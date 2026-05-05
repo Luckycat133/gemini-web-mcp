@@ -1,7 +1,7 @@
 [project]
 name = "gemini-mcp-server"
-version = "0.1.0"
-description = "MCP server for Gemini Web API reverse engineering"
+version = "2.0.0"
+description = "MCP server for Gemini Web API reverse engineering (v2.0)"
 requires-python = ">=3.10"
 readme = "README.md"
 license = {text = "AGPL-3.0"}

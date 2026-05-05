@@ -1,11 +1,12 @@
 import os
 import logging
-from typing import Optional, List
+from typing import Optional, Literal
 
 from mcp.server.fastmcp import FastMCP
 from mcp.types import TextContent
 
-from ..auth import get_gemini_client, initialize_client
+from ..client_wrapper import get_gemini_client, initialize_client
+from ..constants import MODEL_CONFIG
 
 logger = logging.getLogger(__name__)
 
@@ -21,32 +22,30 @@ def register_file_tools(mcp: FastMCP) -> None:
     async def gemini_upload_file(
         file_path: str,
         analysis_prompt: Optional[str] = None,
-        model: str = "unspecified",
+        model: Literal["fast", "thinking", "pro"] = "fast",
     ) -> list[TextContent]:
-        """Upload files for Gemini to analyze.
+        """上传文件供 Gemini 分析。
 
-        Supported file types: images, PDFs, documents, etc.
+        支持: 图片、PDF、文档等。
 
         Args:
-            file_path: Path to the file to upload
-            analysis_prompt: Optional prompt for analysis (default: analyze the file)
-            model: Model to use (default: unspecified)
-
-        Returns:
-            Analysis results from Gemini
+            file_path: 文件路径
+            analysis_prompt: 可选分析提示词
+            model: 模型选择 (fast/thinking/pro)
         """
         client = get_gemini_client()
         await initialize_client()
+        config = MODEL_CONFIG[model]
 
         if not os.path.exists(file_path):
             return [
                 TextContent(
                     type="text",
-                    text=f"❌ Error: File not found at path: {file_path}"
+                    text=f"❌ 文件未找到: {file_path}"
                 )
             ]
 
-        logger.info(f"Uploading file: {file_path}")
+        logger.info(f"上传文件: {file_path}")
 
         try:
             prompt = analysis_prompt or "Please analyze this file and tell me what you see."
@@ -54,7 +53,7 @@ def register_file_tools(mcp: FastMCP) -> None:
             response = await client.generate_content(
                 prompt,
                 files=[file_path],
-                model=model,
+                model=config["name"],
             )
 
             result_text = response.text
@@ -81,29 +80,27 @@ def register_file_tools(mcp: FastMCP) -> None:
     async def gemini_analyze_url(
         url: str,
         analysis_prompt: Optional[str] = None,
-        model: str = "unspecified",
+        model: Literal["fast", "thinking", "pro"] = "fast",
     ) -> list[TextContent]:
-        """Ask Gemini to analyze content from a URL.
+        """分析 URL 内容。
 
-        You can ask for YouTube, web pages, etc. just by mentioning the URL in your prompt.
+        支持: YouTube 视频、网页等。
 
         Args:
-            url: The URL to analyze
-            analysis_prompt: Optional prompt for analysis (default: analyze the URL)
-            model: Model to use (default: unspecified)
-
-        Returns:
-            Analysis results from Gemini
+            url: 网址
+            analysis_prompt: 可选分析提示词
+            model: 模型选择
         """
         client = get_gemini_client()
         await initialize_client()
+        config = MODEL_CONFIG[model]
 
         prompt = analysis_prompt or f"Please analyze the content at this URL: {url}"
 
-        logger.info(f"Analyzing URL: {url}")
+        logger.info(f"分析 URL: {url}")
 
         try:
-            response = await client.generate_content(prompt, model=model)
+            response = await client.generate_content(prompt, model=config["name"])
 
             result_text = response.text
 

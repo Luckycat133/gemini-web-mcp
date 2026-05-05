@@ -1,242 +1,152 @@
-import logging
-from typing import Optional
+#!/usr/bin/env python3
+"""
+Gemini Web 逆向 MCP 服务器
+支持: 文本对话、Deep Research、媒体生成、文件分析
+版本: 2.0 (2026.5)
+"""
 
+import logging
 from mcp.server.fastmcp import FastMCP
 from mcp.types import TextContent
 
-from .auth import get_gemini_client, initialize_client, reset_client
+# 工具注册
 from .tools.chat import register_chat_tools
-from .tools.image import register_image_tools
-from .tools.file import register_file_tools
 from .tools.research import register_research_tools
+from .tools.media import register_media_tools
+from .tools.file import register_file_tools
+from .tools.manage import register_manage_tools
+
+# 客户端封装
+from .client_wrapper import reset_client
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 mcp = FastMCP(
     "Gemini Web MCP Server",
-    instructions="""A Model Context Protocol (MCP) server for Google Gemini using reverse-engineered web API.
+    instructions="""
+# Gemini Web MCP Server (v2.0)
 
-Available tools:
-- gemini_chat: Single chat message
-- gemini_start_chat: Create multi-turn session
-- gemini_send_message: Send message in session
-- gemini_list_sessions: List active sessions
-- gemini_reset_session: Reset a session
-- gemini_generate_image: Generate images
-- gemini_upload_file: Upload and analyze files
-- gemini_analyze_url: Analyze URLs
-- gemini_research: In-depth research (Deep Research)
-- gemini_generate_music: Generate music
-- gemini_reset: Reset client
-- gemini_health_check: Check connection
-- gemini_list_models: List available models
-- gemini_list_features: List all available features
+## 可用模型
 
-Models available:
-- unspecified (default)
-- gemini-3.1-pro
-- gemini-3-flash (2 versions available)
-- gemini-3.0-flash-thinking
-- gemini-3.0-pro
-- gemini-2.5-pro
+1. fast → gemini-3-flash (快速，免费)
+2. thinking → gemini-3-flash-thinking (推理链，免费)
+3. pro → gemini-3.1-pro (最强，AI Plus)
 
-Image models: 2 available (ask to "generate image" in prompt)
-Deep Research: Available for comprehensive research
-Music generation: 2 models available (ask to "generate music")
+## 媒体生成功能
+
+- 图像: Nano Banana 2（所有模型）
+- 视频: Veo 3.1（所有模型，最长60秒）
+- 音乐:
+  - fast → Lyria 3 Clip (30秒)
+  - thinking/pro → Lyria 3 Pro (完整歌曲)
+
+## 主要功能
+
+- 💬 对话: 单次对话、多轮会话
+- 📚 Deep Research: 深度研究（需 AI Plus）
+- 🎨 媒体生成: 图像、视频、音乐
+- 📁 文件分析: 上传文件、分析 URL
+- 🔧 管理: 历史对话、Gem 管理
 """,
 )
 
-# Register all tools
+# 注册所有工具
 register_chat_tools(mcp)
-register_image_tools(mcp)
-register_file_tools(mcp)
 register_research_tools(mcp)
+register_media_tools(mcp)
+register_file_tools(mcp)
+register_manage_tools(mcp)
 
 
 @mcp.tool()
 async def gemini_reset() -> list[TextContent]:
-    """Reset the Gemini client and clear all sessions.
-
-    Returns:
-        Confirmation message
-    """
+    """重置客户端并清除所有会话"""
     reset_client()
     return [
         TextContent(
             type="text",
-            text="✅ Gemini client has been reset and all sessions cleared."
+            text="✅ Gemini 客户端已重置，所有会话已清除。"
         )
     ]
 
 
 @mcp.tool()
 async def gemini_health_check() -> list[TextContent]:
-    """Check the health of the Gemini connection.
-
-    Returns:
-        Health status message
-    """
+    """检查连接健康状态"""
+    from .client_wrapper import get_gemini_client, initialize_client
+    
     try:
         client = get_gemini_client()
         await initialize_client()
-        response = await client.generate_content("Hello! Just checking if you're working.")
+        
+        # 发送测试信息
+        response = await client.generate_content("Hello, quick check!")
+        
         return [
             TextContent(
                 type="text",
-                text=f"✅ Gemini connection is healthy and working!\n\nResponse: {response.text[:100]}..."
+                text=f"✅ Gemini 连接正常！\n\n响应预览: {response.text[:100]}..."
             )
         ]
+        
     except Exception as e:
+        logger.error(f"健康检查失败: {e}")
         return [
             TextContent(
                 type="text",
-                text=f"❌ Gemini connection check failed: {str(e)}\n\nPlease check your GEMINI_PSID and GEMINI_PSIDTS environment variables."
+                text=f"❌ 连接检查失败: {str(e)}\n\n"
+                "请检查: \n"
+                "1. GEMINI_PSID 环境变量是否正确设置？\n"
+                "2. 网络连接是否正常？\n"
+                "3. Cookie 是否过期？"
             )
         ]
-
-
-@mcp.tool()
-async def gemini_list_models() -> list[TextContent]:
-    """List all available Gemini models.
-
-    Returns:
-        List of models with descriptions
-    """
-    models_info = """🤖 Available Gemini Models (Current as of May 2026):
-
-1. unspecified (default)
-   - Uses Gemini's default model selection
-   - Automatically picks best model for your task
-
-2. gemini-3.1-pro
-   - 🚀 Latest and most capable model
-   - Best for complex reasoning, coding, and deep analysis
-   - Advanced multi-modal capabilities
-
-3. gemini-3-flash (2 versions available)
-   - ⚡ Fast and efficient
-   - Two variants: regular and thinking
-   - Great for quick responses and everyday tasks
-
-4. gemini-3.0-flash-thinking
-   - 💭 Shows reasoning process
-   - Includes thinking steps in response
-   - Good for learning and understanding
-
-5. gemini-3.0-pro
-   - Previous generation advanced model
-   - Still powerful and reliable
-
-6. gemini-2.5-pro
-   - Legacy pro model
-   - Stable and compatible
-"""
-    return [TextContent(type="text", text=models_info)]
 
 
 @mcp.tool()
 async def gemini_list_features() -> list[TextContent]:
-    """List all available Gemini features and capabilities.
+    """列出所有可用功能和特性"""
+    features = """✨ Gemini MCP 服务器功能大全（v2.0）
 
-    Returns:
-        Complete feature list with descriptions
-    """
-    features_info = """✨ Gemini Web Features (Current as of May 2026):
+📜 对话工具
+- gemini_chat: 单次对话（支持图片输入）
+- gemini_start_chat: 创建多轮会话
+- gemini_send_message: 会话消息
+- gemini_list_sessions: 列会话
+- gemini_reset_session: 重置会话
 
-📝 Text Generation & Conversation
-- Multi-turn chat with memory
-- Code generation and analysis
-- Creative writing
-- Reasoning and problem-solving
+📚 深度研究
+- gemini_deep_research: 深度研究（需 AI Plus）
 
-🖼️ Image Generation & Analysis (2 models)
-- Generate images from text (Nano Banana)
-- Edit and transform existing images
-- Analyze and describe images
-- Supports multiple image styles
+🎨 媒体生成
+- gemini_generate_media: 图像/视频/音乐生成
+- gemini_generate_music: 音乐生成（便捷工具）
 
-🔍 Deep Research
-- Comprehensive research on any topic
-- Sources citations and references
-- In-depth analysis and summaries
-- Ask "do a deep research on..."
+📁 文件分析
+- gemini_upload_file: 上传并分析文件
+- gemini_analyze_url: 分析网址（YouTube、网页等）
 
-🎵 Music Generation (2 models)
-- Generate original music from text prompt
-- Different styles and genres
-- Ask "generate music..."
+🔧 管理工具
+- gemini_list_chats: 历史对话
+- gemini_manage_gems: Gem 管理（CRUD）
+- gemini_list_models: 模型列表
+- gemini_list_features: 功能列表
+- gemini_health_check: 健康检查
+- gemini_reset: 重置客户端
 
-📁 File Analysis
-- Upload and analyze documents (PDF, TXT, etc.)
-- Image understanding
-- Code file review
-- Data analysis
-
-🌐 Web Integration
-- YouTube video analysis
-- Web page content analysis
-- URL summarization
-- Real-time information
-
-🎨 Creative Tools
-- Image generation and editing
-- Art creation
-- Design assistance
-
-💡 Thinking Models
-- See reasoning steps
-- Learn how AI solves problems
-- Transparent decision process
-
-Note: Some features may have regional or account restrictions.
+---
+⚠️ 使用提示:
+- 设置 GEMINI_PSID 环境变量
+- 从 gemini.google.com 获取 Cookie
+- 部分功能需要 AI Plus 订阅
 """
-    return [TextContent(type="text", text=features_info)]
+    return [TextContent(type="text", text=features)]
 
 
-@mcp.tool()
-async def gemini_generate_music(
-    prompt: str,
-    model: str = "unspecified",
-) -> list[TextContent]:
-    """Generate music with Gemini using natural language prompts.
-
-    Ask Gemini to "generate music" with descriptions of style, mood, genre, etc.
-    Example: "Generate a relaxing piano track in jazz style"
-
-    Args:
-        prompt: Music generation prompt (include "generate music")
-        model: Model to use (default: unspecified)
-
-    Returns:
-        Generated music information
-    """
-    client = get_gemini_client()
-    await initialize_client()
-
-    enhanced_prompt = f"{prompt}. Please generate music based on this description."
-
-    logger.info(f"Generating music with prompt: {prompt[:100]}...")
-
-    try:
-        response = await client.generate_content(enhanced_prompt, model=model)
-
-        result_text = response.text
-
-        return [
-            TextContent(
-                type="text",
-                text=f"🎵 Music Generation Results:\n\n{result_text}"
-            )
-        ]
-    except Exception as e:
-        logger.error(f"Error generating music: {e}")
-        return [TextContent(type="text", text=f"❌ Error: {str(e)}")]
-
-
-def main() -> None:
-    """Start the MCP server."""
-    logger.info("Starting Gemini Web MCP Server...")
+def main():
+    """启动服务器"""
+    logger.info("🚀 启动 Gemini Web MCP Server (v2.0)...")
     mcp.run()
 
 
