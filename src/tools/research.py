@@ -20,14 +20,14 @@ def register_research_tools(mcp: FastMCP) -> None:
         query: str,
         model: str = "unspecified",
     ) -> list[TextContent]:
-        """Ask Gemini to perform in-depth research on a topic.
+        """Ask Gemini to perform Deep Research on a topic.
 
-        Note: This uses Gemini's regular generation capabilities.
-        Asking for "deep research" or "in-depth analysis" in your query
-        will prompt Gemini to provide comprehensive information.
+        Uses Gemini's Deep Research capability for comprehensive analysis
+        with source citations and in-depth information.
 
         Args:
             query: The research topic or question
+            model: Model to use (default: unspecified, auto-select)
 
         Returns:
             Research results from Gemini
@@ -35,9 +35,9 @@ def register_research_tools(mcp: FastMCP) -> None:
         client = get_gemini_client()
         await initialize_client()
 
-        enhanced_query = f"Please perform in-depth research on: {query}. Provide comprehensive analysis with multiple sources if possible."
+        enhanced_query = f"Do a deep research on this topic: {query}. Provide comprehensive analysis, source citations, and detailed information from multiple sources."
 
-        logger.info(f"Starting research on: {query}")
+        logger.info(f"Starting Deep Research on: {query}")
 
         try:
             response = await client.generate_content(enhanced_query, model=model)
@@ -52,14 +52,14 @@ def register_research_tools(mcp: FastMCP) -> None:
                         img_info += f": {img.url}"
                     result_text += f"\n{img_info}"
 
-            logger.info("Research completed")
+            logger.info("Deep Research completed")
 
             return [
                 TextContent(
                     type="text",
-                    text=f"🔍 Research Results: {query}\n\n{result_text}"
+                    text=f"🔍 Deep Research Results: {query}\n\n{result_text}"
                 )
             ]
         except Exception as e:
-            logger.error(f"Error in research: {e}")
+            logger.error(f"Error in Deep Research: {e}")
             return [TextContent(type="text", text=f"❌ Error: {str(e)}")]

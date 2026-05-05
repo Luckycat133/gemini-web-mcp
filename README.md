@@ -7,20 +7,22 @@
 ## 功能特性
 
 - ✅ 文本生成与多轮对话
-- ✅ 图片生成（Nano Banana）
+- ✅ 图片生成（2个图片模型，Nano Banana）
+- ✅ 音乐生成（2个音乐模型）
+- ✅ Deep Research 深度研究
 - ✅ 文件/图片上传与分析
 - ✅ URL 分析（YouTube、网页等）
-- ✅ 深度研究分析
 - ✅ Cookie 自动刷新
-- ✅ 支持多个 Gemini 模型
+- ✅ 支持多个最新 Gemini 模型
 
-## 可用模型
+## 可用模型（2026年5月最新）
 
-- `unspecified` (默认)
-- `gemini-3.0-pro`
-- `gemini-3.0-flash`
-- `gemini-3.0-flash-thinking`
-- `gemini-2.5-pro`
+- `unspecified` (默认) - 自动选择最佳模型
+- `gemini-3.1-pro` - 最新最强模型
+- `gemini-3-flash` - 快速高效模型（2个版本）
+- `gemini-3.0-flash-thinking` - 显示思考过程
+- `gemini-3.0-pro` - 上代高级模型
+- `gemini-2.5-pro` - 遗留稳定模型
 
 ## 快速开始
 
@@ -98,13 +100,29 @@ uv pip install gemini-webapi mcp fastmcp
 | `gemini_send_message` | 在现有会话中发送消息 |
 | `gemini_list_sessions` | 列出活跃会话 |
 | `gemini_reset_session` | 重置会话 |
-| `gemini_generate_image` | 图片生成 |
+| `gemini_generate_image` | 图片生成（2个模型） |
+| `gemini_generate_music` | 音乐生成（2个模型） |
 | `gemini_upload_file` | 上传并分析文件 |
 | `gemini_analyze_url` | 分析 URL 内容 |
-| `gemini_research` | 深度研究分析 |
+| `gemini_research` | Deep Research 深度研究 |
 | `gemini_list_models` | 列出可用模型 |
+| `gemini_list_features` | 列出所有功能特性 |
 | `gemini_health_check` | 检查连接健康 |
 | `gemini_reset` | 重置客户端 |
+
+## 使用提示
+
+### 图片生成
+在提示中包含 "generate an image of" 或 "create a picture of" 等字样，Gemini 会自动使用 2 个图片模型之一。
+
+### 音乐生成
+在提示中包含 "generate music" 或 "create a song" 等字样，Gemini 会自动使用 2 个音乐模型之一。
+
+### Deep Research
+在提示中包含 "do a deep research on" 或使用 `gemini_research` 工具。
+
+### 模型选择
+使用 `gemini_list_models` 查看所有可用模型，并在任何工具的 `model` 参数中指定。
 
 ## 环境变量
 
@@ -152,6 +170,7 @@ gemini-mcp-server/
 ## 已知限制
 
 - 图片生成功能可能受地区限制
+- 音乐生成功能可能受地区限制
 - 需要持续维护 cookie 以保持连接
 - 功能可能随 Gemini Web 更新而变化
 - 建议使用独立的 Google 账户用于研究
