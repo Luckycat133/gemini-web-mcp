@@ -6,6 +6,7 @@ logger = logging.getLogger(__name__)
 
 _client: Optional["gemini_webapi.GeminiClient"] = None
 _sessions: dict[str, "gemini_webapi.ChatSession"] = {}
+_initialized: bool = False
 
 
 def get_gemini_client() -> "gemini_webapi.GeminiClient":
@@ -17,40 +18,50 @@ def get_gemini_client() -> "gemini_webapi.GeminiClient":
     Raises:
         ValueError: If GEMINI_PSID environment variable not set
     """
-    global _client
+    global _client, _initialized
+
     if _client is None:
         try:
-            import gemini_webapi
+            from gemini_webapi import GeminiClient
         except ImportError:
             raise ImportError("Please install gemini-webapi: pip install gemini-webapi")
 
         psid = os.environ.get("GEMINI_PSID")
-        psidts = os.environ.get("GEMINI_PSIDTS")
+        psidts = os.environ.get("GEMINI_PSIDTS", "")
+        proxy = os.environ.get("GEMINI_PROXY")
 
         if not psid:
             raise ValueError(
                 "Please set the GEMINI_PSID environment variable. "
-                "Get this from gemini.google.com (F12 -> Application -> Cookies"
+                "Get this from gemini.google.com (F12 -> Application -> Cookies -> __Secure-1PSID"
             )
 
-        proxy = os.environ.get("GEMINI_PROXY")
-        language = os.environ.get("GEMINI_LANGUAGE", "en")
+        logger.info("Initializing Gemini client...")
+        _client = GeminiClient(psid, psidts, proxy=proxy)
+        _initialized = False
+        logger.info("Gemini client created successfully. Will initialize on first use")
 
-        logger.info("Initializing Gemini client with cookie authentication")
+    return _client
 
-        _client = gemini_webapi.GeminiClient(
-            auto_close=True,
-            proxy=proxy,
-            language=language,
-        )
 
-        cookies = {"__Secure-1PSID": psid}
-        if psidts:
-            cookies["__Secure-1PSIDTS"] = psidts
+async def initialize_client():
+    """Initialize the Gemini client (call init()).
 
-        _client.session.cookies.update(cookies)
+    This must be called after get_gemini_client() once before any other operations.
 
-        logger.info("Gemini client initialized successfully")
+    Returns:
+        The initialized client
+    """
+    global _client, _initialized
+
+    if _client is None:
+        _client = get_gemini_client()
+
+    if not _initialized:
+        logger.info("Calling client.init()...")
+        await _client.init(timeout=30, auto_close=False, auto_refresh=True)
+        _initialized = True
+        logger.info("Gemini client initialized and ready!")
 
     return _client
 
@@ -94,6 +105,7 @@ def clear_sessions() -> None:
 
 def reset_client() -> None:
     """Reset the Gemini client instance."""
-    global _client
+    global _client, _initialized
     _client = None
+    _initialized = False
     clear_sessions()

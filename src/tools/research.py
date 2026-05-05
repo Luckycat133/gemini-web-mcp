@@ -3,45 +3,63 @@ import logging
 from mcp.server.fastmcp import FastMCP
 from mcp.types import TextContent
 
-from ..auth import get_gemini_client
+from ..auth import get_gemini_client, initialize_client
 
 logger = logging.getLogger(__name__)
 
 
 def register_research_tools(mcp: FastMCP) -> None:
-    """Register Deep Research related MCP tools.
+    """Register research-related MCP tools.
 
     Args:
         mcp: FastMCP server instance
     """
 
     @mcp.tool()
-    async def gemini_deep_research(
+    async def gemini_research(
         query: str,
+        model: str = "unspecified",
     ) -> list[TextContent]:
-        """Perform a deep research on a topic using Gemini Deep Research.
+        """Ask Gemini to perform in-depth research on a topic.
+
+        Note: This uses Gemini's regular generation capabilities.
+        Asking for "deep research" or "in-depth analysis" in your query
+        will prompt Gemini to provide comprehensive information.
 
         Args:
-            query: The research query/topic
+            query: The research topic or question
 
         Returns:
-            Research report from Gemini
+            Research results from Gemini
         """
         client = get_gemini_client()
+        await initialize_client()
 
-        logger.info(f"Starting deep research on: {query}")
+        enhanced_query = f"Please perform in-depth research on: {query}. Provide comprehensive analysis with multiple sources if possible."
+
+        logger.info(f"Starting research on: {query}")
 
         try:
-            research = await client.deep_research(query)
+            response = await client.generate_content(enhanced_query, model=model)
 
-            logger.info("Deep research completed")
+            result_text = response.text
+
+            if response.images:
+                result_text += "\n\n📷 Images in response:\n"
+                for i, img in enumerate(response.images, 1):
+                    img_info = f"{i}. {img.title or 'Untitled image'}"
+                    if hasattr(img, "url"):
+                        img_info += f": {img.url}"
+                    result_text += f"\n{img_info}"
+
+            logger.info("Research completed")
 
             return [
                 TextContent(
                     type="text",
-                    text=f"# Deep Research: {query}\n\n{research.report}"
+                    text=f"🔍 Research Results: {query}\n\n{result_text}"
                 )
             ]
         except Exception as e:
-            logger.error(f"Error in deep research: {e}")
-            return [TextContent(type="text", text=f"Error: {str(e)}")]
+            logger.error(f"Error in research: {e}")
+            return [TextContent(type="text", text=f"❌ Error: {str(e)}")]
