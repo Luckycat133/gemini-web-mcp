@@ -5,7 +5,7 @@ from typing import Optional
 from mcp.server.fastmcp import FastMCP
 from mcp.types import TextContent
 
-from ..auth import get_gemini_client, store_session, get_session, remove_session
+from ..auth import get_gemini_client, initialize_client, store_session, get_session, remove_session
 
 logger = logging.getLogger(__name__)
 
@@ -20,70 +20,80 @@ def register_chat_tools(mcp: FastMCP) -> None:
     @mcp.tool()
     async def gemini_chat(
         message: str,
-        model: str = "gemini-2.5-pro",
-        temperature: Optional[float] = None,
-        image: Optional[str] = None,
+        model: str = "unspecified",
     ) -> list[TextContent]:
         """Send a single chat message to Gemini.
 
+        Available models:
+        - unspecified (default)
+        - gemini-3.0-pro
+        - gemini-3.0-flash
+        - gemini-3.0-flash-thinking
+        - gemini-2.5-pro
+
         Args:
             message: The message text to send
-            model: Model to use (default: gemini-2.5-pro)
-            temperature: Generation temperature (optional)
-            image: Optional image path or base64 data (optional)
+            model: Model to use (default: unspecified)
 
         Returns:
             Gemini's response as TextContent list
         """
         client = get_gemini_client()
+        await initialize_client()
 
         logger.info(f"Sending message to Gemini (model: {model})")
 
         try:
-            response = await client.generate_content(
-                message,
-                model=model,
-                temperature=temperature,
-            )
+            response = await client.generate_content(message, model=model)
 
-            text = response.text
+            result_text = response.text
+
+            # Add images if available
+            if response.images:
+                result_text += "\n\n📷 Images in response:\n"
+                for i, img in enumerate(response.images, 1):
+                    img_info = f"{i}. {img.title or 'Untitled image'}"
+                    if hasattr(img, "url"):
+                        img_info += f": {img.url}"
+                    result_text += f"\n{img_info}"
+
             logger.info("Received response from Gemini")
-
-            return [TextContent(type="text", text=text)]
+            return [TextContent(type="text", text=result_text)]
         except Exception as e:
             logger.error(f"Error communicating with Gemini: {e}")
-            return [TextContent(type="text", text=f"Error: {str(e)}")]
+            return [TextContent(type="text", text=f"❌ Error: {str(e)}")]
 
     @mcp.tool()
     async def gemini_start_chat(
-        system_instruction: str = "",
-        model: str = "gemini-2.5-pro",
+        model: str = "unspecified",
+        gem: Optional[str] = None,
     ) -> list[TextContent]:
         """Create a new multi-turn chat session.
 
         Args:
-            system_instruction: System instruction for the conversation
             model: Model to use for the session
+            gem: Optional gem id or name to use as system prompt
 
         Returns:
             Session ID for future interactions
         """
         client = get_gemini_client()
+        await initialize_client()
 
         session_id = str(uuid.uuid4())
         logger.info(f"Creating new chat session (ID: {session_id}, model: {model})")
 
-        session = client.start_chat(
-            model=model,
-            system_instruction=system_instruction,
-        )
+        chat_kwargs = {"model": model}
+        if gem:
+            chat_kwargs["gem"] = gem
 
+        session = client.start_chat(**chat_kwargs)
         store_session(session_id, session)
 
         return [
             TextContent(
                 type="text",
-                text=f"Chat session created successfully! Session ID: {session_id}"
+                text=f"✅ Chat session created successfully!\nSession ID: {session_id}\n\nUse `gemini_send_message` to continue the conversation."
             )
         ]
 
@@ -107,7 +117,7 @@ def register_chat_tools(mcp: FastMCP) -> None:
             return [
                 TextContent(
                     type="text",
-                    text=f"Error: Session not found. Please create a new session first."
+                    text=f"❌ Error: Session not found. Please create a new session first."
                 )
             ]
 
@@ -115,12 +125,23 @@ def register_chat_tools(mcp: FastMCP) -> None:
 
         try:
             response = await session.send_message(message)
-            logger.info(f"Received response for session {session_id}")
 
-            return [TextContent(type="text", text=response.text)]
+            result_text = response.text
+
+            # Add images if available
+            if response.images:
+                result_text += "\n\n📷 Images in response:\n"
+                for i, img in enumerate(response.images, 1):
+                    img_info = f"{i}. {img.title or 'Untitled image'}"
+                    if hasattr(img, "url"):
+                        img_info += f": {img.url}"
+                    result_text += f"\n{img_info}"
+
+            logger.info(f"Received response for session {session_id}")
+            return [TextContent(type="text", text=result_text)]
         except Exception as e:
             logger.error(f"Error in chat session {session_id}: {e}")
-            return [TextContent(type="text", text=f"Error: {str(e)}")]
+            return [TextContent(type="text", text=f"❌ Error: {str(e)}")]
 
     @mcp.tool()
     async def gemini_reset_session(session_id: str) -> list[TextContent]:
@@ -136,30 +157,24 @@ def register_chat_tools(mcp: FastMCP) -> None:
         return [
             TextContent(
                 type="text",
-                text=f"Session {session_id} has been reset and removed."
+                text=f"✅ Session {session_id} has been reset and removed."
             )
         ]
 
     @mcp.tool()
-    async def gemini_list_chats() -> list[TextContent]:
-        """List recent chat history from Gemini Web.
+    async def gemini_list_sessions() -> list[TextContent]:
+        """List active chat sessions.
 
         Returns:
-            List of recent chats
+            List of active session IDs
         """
-        client = get_gemini_client()
+        from ..auth import _sessions
 
-        try:
-            chats = await client.list_chats(limit=20)
-            chat_list = []
+        if not _sessions:
+            return [TextContent(type="text", text="No active chat sessions.")]
 
-            for i, chat in enumerate(chats, 1):
-                chat_list.append(f"{i}. {chat.title} (ID: {chat.id})")
+        session_list = ["Active chat sessions:"]
+        for i, (sid, _) in enumerate(_sessions.items(), 1):
+            session_list.append(f"{i}. {sid}")
 
-            if not chat_list:
-                return [TextContent(type="text", text="No chat history found.")]
-
-            return [TextContent(type="text", text="\n".join(chat_list))]
-        except Exception as e:
-            logger.error(f"Error listing chats: {e}")
-            return [TextContent(type="text", text=f"Error: {str(e)}")]
+        return [TextContent(type="text", text="\n".join(session_list))]
