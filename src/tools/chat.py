@@ -1,105 +1,127 @@
-import uuid
-import logging
-from typing import Optional
+"""
+对话相关 MCP 工具
+支持: gemini-3-flash, gemini-3-flash-thinking, gemini-3.1-pro
+"""
 
 from mcp.server.fastmcp import FastMCP
 from mcp.types import TextContent
+from typing import Optional, Literal
+import uuid
+import logging
 
-from ..auth import get_gemini_client, initialize_client, store_session, get_session, remove_session
+from ..client_wrapper import (
+    get_gemini_client,
+    initialize_client,
+    store_session,
+    get_session,
+    remove_session,
+)
+from ..constants import MODEL_CONFIG
 
 logger = logging.getLogger(__name__)
 
 
-def register_chat_tools(mcp: FastMCP) -> None:
-    """Register all chat-related MCP tools.
-
-    Args:
-        mcp: FastMCP server instance
-    """
+def register_chat_tools(mcp: FastMCP):
 
     @mcp.tool()
     async def gemini_chat(
         message: str,
-        model: str = "unspecified",
+        model: Literal["fast", "thinking", "pro"] = "fast",
+        image_paths: Optional[list[str]] = None,
     ) -> list[TextContent]:
-        """Send a single chat message to Gemini.
-
-        Available models:
-        - unspecified (default) - Auto-selects best model
-        - gemini-3.1-pro - Latest and most capable
-        - gemini-3-flash - Fast and efficient (2 versions)
-        - gemini-3.0-flash-thinking - Shows reasoning steps
-        - gemini-3.0-pro - Previous generation
-        - gemini-2.5-pro - Legacy pro model
-
-        Special features:
-        - Ask for "deep research" for comprehensive analysis
-        - Ask to "generate image" for image creation (2 models available)
-        - Ask to "generate music" for music creation (2 models available)
-
-        Args:
-            message: The message text to send
-            model: Model to use (default: unspecified)
-
-        Returns:
-            Gemini's response as TextContent list
+        """
+        使用 Gemini 进行单次对话（非流式）。
+        
+        模型选择:
+        - fast: Gemini 3 Flash，快速响应，音乐生成=30秒片段
+        - thinking: Gemini 3 Flash Thinking，带推理链，音乐生成=完整歌曲
+        - pro: Gemini 3.1 Pro，最强能力，音乐生成=完整歌曲
+        
+        媒体生成:
+        - 所有模型支持图像生成 (Nano Banana 2)
+        - 所有模型支持视频生成 (Veo 3.1)
+        - 音乐时长由选择的聊天模型决定
         """
         client = get_gemini_client()
         await initialize_client()
+        config = MODEL_CONFIG[model]
 
-        logger.info(f"Sending message to Gemini (model: {model})")
+        # 构建输入
+        contents = [message]
+        if image_paths:
+            try:
+                from PIL import Image
+                for p in image_paths:
+                    if p.strip():
+                        contents.append(Image.open(p))
+            except Exception as e:
+                logger.warning(f"无法加载图片: {e}")
 
-        try:
-            response = await client.generate_content(message, model=model)
+        # 生成响应
+        logger.info(f"正在使用 {config['name']} 生成响应...")
+        response = await client.generate_content(contents, model=config["name"])
 
-            result_text = response.text
+        # 解析输出
+        outputs = []
+        result_parts = []
 
-            # Add images if available
-            if response.images:
-                result_text += "\n\n📷 Images in response:\n"
-                for i, img in enumerate(response.images, 1):
-                    img_info = f"{i}. {img.title or 'Untitled image'}"
-                    if hasattr(img, "url"):
-                        img_info += f": {img.url}"
-                    result_text += f"\n{img_info}"
+        # 文本
+        if response.text:
+            result_parts.append(response.text)
 
-            logger.info("Received response from Gemini")
-            return [TextContent(type="text", text=result_text)]
-        except Exception as e:
-            logger.error(f"Error communicating with Gemini: {e}")
-            return [TextContent(type="text", text=f"❌ Error: {str(e)}")]
+        # 生成的图像
+        if hasattr(response, "images") and response.images:
+            for i, img in enumerate(response.images, 1):
+                img_info = f"\n\n🖼️ 生成图片 {i}: {img.title or 'Untitled'}"
+                if hasattr(img, "url") and img.url:
+                    img_info += f"\nURL: {img.url}"
+                result_parts.append(img_info)
+
+        # 生成的视频 (Veo 3.1)
+        if hasattr(response, "videos") and response.videos:
+            for i, vid in enumerate(response.videos, 1):
+                vid_info = f"\n\n🎬 生成视频 {i}:"
+                if hasattr(vid, "url") and vid.url:
+                    vid_info += f"\nURL: {vid.url}"
+                if hasattr(vid, "duration"):
+                    vid_info += f"\n时长: {vid.duration}秒"
+                result_parts.append(vid_info)
+
+        # 生成的音乐 (Lyria 3)
+        if hasattr(response, "audio_url") and response.audio_url:
+            music_type = "30s clip" if model == "fast" else "full song (~3min)"
+            result_parts.append(f"\n\n🎵 生成音乐 ({music_type}): {response.audio_url}")
+        elif hasattr(response, "lyrics") and response.lyrics:
+            result_parts.append(f"\n\n🎵 歌词:\n{response.lyrics}")
+
+        outputs.append(TextContent(type="text", text="".join(result_parts)))
+        return outputs
 
     @mcp.tool()
     async def gemini_start_chat(
-        model: str = "unspecified",
-        gem: Optional[str] = None,
+        system_instruction: str = "",
+        model: Literal["fast", "thinking", "pro"] = "fast",
     ) -> list[TextContent]:
-        """Create a new multi-turn chat session.
-
-        Args:
-            model: Model to use for the session
-            gem: Optional gem id or name to use as system prompt
-
-        Returns:
-            Session ID for future interactions
+        """
+        创建一个新的多轮对话会话。
+        后续使用 gemini_send_message 在会话中继续对话。
         """
         client = get_gemini_client()
         await initialize_client()
+        config = MODEL_CONFIG[model]
 
-        session_id = str(uuid.uuid4())
-        logger.info(f"Creating new chat session (ID: {session_id}, model: {model})")
+        session = client.start_chat(
+            system_instruction=system_instruction,
+            model=config["name"],
+        )
 
-        chat_kwargs = {"model": model}
-        if gem:
-            chat_kwargs["gem"] = gem
-
-        session = client.start_chat(**chat_kwargs)
-        store_session(session_id, session)
+        session_id = str(uuid.uuid4())[:8]
+        store_session(session_id, session, model)
 
         return [
             TextContent(
                 type="text",
-                text=f"✅ Chat session created successfully!\nSession ID: {session_id}\n\nUse `gemini_send_message` to continue the conversation."
+                text=f"✅ 会话创建成功！\n\n会话 ID: {session_id}\n模型: {config['name']}\n\n使用 gemini_send_message 继续对话。",
             )
         ]
 
@@ -107,80 +129,54 @@ def register_chat_tools(mcp: FastMCP) -> None:
     async def gemini_send_message(
         session_id: str,
         message: str,
+        image_paths: Optional[list[str]] = None,
     ) -> list[TextContent]:
-        """Send a message in an existing chat session.
+        """在现有会话中发送消息，保持上下文连贯"""
+        session_data = get_session(session_id)
 
-        Args:
-            session_id: Session ID from gemini_start_chat
-            message: The message text to send
-
-        Returns:
-            Gemini's response as TextContent list
-        """
-        session = get_session(session_id)
-
-        if not session:
+        if not session_data:
             return [
                 TextContent(
-                    type="text",
-                    text=f"❌ Error: Session not found. Please create a new session first."
+                    type="text", text=f"❌ 错误: 会话 {session_id} 不存在，请先使用 gemini_start_chat 创建。"
                 )
             ]
 
-        logger.info(f"Sending message to chat session {session_id}")
+        session = session_data["session"]
 
-        try:
-            response = await session.send_message(message)
+        # 构建输入
+        contents = [message]
+        if image_paths:
+            try:
+                from PIL import Image
+                for p in image_paths:
+                    if p.strip():
+                        contents.append(Image.open(p))
+            except Exception as e:
+                logger.warning(f"无法加载图片: {e}")
 
-            result_text = response.text
+        response = await session.send_message(contents)
 
-            # Add images if available
-            if response.images:
-                result_text += "\n\n📷 Images in response:\n"
-                for i, img in enumerate(response.images, 1):
-                    img_info = f"{i}. {img.title or 'Untitled image'}"
-                    if hasattr(img, "url"):
-                        img_info += f": {img.url}"
-                    result_text += f"\n{img_info}"
-
-            logger.info(f"Received response for session {session_id}")
-            return [TextContent(type="text", text=result_text)]
-        except Exception as e:
-            logger.error(f"Error in chat session {session_id}: {e}")
-            return [TextContent(type="text", text=f"❌ Error: {str(e)}")]
+        return [TextContent(type="text", text=response.text)]
 
     @mcp.tool()
     async def gemini_reset_session(session_id: str) -> list[TextContent]:
-        """Reset and remove a chat session.
-
-        Args:
-            session_id: Session ID to reset
-
-        Returns:
-            Confirmation message
-        """
+        """重置并移除指定会话"""
         remove_session(session_id)
         return [
-            TextContent(
-                type="text",
-                text=f"✅ Session {session_id} has been reset and removed."
-            )
+            TextContent(type="text", text=f"✅ 会话 {session_id} 已重置。")
         ]
 
     @mcp.tool()
     async def gemini_list_sessions() -> list[TextContent]:
-        """List active chat sessions.
-
-        Returns:
-            List of active session IDs
-        """
-        from ..auth import _sessions
+        """列出所有活跃会话"""
+        from ..client_wrapper import _sessions
 
         if not _sessions:
-            return [TextContent(type="text", text="No active chat sessions.")]
+            return [TextContent(type="text", text="暂无活跃会话。")]
 
-        session_list = ["Active chat sessions:"]
-        for i, (sid, _) in enumerate(_sessions.items(), 1):
-            session_list.append(f"{i}. {sid}")
+        session_list = ["活跃会话:"]
+        for i, (sid, data) in enumerate(_sessions.items(), 1):
+            config = MODEL_CONFIG[data["model"]]
+            session_list.append(f"{i}. {sid} - {config['name']}")
 
         return [TextContent(type="text", text="\n".join(session_list))]
