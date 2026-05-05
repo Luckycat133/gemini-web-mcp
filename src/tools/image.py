@@ -22,12 +22,13 @@ def register_image_tools(mcp: FastMCP) -> None:
     ) -> list[TextContent]:
         """Generate images with Gemini using natural language prompts.
 
-        Just ask Gemini to "generate" images in your prompt and it will use Nano Banana.
-        Examples: "Generate an image of a cute cat", "Create a picture of a mountain landscape"
+        2 image generation models available! Just ask to "generate images"
+        with descriptions of style, subject, mood, etc.
+        Examples: "Generate an image of a cute cat", "Create a futuristic cityscape"
 
         Args:
-            prompt: Image generation prompt (be sure to use words like "generate", "create", "make an image of")
-            model: Model to use (default: unspecified)
+            prompt: Image generation prompt (include "generate", "create", "make an image of")
+            model: Model to use (default: unspecified, auto-select)
 
         Returns:
             Generated image URLs and information
@@ -46,11 +47,11 @@ def register_image_tools(mcp: FastMCP) -> None:
 
             if not response.images:
                 result_lines.append(
-                    "\n⚠️ No images were generated. Try adding words like 'generate' or 'create an image of' to your prompt, or check your region/account restrictions."
+                    "\n⚠️ No images were generated. Try adding words like 'generate' or 'create an image of' to your prompt, or check your region/account restrictions. Note: 2 image models available!"
                 )
                 return [TextContent(type="text", text="\n".join(result_lines))]
 
-            result_lines.append("\n📷 Generated images:")
+            result_lines.append("\n🖼️ Generated images (2 models available):")
             for i, image in enumerate(response.images, 1):
                 img_info = f"{i}. {image.title or 'Untitled image'}"
                 if hasattr(image, "url"):

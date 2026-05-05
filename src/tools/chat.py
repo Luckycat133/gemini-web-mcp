@@ -25,11 +25,17 @@ def register_chat_tools(mcp: FastMCP) -> None:
         """Send a single chat message to Gemini.
 
         Available models:
-        - unspecified (default)
-        - gemini-3.0-pro
-        - gemini-3.0-flash
-        - gemini-3.0-flash-thinking
-        - gemini-2.5-pro
+        - unspecified (default) - Auto-selects best model
+        - gemini-3.1-pro - Latest and most capable
+        - gemini-3-flash - Fast and efficient (2 versions)
+        - gemini-3.0-flash-thinking - Shows reasoning steps
+        - gemini-3.0-pro - Previous generation
+        - gemini-2.5-pro - Legacy pro model
+
+        Special features:
+        - Ask for "deep research" for comprehensive analysis
+        - Ask to "generate image" for image creation (2 models available)
+        - Ask to "generate music" for music creation (2 models available)
 
         Args:
             message: The message text to send
