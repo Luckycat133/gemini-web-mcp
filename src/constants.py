@@ -22,9 +22,9 @@ MODEL_CONFIG = {
         "music_model": "lyria-3-pro",
     },
     "pro": {
-        "name": "gemini-3.1-pro",
-        "hex_id": "e6fa609c3fa255c0",
-        "capacity_tail": 2,
+        "name": "gemini-3-pro",
+        "hex_id": "9d8ca3786ebdfbea",
+        "capacity_tail": 1,
         "advanced_only": True,
         "music_model": "lyria-3-pro",
     },

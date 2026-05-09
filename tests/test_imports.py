@@ -25,11 +25,17 @@ def test_imports():
     import src.tools.image
     print("✓ src.tools.image imported")
 
+    import src.tools.media
+    print("✓ src.tools.media imported")
+
     import src.tools.file
     print("✓ src.tools.file imported")
 
     import src.tools.research
     print("✓ src.tools.research imported")
+
+    import src.tools.manage
+    print("✓ src.tools.manage imported")
 
     print("\n✅ All imports successful!")
     print("\nNote: Full functionality requires gemini-webapi and mcp packages.")
