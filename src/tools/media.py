@@ -8,7 +8,7 @@ from mcp.types import TextContent
 from typing import Literal, Optional
 import logging
 
-from ..client_wrapper import get_gemini_client, initialize_client
+from ..client_wrapper import get_gemini_client, initialize_client, load_images
 from ..constants import MODEL_CONFIG
 
 logger = logging.getLogger(__name__)
@@ -57,11 +57,8 @@ def register_media_tools(mcp: FastMCP):
         
         # 添加图片输入（图片转视频/音乐）
         if image_path:
-            try:
-                from PIL import Image
-                contents.append(Image.open(image_path))
-            except Exception as e:
-                logger.warning(f"无法加载参考图片: {e}")
+            images = load_images([image_path])
+            contents.extend(images)
 
         # 生成
         logger.info(f"正在生成 {media_type}...")

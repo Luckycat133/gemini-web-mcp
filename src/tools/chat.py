@@ -15,6 +15,8 @@ from ..client_wrapper import (
     store_session,
     get_session,
     remove_session,
+    list_sessions,
+    load_images,
 )
 from ..constants import MODEL_CONFIG
 
@@ -49,13 +51,8 @@ def register_chat_tools(mcp: FastMCP):
         # 构建输入
         contents = [message]
         if image_paths:
-            try:
-                from PIL import Image
-                for p in image_paths:
-                    if p.strip():
-                        contents.append(Image.open(p))
-            except Exception as e:
-                logger.warning(f"无法加载图片: {e}")
+            images = load_images(image_paths)
+            contents.extend(images)
 
         # 生成响应
         logger.info(f"正在使用 {config['name']} 生成响应...")
@@ -146,13 +143,8 @@ def register_chat_tools(mcp: FastMCP):
         # 构建输入
         contents = [message]
         if image_paths:
-            try:
-                from PIL import Image
-                for p in image_paths:
-                    if p.strip():
-                        contents.append(Image.open(p))
-            except Exception as e:
-                logger.warning(f"无法加载图片: {e}")
+            images = load_images(image_paths)
+            contents.extend(images)
 
         response = await session.send_message(contents)
 
@@ -169,13 +161,13 @@ def register_chat_tools(mcp: FastMCP):
     @mcp.tool()
     async def gemini_list_sessions() -> list[TextContent]:
         """列出所有活跃会话"""
-        from ..client_wrapper import _sessions
+        sessions = list_sessions()
 
-        if not _sessions:
+        if not sessions:
             return [TextContent(type="text", text="暂无活跃会话。")]
 
         session_list = ["活跃会话:"]
-        for i, (sid, data) in enumerate(_sessions.items(), 1):
+        for i, (sid, data) in enumerate(sessions.items(), 1):
             config = MODEL_CONFIG[data["model"]]
             session_list.append(f"{i}. {sid} - {config['name']}")
 
