@@ -1,4 +1,4 @@
-# Gemini Web MCP Server (v2.0)
+# Gemini Web MCP Server (v3.0)
 
 > ⚠️ 免责声明: 本项目仅供技术研究与教育用途。使用逆向工程方式访问 Gemini Web 可能违反 Google 服务条款，并存在账户被限制的风险。
 
@@ -6,7 +6,7 @@
 
 ---
 
-## ✨ 主要功能
+## ✨ 主要功能 (v3.0 更新)
 
 ### 🤖 模型支持 (2026.5 更新)
 - **fast** → gemini-3-flash (快速，免费)
@@ -25,9 +25,19 @@
 - 来源引用和详细分析
 
 ### 💬 对话功能
-- 单次对话
-- 多轮会话
+- 单次对话 (支持流式输出)
+- 多轮会话 (支持流式输出)
 - 图片输入支持
+
+### 🖼️ 图像编辑 (v3.0 新增)
+- 提示词驱动的图像编辑
+- 图像变体生成
+- 支持参考图像
+
+### 📝 预设提示词库 (v3.0 新增)
+- 提示词 CRUD 管理
+- 分类管理
+- 快速访问常用提示词
 
 ### 📁 文件与 URL 分析
 - 上传文件 (图片、PDF、文档等)
@@ -37,6 +47,8 @@
 - 历史对话管理
 - Gem (自定义助手) CRUD
 - 会话管理
+- Cookie 自动刷新 (v3.0 新增)
+- 会话持久化 (v3.0 新增)
 
 ---
 
@@ -44,10 +56,17 @@
 
 ### 1. 获取 Cookie
 
+#### 方法 1: 手动获取
 1. 打开 Chrome，访问 [gemini.google.com](https://gemini.google.com) 并登录
 2. F12 → Application → Cookies → https://gemini.google.com
 3. 复制 `__Secure-1PSID` 的值 (必填)
 4. 复制 `__Secure-1PSIDTS` 的值 (可选，但推荐)
+
+#### 方法 2: 自动从浏览器获取 (v3.0 新增)
+```bash
+pip install browser-cookie3
+```
+然后使用 MCP 工具 `gemini_get_cookie_from_browser(browser="chrome")` 自动获取
 
 ### 2. 配置 Claude Desktop
 
@@ -82,6 +101,11 @@ pip install gemini-webapi>=1.20.0 mcp fastmcp
 uv pip install gemini-webapi>=1.20.0 mcp fastmcp
 ```
 
+可选: 安装浏览器 Cookie 自动获取功能
+```bash
+pip install browser-cookie3
+```
+
 ### 4. 重启 Claude Desktop
 
 完成！现在可以在 Claude 中使用 Gemini 了。
@@ -96,6 +120,7 @@ uv pip install gemini-webapi>=1.20.0 mcp fastmcp
 | GEMINI_PSIDTS | ❌ | Cookie __Secure-1PSIDTS | 自动提取 |
 | GEMINI_PROXY | ❌ | 代理地址 | - |
 | GEMINI_AUTO_REFRESH | ❌ | 自动刷新 Cookie | true |
+| GEMINI_SESSIONS_DIR | ❌ | 会话保存目录 | ./.gemini_sessions |
 
 ---
 
@@ -103,8 +128,10 @@ uv pip install gemini-webapi>=1.20.0 mcp fastmcp
 
 ### 对话工具
 - `gemini_chat`: 单次对话 (支持图片输入)
+- `gemini_chat_stream`: 单次流式对话 (v3.0 新增)
 - `gemini_start_chat`: 创建多轮会话
 - `gemini_send_message`: 会话消息
+- `gemini_send_message_stream`: 会话流式消息 (v3.0 新增)
 - `gemini_list_sessions`: 列会话
 - `gemini_reset_session`: 重置会话
 
@@ -115,9 +142,20 @@ uv pip install gemini-webapi>=1.20.0 mcp fastmcp
 - `gemini_generate_media`: 图像/视频/音乐生成
 - `gemini_generate_music`: 音乐生成 (便捷工具)
 
+### 图像编辑工具 (v3.0 新增)
+- `gemini_edit_image`: 使用提示词编辑图像
+- `gemini_variations`: 生成图像变体
+
 ### 文件工具
 - `gemini_upload_file`: 上传并分析文件
 - `gemini_analyze_url`: 分析网址
+
+### 预设提示词库 (v3.0 新增)
+- `gemini_manage_prompts`: 提示词管理 (CRUD)
+
+### Cookie 管理 (v3.0 新增)
+- `gemini_get_cookie_status`: 查看 Cookie 状态
+- `gemini_get_cookie_from_browser`: 从浏览器自动获取 Cookie
 
 ### 管理工具
 - `gemini_list_chats`: 历史对话
@@ -126,6 +164,37 @@ uv pip install gemini-webapi>=1.20.0 mcp fastmcp
 - `gemini_list_features`: 功能列表
 - `gemini_health_check`: 健康检查
 - `gemini_reset`: 重置客户端
+
+---
+
+## 🎯 v3.0 新功能详解
+
+### 1. 会话持久化
+- 会话自动保存到本地 JSON 文件
+- 服务器重启后自动恢复会话
+- 可配置保存目录 (GEMINI_SESSIONS_DIR)
+- 自动清理过期会话
+
+### 2. Cookie 自动刷新
+- 后台 Cookie 状态监控
+- 浏览器 Cookie 自动获取
+- Cookie 使用时长统计
+- 24小时刷新提醒
+
+### 3. 流式对话
+- 流式输出支持
+- 更流畅的用户体验
+- 完全兼容现有工具
+
+### 4. 图像编辑
+- 提示词驱动的编辑
+- 图像变体生成
+- 参考图像支持
+
+### 5. 预设提示词库
+- 提示词分类管理
+- 快速访问常用提示词
+- 支持创建、读取、更新、删除操作
 
 ---
 
@@ -139,16 +208,21 @@ gemini-mcp-server/
 ├── src/
 │   ├── __init__.py
 │   ├── server.py           # MCP 服务器主入口
-│   ├── client_wrapper.py   # Gemini 客户端封装
+│   ├── client_wrapper.py   # Gemini 客户端封装 (含会话持久化)
+│   ├── cookie_manager.py   # Cookie 管理模块 (v3.0 新增)
 │   ├── constants.py        # 模型常量、配置
 │   └── tools/              # 工具集
 │       ├── __init__.py
-│       ├── chat.py         # 对话工具
+│       ├── chat.py         # 对话工具 (含流式支持)
 │       ├── research.py     # Deep Research
 │       ├── media.py        # 媒体生成
 │       ├── file.py         # 文件工具
-│       └── manage.py       # 管理工具
-└── tests/                  # 测试 (可选)
+│       ├── manage.py       # 管理工具
+│       ├── image.py        # 图像编辑工具 (v3.0 新增)
+│       └── prompts.py      # 预设提示词库 (v3.0 新增)
+├── tests/                  # 测试 (可选)
+├── .gemini_sessions/       # 会话数据目录 (自动创建)
+└── prompts.json            # 预设提示词存储 (自动创建)
 ```
 
 ---

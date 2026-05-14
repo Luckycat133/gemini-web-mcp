@@ -15,9 +15,16 @@ from .tools.research import register_research_tools
 from .tools.media import register_media_tools
 from .tools.file import register_file_tools
 from .tools.manage import register_manage_tools
+from .tools.image import register_image_tools
+from .tools.prompts import register_prompts_tools
 
 # 客户端封装
-from .client_wrapper import reset_client
+from .client_wrapper import (
+    reset_client,
+    get_cookie_from_browser,
+    get_cookie_status,
+    init_cookie_manager_integration
+)
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -57,6 +64,8 @@ register_research_tools(mcp)
 register_media_tools(mcp)
 register_file_tools(mcp)
 register_manage_tools(mcp)
+register_image_tools(mcp)
+register_prompts_tools(mcp)
 
 
 @mcp.tool()
@@ -69,6 +78,73 @@ async def gemini_reset() -> list[TextContent]:
             text="✅ Gemini 客户端已重置，所有会话已清除。"
         )
     ]
+
+
+@mcp.tool()
+async def gemini_get_cookie_status() -> list[TextContent]:
+    """获取 Cookie 状态信息"""
+    status = get_cookie_status()
+    
+    if not status.get("available", False):
+        return [
+            TextContent(
+                type="text",
+                text="⚠️ Cookie Manager 不可用"
+            )
+        ]
+    
+    status_text = f"""📊 Cookie 状态
+状态: {status.get('status', 'unknown')}
+已设置: {'✅' if status.get('has_cookie') else '❌'}
+来源: {status.get('source', 'unknown')}
+使用时长: {status.get('age_hours', 0)} 小时
+需要刷新: {'✅' if status.get('needs_refresh', False) else '❌'}"""
+    
+    return [
+        TextContent(
+            type="text",
+            text=status_text
+        )
+    ]
+
+
+@mcp.tool()
+async def gemini_get_cookie_from_browser(browser: str = "chrome") -> list[TextContent]:
+    """
+    从浏览器自动获取 Cookie
+    
+    Args:
+        browser: 浏览器类型 (chrome, firefox, edge, opera, brave)
+    """
+    try:
+        success = get_cookie_from_browser(browser)
+        
+        if success:
+            return [
+                TextContent(
+                    type="text",
+                    text=f"✅ 已从 {browser} 浏览器获取 Cookie！客户端已自动重置。"
+                )
+            ]
+        else:
+            return [
+                TextContent(
+                    type="text",
+                    text=f"❌ 从 {browser} 浏览器获取 Cookie 失败\n\n"
+                    "请确保：\n"
+                    "1. 已登录 gemini.google.com\n"
+                    "2. 浏览器已关闭或 Cookie 未被锁定\n"
+                    "3. browser-cookie3 已安装: pip install browser-cookie3"
+                )
+            ]
+    except Exception as e:
+        logger.error(f"获取浏览器 Cookie 失败: {e}")
+        return [
+            TextContent(
+                type="text",
+                text=f"❌ 获取 Cookie 时出错: {str(e)}"
+            )
+        ]
 
 
 @mcp.tool()
@@ -107,12 +183,14 @@ async def gemini_health_check() -> list[TextContent]:
 @mcp.tool()
 async def gemini_list_features() -> list[TextContent]:
     """列出所有可用功能和特性"""
-    features = """✨ Gemini MCP 服务器功能大全（v2.0）
+    features = """✨ Gemini MCP 服务器功能大全（v3.0）
 
 📜 对话工具
 - gemini_chat: 单次对话（支持图片输入）
+- gemini_chat_stream: 单次流式对话
 - gemini_start_chat: 创建多轮会话
 - gemini_send_message: 会话消息
+- gemini_send_message_stream: 会话流式消息
 - gemini_list_sessions: 列会话
 - gemini_reset_session: 重置会话
 
@@ -123,9 +201,20 @@ async def gemini_list_features() -> list[TextContent]:
 - gemini_generate_media: 图像/视频/音乐生成
 - gemini_generate_music: 音乐生成（便捷工具）
 
+🖼️ 图像编辑
+- gemini_edit_image: 使用提示词编辑图像
+- gemini_variations: 生成图像变体
+
 📁 文件分析
 - gemini_upload_file: 上传并分析文件
 - gemini_analyze_url: 分析网址（YouTube、网页等）
+
+📝 预设提示词库
+- gemini_manage_prompts: 提示词管理（CRUD）
+
+🍪 Cookie 管理
+- gemini_get_cookie_status: 查看 Cookie 状态
+- gemini_get_cookie_from_browser: 从浏览器自动获取 Cookie
 
 🔧 管理工具
 - gemini_list_chats: 历史对话
@@ -136,6 +225,13 @@ async def gemini_list_features() -> list[TextContent]:
 - gemini_reset: 重置客户端
 
 ---
+✨ v3.0 新特性:
+- ✅ 会话持久化（自动保存会话）
+- ✅ Cookie 自动刷新（后台监控）
+- ✅ 流式对话支持
+- ✅ 图像编辑功能
+- ✅ 预设提示词库
+
 ⚠️ 使用提示:
 - 设置 GEMINI_PSID 环境变量
 - 从 gemini.google.com 获取 Cookie
@@ -147,8 +243,10 @@ async def gemini_list_features() -> list[TextContent]:
 def main():
     """启动服务器"""
     logger.info("🚀 启动 Gemini Web MCP Server (v2.0)...")
+    init_cookie_manager_integration()
     mcp.run()
 
 
 if __name__ == "__main__":
     main()
+
