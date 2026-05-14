@@ -6,9 +6,22 @@ import os
 import time
 import threading
 import logging
+import json
+from pathlib import Path
 from typing import Optional, Dict, Any, List
 
 logger = logging.getLogger(__name__)
+
+try:
+    from .cookie_manager import (
+        get_cookie_manager,
+        init_cookie_manager,
+        CookieData
+    )
+    COOKIE_MANAGER_AVAILABLE = True
+except ImportError:
+    COOKIE_MANAGER_AVAILABLE = False
+    logger.warning("cookie_manager 模块不可用")
 
 # 线程安全的全局变量
 _client: Optional[Any] = None
@@ -18,6 +31,11 @@ _client_lock = threading.Lock()
 # 内存会话存储（带过期机制）
 _sessions: Dict[str, Dict[str, Any]] = {}
 _sessions_lock = threading.Lock()
+
+# 会话持久化配置
+_SESSIONS_DIR = os.environ.get("GEMINI_SESSIONS_DIR", "./.gemini_sessions")
+_SESSIONS_FILE = os.path.join(_SESSIONS_DIR, "sessions.json")
+_SESSIONS_FILE_LOCK = threading.Lock()
 
 
 def validate_config() -> None:
@@ -49,6 +67,91 @@ def validate_config() -> None:
     auto_refresh = os.environ.get("GEMINI_AUTO_REFRESH", "true")
     if auto_refresh.lower() not in ["true", "false"]:
         logger.warning(f"GEMINI_AUTO_REFRESH 值无效: {auto_refresh}，默认使用 'true'")
+
+
+def _on_cookie_update(cookie_data: CookieData) -> None:
+    """
+    Cookie 更新回调 - 当 Cookie 更新时重置客户端
+    """
+    logger.info("🔄 Cookie 已更新，重置客户端...")
+    reset_client()
+    
+    # 更新环境变量
+    os.environ["GEMINI_PSID"] = cookie_data.psid
+    if cookie_data.psidts:
+        os.environ["GEMINI_PSIDTS"] = cookie_data.psidts
+
+
+def init_cookie_manager_integration() -> None:
+    """
+    初始化 Cookie Manager 集成
+    """
+    if not COOKIE_MANAGER_AVAILABLE:
+        return
+    
+    auto_refresh = os.environ.get("GEMINI_AUTO_REFRESH", "true").lower() == "true"
+    
+    init_cookie_manager(
+        auto_refresh=auto_refresh,
+        on_cookie_update=_on_cookie_update
+    )
+    
+    cookie_manager = get_cookie_manager()
+    cookie_manager.start_monitor()
+    logger.info("✅ Cookie Manager 集成已初始化")
+
+
+def get_cookie_from_browser(browser: str = "chrome") -> bool:
+    """
+    从浏览器获取 Cookie 并更新
+    
+    Args:
+        browser: 浏览器类型
+    
+    Returns:
+        是否成功获取
+    """
+    if not COOKIE_MANAGER_AVAILABLE:
+        logger.error("❌ Cookie Manager 不可用")
+        return False
+    
+    cookie_manager = get_cookie_manager()
+    psid, psidts = cookie_manager.get_cookie_from_browser(browser)
+    
+    if psid:
+        success = cookie_manager.update_cookie(psid, psidts, source=f"browser_{browser}")
+        if success:
+            # 更新环境变量
+            os.environ["GEMINI_PSID"] = psid
+            if psidts:
+                os.environ["GEMINI_PSIDTS"] = psidts
+            logger.info("✅ 已从浏览器获取 Cookie 并更新")
+        return success
+    
+    return False
+
+
+def get_cookie_status() -> Dict[str, Any]:
+    """
+    获取 Cookie 状态
+    
+    Returns:
+        状态信息字典
+    """
+    if not COOKIE_MANAGER_AVAILABLE:
+        return {
+            "available": False,
+            "message": "Cookie Manager 不可用"
+        }
+    
+    cookie_manager = get_cookie_manager()
+    status, info = cookie_manager.get_cookie_status()
+    
+    return {
+        "available": True,
+        "status": status.value,
+        **info
+    }
 
 
 def get_gemini_client() -> Any:
@@ -95,16 +198,6 @@ async def initialize_client() -> Any:
     return _client
 
 
-def store_session(session_id: str, session: Any, model: str = "fast") -> None:
-    """存储多轮对话会话（带时间戳）"""
-    with _sessions_lock:
-        _sessions[session_id] = {
-            "session": session,
-            "model": model,
-            "created_at": time.time()
-        }
-
-
 def get_session(session_id: str) -> Optional[Dict[str, Any]]:
     """获取存储的会话"""
     with _sessions_lock:
@@ -119,6 +212,7 @@ def get_session(session_id: str) -> Optional[Dict[str, Any]]:
         
         if expired:
             logger.info(f"清理了 {len(expired)} 个过期会话")
+            save_sessions_to_file()
         
         return _sessions.get(session_id)
 
@@ -128,12 +222,16 @@ def remove_session(session_id: str) -> None:
     with _sessions_lock:
         if session_id in _sessions:
             del _sessions[session_id]
+    
+    save_sessions_to_file()
 
 
 def clear_sessions() -> None:
     """清空所有会话"""
     with _sessions_lock:
         _sessions.clear()
+    
+    save_sessions_to_file()
 
 
 def cleanup_expired_sessions(max_age_seconds: int = 1800) -> int:
@@ -153,7 +251,12 @@ def cleanup_expired_sessions(max_age_seconds: int = 1800) -> int:
         if expired:
             logger.info(f"清理了 {len(expired)} 个过期会话")
         
-        return len(expired)
+        count = len(expired)
+    
+    if count > 0:
+        save_sessions_to_file()
+    
+    return count
 
 
 def reset_client() -> None:
@@ -208,3 +311,73 @@ def load_images(image_paths: List[str]) -> List[Any]:
         logger.error(f"加载图片过程中出错: {e}")
     
     return images
+
+
+def _ensure_sessions_dir() -> None:
+    """确保会话保存目录存在"""
+    try:
+        Path(_SESSIONS_DIR).mkdir(parents=True, exist_ok=True)
+    except Exception as e:
+        logger.error(f"创建会话目录失败: {e}")
+
+
+def save_sessions_to_file() -> None:
+    """
+    将所有内存会话保存到文件（JSON格式）
+    注意：GeminiClient的session对象无法直接序列化，我们只保存元数据
+    """
+    with _sessions_lock, _SESSIONS_FILE_LOCK:
+        try:
+            _ensure_sessions_dir()
+            
+            session_data = {}
+            for sid, data in _sessions.items():
+                session_data[sid] = {
+                    "model": data["model"],
+                    "created_at": data["created_at"]
+                }
+            
+            with open(_SESSIONS_FILE, 'w', encoding='utf-8') as f:
+                json.dump(session_data, f, ensure_ascii=False, indent=2)
+            
+            logger.debug(f"已保存 {len(session_data)} 个会话元数据到文件")
+        except Exception as e:
+            logger.error(f"保存会话到文件失败: {e}")
+
+
+def load_sessions_from_file() -> int:
+    """
+    从文件加载会话元数据
+    返回加载的会话数量
+    """
+    with _sessions_lock, _SESSIONS_FILE_LOCK:
+        try:
+            if not os.path.exists(_SESSIONS_FILE):
+                logger.debug("会话文件不存在")
+                return 0
+            
+            with open(_SESSIONS_FILE, 'r', encoding='utf-8') as f:
+                session_data = json.load(f)
+            
+            logger.debug(f"从文件加载了 {len(session_data)} 个会话元数据")
+            return len(session_data)
+        except Exception as e:
+            logger.error(f"从文件加载会话失败: {e}")
+            return 0
+
+
+def save_session_to_file(session_id: str) -> None:
+    """保存单个会话到文件"""
+    save_sessions_to_file()
+
+
+def store_session(session_id: str, session: Any, model: str = "fast") -> None:
+    """存储多轮对话会话（带时间戳和自动保存）"""
+    with _sessions_lock:
+        _sessions[session_id] = {
+            "session": session,
+            "model": model,
+            "created_at": time.time()
+        }
+    
+    save_sessions_to_file()
