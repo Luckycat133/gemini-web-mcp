@@ -40,22 +40,19 @@ mcp = FastMCP(
     "Gemini Skill",
     instructions="""
 # Gemini Skill (v3.0)
-Gemini Web MCP Server - Optimized for AI use.
+
+## TOOLS
+- **chat**: Gemini conversation
+- **create**: image/video/music generation
+- **edit**: modify existing images
+- **session**: conversation context
+- **prompts**: saved prompt templates
+- **cookie**: auth management
 
 ## MODELS
-- fast: quick responses
-- thinking: reasoning chain
+- fast: quick
+- thinking: reasoning
 - pro: best quality
-
-## MAIN TOOLS
-- ask: chat with Gemini
-- media: generate images/videos/music
-- edit: edit images
-- session: manage multi-turn conversations
-- prompts: manage prompt library
-- cookie: check/refresh cookies
-
-Use ask for most tasks.
 """
 )
 
@@ -69,19 +66,14 @@ _sessions = {}
 # ============================================
 
 @mcp.tool()
-async def ask(
+async def chat(
     message: str,
     model: Literal["fast", "thinking", "pro"] = "fast",
     image_path: Optional[str] = None,
     session_id: Optional[str] = None
 ) -> list[TextContent]:
     """
-    Chat with Gemini.
-    Args:
-        message: what you want to say
-        model: fast|thinking|pro (default: fast)
-        image_path: optional path to image
-        session_id: optional, for conversation
+    Chat with Gemini - supports images, sessions, all models.
     """
     client = get_gemini_client()
     await initialize_client()
@@ -116,19 +108,14 @@ async def ask(
 
 
 @mcp.tool()
-async def media(
+async def create(
     prompt: str,
     type: Literal["image", "video", "music"] = "image",
     model: Literal["fast", "thinking", "pro"] = "fast",
     image_path: Optional[str] = None
 ) -> list[TextContent]:
     """
-    Generate media (image/video/music).
-    Args:
-        prompt: what to generate
-        type: image|video|music
-        model: fast|thinking|pro
-        image_path: optional reference image
+    Generate image/video/music from prompt.
     """
     client = get_gemini_client()
     await initialize_client()
@@ -172,11 +159,7 @@ async def edit(
     model: Literal["fast", "thinking", "pro"] = "fast"
 ) -> list[TextContent]:
     """
-    Edit an existing image.
-    Args:
-        image_path: path to image file
-        prompt: what changes to make
-        model: fast|thinking|pro
+    Edit an existing image with prompt.
     """
     client = get_gemini_client()
     await initialize_client()
@@ -276,12 +259,7 @@ async def prompts(
     category: Optional[str] = None
 ) -> list[TextContent]:
     """
-    Manage prompt library.
-    Args:
-        action: list|get|create|delete
-        name: prompt name (required for create/delete)
-        content: prompt text (create only)
-        category: optional category
+    Manage preset prompts library.
     """
     from .tools.prompts import get_prompt_manager
     mgr = get_prompt_manager()
