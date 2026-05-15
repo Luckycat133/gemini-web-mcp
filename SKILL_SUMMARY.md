@@ -1,138 +1,74 @@
-# Gemini Skill - Complete Optimization Summary
+# Gemini Skill - Optimization Summary
 
-## Overview
+## Created Files
 
-Created a low-token, AI-friendly MCP server while preserving 100% of core functionality.
+- `src/skill_server.py` - Optimized server (6 tools)
+- `prompts_default.json` - 8 preset prompts
+- `SKILL_README.md` - Quick reference
 
-## File Structure
+## Tool Naming (1-2 words)
 
-```
-/workspace/
-├── src/skill_server.py           # Optimized skill server (6 tools)
-├── prompts_default.json          # 8 pre-built prompts
-├── SKILL_README.md               # Short, clear documentation
-└── SKILL_SUMMARY.md              # This file
-```
+| Tool | Purpose |
+|------|---------|
+| **chat** | Gemini conversation with images, sessions |
+| **create** | Generate image/video/music |
+| **edit** | Modify existing images |
+| **session** | Conversation context management |
+| **prompts** | Saved prompt templates |
+| **cookie** | Auth management |
 
-## Optimization Breakdown
+## Optimization Results
 
-### 1. Tool Reduction
+| Metric | Full Version | Skill Version | Reduction |
+|--------|-------------|---------------|-----------|
+| Tools | 20+ | 6 | 70% |
+| Instructions | 300+ tokens | ~50 tokens | 83% |
+| Function names | Long descriptive | 1-2 words | ✓ |
 
-**Before (Full Version)**
-- `gemini_chat`
-- `gemini_chat_stream`
-- `gemini_start_chat`
-- `gemini_send_message`
-- `gemini_send_message_stream`
-- `gemini_list_sessions`
-- `gemini_reset_session`
-- `gemini_deep_research`
-- `gemini_generate_media`
-- `gemini_generate_music`
-- `gemini_edit_image`
-- `gemini_variations`
-- `gemini_upload_file`
-- `gemini_analyze_url`
-- `gemini_list_chats`
-- `gemini_manage_gems`
-- `gemini_list_models`
-- `gemini_list_features`
-- `gemini_health_check`
-- `gemini_reset`
-- `gemini_get_cookie_status`
-- `gemini_get_cookie_from_browser`
-- `gemini_manage_prompts`
+## Features Preserved
 
-**After (Skill Version)**
-- `ask` - One tool for all chat needs
-- `media` - Image/video/music generation
-- `edit` - Image editing
-- `session` - Multi-turn conversation manager
-- `prompts` - Preset prompt library
-- `cookie` - Cookie management
+✓ Chat with images  
+✓ All 3 models (fast/thinking/pro)  
+✓ Session management  
+✓ Image/video/music generation  
+✓ Image editing  
+✓ Preset prompts (8 default)  
+✓ Cookie management  
 
-**Reduction: 20+ tools → 6 tools (70% reduction)**
-
-### 2. Instructions Optimization
-
-**Full Version** (~300+ tokens):
-- Detailed Chinese/English documentation
-- Complete model specs
-- Every feature explained
-- Full feature list
-
-**Skill Version** (~100 tokens):
-- Minimal, focused instructions
-- Clear tool list
-- Quick model guide
-- Recommendation for `ask` tool
-
-**Reduction: ~67% fewer tokens**
-
-### 3. Tool Name Optimization
-
-**Long descriptive names → Short AI-friendly names:**
-- `gemini_chat` → `ask`
-- `gemini_generate_media` → `media`
-- `gemini_edit_image` → `edit`
-- `gemini_start_chat` + `gemini_send_message` → `session`
-- `gemini_manage_prompts` → `prompts`
-- `gemini_get_cookie_*` → `cookie`
-
-### 4. Preset Prompts Library
-
-**8 pre-built, ready-to-use prompts:**
-1. Code Review
-2. Python Optimize
-3. Explain Simply
-4. Translate
-5. Image Prompt
-6. Bug Fix
-7. Improve Writing
-8. Summarize
-
-## Usage
-
-### Claude Desktop Config
+## Quick Setup
 
 ```json
 {
   "mcpServers": {
     "gemini": {
       "command": "python",
-      "args": ["-m", "uv", "run", "--directory", "/path/to/gemini-mcp-server", "src/skill_server.py"],
-      "env": {
-        "GEMINI_PSID": "your_cookie"
-      }
+      "args": ["-m", "uv", "run", "src/skill_server.py"],
+      "env": {"GEMINI_PSID": "your_cookie"}
     }
   }
 }
 ```
 
-## Features Comparison
+## Default Prompts (8)
+Code Review, Python Optimize, Bug Fix, Summarize, Translate, Image Prompt, Writing Improve, Explain Simply
 
-| Feature | Full Version | Skill Version |
-|---------|-------------|--------------|
-| Chat | ✓ | ✓ |
-| Multi-turn | ✓ | ✓ |
-| Images | ✓ | ✓ |
-| Media generation | ✓ | ✓ |
-| Image editing | ✓ | ✓ |
-| Cookie management | ✓ | ✓ |
-| Prompt library | ✓ | ✓ |
-| Token optimized | ✗ | ✓ |
-| Short tool names | ✗ | ✓ |
+## Usage Examples
 
-## Token Savings
+```
+chat(message="Hello")
+chat(message="Analyze code", model="thinking")
+chat(message="Describe this", image_path="/path.jpg")
 
-- Tool descriptions: ~70% less
-- Instructions: ~67% less
-- Total context: ~60-70% reduction
+create(prompt="a cat", type="image")
+create(prompt="music", type="music")
 
-## Recommendation
+edit(image_path="/path/photo.jpg", prompt="make it sunset")
 
-Use `skill_server.py` for everyday AI use, keep `server.py` for full control when needed.
+session(action="create")
+session(action="send", session_id="sess_1", message="Hello")
 
----
+prompts(action="list")
+prompts(action="get", name="Code Review")
 
-✓ **Optimization complete!**
+cookie(action="status")
+```
