@@ -1,0 +1,78 @@
+{
+  "version": "1.0",
+  "updated_at": "2026-05-15",
+  "prompts": {
+    "code_review": {
+      "id": "code_review",
+      "name": "Code Review",
+      "content": "Please review this code for bugs, security issues, performance problems, and suggest improvements.",
+      "category": "coding",
+      "description": "Comprehensive code review",
+      "created_at": "2026-05-15",
+      "updated_at": "2026-05-15"
+    },
+    "python_optimize": {
+      "id": "python_optimize",
+      "name": "Python Optimize",
+      "content": "Optimize this Python code for better performance and readability.",
+      "category": "coding",
+      "description": "Optimize Python code",
+      "created_at": "2026-05-15",
+      "updated_at": "2026-05-15"
+    },
+    "explain_simple": {
+      "id": "explain_simple",
+      "name": "Explain Simply",
+      "content": "Explain this in simple terms, as if I'm 12 years old.",
+      "category": "general",
+      "description": "Simplified explanation",
+      "created_at": "2026-05-15",
+      "updated_at": "2026-05-15"
+    },
+    "translate": {
+      "id": "translate",
+      "name": "Translate to English",
+      "content": "Translate the following text to English.",
+      "category": "general",
+      "description": "English translation",
+      "created_at": "2026-05-15",
+      "updated_at": "2026-05-15"
+    },
+    "image_prompt": {
+      "id": "image_prompt",
+      "name": "Image Prompt",
+      "content": "Generate a detailed, high-quality image based on this description. Make it cinematic with beautiful lighting.",
+      "category": "creative",
+      "description": "High quality image prompts",
+      "created_at": "2026-05-15",
+      "updated_at": "2026-05-15"
+    },
+    "bug_fix": {
+      "id": "bug_fix",
+      "name": "Bug Fix",
+      "content": "Find and fix the bug in this code. Explain what was wrong and how you fixed it.",
+      "category": "coding",
+      "description": "Debug and fix issues",
+      "created_at": "2026-05-15",
+      "updated_at": "2026-05-15"
+    },
+    "writing_improve": {
+      "id": "writing_improve",
+      "name": "Improve Writing",
+      "content": "Improve this text for clarity, style, and grammar while preserving the original meaning.",
+      "category": "writing",
+      "description": "Enhance written content",
+      "created_at": "2026-05-15",
+      "updated_at": "2026-05-15"
+    },
+    "summarize": {
+      "id": "summarize",
+      "name": "Summarize",
+      "content": "Summarize this content concisely, keeping only the most important information.",
+      "category": "general",
+      "description": "Concise summary",
+      "created_at": "2026-05-15",
+      "updated_at": "2026-05-15"
+    }
+  }
+}
