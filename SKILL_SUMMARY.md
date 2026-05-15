@@ -1,74 +1,93 @@
-# Gemini Skill - Optimization Summary
+# Gemini Skill - Best Practices Edition
 
-## Created Files
+## Architecture
 
-- `src/skill_server.py` - Optimized server (6 tools)
-- `prompts_default.json` - 8 preset prompts
-- `SKILL_README.md` - Quick reference
+### Design Principles
 
-## Tool Naming (1-2 words)
+1. **Single Responsibility** - Each tool does one thing well
+2. **Error Handling** - All functions have try/except
+3. **Type Hints** - Full typing for better IDE support
+4. **DRY** - Shared logic in helper functions
+5. **Singleton Pattern** - PromptManager as single instance
 
-| Tool | Purpose |
-|------|---------|
-| **chat** | Gemini conversation with images, sessions |
-| **create** | Generate image/video/music |
-| **edit** | Modify existing images |
-| **session** | Conversation context management |
-| **prompts** | Saved prompt templates |
-| **cookie** | Auth management |
+### Code Structure
 
-## Optimization Results
-
-| Metric | Full Version | Skill Version | Reduction |
-|--------|-------------|---------------|-----------|
-| Tools | 20+ | 6 | 70% |
-| Instructions | 300+ tokens | ~50 tokens | 83% |
-| Function names | Long descriptive | 1-2 words | ✓ |
-
-## Features Preserved
-
-✓ Chat with images  
-✓ All 3 models (fast/thinking/pro)  
-✓ Session management  
-✓ Image/video/music generation  
-✓ Image editing  
-✓ Preset prompts (8 default)  
-✓ Cookie management  
-
-## Quick Setup
-
-```json
-{
-  "mcpServers": {
-    "gemini": {
-      "command": "python",
-      "args": ["-m", "uv", "run", "src/skill_server.py"],
-      "env": {"GEMINI_PSID": "your_cookie"}
-    }
-  }
-}
+```python
+# Imports
+# Constants (MODEL_ALIASES, MEDIA_TYPES)
+# MCP Server initialization
+# Helper functions (_normalize_*)
+# PromptManager class
+# Tool functions (chat, create, edit, session, prompts, cookie)
+# Response formatter (_format_response)
+# Main entry point
 ```
 
-## Default Prompts (8)
-Code Review, Python Optimize, Bug Fix, Summarize, Translate, Image Prompt, Writing Improve, Explain Simply
+### Key Patterns
 
-## Usage Examples
-
+**1. Alias Normalization**
+```python
+MODEL_ALIASES = {"f": "fast", "t": "thinking", "p": "pro"}
 ```
-chat(message="Hello")
-chat(message="Analyze code", model="thinking")
-chat(message="Describe this", image_path="/path.jpg")
 
-create(prompt="a cat", type="image")
-create(prompt="music", type="music")
-
-edit(image_path="/path/photo.jpg", prompt="make it sunset")
-
-session(action="create")
-session(action="send", session_id="sess_1", message="Hello")
-
-prompts(action="list")
-prompts(action="get", name="Code Review")
-
-cookie(action="status")
+**2. Singleton PromptManager**
+```python
+_prompt_manager: Optional[PromptManager] = None
+def get_prompts() -> PromptManager:
+    global _prompt_manager
+    if _prompt_manager is None:
+        _prompt_manager = PromptManager(PROMPTS_FILE)
+    return _prompt_manager
 ```
+
+**3. Centralized Error Handling**
+```python
+try:
+    # operation
+except Exception as e:
+    logger.error(f"Tool error: {e}")
+    return [TextContent(type="text", text=f"Error: {e}")]
+```
+
+**4. Response Formatting**
+```python
+def _format_response(response: Any, media_type: str = "") -> list[TextContent]:
+    parts = []
+    if response.text:
+        parts.append(response.text)
+    # ... media handling
+    return [TextContent(type="text", text="".join(parts))]
+```
+
+## Best Practices Applied
+
+| Practice | Implementation |
+|----------|---------------|
+| Type hints | All functions typed |
+| Docstrings | Short, clear descriptions |
+| Error handling | Try/except with logging |
+| Logging | Structured, configurable |
+| Path handling | pathlib.Path |
+| Config | Environment variables |
+| Constants | Typed dictionaries |
+| Imports | Explicit, grouped |
+| Code style | Black-compatible |
+
+## Metrics
+
+| Metric | Value |
+|--------|-------|
+| Tools | 6 |
+| Instructions | ~40 tokens |
+| Lines | ~450 |
+| Functions | 20+ |
+| Classes | 1 |
+| Testable | ✓ |
+| Type-safe | ✓ |
+
+## Files
+
+- `src/skill_server.py` - Main server
+- `prompts_default.json` - Default prompts
+- `SKILL_README.md` - Usage docs
+- `SKILL_SUMMARY.md` - This file

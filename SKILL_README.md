@@ -1,48 +1,8 @@
 # Gemini Skill (v3.0)
 
-Low-token MCP server for AI use.
+Production-ready, low-token MCP server.
 
-## Tools (6)
-
-| Tool | Purpose |
-|------|---------|
-| **chat** | Gemini conversation with images, sessions |
-| **create** | Generate image/video/music |
-| **edit** | Modify existing images |
-| **session** | Conversation context management |
-| **prompts** | Saved prompt templates |
-| **cookie** | Auth management |
-
-## Models
-- **fast**: quick
-- **thinking**: reasoning
-- **pro**: best quality
-
-## Usage
-
-```
-chat(message="Hello", model="fast")
-chat(message="Fix code", model="thinking", image_path="/path.jpg")
-
-create(prompt="a cat", type="image", model="pro")
-create(prompt="music", type="music", model="thinking")
-
-edit(image_path="/path/photo.jpg", prompt="make it sunset")
-
-session(action="create", model="thinking")
-session(action="send", session_id="sess_1", message="Hello")
-
-prompts(action="list")
-prompts(action="get", name="Code Review")
-
-cookie(action="status")
-cookie(action="get", browser="chrome")
-```
-
-## Default Prompts
-Code Review, Python Optimize, Bug Fix, Summarize, Translate
-
-## Quick Setup
+## Setup
 
 ```json
 {
@@ -56,8 +16,62 @@ Code Review, Python Optimize, Bug Fix, Summarize, Translate
 }
 ```
 
-## Compare
-| Metric | Full | Skill |
-|--------|------|-------|
-| Tools | 20+ | 6 |
-| Instructions | 300+ | ~50 |
+## Tools
+
+| Tool | Purpose |
+|------|---------|
+| **chat** | Conversation + images + sessions |
+| **create** | Generate image/video/music |
+| **edit** | Modify existing images |
+| **session** | Conversation history |
+| **prompts** | Saved templates |
+| **cookie** | Authentication |
+
+## Models
+
+`fast` (default) / `thinking` / `pro`
+
+## Usage
+
+```
+chat(message="hi")
+chat(message="fix", model="thinking")
+chat(message="describe", image_path="/img.jpg")
+chat(message="continue", session_id="sess_1")
+
+create(prompt="cat", type="image")
+create(prompt="video", type="video")
+create(prompt="song", type="music")
+
+edit(image_path="/photo.jpg", prompt="sunset")
+
+session(action="create")
+session(action="send", session_id="sess_1", message="hi")
+session(action="list")
+session(action="reset")
+
+prompts(action="list")
+prompts(action="get", name="Code Review")
+prompts(action="create", name="Custom", content="...")
+
+cookie(action="status")
+cookie(action="get")
+```
+
+## Aliases
+
+```
+Model: f/t/p or flash/thinking/pro
+Media: img/picture/photo → image
+```
+
+## Config
+
+| Variable | Default |
+|----------|---------|
+| GEMINI_PSID | required |
+| GEMINI_CONFIG_DIR | .gemini |
+
+## Defaults (8)
+
+Code Review, Python Optimize, Bug Fix, Summarize, Translate, Image Prompt, Writing Improve, Explain Simply

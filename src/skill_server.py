@@ -1,110 +1,211 @@
 #!/usr/bin/env python3
 """
-Gemini Web MCP Server - Skill Optimized Edition (v3.0)
-Optimized for low token consumption and ease of AI use.
+Gemini Skill - Optimized MCP Server (v3.0)
+Low-token, production-ready.
 """
 
-import logging
-from mcp.server.fastmcp import FastMCP
-from mcp.types import TextContent
-from typing import Optional, Literal
 import os
 import json
 import shutil
+import logging
+from pathlib import Path
+from typing import Optional, Literal, Any
+
+try:
+    from mcp.server.fastmcp import FastMCP
+    from mcp.types import TextContent
+except ImportError:
+    print("Error: mcp package required. Install with: pip install mcp fastmcp")
+    exit(1)
 
 from .client_wrapper import (
-    get_gemini_client, initialize_client, store_session, 
-    get_session, remove_session, list_sessions, load_images,
-    reset_client, get_cookie_status, get_cookie_from_browser
+    get_gemini_client,
+    initialize_client,
+    load_images,
+    reset_client,
+    get_cookie_status,
+    get_cookie_from_browser,
 )
 from .constants import MODEL_CONFIG
 
-logging.basicConfig(level=logging.WARNING)
+logging.basicConfig(
+    level=logging.WARNING,
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+)
 logger = logging.getLogger(__name__)
 
-# ============================================
-# Preset configurations for quick access
-# ============================================
-PRESETS = {
-    "code": {"model": "thinking", "temperature": 0.2},
-    "creative": {"model": "pro", "temperature": 0.8},
-    "fast": {"model": "fast", "temperature": 0.5},
-    "image": {"model": "pro", "media": "image"},
-    "research": {"model": "pro", "research": True}
+CONFIG_DIR = Path(os.environ.get("GEMINI_CONFIG_DIR", ".gemini"))
+PROMPTS_FILE = CONFIG_DIR / "prompts.json"
+DEFAULT_PROMPTS_FILE = Path(__file__).parent.parent / "prompts_default.json"
+
+MODEL_ALIASES = {
+    "f": "fast",
+    "t": "thinking",
+    "p": "pro",
+    "flash": "fast",
+    "pro": "pro",
 }
 
-# ============================================
-# Server initialization with minimal instructions
-# ============================================
+MEDIA_TYPES = {"img": "image", "picture": "image", "photo": "image"}
+
 mcp = FastMCP(
-    "Gemini Skill",
+    "Gemini",
     instructions="""
-# Gemini Skill (v3.0)
+# Gemini Skill
 
-## TOOLS
-- **chat**: Gemini conversation
-- **create**: image/video/music generation
-- **edit**: modify existing images
-- **session**: conversation context
-- **prompts**: saved prompt templates
-- **cookie**: auth management
+## Tools
+- **chat**: conversation
+- **create**: generate media
+- **edit**: modify images
+- **session**: conversation history
+- **prompts**: saved templates
+- **cookie**: authentication
 
-## MODELS
-- fast: quick
-- thinking: reasoning
-- pro: best quality
-"""
+## Models
+- fast (default), thinking, pro
+
+## Quick
+chat(message="hi")
+create(prompt="image", type="image")
+""",
 )
 
-# ============================================
-# Session management
-# ============================================
-_sessions = {}
 
-# ============================================
-# Tool implementations (minimal parameters)
-# ============================================
+def _normalize_model(model: str) -> str:
+    """Normalize model alias to standard name."""
+    return MODEL_ALIASES.get(model.lower(), model)
+
+
+def _normalize_media_type(media_type: str) -> str:
+    """Normalize media type alias."""
+    return MEDIA_TYPES.get(media_type.lower(), media_type)
+
+
+def _ensure_config_dir() -> None:
+    """Ensure config directory exists."""
+    CONFIG_DIR.mkdir(exist_ok=True)
+
+
+def _init_default_prompts() -> None:
+    """Initialize with default prompts if none exist."""
+    _ensure_config_dir()
+    if not PROMPTS_FILE.exists() and DEFAULT_PROMPTS_FILE.exists():
+        shutil.copy(DEFAULT_PROMPTS_FILE, PROMPTS_FILE)
+        logger.info("Initialized default prompts")
+
+
+class PromptManager:
+    """Simple prompt storage manager."""
+
+    def __init__(self, file_path: Path):
+        self.file_path = file_path
+        self._data: dict[str, dict] = {}
+        self._load()
+
+    def _load(self) -> None:
+        """Load prompts from file."""
+        if self.file_path.exists():
+            try:
+                with open(self.file_path, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                    self._data = data.get("prompts", {})
+            except (json.JSONDecodeError, IOError) as e:
+                logger.error(f"Failed to load prompts: {e}")
+                self._data = {}
+
+    def _save(self) -> None:
+        """Save prompts to file."""
+        _ensure_config_dir()
+        try:
+            with open(self.file_path, "w", encoding="utf-8") as f:
+                json.dump(
+                    {"version": "1.0", "prompts": self._data},
+                    f,
+                    ensure_ascii=False,
+                    indent=2,
+                )
+        except IOError as e:
+            logger.error(f"Failed to save prompts: {e}")
+
+    def list_all(self) -> list[dict]:
+        """List all prompts."""
+        return sorted(self._data.values(), key=lambda x: x.get("name", "").lower())
+
+    def get_by_name(self, name: str) -> Optional[dict]:
+        """Get prompt by name."""
+        for p in self._data.values():
+            if p.get("name", "").lower() == name.lower():
+                return p
+        return None
+
+    def create(self, name: str, content: str, category: str = "general") -> str:
+        """Create new prompt."""
+        prompt_id = name.lower().replace(" ", "_")
+        self._data[prompt_id] = {
+            "id": prompt_id,
+            "name": name,
+            "content": content,
+            "category": category,
+        }
+        self._save()
+        return prompt_id
+
+    def delete(self, name: str) -> bool:
+        """Delete prompt by name."""
+        prompt = self.get_by_name(name)
+        if prompt:
+            del self._data[prompt["id"]]
+            self._save()
+            return True
+        return False
+
+
+_prompt_manager: Optional[PromptManager] = None
+
+
+def get_prompts() -> PromptManager:
+    """Get singleton prompt manager."""
+    global _prompt_manager
+    if _prompt_manager is None:
+        _prompt_manager = PromptManager(PROMPTS_FILE)
+    return _prompt_manager
+
+
+_sessions: dict[str, dict[str, Any]] = {}
+
 
 @mcp.tool()
 async def chat(
     message: str,
     model: Literal["fast", "thinking", "pro"] = "fast",
     image_path: Optional[str] = None,
-    session_id: Optional[str] = None
+    session_id: Optional[str] = None,
 ) -> list[TextContent]:
-    """
-    Chat with Gemini - supports images, sessions, all models.
-    """
-    client = get_gemini_client()
-    await initialize_client()
-    config = MODEL_CONFIG[model]
-    
-    contents = [message]
-    if image_path:
-        images = load_images([image_path])
-        contents.extend(images)
-    
-    if session_id and session_id in _sessions:
-        response = await _sessions[session_id]["session"].send_message(contents)
-    else:
-        response = await client.generate_content(contents, model=config["name"])
-    
-    result = [response.text] if response.text else []
-    
-    if hasattr(response, "images") and response.images:
-        for i, img in enumerate(response.images, 1):
-            if hasattr(img, "url") and img.url:
-                result.append(f"\n[Image {i}]: {img.url}")
-    
-    if hasattr(response, "videos") and response.videos:
-        for i, vid in enumerate(response.videos, 1):
-            if hasattr(vid, "url") and vid.url:
-                result.append(f"\n[Video {i}]: {vid.url}")
-    
-    if hasattr(response, "audio_url") and response.audio_url:
-        result.append(f"\n[Audio]: {response.audio_url}")
-    
-    return [TextContent(type="text", text="".join(result))]
+    """Chat with Gemini - supports images and sessions."""
+    try:
+        client = get_gemini_client()
+        await initialize_client()
+
+        model = _normalize_model(model)
+        config = MODEL_CONFIG[model]
+
+        contents: list[Any] = [message]
+        if image_path:
+            images = load_images([image_path])
+            contents.extend(images)
+
+        if session_id and session_id in _sessions:
+            response = await _sessions[session_id]["session"].send_message(contents)
+        else:
+            response = await client.generate_content(
+                contents, model=config["name"]
+            )
+
+        return _format_response(response)
+
+    except Exception as e:
+        logger.error(f"Chat error: {e}")
+        return [TextContent(type="text", text=f"Error: {e}")]
 
 
 @mcp.tool()
@@ -112,73 +213,66 @@ async def create(
     prompt: str,
     type: Literal["image", "video", "music"] = "image",
     model: Literal["fast", "thinking", "pro"] = "fast",
-    image_path: Optional[str] = None
+    image_path: Optional[str] = None,
 ) -> list[TextContent]:
-    """
-    Generate image/video/music from prompt.
-    """
-    client = get_gemini_client()
-    await initialize_client()
-    config = MODEL_CONFIG[model]
-    
-    prefix = {
-        "image": "Generate image: ",
-        "video": "Generate video: ",
-        "music": "Create music: "
-    }[type]
-    
-    contents = [prefix + prompt]
-    if image_path:
-        images = load_images([image_path])
-        contents.extend(images)
-    
-    response = await client.generate_content(contents, model=config["name"])
-    
-    result = [response.text] if response.text else []
-    
-    if type == "image" and hasattr(response, "images") and response.images:
-        for i, img in enumerate(response.images, 1):
-            if hasattr(img, "url"):
-                result.append(f"\n[Image {i}]: {img.url}")
-    
-    if type == "video" and hasattr(response, "videos") and response.videos:
-        for i, vid in enumerate(response.videos, 1):
-            if hasattr(vid, "url"):
-                result.append(f"\n[Video {i}]: {vid.url}")
-    
-    if type == "music" and hasattr(response, "audio_url") and response.audio_url:
-        result.append(f"\n[Audio]: {response.audio_url}")
-    
-    return [TextContent(type="text", text="".join(result))]
+    """Generate image/video/music."""
+    try:
+        client = get_gemini_client()
+        await initialize_client()
+
+        model = _normalize_model(model)
+        media_type = _normalize_media_type(type)
+        config = MODEL_CONFIG[model]
+
+        prefixes = {
+            "image": "Generate image: ",
+            "video": "Generate video: ",
+            "music": "Create music: ",
+        }
+        contents = [prefixes.get(media_type, "") + prompt]
+
+        if image_path:
+            images = load_images([image_path])
+            contents.extend(images)
+
+        response = await client.generate_content(
+            contents, model=config["name"]
+        )
+
+        return _format_response(response, media_type)
+
+    except Exception as e:
+        logger.error(f"Create error: {e}")
+        return [TextContent(type="text", text=f"Error: {e}")]
 
 
 @mcp.tool()
 async def edit(
     image_path: str,
     prompt: str,
-    model: Literal["fast", "thinking", "pro"] = "fast"
+    model: Literal["fast", "thinking", "pro"] = "fast",
 ) -> list[TextContent]:
-    """
-    Edit an existing image with prompt.
-    """
-    client = get_gemini_client()
-    await initialize_client()
-    config = MODEL_CONFIG[model]
-    
-    contents = [f"Edit this image: {prompt}"]
-    images = load_images([image_path])
-    contents.extend(images)
-    
-    response = await client.generate_content(contents, model=config["name"])
-    
-    result = [response.text] if response.text else []
-    
-    if hasattr(response, "images") and response.images:
-        for i, img in enumerate(response.images, 1):
-            if hasattr(img, "url"):
-                result.append(f"\n[Edited Image {i}]: {img.url}")
-    
-    return [TextContent(type="text", text="".join(result))]
+    """Edit existing image."""
+    try:
+        client = get_gemini_client()
+        await initialize_client()
+
+        model = _normalize_model(model)
+        config = MODEL_CONFIG[model]
+
+        contents = [f"Edit this image: {prompt}"]
+        images = load_images([image_path])
+        contents.extend(images)
+
+        response = await client.generate_content(
+            contents, model=config["name"]
+        )
+
+        return _format_response(response, "image")
+
+    except Exception as e:
+        logger.error(f"Edit error: {e}")
+        return [TextContent(type="text", text=f"Error: {e}")]
 
 
 @mcp.tool()
@@ -187,68 +281,60 @@ async def session(
     session_id: Optional[str] = None,
     message: Optional[str] = None,
     model: Literal["fast", "thinking", "pro"] = "fast",
-    image_path: Optional[str] = None
+    image_path: Optional[str] = None,
 ) -> list[TextContent]:
-    """
-    Manage multi-turn conversation sessions.
-    Args:
-        action: create|send|list|reset
-        session_id: required for send/reset
-        message: message to send (send action only)
-        model: fast|thinking|pro (create only)
-        image_path: optional image
-    """
-    client = get_gemini_client()
-    await initialize_client()
-    
-    if action == "create":
-        config = MODEL_CONFIG[model]
-        sess = client.start_chat(model=config["name"])
-        sid = f"sess_{len(_sessions) + 1}"
-        _sessions[sid] = {"session": sess, "model": model}
-        return [TextContent(type="text", text=f"Created session: {sid}")]
-    
-    elif action == "send":
-        if not session_id or session_id not in _sessions:
-            return [TextContent(type="text", text=f"Invalid session: {session_id}")]
-        
-        contents = [message] if message else []
-        if image_path:
-            images = load_images([image_path])
-            contents.extend(images)
-        
-        response = await _sessions[session_id]["session"].send_message(contents)
-        
-        result = [response.text] if response.text else []
-        
-        if hasattr(response, "images") and response.images:
-            for i, img in enumerate(response.images, 1):
-                if hasattr(img, "url"):
-                    result.append(f"\n[Image {i}]: {img.url}")
-        
-        return [TextContent(type="text", text="".join(result))]
-    
-    elif action == "list":
-        if not _sessions:
-            return [TextContent(type="text", text="No active sessions")]
-        
-        items = []
-        for i, (sid, data) in enumerate(_sessions.items(), 1):
-            items.append(f"{i}. {sid} ({data['model']})")
-        
-        return [TextContent(type="text", text="\n".join(items))]
-    
-    elif action == "reset":
-        if session_id:
-            if session_id in _sessions:
+    """Manage conversation sessions."""
+    try:
+        client = get_gemini_client()
+        await initialize_client()
+
+        model = _normalize_model(model)
+
+        if action == "create":
+            config = MODEL_CONFIG[model]
+            sess = client.start_chat(model=config["name"])
+            sid = f"sess_{len(_sessions) + 1}"
+            _sessions[sid] = {"session": sess, "model": model}
+            return [TextContent(type="text", text=f"Session created: {sid}")]
+
+        elif action == "send":
+            if not session_id or session_id not in _sessions:
+                return [
+                    TextContent(type="text", text=f"Invalid session: {session_id}")
+                ]
+
+            contents: list[Any] = [message] if message else []
+            if image_path:
+                images = load_images([image_path])
+                contents.extend(images)
+
+            response = await _sessions[session_id]["session"].send_message(contents)
+            return _format_response(response)
+
+        elif action == "list":
+            if not _sessions:
+                return [TextContent(type="text", text="No active sessions")]
+            items = [
+                f"{i}. {sid} ({data['model']})"
+                for i, (sid, data) in enumerate(_sessions.items(), 1)
+            ]
+            return [TextContent(type="text", text="\n".join(items))]
+
+        elif action == "reset":
+            if session_id and session_id in _sessions:
                 del _sessions[session_id]
-                return [TextContent(type="text", text=f"Reset session: {session_id}")]
-        else:
+                return [
+                    TextContent(type="text", text=f"Session deleted: {session_id}")
+                ]
             _sessions.clear()
             reset_client()
-            return [TextContent(type="text", text="Reset all sessions")]
-    
-    return [TextContent(type="text", text="Invalid action")]
+            return [TextContent(type="text", text="All sessions reset")]
+
+        return [TextContent(type="text", text="Invalid action")]
+
+    except Exception as e:
+        logger.error(f"Session error: {e}")
+        return [TextContent(type="text", text=f"Error: {e}")]
 
 
 @mcp.tool()
@@ -256,95 +342,112 @@ async def prompts(
     action: Literal["list", "get", "create", "delete"],
     name: Optional[str] = None,
     content: Optional[str] = None,
-    category: Optional[str] = None
+    category: Optional[str] = None,
 ) -> list[TextContent]:
-    """
-    Manage preset prompts library.
-    """
-    from .tools.prompts import get_prompt_manager
-    mgr = get_prompt_manager()
-    
-    if action == "list":
-        items = mgr.list_prompts(category=category)
-        if not items:
-            return [TextContent(type="text", text="No prompts found")]
-        
-        result = []
-        for i, p in enumerate(items, 1):
-            result.append(f"{i}. {p['name']} ({p['category']})")
-        
-        return [TextContent(type="text", text="\n".join(result))]
-    
-    elif action == "get":
-        if not name:
-            return [TextContent(type="text", text="Name required")]
-        
-        for p in mgr.list_prompts():
-            if p["name"] == name:
-                return [TextContent(type="text", text=f"{p['name']}\n---\n{p['content']}")]
-        
-        return [TextContent(type="text", text="Prompt not found")]
-    
-    elif action == "create":
-        if not name or not content:
-            return [TextContent(type="text", text="Name and content required")]
-        
-        pid = mgr.create_prompt(
-            name=name, 
-            content=content, 
-            category=category or "general"
-        )
-        return [TextContent(type="text", text=f"Created prompt: {name} (id: {pid[:8]})")]
-    
-    elif action == "delete":
-        if not name:
-            return [TextContent(type="text", text="Name required")]
-        
-        for p in mgr.list_prompts():
-            if p["name"] == name:
-                mgr.delete_prompt(p["id"])
+    """Manage saved prompts."""
+    try:
+        mgr = get_prompts()
+
+        if action == "list":
+            items = mgr.list_all()
+            if not items:
+                return [TextContent(type="text", text="No prompts")]
+            lines = [f"{i}. {p['name']}" for i, p in enumerate(items, 1)]
+            return [TextContent(type="text", text="\n".join(lines))]
+
+        elif action == "get":
+            if not name:
+                return [TextContent(type="text", text="Name required")]
+            prompt = mgr.get_by_name(name)
+            if prompt:
+                return [
+                    TextContent(
+                        type="text",
+                        text=f"{prompt['name']}\n---\n{prompt['content']}",
+                    )
+                ]
+            return [TextContent(type="text", text="Not found")]
+
+        elif action == "create":
+            if not name or not content:
+                return [
+                    TextContent(type="text", text="Name and content required")
+                ]
+            mgr.create(name, content, category or "general")
+            return [TextContent(type="text", text=f"Created: {name}")]
+
+        elif action == "delete":
+            if not name:
+                return [TextContent(type="text", text="Name required")]
+            if mgr.delete(name):
                 return [TextContent(type="text", text=f"Deleted: {name}")]
-        
-        return [TextContent(type="text", text="Prompt not found")]
-    
-    return [TextContent(type="text", text="Invalid action")]
+            return [TextContent(type="text", text="Not found")]
+
+        return [TextContent(type="text", text="Invalid action")]
+
+    except Exception as e:
+        logger.error(f"Prompts error: {e}")
+        return [TextContent(type="text", text=f"Error: {e}")]
 
 
 @mcp.tool()
 async def cookie(
     action: Literal["status", "get"],
-    browser: Literal["chrome", "firefox", "edge"] = "chrome"
+    browser: Literal["chrome", "firefox", "edge"] = "chrome",
 ) -> list[TextContent]:
-    """
-    Check or refresh cookies.
-    Args:
-        action: status|get
-        browser: chrome|firefox|edge (get only)
-    """
-    if action == "status":
-        status = get_cookie_status()
-        return [TextContent(type="text", text=f"Cookie: {'OK' if status.get('has_cookie') else 'Missing'}")]
-    
-    elif action == "get":
-        success = get_cookie_from_browser(browser)
-        return [TextContent(type="text", text=f"Cookie: {'Loaded' if success else 'Failed'}")]
-    
-    return [TextContent(type="text", text="Invalid action")]
+    """Manage authentication cookies."""
+    try:
+        if action == "status":
+            status = get_cookie_status()
+            return [
+                TextContent(
+                    type="text",
+                    text=f"Cookie: {'OK' if status.get('has_cookie') else 'Missing'}",
+                )
+            ]
+
+        elif action == "get":
+            success = get_cookie_from_browser(browser)
+            return [
+                TextContent(
+                    type="text",
+                    text=f"Cookie: {'Loaded' if success else 'Failed'}",
+                )
+            ]
+
+        return [TextContent(type="text", text="Invalid action")]
+
+    except Exception as e:
+        logger.error(f"Cookie error: {e}")
+        return [TextContent(type="text", text=f"Error: {e}")]
 
 
-def initialize_prompts():
-    """Initialize with default prompts if none exist"""
-    prompts_file = "prompts.json"
-    if not os.path.exists(prompts_file):
-        default_file = "prompts_default.json"
-        if os.path.exists(default_file):
-            shutil.copy(default_file, prompts_file)
-            logger.info("Initialized with default prompts")
+def _format_response(response: Any, media_type: str = "") -> list[TextContent]:
+    """Format Gemini response to TextContent."""
+    parts = []
+
+    if response.text:
+        parts.append(response.text)
+
+    if hasattr(response, "images") and response.images:
+        for i, img in enumerate(response.images, 1):
+            if hasattr(img, "url") and img.url:
+                parts.append(f"[Image {i}]: {img.url}")
+
+    if hasattr(response, "videos") and response.videos:
+        for i, vid in enumerate(response.videos, 1):
+            if hasattr(vid, "url") and vid.url:
+                parts.append(f"[Video {i}]: {vid.url}")
+
+    if hasattr(response, "audio_url") and response.audio_url:
+        parts.append(f"[Audio]: {response.audio_url}")
+
+    return [TextContent(type="text", text="".join(parts))]
 
 
-def main():
-    """Run the optimized skill server"""
-    initialize_prompts()
+def main() -> None:
+    """Run the server."""
+    _init_default_prompts()
     mcp.run()
 
 
