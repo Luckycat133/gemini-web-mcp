@@ -1,7 +1,7 @@
 [project]
 name = "gemini-mcp-server"
 version = "2.0.0"
-description = "MCP server for Gemini Web API reverse engineering (v2.0)"
+description = "MCP server for Gemini Web API reverse engineering"
 requires-python = ">=3.10"
 readme = "README.md"
 license = {text = "AGPL-3.0"}
@@ -24,12 +24,11 @@ all = ["browser-cookie3>=0.19.0", "pillow>=10.0.0"]
 gemini-mcp-server = "src.server:main"
 
 [build-system]
-requires = ["hatchling"]
-build-backend = "hatchling.build"
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
 
-[tool.hatch.version]
-source = "file"
-path = "src/__init__.py"
+[tool.setuptools.packages.find]
+where = ["src"]
 
 [tool.ruff]
 line-length = 120

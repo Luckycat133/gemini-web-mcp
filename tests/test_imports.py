@@ -9,8 +9,8 @@ def test_imports():
     import src
     print("✓ src imported")
 
-    import src.auth
-    print("✓ src.auth imported")
+    import src.client_wrapper
+    print("✓ src.client_wrapper imported")
 
     import src.server
     print("✓ src.server imported")
@@ -22,8 +22,8 @@ def test_imports():
     import src.tools.chat
     print("✓ src.tools.chat imported")
 
-    import src.tools.image
-    print("✓ src.tools.image imported")
+    import src.tools.media
+    print("✓ src.tools.media imported")
 
     import src.tools.media
     print("✓ src.tools.media imported")
