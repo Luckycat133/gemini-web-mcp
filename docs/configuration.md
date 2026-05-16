@@ -1,180 +1,163 @@
-# 环境变量配置详解
+# 环境变量配置
 
-完整的环境变量配置说明。
+本指南详细介绍所有可用的环境变量配置。
 
 ---
 
 ## 📋 环境变量列表
 
-| 变量名 | 必填 | 默认值 | 说明 |
-|--------|------|-------|
-| `GEMINI_PSID` | ✅ | - | Cookie `__Secure-1PSID` 的值 |
-| `GEMINI_PSIDTS` | ❌ | - | Cookie `__Secure-1PSIDTS` 的值 |
-| `GEMINI_PROXY` | ❌ | - | HTTP/HTTPS 代理地址 |
-| `GEMINI_AUTO_REFRESH` | ❌ | `true` | 自动刷新 Cookie |
+| 变量名 | 必填 | 说明 | 默认值 |
+|--------|------|------|--------|
+| GEMINI_PSID | ✅ | Cookie __Secure-1PSID | - |
+| GEMINI_PSIDTS | ❌ | Cookie __Secure-1PSIDTS | - |
+| GEMINI_PROXY | ❌ | 代理地址 | - |
+| GEMINI_AUTO_REFRESH | ❌ | 自动刷新 Cookie | true |
+| GEMINI_TOOLS | ❌ | 加载的工具组 | basic |
 
 ---
 
-## 🔑 Cookie 配置
+## 🔧 工具组配置 (v2.0 新增)
 
-### GEMINI_PSID (必需配置
+v2.0 支持分层加载，可以根据使用场景选择加载不同的工具组，降低 Token 消耗。
 
-这是最重要的环境变量，必须设置。
+### 可用工具组
 
-**获取方式：**
-1. 访问 [gemini.google.com](https://gemini.google.com)
-2. 登录 Google 账户
-3. F12 → Application → Cookies
-4. 复制 `__Secure-1PSID`
+| 工具组 | 包含功能 | 用途 | Token 消耗 |
+|--------|---------|------|-----------|
+| `basic` | 对话功能 | 基础对话 | 低 |
+| `media` | 媒体生成 + 图像编辑 | 创作场景 | 中 |
+| `advanced` | 提示词管理 | 高级用户 | 中 |
+| `all` | 全部功能 | 完整体验 | 高 |
 
-**值通常很长，以 `g.a000` 开头。
+### 配置示例
 
-**配置示例：
-```env
-GEMINI_PSID=g.a000...[rest_of_your_cookie_here
+```bash
+# 仅加载基础对话功能（最小 Token 消耗）
+GEMINI_TOOLS=basic
+
+# 基础 + 媒体功能
+GEMINI_TOOLS=basic,media
+
+# 全部功能
+GEMINI_TOOLS=all
+
+# 自定义组合
+GEMINI_TOOLS=basic,media,advanced
 ```
 
-### GEMINI_PSIDTS (推荐)
-
-虽然可选，但强烈建议设置，提高稳定性。
-
-**获取方式：**
-同样在 Cookie 中找到 `__Secure-1PSIDTS`
-
-**配置示例：**
-```env
-GEMINI_PSIDTS=sidts-CjE...
-```
-
----
-
-## 🔀 代理配置
-
-如果您需要使用代理访问 Gemini：
-
-```env
-GEMINI_PROXY=http://127.0.0.1:7890
-```
-
-**支持的代理类型：
-- HTTP 代理
-- SOCKS5 代理
-
----
-
-## 🤖 Claude Desktop 配置
-
-### 完整配置示例
+### Claude Desktop 配置
 
 ```json
 {
   "mcpServers": {
     "gemini": {
       "command": "python",
-      "args": ["-m", "uv", "run", "--directory", "/path/to/gemini-mcp-server", "src/server.py"],
+      "args": ["-m", "src.server"],
       "env": {
-        "GEMINI_PSID": "your___Secure-1PSID_value",
-        "GEMINI_PSIDTS": "your___Secure-1PSIDTS_value",
-        "GEMINI_AUTO_REFRESH": "true",
-        "GEMINI_PROXY": ""
+        "GEMINI_PSID": "your-psid-value",
+        "GEMINI_TOOLS": "basic,media"
       }
     }
   }
 }
 ```
 
-### macOS 配置位置
-
-**macOS**: `~/Library/Application Support/Claude/claude_desktop_config.json`
-
-**Windows**: `%APPDATA%\Claude\claude_desktop_config.json`
-
-**Linux**: `~/.config/Claude/claude_desktop_config.json`
-
 ---
 
-## 📄 .env 文件配置
+## 🍪 Cookie 配置
 
-### 创建 `.env` 文件（推荐）：
+### 必需变量
 
 ```bash
-# 复制示例
-cp .env.example .env
-
-# 编辑配置
-nano .env  # 或其他编辑器
+# 必填：__Secure-1PSID Cookie 值
+GEMINI_PSID=xxxxxxxxxxxxxxx
 ```
 
-### .env 示例内容
+### 可选变量
 
-```env
-# Gemini MCP Server 配置
+```bash
+# 推荐：__Secure-1PSIDTS Cookie 值
+GEMINI_PSIDTS=xxxxxxxxxxxxxxx
+```
 
-# 认证配置 (必需)
-GEMINI_PSID=g.a000...
+### 获取方式
 
-# Cookie 配置 (推荐)
-GEMINI_PSIDTS=sidts-CjE...
+1. 打开 Chrome 浏览器
+2. 访问 [gemini.google.com](https://gemini.google.com)
+3. 登录后按 F12 打开开发者工具
+4. Application → Cookies → https://gemini.google.com
+5. 复制 `__Secure-1PSID` 和 `__Secure-1PSIDTS` 的值
 
-# 代理配置 (可选)
-GEMINI_PROXY=http://127.0.0.1:7890
+---
 
-# 刷新配置 (可选)
+## 🌐 代理配置
+
+如果需要通过代理访问：
+
+```bash
+# 代理地址
+GEMINI_PROXY=http://proxy.example.com:8080
+
+# 带认证的代理
+GEMINI_PROXY=http://user:password@proxy.example.com:8080
+```
+
+---
+
+## 🔄 自动刷新配置
+
+```bash
+# 启用 Cookie 自动刷新 (默认)
 GEMINI_AUTO_REFRESH=true
 
-# 语言设置 (可选)
-# LANGUAGE=zh-CN
+# 禁用 Cookie 自动刷新
+GEMINI_AUTO_REFRESH=false
+```
+
+当启用时，系统会自动：
+- 监控 Cookie 状态
+- 24 小时后提醒更新
+- 自动从浏览器获取最新 Cookie（如果安装了 browser-cookie3）
+
+---
+
+## 📝 完整配置示例
+
+```bash
+# .env 文件示例
+GEMINI_PSID=xxxxxxxxxxxxxxx
+GEMINI_PSIDTS=xxxxxxxxxxxxxxx
+GEMINI_PROXY=
+GEMINI_AUTO_REFRESH=true
+GEMINI_TOOLS=basic,media
 ```
 
 ---
 
-## 🔄 Cookie 刷新机制
+## 🔍 验证配置
 
-### 自动刷新
-
-当 `GEMINI_AUTO_REFRESH=true`（默认）时：
-- 每 9 分钟自动刷新 Cookie
-- 提高连接稳定性
-- 推荐开启
-
-### 手动刷新
-
-如果需要手动刷新，可以使用工具：
+使用健康检查工具验证配置：
 
 ```
-gemini_reset
+gemini_health_check
 ```
+
+如果配置正确，应该看到 "✅ Gemini 连接正常"。
 
 ---
 
-## ⚠️ 安全注意事项
+## ⚠️ 常见问题
 
-1. **不要** 将 `.env` 文件提交到 Git
-2. **不要** 在公开场合分享 Cookie
-3. **定期** 更新 Cookie（如果失效）
-4. **使用** 独立的 Google 账户用于研究
+**问题：Cookie 总是过期**
 
----
+解决：
+1. 确保设置了 `GEMINI_PSIDTS`
+2. 启用 `GEMINI_AUTO_REFRESH=true`
+3. 安装 browser-cookie3: `pip install browser-cookie3`
 
-## 🐛 配置问题排查
+**问题：部分工具不可用**
 
-### 问题：认证失败
-
-**检查：**
-- `GEMINI_PSID 是否正确
-- Cookie 是否过期
-- Cookie 值是否完整复制
-
-### 问题：代理不工作
-
-**检查：**
-- 代理地址格式正确
-- 代理服务正在运行
-- 网络连接正常
-
-### 问题：Claude 无法连接
-
-**检查：**
-- Python 路径是否正确
-- 项目路径是否正确
-- 依赖是否已安装
+解决：
+1. 检查 `GEMINI_TOOLS` 配置
+2. 确保加载了需要的工具组
+3. 重启服务器使配置生效
