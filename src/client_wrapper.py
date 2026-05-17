@@ -124,6 +124,12 @@ def _clean_expired_sessions() -> None:
         logger.info(f"清理了 {len(expired)} 个过期会话")
 
 
+def cleanup_expired_sessions() -> None:
+    """清理过期会话。"""
+    with _sessions_lock:
+        _clean_expired_sessions()
+
+
 def get_session(session_id: str) -> Optional[Dict[str, Any]]:
     """获取存储的会话"""
     with _sessions_lock:

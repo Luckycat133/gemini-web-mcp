@@ -24,12 +24,12 @@ def register_manage_tools(mcp: FastMCP):
         await initialize_client()
 
         try:
-            chats = await client.list_chats(limit=limit)
+            chats = client.list_chats()
             if not chats:
                 return [TextContent(type="text", text="暂无历史对话。")]
             
             chat_list = ["## 📜 历史对话"]
-            for i, chat in enumerate(chats, 1):
+            for i, chat in enumerate(chats[:limit], 1):
                 chat_title = getattr(chat, "title", "Untitled")
                 chat_id = getattr(chat, "id", "")
                 chat_list.append(f"{i}. {chat_title} (ID: {chat_id})")
@@ -92,12 +92,13 @@ def register_manage_tools(mcp: FastMCP):
 
         try:
             if action == "list":
-                gems = await client.list_gems()
+                gems = await client.fetch_gems()
                 if not gems:
                     return [TextContent(type="text", text="暂无保存的 Gems。")]
-                
+
                 gem_list = ["## 💎 Gems 列表"]
-                for i, gem in enumerate(gems, 1):
+                gem_values = gems.values() if hasattr(gems, "values") else gems
+                for i, gem in enumerate(gem_values, 1):
                     gem_name = getattr(gem, "name", "Untitled")
                     gem_id_val = getattr(gem, "id", "")
                     gem_desc = getattr(gem, "description", "")[:30]
@@ -111,8 +112,8 @@ def register_manage_tools(mcp: FastMCP):
                 
                 gem = await client.create_gem(
                     name=name,
+                    prompt=instructions or "",
                     description=description,
-                    instructions=instructions
                 )
                 gem_id_val = getattr(gem, "id", "")
                 return [TextContent(
@@ -125,10 +126,10 @@ def register_manage_tools(mcp: FastMCP):
                     return [TextContent(type="text", text="❌ 更新 Gem 需要提供 gem_id。")]
                 
                 await client.update_gem(
-                    gem_id=gem_id,
-                    name=name,
+                    gem=gem_id,
+                    name=name or "",
+                    prompt=instructions or "",
                     description=description,
-                    instructions=instructions
                 )
                 return [TextContent(type="text", text=f"✅ Gem {gem_id} 更新成功。")]
 

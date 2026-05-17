@@ -15,7 +15,6 @@ from ..client_wrapper import (
     get_session,
     remove_session,
     list_sessions,
-    load_images,
 )
 from ..constants import MODEL_CONFIG
 from .utils import parse_response
@@ -35,23 +34,19 @@ def register_chat_tools(mcp: FastMCP):
         client = get_gemini_client()
         await initialize_client()
         config = MODEL_CONFIG[model]
-        contents = [message]
-        if image_paths:
-            contents.extend(load_images(image_paths))
         logger.info(f"正在使用 {config['name']} 生成响应...")
-        response = await client.generate_content(contents, model=config["name"])
+        response = await client.generate_content(prompt=message, files=image_paths, model=config["name"])
         return parse_response(response, model)
 
     @mcp.tool()
     async def gemini_start_chat(
-        system_instruction: str = "",
         model: Literal["fast", "thinking", "pro"] = "fast",
     ) -> list[TextContent]:
         """创建多轮会话"""
         client = get_gemini_client()
         await initialize_client()
         config = MODEL_CONFIG[model]
-        session = client.start_chat(system_instruction=system_instruction, model=config["name"])
+        session = client.start_chat(model=config["name"])
         session_id = str(uuid.uuid4())[:8]
         store_session(session_id, session, model)
         return [TextContent(
@@ -69,10 +64,7 @@ def register_chat_tools(mcp: FastMCP):
         session_data = get_session(session_id)
         if not session_data:
             return [TextContent(type="text", text=f"❌ 会话 {session_id} 不存在")]
-        contents = [message]
-        if image_paths:
-            contents.extend(load_images(image_paths))
-        response = await session_data["session"].send_message(contents)
+        response = await session_data["session"].send_message(prompt=message, files=image_paths)
         return [TextContent(type="text", text=response.text)]
 
     @mcp.tool()
@@ -102,12 +94,9 @@ def register_chat_tools(mcp: FastMCP):
         client = get_gemini_client()
         await initialize_client()
         config = MODEL_CONFIG[model]
-        contents = [message]
-        if image_paths:
-            contents.extend(load_images(image_paths))
         full_text = ""
         final_response = None
-        async for response in client.generate_content_stream(contents, model=config["name"]):
+        async for response in client.generate_content_stream(prompt=message, files=image_paths, model=config["name"]):
             if response.text:
                 full_text += response.text
             final_response = response
@@ -126,11 +115,8 @@ def register_chat_tools(mcp: FastMCP):
         session_data = get_session(session_id)
         if not session_data:
             return [TextContent(type="text", text=f"❌ 会话 {session_id} 不存在")]
-        contents = [message]
-        if image_paths:
-            contents.extend(load_images(image_paths))
         full_text = ""
-        async for response in session_data["session"].send_message_stream(contents):
+        async for response in session_data["session"].send_message_stream(prompt=message, files=image_paths):
             if response.text:
                 full_text += response.text
         return [TextContent(type="text", text=full_text)]

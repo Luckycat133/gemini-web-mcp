@@ -7,7 +7,7 @@ from mcp.types import TextContent
 from typing import Literal, Optional
 import logging
 
-from ..client_wrapper import get_gemini_client, initialize_client, load_images
+from ..client_wrapper import get_gemini_client, initialize_client
 from ..constants import MODEL_CONFIG
 from .utils import parse_response
 
@@ -32,11 +32,9 @@ def register_media_tools(mcp: FastMCP):
             "video": f"Generate a video: {prompt}",
             "music": f"Create a song: {prompt}",
         }
-        contents = [prompts[media_type]]
-        if image_path:
-            contents.extend(load_images([image_path]))
         logger.info(f"正在生成 {media_type}...")
-        response = await client.generate_content(contents, model=config["name"])
+        files = [image_path] if image_path else None
+        response = await client.generate_content(prompt=prompts[media_type], files=files, model=config["name"])
         return parse_response(response, model)
 
     @mcp.tool()

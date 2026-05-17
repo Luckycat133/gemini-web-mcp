@@ -2,6 +2,24 @@
 Gemini 常量配置
 """
 
+from enum import Enum
+
+
+class RPC(str, Enum):
+    """Gemini Web RPC identifiers used by compatible tooling."""
+
+    GENERATE = "GenerateContent"
+    STREAM_GENERATE = "StreamGenerateContent"
+    LIST_CHATS = "ListChats"
+    FETCH_GEMS = "FetchGems"
+
+
+ENDPOINTS = {
+    "base": "https://gemini.google.com",
+    "batchexecute": "https://gemini.google.com/_/BardChatUi/data/batchexecute",
+}
+
+
 MODEL_CONFIG = {
     "fast": {
         "name": "gemini-3-flash",
