@@ -6,12 +6,18 @@ from .chat import register_chat_tools
 from .media import register_media_tools
 from .image import register_image_tools
 from .prompts import register_prompts_tools
+from .manage import register_manage_tools
+from .file import register_file_tools
+from .research import register_research_tools
 
 TOOL_GROUPS = {
     "basic": ["chat"],
     "media": ["media", "image"],
-    "advanced": ["prompts"],
-    "all": ["chat", "media", "image", "prompts"],
+    "advanced": ["prompts", "research"],
+    "manage": ["manage"],
+    "file": ["file"],
+    "research": ["research"],
+    "all": ["chat", "media", "image", "prompts", "manage", "file", "research"],
 }
 
 def register_tools(mcp, groups: list = None):
@@ -33,15 +39,29 @@ def register_tools(mcp, groups: list = None):
     """
     if not groups:
         groups = ["basic"]
-    
-    if "chat" in groups or "basic" in groups or "all" in groups:
+
+    selected = set()
+    for group in groups:
+        group = group.strip()
+        selected.update(TOOL_GROUPS.get(group, [group]))
+
+    if "chat" in selected:
         register_chat_tools(mcp)
-    
-    if "media" in groups or "all" in groups:
+
+    if "media" in selected:
         register_media_tools(mcp)
-    
-    if "image" in groups or "all" in groups:
+
+    if "image" in selected and "media" not in selected:
         register_image_tools(mcp)
-    
-    if "prompts" in groups or "advanced" in groups or "all" in groups:
+
+    if "prompts" in selected:
         register_prompts_tools(mcp)
+
+    if "manage" in selected:
+        register_manage_tools(mcp)
+
+    if "file" in selected:
+        register_file_tools(mcp)
+
+    if "research" in selected:
+        register_research_tools(mcp)

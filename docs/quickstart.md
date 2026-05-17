@@ -34,10 +34,10 @@
 cd gemini-mcp-server
 
 # 安装依赖
-pip install gemini-webapi>=1.20.0 mcp fastmcp
+pip install "gemini-webapi>=1.20.0" mcp fastmcp
 
 # 或使用 uv（推荐）
-uv pip install gemini-webapi>=1.20.0 mcp fastmcp
+uv pip install "gemini-webapi>=1.20.0" mcp fastmcp
 ```
 
 ---

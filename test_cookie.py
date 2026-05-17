@@ -9,9 +9,9 @@ import sys
 import asyncio
 import logging
 
-# 设置Cookie (来自用户提供的信息)
-os.environ["GEMINI_PSID"] = "g.a0008ggEyGZTeRJoeWCpRuXLv5rR5Atyds62Q94PlgPNRERci7ebVCz8FEMjd_weaEs0Tvvl4gACgYKATASARcSFQHGX2MiUEmtrmKSTzQKQtljXZlyXhoVAUF8yKreSlptkUrjna0eOK-lUPik0076"
-os.environ["GEMINI_PSIDTS"] = "sidts-CjEBWhotCfNSnxyggdYkvisL1V0MTO5QQRNFDkf8BFEj8J7f-jWtVm43y0wssVYD-nCUEAA"
+# Cookie values must be provided by the local environment.
+if not os.environ.get("GEMINI_PSID"):
+    print("⚠️ GEMINI_PSID 未设置；实际 API 测试将无法运行。")
 
 # 配置日志
 logging.basicConfig(
@@ -187,6 +187,10 @@ async def main():
     print("\n" + "=" * 60)
     print("Gemini MCP Server 功能测试")
     print("=" * 60)
+
+    if not os.environ.get("GEMINI_PSID"):
+        print("请先设置 GEMINI_PSID/GEMINI_PSIDTS 环境变量后再运行此脚本。")
+        return
     
     results = []
     

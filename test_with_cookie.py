@@ -6,9 +6,9 @@
 import os
 import asyncio
 
-# 设置Cookie（用户提供的）
-os.environ["GEMINI_PSID"] = "g.a0008ggEyGZTeRJoeWCpRuXLv5rR5Atyds62Q94PlgPNRERci7ebVCz8FEMjd_weaEs0Tvvl4gACgYKATASARcSFQHGX2MiUEmtrmKSTzQKQtljXZlyXhoVAUF8yKreSlptkUrjna0eOK-lUPik0076"
-os.environ["GEMINI_PSIDTS"] = "sidts-CjEBWhotCfNSnxyggdYkvisL1V0MTO5QQRNFDkf8BFEj8J7f-jWtVm43y0wssVYD-nCUEAA"
+# Cookie values must be provided by the local environment.
+if not os.environ.get("GEMINI_PSID"):
+    print("⚠️ GEMINI_PSID 未设置；实际 API 测试将无法运行。")
 
 print("=" * 60)
 print("Gemini MCP Server v2.0 API测试")
@@ -122,6 +122,10 @@ async def test_image_generation():
 
 async def main():
     """主测试函数"""
+    if not os.environ.get("GEMINI_PSID"):
+        print("请先设置 GEMINI_PSID/GEMINI_PSIDTS 环境变量后再运行此脚本。")
+        return
+
     results = []
     
     # 测试 1: 基础对话

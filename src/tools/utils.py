@@ -11,7 +11,7 @@ def parse_response(response, model: str = "fast") -> List[TextContent]:
     result_parts = []
     if response.text:
         result_parts.append(response.text)
-    
+
     if hasattr(response, "images") and response.images:
         for i, img in enumerate(response.images, 1):
             info = f"\n\n🖼️ 图片 {i}: {img.title or 'Untitled'}"
@@ -20,22 +20,22 @@ def parse_response(response, model: str = "fast") -> List[TextContent]:
             if hasattr(img, "alt") and img.alt:
                 info += f"\n描述: {img.alt}"
             result_parts.append(info)
-    
+
     if hasattr(response, "videos") and response.videos:
         for i, vid in enumerate(response.videos, 1):
-            info = f"\n\n🎬 视频 {i}:"
-            if hasattr(vid, "title") and vid.title:
-                info += f"\n标题: {vid.title}"
+            info = f"\n\n🎬 视频 {i}: {vid.title or 'Untitled'}"
             if hasattr(vid, "url") and vid.url:
                 info += f"\nURL: {vid.url}"
-            if hasattr(vid, "duration"):
-                info += f"\n时长: {vid.duration}秒"
             result_parts.append(info)
-    
-    if hasattr(response, "audio_url") and response.audio_url:
-        music_type = "30秒片段" if model == "fast" else "完整歌曲 (~3分钟)"
-        result_parts.append(f"\n\n🎵 音乐 ({music_type}): {response.audio_url}")
-    elif hasattr(response, "lyrics") and response.lyrics:
-        result_parts.append(f"\n\n🎵 歌词:\n{response.lyrics}")
-    
+
+    if hasattr(response, "media") and response.media:
+        for i, m in enumerate(response.media, 1):
+            music_type = "30秒片段" if model == "fast" else "完整歌曲 (~3分钟)"
+            info = f"\n\n🎵 音乐 {i} ({music_type}): {m.title or 'Untitled'}"
+            if hasattr(m, "mp3_url") and m.mp3_url:
+                info += f"\nMP3: {m.mp3_url}"
+            if hasattr(m, "url") and m.url:
+                info += f"\nURL: {m.url}"
+            result_parts.append(info)
+
     return [TextContent(type="text", text="".join(result_parts))]

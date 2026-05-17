@@ -83,7 +83,7 @@ pip install browser-cookie3
 
 ```bash
 cd /workspace
-pip install gemini-webapi>=1.20.0 mcp fastmcp
+pip install "gemini-webapi>=1.20.0" mcp fastmcp
 ```
 
 可选功能:

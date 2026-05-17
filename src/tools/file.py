@@ -84,10 +84,6 @@ def register_file_tools(mcp: FastMCP) -> None:
             analysis_prompt: 可选分析提示词
             model: 模型选择 (fast/thinking/pro)
         """
-        client = get_gemini_client()
-        await initialize_client()
-        config = MODEL_CONFIG[model]
-
         is_safe, safe_path_or_error = _validate_file_path(file_path)
         if not is_safe:
             return [
@@ -105,6 +101,10 @@ def register_file_tools(mcp: FastMCP) -> None:
                     text=f"❌ 文件未找到: {safe_file_path}"
                 )
             ]
+
+        client = get_gemini_client()
+        await initialize_client()
+        config = MODEL_CONFIG[model]
 
         logger.info(f"上传文件: {safe_file_path}")
 
@@ -152,10 +152,6 @@ def register_file_tools(mcp: FastMCP) -> None:
             analysis_prompt: 可选分析提示词
             model: 模型选择
         """
-        client = get_gemini_client()
-        await initialize_client()
-        config = MODEL_CONFIG[model]
-
         is_valid, valid_url_or_error = _validate_url(url)
         if not is_valid:
             return [
@@ -165,6 +161,10 @@ def register_file_tools(mcp: FastMCP) -> None:
                 )
             ]
         valid_url = valid_url_or_error
+
+        client = get_gemini_client()
+        await initialize_client()
+        config = MODEL_CONFIG[model]
 
         prompt = analysis_prompt or f"Please analyze the content at this URL: {valid_url}"
 
