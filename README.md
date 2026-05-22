@@ -9,29 +9,27 @@
 ## ✨ 主要功能 (v2.0)
 
 ### 🤖 模型支持
-- **fast** → gemini-3-flash (快速，免费)
-- **thinking** → gemini-3-flash-thinking (推理链，免费)
-- **pro** → gemini-3.1-pro (最强，AI Plus)
+- **flash-lite** → Web UI `3.1 Flash-Lite`
+- **flash** / **fast** → Web UI `3.5 Flash`
+- **pro** → Web UI `3.1 Pro`
+- 上述三个模型都支持 `thinking_level=standard` / `extended`
+- **thinking** 仍保留为旧兼容别名
 
 ### 🎨 媒体生成
-- **图像**: Nano Banana 2 (所有模型)
+- **图像**: 首轮生成固定为 Nano Banana 2；`pro` 只对应网页生成后的 Pro redo 语义
 - **视频**: Veo 3.1 (最长60秒，所有模型)
-- **音乐**: Lyria 3 (30秒片段 / 完整歌曲)
+- **音乐**: `flash` 系列 → Lyria 3，`pro` → Lyria 3 Pro
 
 ### 💬 对话功能
 - 单次对话 (支持流式输出 + 图片输入)
 - 多轮会话 (支持流式输出)
+- Temporary chat (不进入 Gemini 历史记录)
+- 使用已保存 Gem 进行对话
 - 会话管理
 
-### 🖼️ 图像编辑
-- 提示词驱动的图像编辑
-- 图像变体生成
-- 参考图像支持
-
-### 📝 预设提示词库
-- 提示词 CRUD 管理
-- 分类管理
-- 快速访问常用提示词
+### 🖼️ 参考图像
+- 媒体生成可附带参考图像
+- 提示词可要求 Gemini 编辑或变换上传图像
 
 ### 🔧 管理功能
 - Cookie 自动刷新
@@ -72,7 +70,7 @@ pip install browser-cookie3
       "env": {
         "GEMINI_PSID": "your-__Secure-1PSID-value-here",
         "GEMINI_PSIDTS": "your-__Secure-1PSIDTS-value-here",
-        "GEMINI_TOOLS": "basic,media"
+        "GEMINI_TOOLS": "core"
       }
     }
   }
@@ -83,7 +81,7 @@ pip install browser-cookie3
 
 ```bash
 cd /workspace
-pip install "gemini-webapi>=1.20.0" mcp fastmcp
+pip install "gemini-webapi>=2.0.0" mcp fastmcp
 ```
 
 可选功能:
@@ -98,11 +96,8 @@ pip install pillow
 ### 4. 启动服务器
 
 ```bash
-# 基础功能 (默认)
-GEMINI_TOOLS=basic python -m src.server
-
-# 基础 + 媒体功能
-GEMINI_TOOLS=basic,media python -m src.server
+# 推荐默认工具面
+GEMINI_TOOLS=core python -m src.server
 
 # 全部功能
 GEMINI_TOOLS=all python -m src.server
@@ -118,7 +113,8 @@ GEMINI_TOOLS=all python -m src.server
 | GEMINI_PSIDTS | ❌ | Cookie __Secure-1PSIDTS | - |
 | GEMINI_PROXY | ❌ | 代理地址 | - |
 | GEMINI_AUTO_REFRESH | ❌ | 自动刷新 Cookie | true |
-| GEMINI_TOOLS | ❌ | 加载的工具组 | basic |
+| GEMINI_TOOLS | ❌ | 加载的工具组 | core |
+| GEMINI_CHAT_RETENTION_SECONDS | ❌ | 默认远端对话保留时间；到期自动删除，设为 0 表示尽快删除 | 1800 |
 
 ---
 
@@ -126,10 +122,10 @@ GEMINI_TOOLS=all python -m src.server
 
 | 工具组 | 包含功能 | 用途 | Token 消耗 |
 |--------|---------|------|-----------|
-| `basic` | 对话功能 | 基础对话 | 低 |
-| `media` | 媒体生成 + 图像编辑 | 创作场景 | 中 |
-| `advanced` | 提示词管理 | 高级用户 | 中 |
-| `all` | 全部功能 | 完整体验 | 高 |
+| `core` | 对话 + 媒体 + 文件/URL + Deep Research | 推荐默认组合 | 中 |
+| `manage` | 历史对话、模型、Gems 管理 | 账户内容管理 | 中 |
+| `prompts` | 本地提示词库存取 | 可选附加能力 | 低 |
+| `all` | `core` + `manage` | 完整 Gemini 工作流 | 高 |
 
 ---
 
@@ -138,22 +134,29 @@ GEMINI_TOOLS=all python -m src.server
 ### 对话工具
 - `gemini_chat`: 单次对话
 - `gemini_chat_stream`: 单次流式对话
-- `gemini_start_chat`: 创建多轮会话
-- `gemini_send_message`: 会话消息
-- `gemini_send_message_stream`: 会话流式消息
+- `gemini_start_chat`: 创建多轮会话，可指定 Gem 和 Temporary chat
+- `gemini_send_message`: 会话消息，可沿用或覆盖 Temporary chat
+- `gemini_send_message_stream`: 会话流式消息，可沿用或覆盖 Temporary chat
 - `gemini_list_sessions`: 列会话
 - `gemini_reset_session`: 重置会话
 
+默认情况下，工具调用产生的 Gemini 网页端对话会在一段时间后自动删除。需要保留时传入 `retain_chat=true`；需要调整本次调用保留时间时传入 `delete_after_seconds`。
+
 ### 媒体工具
-- `gemini_generate_media`: 图像/视频/音乐生成
-- `gemini_generate_music`: 音乐生成 (便捷工具)
+- `gemini_generate_media`: 图像/视频/音乐生成；视频/音乐是 Gemini Web 长任务，建议设置较长 `timeout_seconds`
+- `gemini_generate_music`: 音乐生成便捷工具；默认走 `flash` → Lyria 3
 
-### 图像编辑工具
-- `gemini_edit_image`: 使用提示词编辑图像
-- `gemini_variations`: 生成图像变体
+### 文件和 URL
+- `gemini_upload_file`: 上传并分析本地文件
+- `gemini_analyze_url`: 分析网页或 YouTube 等 URL
 
-### 提示词管理 (高级)
-- `gemini_manage_prompts`: 提示词管理 (CRUD)
+### Deep Research
+- `gemini_deep_research`: 创建研究计划、启动研究，并轮询最终报告或返回清晰进度状态
+
+### 账户和内容管理
+- `gemini_list_chats`: 列出历史对话
+- `gemini_list_models`: 列出可用模型说明
+- `gemini_manage_gems`: Gems 的 list/create/update/delete
 
 ### Cookie 管理
 - `gemini_get_cookie_status`: 查看 Cookie 状态
@@ -161,7 +164,6 @@ GEMINI_TOOLS=all python -m src.server
 
 ### 管理工具
 - `gemini_reset`: 重置客户端
-- `gemini_list_features`: 功能列表
 
 ---
 
@@ -200,7 +202,10 @@ gemini-mcp-server/
 │       ├── utils.py        # 共享工具函数 (v2.0 新增)
 │       ├── chat.py         # 对话工具
 │       ├── media.py        # 媒体生成
-│       ├── image.py        # 图像编辑工具
+│       ├── image.py        # media.py 向后兼容别名
+│       ├── file.py         # 文件和 URL 工具
+│       ├── manage.py       # 聊天、模型、Gems 管理
+│       ├── research.py     # Deep Research
 │       └── prompts.py      # 预设提示词库
 └── tests/                  # 测试
 ```

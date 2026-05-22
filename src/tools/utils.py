@@ -6,11 +6,16 @@ from typing import List, Optional
 from mcp.types import TextContent
 
 
-def parse_response(response, model: str = "fast") -> List[TextContent]:
+def parse_response(
+    response,
+    model: str = "flash",
+    text_override: Optional[str] = None,
+) -> List[TextContent]:
     """解析 Gemini 响应，提取文本、图片、视频、音乐"""
     result_parts = []
-    if response.text:
-        result_parts.append(response.text)
+    text = text_override if text_override is not None else getattr(response, "text", "")
+    if text:
+        result_parts.append(text)
 
     if hasattr(response, "images") and response.images:
         for i, img in enumerate(response.images, 1):
@@ -30,7 +35,13 @@ def parse_response(response, model: str = "fast") -> List[TextContent]:
 
     if hasattr(response, "media") and response.media:
         for i, m in enumerate(response.media, 1):
-            music_type = "30秒片段" if model == "fast" else "完整歌曲 (~3分钟)"
+            music_type = {
+                "flash-lite": "Lyria 3",
+                "flash": "Lyria 3",
+                "fast": "Lyria 3",
+                "thinking": "Lyria 3",
+                "pro": "Lyria 3 Pro",
+            }.get(model, "时长取决于当前模型")
             info = f"\n\n🎵 音乐 {i} ({music_type}): {m.title or 'Untitled'}"
             if hasattr(m, "mp3_url") and m.mp3_url:
                 info += f"\nMP3: {m.mp3_url}"
@@ -39,3 +50,10 @@ def parse_response(response, model: str = "fast") -> List[TextContent]:
             result_parts.append(info)
 
     return [TextContent(type="text", text="".join(result_parts))]
+
+
+def get_stream_text_piece(response) -> str:
+    """优先使用库提供的 text_delta，回退到完整 text。"""
+    if hasattr(response, "text_delta"):
+        return getattr(response, "text_delta", "") or ""
+    return getattr(response, "text", "") or ""

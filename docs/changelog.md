@@ -4,6 +4,25 @@ Gemini MCP Server 版本更新历史记录。
 
 ---
 
+## Unreleased
+
+### Web UI 对齐
+- 对齐 2026-05-22 观察到的 Gemini Web 模型面：`3.1 Flash-Lite`、`3.5 Flash`、`3.1 Pro`
+- 将 `standard` / `extended` 固化为独立 `thinking_level` 选择
+- 在媒体工具中显式写入网页实际后端规则：
+  图像首轮固定为 Nano Banana 2，音乐按 `flash` / `pro` 分流到 Lyria 3 / Lyria 3 Pro
+
+### 工具面收缩
+- 新默认工具组改为 `core`
+- `all` 现在聚焦高价值 AI 工作流，不再默认加载本地提示词工具
+- 移除 `gemini_list_features`，减少低价值枚举型工具
+
+### 文档与验证
+- 补充 Gemini Web live UI 覆盖说明和媒体路由说明
+- 扩展测试以校验媒体后端分流和默认工具面
+
+---
+
 ## v2.0.0 (2026-05-05)
 
 ### ✨ 主要更新

@@ -34,10 +34,10 @@
 cd gemini-mcp-server
 
 # 安装依赖
-pip install "gemini-webapi>=1.20.0" mcp fastmcp
+pip install "gemini-webapi>=2.0.0" mcp fastmcp
 
 # 或使用 uv（推荐）
-uv pip install "gemini-webapi>=1.20.0" mcp fastmcp
+uv pip install "gemini-webapi>=2.0.0" mcp fastmcp
 ```
 
 ---
@@ -73,7 +73,8 @@ uv pip install "gemini-webapi>=1.20.0" mcp fastmcp
       "args": ["-m", "uv", "run", "--directory", "/path/to/gemini-mcp-server", "src/server.py"],
       "env": {
         "GEMINI_PSID": "your___Secure-1PSID_value",
-        "GEMINI_PSIDTS": "your___Secure-1PSIDTS_value"
+        "GEMINI_PSIDTS": "your___Secure-1PSIDTS_value",
+        "GEMINI_TOOLS": "core"
       }
     }
   }
@@ -122,6 +123,8 @@ GEMINI_AUTO_REFRESH=true
 ```
 请用 Gemini 生成一张猫咪的卡通图片
 ```
+
+图像首轮始终走 Nano Banana 2；如果后续网页支持 Pro redo，那是生成后的二次操作。
 
 ### 多轮对话
 

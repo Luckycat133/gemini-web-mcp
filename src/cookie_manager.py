@@ -26,6 +26,7 @@ class CookieData:
     """Cookie 数据结构"""
     psid: str
     psidts: str = ""
+    extra_cookies: Dict[str, str] = field(default_factory=dict)
     acquired_at: float = field(default_factory=time.time)
     expires_at: Optional[float] = None
     status: CookieStatus = CookieStatus.UNKNOWN
@@ -45,7 +46,7 @@ class CookieManager:
     ):
         """
         初始化 Cookie 管理器
-        
+
         Args:
             psid_env: PSID 环境变量名
             psidts_env: PSIDTS 环境变量名
@@ -58,7 +59,7 @@ class CookieManager:
         self.refresh_threshold = refresh_threshold_hours * 3600
         self.auto_refresh = auto_refresh
         self.on_cookie_update = on_cookie_update
-        
+
         self._cookie_data: Optional[CookieData] = None
         self._lock = threading.Lock()
         self._monitor_thread: Optional[threading.Thread] = None
@@ -76,69 +77,106 @@ class CookieManager:
             self._cookie_data = CookieData(
                 psid=psid,
                 psidts=psidts,
+                extra_cookies=self._load_extra_cookies_from_env(psid, psidts),
                 source="manual"
             )
             self._cookie_data.status = CookieStatus.VALID
             logger.info("✅ 从环境变量加载 Cookie")
 
     @staticmethod
-    def get_cookie_from_browser(browser: str = "chrome") -> Tuple[Optional[str], Optional[str]]:
-        """
-        从浏览器自动获取 Cookie
-        
-        Args:
-            browser: 浏览器类型 (chrome, firefox, edge, opera, brave)
-        
-        Returns:
-            (psid, psidts) 元组
-        """
+    def _load_extra_cookies_from_env(psid: str = "", psidts: str = "") -> Dict[str, str]:
+        cookies: Dict[str, str] = {}
+        if psid:
+            cookies["__Secure-1PSID"] = psid
+        if psidts:
+            cookies["__Secure-1PSIDTS"] = psidts
+        psidcc = os.environ.get("GEMINI_PSIDCC", "")
+        if psidcc:
+            cookies["__Secure-1PSIDCC"] = psidcc
+        return cookies
+
+    @staticmethod
+    def get_cookies_from_browser(browser: str = "chrome") -> Dict[str, str]:
+        """从浏览器获取 Gemini 所需的完整 Google 认证 Cookie。"""
+        cookie_names = {
+            "__Secure-1PSID",
+            "__Secure-1PSIDTS",
+            "__Secure-1PSIDCC",
+            "__Secure-3PSID",
+            "__Secure-3PSIDTS",
+            "__Secure-3PSIDCC",
+            "SID",
+            "HSID",
+            "SSID",
+            "APISID",
+            "SAPISID",
+            "NID",
+        }
+
         try:
             import browser_cookie3
         except ImportError:
             logger.warning("⚠️ browser-cookie3 未安装，无法从浏览器获取Cookie")
             logger.warning("   请运行: pip install browser-cookie3")
-            return None, None
-        
+            return {}
+
+        cookie_functions = {
+            "chrome": browser_cookie3.chrome,
+            "firefox": browser_cookie3.firefox,
+            "edge": browser_cookie3.edge,
+            "opera": browser_cookie3.opera,
+            "brave": browser_cookie3.brave
+        }
+
+        if browser not in cookie_functions:
+            logger.error(f"❌ 不支持的浏览器: {browser}")
+            return {}
+
         try:
-            cookie_functions = {
-                "chrome": browser_cookie3.chrome,
-                "firefox": browser_cookie3.firefox,
-                "edge": browser_cookie3.edge,
-                "opera": browser_cookie3.opera,
-                "brave": browser_cookie3.brave
-            }
-            
-            if browser not in cookie_functions:
-                logger.error(f"❌ 不支持的浏览器: {browser}")
-                return None, None
-            
-            cookie_func = cookie_functions[browser]
             logger.info(f"🔍 正在从 {browser} 浏览器获取 Cookie...")
-            
-            cj = cookie_func(domain_name="google.com")
-            
-            psid = ""
-            psidts = ""
-            
+            cj = cookie_functions[browser](domain_name="google.com")
+            cookies: Dict[str, str] = {}
+
             for cookie in cj:
-                if cookie.name == "__Secure-1PSID":
-                    psid = cookie.value
-                    logger.info(f"✅ 获取到 __Secure-1PSID")
-                elif cookie.name == "__Secure-1PSIDTS":
-                    psidts = cookie.value
-                    logger.info(f"✅ 获取到 __Secure-1PSIDTS")
-            
-            if psid:
-                return psid, psidts
-            else:
+                if cookie.name not in cookie_names or not cookie.value:
+                    continue
+                if cookie.domain not in {".google.com", "google.com"}:
+                    continue
+                cookies[cookie.name] = cookie.value
+                if cookie.name in {"__Secure-1PSID", "__Secure-1PSIDTS"}:
+                    logger.info(f"✅ 获取到 {cookie.name}")
+
+            if not cookies.get("__Secure-1PSID"):
                 logger.warning("⚠️ 未在浏览器中找到有效的 Cookie")
-                return None, None
-                
+                return {}
+
+            logger.info(f"✅ 已获取 {len(cookies)} 个 Google 认证 Cookie")
+            return cookies
         except Exception as e:
             logger.error(f"❌ 从浏览器获取 Cookie 失败: {e}")
-            return None, None
+            return {}
 
-    def update_cookie(self, psid: str, psidts: str = "", source: str = "manual") -> bool:
+    @staticmethod
+    def get_cookie_from_browser(browser: str = "chrome") -> Tuple[Optional[str], Optional[str]]:
+        """
+        从浏览器自动获取 Cookie
+
+        Args:
+            browser: 浏览器类型 (chrome, firefox, edge, opera, brave)
+
+        Returns:
+            (psid, psidts) 元组
+        """
+        cookies = CookieManager.get_cookies_from_browser(browser)
+        return cookies.get("__Secure-1PSID"), cookies.get("__Secure-1PSIDTS")
+
+    def update_cookie(
+        self,
+        psid: str,
+        psidts: str = "",
+        source: str = "manual",
+        extra_cookies: Optional[Dict[str, str]] = None,
+    ) -> bool:
         """
         更新 Cookie
         
@@ -158,6 +196,7 @@ class CookieManager:
             self._cookie_data = CookieData(
                 psid=psid,
                 psidts=psidts,
+                extra_cookies=extra_cookies or self._load_extra_cookies_from_env(psid, psidts),
                 source=source,
                 status=CookieStatus.VALID
             )

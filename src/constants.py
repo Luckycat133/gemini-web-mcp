@@ -21,25 +21,172 @@ ENDPOINTS = {
 
 
 MODEL_CONFIG = {
+    "flash-lite": {
+        "name": "3.1 Flash-Lite",
+        "hex_id": "8c46e95b1a07cecc",
+        "capacity_tail": 1,
+        "advanced_only": False,
+        "thinking_mode_id": 6,
+    },
+    "lite": {
+        "name": "3.1 Flash-Lite",
+        "hex_id": "8c46e95b1a07cecc",
+        "capacity_tail": 1,
+        "advanced_only": False,
+        "thinking_mode_id": 6,
+    },
     "fast": {
         "name": "gemini-3-flash",
         "hex_id": "fbb127bbb056c959",
         "capacity_tail": 1,
         "advanced_only": False,
-        "music_model": "lyria-3-clip",
+        "thinking_mode_id": 1,
+    },
+    "flash": {
+        "name": "gemini-3-flash",
+        "hex_id": "fbb127bbb056c959",
+        "capacity_tail": 1,
+        "advanced_only": False,
+        "thinking_mode_id": 1,
     },
     "thinking": {
         "name": "gemini-3-flash-thinking",
         "hex_id": "5bf011840784117a",
         "capacity_tail": 1,
         "advanced_only": False,
-        "music_model": "lyria-3-pro",
+        "thinking_mode_id": 1,
     },
     "pro": {
         "name": "gemini-3-pro",
         "hex_id": "9d8ca3786ebdfbea",
         "capacity_tail": 1,
         "advanced_only": True,
-        "music_model": "lyria-3-pro",
+        "thinking_mode_id": 3,
     },
 }
+
+THINKING_LEVEL_IDS = {
+    "standard": 1,
+    "extended": 2,
+    "标准": 1,
+    "扩展": 2,
+}
+
+THINKING_MODE_IDS = {
+    "3.1 flash-lite": 6,
+    "flash-lite": 6,
+    "lite": 6,
+    "8c46e95b1a07cecc": 6,
+    "3.5 flash": 1,
+    "flash": 1,
+    "fast": 1,
+    "thinking": 1,
+    "gemini-3-flash": 1,
+    "gemini-3-flash-thinking": 1,
+    "fbb127bbb056c959": 1,
+    "56fdd199312815e2": 1,
+    "5bf011840784117a": 1,
+    "e051ce1aa80aa576": 1,
+    "3.1 pro": 3,
+    "pro": 3,
+    "gemini-3-pro": 3,
+    "9d8ca3786ebdfbea": 3,
+    "e6fa609c3fa255c0": 3,
+}
+
+
+def resolve_model_name(model: str) -> str:
+    """Resolve MCP aliases while keeping runtime Gemini model names intact."""
+    config = MODEL_CONFIG.get(model)
+    return config["name"] if config else model
+
+
+def normalize_model_alias(model: str | None) -> str:
+    """Normalize incoming aliases to a stable MCP-facing model key."""
+    if not model:
+        return "flash"
+
+    alias = model.strip().lower()
+    if alias in {"3.1 flash-lite", "flash-lite", "lite"}:
+        return "flash-lite"
+    if alias in {"3.5 flash", "flash", "fast"}:
+        return "flash"
+    if alias in {"3.1 pro", "pro"}:
+        return "pro"
+    if alias in {"thinking", "gemini-3-flash-thinking"}:
+        return "thinking"
+    return alias
+
+
+def resolve_media_request(model: str | None, media_type: str) -> dict[str, str]:
+    """Resolve the effective Gemini Web backend behavior for media generation."""
+    alias = normalize_model_alias(model)
+
+    if media_type == "image":
+        return {
+            "requested_alias": alias,
+            "effective_alias": "flash",
+            "request_model": resolve_model_name("flash"),
+            "backend_label": "Nano Banana 2",
+            "note": (
+                "Gemini Web 当前首轮图像生成统一走 Nano Banana 2；"
+                "flash-lite / flash / pro 不会改变首轮图像后端。"
+            ),
+        }
+
+    if media_type == "music":
+        if alias == "pro":
+            return {
+                "requested_alias": alias,
+                "effective_alias": "pro",
+                "request_model": resolve_model_name("pro"),
+                "backend_label": "Lyria 3 Pro",
+                "note": "音乐生成在 Web UI 中按模型分流：pro 对应 Lyria 3 Pro。",
+            }
+        return {
+            "requested_alias": alias,
+            "effective_alias": "flash",
+            "request_model": resolve_model_name("flash"),
+            "backend_label": "Lyria 3",
+            "note": "音乐生成在 Web UI 中按模型分流：flash 系列对应 Lyria 3。",
+        }
+
+    return {
+        "requested_alias": alias,
+        "effective_alias": alias,
+        "request_model": resolve_model_name(alias),
+        "backend_label": "Gemini Web default",
+        "note": "",
+    }
+
+
+def describe_model_name(model: str) -> str:
+    """Return a stable model label for session/status output."""
+    resolved = resolve_model_name(model)
+    return resolved or "unspecified"
+
+
+def resolve_thinking_mode_id(model: object) -> int | None:
+    """Resolve the current Web UI thinking-level mode bucket for a model."""
+    if isinstance(model, str):
+        keys = [model, resolve_model_name(model)]
+    else:
+        keys = [
+            getattr(model, "model_id", ""),
+            getattr(model, "model_name", ""),
+            getattr(model, "display_name", ""),
+        ]
+
+    for key in keys:
+        if isinstance(key, str):
+            mode_id = THINKING_MODE_IDS.get(key.strip().lower())
+            if mode_id:
+                return mode_id
+    return None
+
+
+def resolve_thinking_level_id(thinking_level: str | None) -> int | None:
+    """Resolve the Web UI standard/extended thinking-level selector."""
+    if thinking_level is None:
+        return None
+    return THINKING_LEVEL_IDS.get(thinking_level.strip().lower())

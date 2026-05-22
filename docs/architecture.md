@@ -247,18 +247,26 @@ client = GeminiClient(psid, psidts, ...)
 ### 模型映射表
 
 ```python
-"fast"     -> {"name": "gemini-3-flash",          ...}
-"thinking" -> {"name": "gemini-3-flash-thinking", ...}
-"pro"      -> {"name": "gemini-3.1-pro",         ...}
+"flash-lite" -> {"name": "3.1 Flash-Lite", ...}
+"flash"      -> {"name": "gemini-3-flash", ...}
+"fast"       -> {"name": "gemini-3-flash", ...}  # compatible alias
+"pro"        -> {"name": "gemini-3-pro", ...}
 ```
+
+聊天、文件、媒体和研究工具会先解析这些 MCP 别名；别名之外的模型
+字符串会原样交给 `gemini-webapi` 的运行时模型注册表处理。网页端
+`standard` / `extended` 思考等级作为独立 `thinking_level` 传输字段处理。
 
 ### 媒体模型绑定
 
 | 聊天模型 | 图像模型 | 视频模型 | 音乐模型 |
 |---------|---------|---------|---------|
-| fast | Nano Banana 2 | Veo 3.1 | Lyria 3 Clip (30s) |
-| thinking | Nano Banana 2 | Veo 3.1 | Lyria 3 Pro (full) |
-| pro | Nano Banana 2 | Veo 3.1 | Lyria 3 Pro (full) |
+| flash-lite | Nano Banana 2 | Veo 3.1 | Lyria 3 |
+| flash | Nano Banana 2 | Veo 3.1 | Lyria 3 |
+| pro | Nano Banana 2 | Veo 3.1 | Lyria 3 Pro |
+
+实现上，`image` 首轮请求会统一落到 `Nano Banana 2`，而不是沿用聊天模型。
+`pro` 图像 redo 属于网页生成后的二次 UI 动作，不作为单独首轮模型暴露。
 
 ---
 

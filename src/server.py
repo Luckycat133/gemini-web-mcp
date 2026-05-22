@@ -23,7 +23,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # 根据环境变量选择加载的工具组
-TOOL_GROUPS = os.environ.get("GEMINI_TOOLS", "basic").split(",")
+TOOL_GROUPS = os.environ.get("GEMINI_TOOLS", "core").split(",")
 
 mcp = FastMCP(
     "Gemini Web MCP Server",
@@ -31,20 +31,27 @@ mcp = FastMCP(
 # Gemini Web MCP Server (v2.0)
 
 ## 可用模型
-- fast → gemini-3-flash (快速，免费)
-- thinking → gemini-3-flash-thinking (推理链，免费)
-- pro → gemini-3.1-pro (最强，AI Plus)
+- flash-lite → Web UI 3.1 Flash-Lite
+- flash / fast → Web UI 3.5 Flash
+- pro → Web UI 3.1 Pro
+- 三个 Web UI 模型都支持 thinking_level=standard/extended
+- thinking 保留为旧兼容别名
 
 ## 工具组（可配置）
-- basic: 基础对话功能
-- media: 图像/视频/音乐生成
-- advanced: 提示词管理等高级功能
+- core: 推荐默认工具面，适合大多数 AI 客户端
+- manage: 历史对话 / Gems / 运行时模型
+- prompts: 本地提示词库存取
+
+Cookie 辅助工具始终可用，不依赖额外工具组。
 
 ## 主要功能
-- 💬 对话: 单次对话、多轮会话
+- 💬 对话: 单次对话、多轮会话、Temporary chat、Gem 对话
 - 🎨 媒体生成: 图像、视频、音乐
-- 🖼️ 图像编辑: 编辑、变体生成
-- 📝 提示词管理（高级）
+-   图像首轮生成统一走 Nano Banana 2
+-   音乐按模型分流：flash 系列 → Lyria 3，pro → Lyria 3 Pro
+- 🖼️ 参考图像: 媒体生成可附带图像输入
+- 📎 文件/URL 分析
+- 🔎 Deep Research
 
 ## 错误处理
 遇到问题时会自动提供解决方案和可使用的工具
@@ -68,12 +75,16 @@ async def gemini_get_cookie_status() -> list[TextContent]:
     status = get_cookie_status()
     if not status.get("available", False):
         return [TextContent(type="text", text="⚠️ Cookie Manager 不可用")]
-    
+
+    has_cookie = bool(status.get("has_cookie"))
+    needs_refresh = bool(status.get("needs_refresh", False))
+    cookie_text = "已设置" if has_cookie else "未设置"
+    refresh_text = "需要刷新" if needs_refresh else "无需刷新"
     return [TextContent(type="text", text=f"""📊 Cookie 状态
 状态: {status.get('status', 'unknown')}
-已设置: {'✅' if status.get('has_cookie') else '❌'}
+Cookie: {cookie_text}
 来源: {status.get('source', 'unknown')}
-需要刷新: {'✅' if status.get('needs_refresh', False) else '❌'}""")]
+刷新: {refresh_text}""")]
 
 
 @mcp.tool()
@@ -88,48 +99,6 @@ async def gemini_get_cookie_from_browser(browser: str = "chrome") -> list[TextCo
     except Exception as e:
         error_info = handle_error(e)
         return [format_error_response(error_info)]
-
-
-@mcp.tool()
-async def gemini_list_features() -> list[TextContent]:
-    """列出可用功能"""
-    features = """✨ Gemini MCP 服务器功能
-    
-📜 对话工具
-- gemini_chat: 单次对话
-- gemini_chat_stream: 流式对话
-- gemini_start_chat: 创建会话
-- gemini_send_message: 会话消息
-- gemini_send_message_stream: 会话流式消息
-- gemini_list_sessions: 列会话
-- gemini_reset_session: 重置会话
-
-🎨 媒体生成
-- gemini_generate_media: 图像/视频/音乐
-- gemini_generate_music: 音乐生成
-
-🖼️ 图像编辑
-- gemini_edit_image: 图像编辑
-- gemini_variations: 图像变体
-
-📝 提示词管理（高级）
-- gemini_manage_prompts: 提示词 CRUD
-
-🍪 Cookie 管理
-- gemini_get_cookie_status: Cookie 状态
-- gemini_get_cookie_from_browser: 从浏览器获取
-
-🔧 管理工具
-- gemini_reset: 重置客户端
-- gemini_list_features: 功能列表
-
----
-💡 使用提示:
-- 设置 GEMINI_PSID 环境变量
-- 通过 GEMINI_TOOLS 配置加载的工具组
-- 例如: GEMINI_TOOLS=basic,media
-"""
-    return [TextContent(type="text", text=features)]
 
 
 def main():

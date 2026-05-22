@@ -31,21 +31,25 @@
 
 ## 🤖 模型与功能
 
-### Q: gemini-3.1-pro 需要付费吗？
-**A:** 是的，需要 Google AI Plus 订阅。免费账户可以使用 gemini-3-flash 和 gemini-3-flash-thinking。
+### Q: Pro 模型需要付费吗？
+**A:** 以当前账户运行时模型注册表和 Gemini Web 限额为准。先用 `gemini_list_models` 查看当前认证账户可见的模型。
 
 ### Q: 哪些功能是免费的？
 **A:**
-- 对话：fast 和 thinking 模型
+- 对话：以网页端可见的 Flash-Lite、Flash、Pro 及账户限额为准
 - 图像生成：所有模型
 - 视频生成：所有模型
-- 音乐片段（30秒）：fast 模型
+- 音乐：flash 系列对应 Lyria 3，pro 对应 Lyria 3 Pro
 - Deep Research：需要 AI Plus
 
-### Q: 音乐生成时长受什么影响？
+### Q: 音乐生成选哪个模型？
 **A:**
-- fast：Lyria 3 Clip（30秒片段）
-- thinking/pro：Lyria 3 Pro（完整歌曲约3分钟）
+- `flash-lite` / `flash` / `fast` / `thinking`：Lyria 3
+- `pro`：Lyria 3 Pro
+- `extended` 思考等级不等于音乐模型
+
+### Q: 图像生成时 `pro` 为什么没有直接换模型？
+**A:** 当前网页端首轮图像生成统一走 Nano Banana 2。`pro` 相关的图像增强属于网页生成后的 Pro redo，不是独立首轮模型。
 
 ### Q: 视频生成最长多长？
 **A:** 60秒（Veo 3.1）。
@@ -120,7 +124,7 @@
 ## 💡 进阶问题
 
 ### Q: 如何自定义会话系统提示？
-**A:** 使用 `gemini_start_chat` 时指定 `system_instruction` 参数。
+**A:** 主服务当前没有独立的 `system_instruction` 参数。需要稳定复用指令时，使用 Gem 或提示词管理工具。
 
 ### Q: 支持多个 Cookie 切换吗？
 **A:** 当前版本不支持，但您可以手动更改环境变量重启服务器。
@@ -129,7 +133,7 @@
 **A:** 不可以，需要重启服务器。可以使用 `gemini_reset` 重置连接。
 
 ### Q: 支持流式响应吗？
-**A:** 当前 v2.0 版本使用非流式响应，简化实现。
+**A:** 支持。使用 `gemini_chat_stream` 或 `gemini_send_message_stream`。
 
 ---
 

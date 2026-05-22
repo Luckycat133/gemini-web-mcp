@@ -21,12 +21,11 @@ except ImportError:
 from .client_wrapper import (
     get_gemini_client,
     initialize_client,
-    load_images,
     reset_client,
     get_cookie_status,
     get_cookie_from_browser,
 )
-from .constants import MODEL_CONFIG
+from .constants import resolve_media_request, resolve_model_name
 
 logging.basicConfig(
     level=logging.WARNING,
@@ -39,10 +38,11 @@ PROMPTS_FILE = CONFIG_DIR / "prompts.json"
 DEFAULT_PROMPTS_FILE = Path(__file__).parent.parent / "prompts_default.json"
 
 MODEL_ALIASES = {
-    "f": "fast",
+    "l": "flash-lite",
+    "f": "flash",
     "t": "thinking",
     "p": "pro",
-    "flash": "fast",
+    "lite": "flash-lite",
     "pro": "pro",
 }
 
@@ -58,11 +58,15 @@ mcp = FastMCP(
 - **create**: generate media
 - **edit**: modify images
 - **session**: conversation history
-- **prompts**: saved templates
-- **cookie**: authentication
+- **cookie**: authentication helper
 
 ## Models
-- fast (default), thinking, pro
+- flash-lite, flash (default), pro
+- thinking_level: standard or extended
+
+## Media behavior
+- image: always Nano Banana 2 on first generation
+- music: flash series -> Lyria 3, pro -> Lyria 3 Pro
 
 ## Quick
 chat(message="hi")
@@ -177,7 +181,8 @@ _sessions: dict[str, dict[str, Any]] = {}
 @mcp.tool()
 async def chat(
     message: str,
-    model: Literal["fast", "thinking", "pro"] = "fast",
+    model: str = "flash",
+    thinking_level: str = "standard",
     image_path: Optional[str] = None,
     session_id: Optional[str] = None,
 ) -> list[TextContent]:
@@ -187,18 +192,22 @@ async def chat(
         await initialize_client()
 
         model = _normalize_model(model)
-        config = MODEL_CONFIG[model]
-
-        contents: list[Any] = [message]
-        if image_path:
-            images = load_images([image_path])
-            contents.extend(images)
+        media_request = resolve_media_request(model, media_type)
+        model_name = media_request["request_model"]
+        files = [image_path] if image_path else None
 
         if session_id and session_id in _sessions:
-            response = await _sessions[session_id]["session"].send_message(contents)
+            response = await _sessions[session_id]["session"].send_message(
+                prompt=message,
+                files=files,
+                thinking_level=thinking_level,
+            )
         else:
             response = await client.generate_content(
-                contents, model=config["name"]
+                prompt=message,
+                files=files,
+                model=model_name,
+                thinking_level=thinking_level,
             )
 
         return _format_response(response)
@@ -212,7 +221,8 @@ async def chat(
 async def create(
     prompt: str,
     type: Literal["image", "video", "music"] = "image",
-    model: Literal["fast", "thinking", "pro"] = "fast",
+    model: str = "fast",
+    thinking_level: str = "standard",
     image_path: Optional[str] = None,
 ) -> list[TextContent]:
     """Generate image/video/music."""
@@ -222,24 +232,29 @@ async def create(
 
         model = _normalize_model(model)
         media_type = _normalize_media_type(type)
-        config = MODEL_CONFIG[model]
+        model_name = resolve_model_name(model)
 
         prefixes = {
             "image": "Generate image: ",
             "video": "Generate video: ",
             "music": "Create music: ",
         }
-        contents = [prefixes.get(media_type, "") + prompt]
-
-        if image_path:
-            images = load_images([image_path])
-            contents.extend(images)
+        media_prompt = prefixes.get(media_type, "") + prompt
+        files = [image_path] if image_path else None
 
         response = await client.generate_content(
-            contents, model=config["name"]
+            prompt=media_prompt,
+            files=files,
+            model=model_name,
+            thinking_level=thinking_level,
         )
 
-        return _format_response(response, media_type)
+        return _format_response(
+            response,
+            media_type,
+            backend_label=media_request["backend_label"],
+            backend_note=media_request["note"],
+        )
 
     except Exception as e:
         logger.error(f"Create error: {e}")
@@ -250,7 +265,8 @@ async def create(
 async def edit(
     image_path: str,
     prompt: str,
-    model: Literal["fast", "thinking", "pro"] = "fast",
+    model: str = "flash",
+    thinking_level: str = "standard",
 ) -> list[TextContent]:
     """Edit existing image."""
     try:
@@ -258,14 +274,13 @@ async def edit(
         await initialize_client()
 
         model = _normalize_model(model)
-        config = MODEL_CONFIG[model]
-
-        contents = [f"Edit this image: {prompt}"]
-        images = load_images([image_path])
-        contents.extend(images)
+        model_name = resolve_model_name(model)
 
         response = await client.generate_content(
-            contents, model=config["name"]
+            prompt=f"Edit this image: {prompt}",
+            files=[image_path],
+            model=model_name,
+            thinking_level=thinking_level,
         )
 
         return _format_response(response, "image")
@@ -280,7 +295,8 @@ async def session(
     action: Literal["create", "send", "list", "reset"],
     session_id: Optional[str] = None,
     message: Optional[str] = None,
-    model: Literal["fast", "thinking", "pro"] = "fast",
+    model: str = "fast",
+    thinking_level: str = "standard",
     image_path: Optional[str] = None,
 ) -> list[TextContent]:
     """Manage conversation sessions."""
@@ -291,10 +307,13 @@ async def session(
         model = _normalize_model(model)
 
         if action == "create":
-            config = MODEL_CONFIG[model]
-            sess = client.start_chat(model=config["name"])
+            sess = client.start_chat(model=resolve_model_name(model))
             sid = f"sess_{len(_sessions) + 1}"
-            _sessions[sid] = {"session": sess, "model": model}
+            _sessions[sid] = {
+                "session": sess,
+                "model": model,
+                "thinking_level": thinking_level,
+            }
             return [TextContent(type="text", text=f"Session created: {sid}")]
 
         elif action == "send":
@@ -303,12 +322,11 @@ async def session(
                     TextContent(type="text", text=f"Invalid session: {session_id}")
                 ]
 
-            contents: list[Any] = [message] if message else []
-            if image_path:
-                images = load_images([image_path])
-                contents.extend(images)
-
-            response = await _sessions[session_id]["session"].send_message(contents)
+            response = await _sessions[session_id]["session"].send_message(
+                prompt=message or "",
+                files=[image_path] if image_path else None,
+                thinking_level=_sessions[session_id].get("thinking_level", thinking_level),
+            )
             return _format_response(response)
 
         elif action == "list":
@@ -422,7 +440,12 @@ async def cookie(
         return [TextContent(type="text", text=f"Error: {e}")]
 
 
-def _format_response(response: Any, media_type: str = "") -> list[TextContent]:
+def _format_response(
+    response: Any,
+    media_type: str = "",
+    backend_label: str | None = None,
+    backend_note: str | None = None,
+) -> list[TextContent]:
     """Format Gemini response to TextContent."""
     parts = []
 
@@ -441,6 +464,12 @@ def _format_response(response: Any, media_type: str = "") -> list[TextContent]:
 
     if hasattr(response, "audio_url") and response.audio_url:
         parts.append(f"[Audio]: {response.audio_url}")
+
+    if backend_label:
+        prefix = f"Backend: {backend_label}"
+        if backend_note:
+            prefix += f"\n{backend_note}"
+        parts.insert(0, prefix + "\n")
 
     return [TextContent(type="text", text="".join(parts))]
 

@@ -31,7 +31,7 @@ def register_manage_tools(mcp: FastMCP):
             chat_list = ["## 📜 历史对话"]
             for i, chat in enumerate(chats[:limit], 1):
                 chat_title = getattr(chat, "title", "Untitled")
-                chat_id = getattr(chat, "id", "")
+                chat_id = getattr(chat, "cid", "") or getattr(chat, "id", "")
                 chat_list.append(f"{i}. {chat_title} (ID: {chat_id})")
             
             return [TextContent(type="text", text="\n".join(chat_list))]
@@ -43,31 +43,52 @@ def register_manage_tools(mcp: FastMCP):
     @mcp.tool()
     async def gemini_list_models() -> list[TextContent]:
         """列出所有可用模型及其说明"""
-        model_info = """🤖 可用模型（2026.5 更新）:
+        aliases = """🤖 MCP 模型别名:
 
-1. fast → gemini-3-flash
-   - ✅ 快速响应，适合日常问答
-   - ✅ 音乐生成 = Lyria 3 Clip (30秒)
-   - 📌 免费可用
+1. flash-lite / lite → 3.1 Flash-Lite
+   - 网页端极速模型
 
-2. thinking → gemini-3-flash-thinking
-   - ✅ 带推理链，适合复杂问题
-   - ✅ 音乐生成 = Lyria 3 Pro (完整歌曲)
-   - 📌 免费可用
+2. flash / fast → gemini-3-flash
+   - 网页端 3.5 Flash；fast 保留为兼容别名
 
-3. pro → gemini-3.1-pro
-   - ✅ 最强能力，适合专业任务
-   - ✅ 音乐生成 = Lyria 3 Pro (完整歌曲)
-   - 📌 需要 AI Plus 订阅
+3. pro → gemini-3-pro
+   - 网页端 3.1 Pro，是否可用取决于当前账户
+
+4. thinking → gemini-3-flash-thinking
+   - 旧兼容别名；新网页思考等级请用 thinking_level=standard/extended
+
+媒体规则:
+- 图像首轮生成始终使用 Nano Banana 2
+- 音乐: flash 系列 → Lyria 3, pro → Lyria 3 Pro
 
 ---
 
-📝 媒体生成功能:
-- 所有模型支持图像生成 (Nano Banana 2)
-- 所有模型支持视频生成 (Veo 3.1，最长60秒)
-- Deep Research: 需要 AI Plus 订阅
+运行时模型:
 """
-        return [TextContent(type="text", text=model_info)]
+        try:
+            client = get_gemini_client()
+            await initialize_client()
+            models = client.list_models() if hasattr(client, "list_models") else None
+        except Exception as e:
+            logger.warning(f"运行时模型发现失败: {e}")
+            models = None
+
+        if not models:
+            return [
+                TextContent(
+                    type="text",
+                    text=aliases + "- 暂无运行时模型注册表；请确认 Cookie 和账户状态后重试。",
+                )
+            ]
+
+        model_lines = [aliases]
+        for model in models:
+            display_name = getattr(model, "display_name", "") or "Unnamed"
+            model_name = getattr(model, "model_name", "") or "unknown"
+            available = "可用" if getattr(model, "is_available", True) else "不可用"
+            description = getattr(model, "description", "") or "无描述"
+            model_lines.append(f"- {display_name}: {model_name} ({available})\n  {description}")
+        return [TextContent(type="text", text="\n".join(model_lines))]
 
     @mcp.tool()
     async def gemini_manage_gems(

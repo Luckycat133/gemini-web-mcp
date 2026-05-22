@@ -14,6 +14,7 @@
 ### 使用指南
 - [工具使用手册](./tools.md) - 所有 MCP 工具详细说明
 - [模型选择指南](./models.md) - 选择合适的模型
+- [现网 UI 覆盖表](./live-ui-coverage.md) - 已登录 Gemini Web UI 与 MCP 覆盖关系
 - [媒体生成教程](./media-generation.md) - 图像/视频/音乐生成
 - [Deep Research 指南](./deep-research.md) - 深度研究功能
 - [会话管理](./session-management.md) - 多轮对话使用
@@ -30,6 +31,7 @@
 
 ### 参考资料
 - [常见问题 FAQ](./faq.md)
+- [Release Notes 2026-05-23](./release-notes-2026-05-23.md)
 - [故障排除](./troubleshooting.md)
 - [Changelog](./changelog.md)
 - [贡献指南](./contributing.md)
@@ -50,9 +52,9 @@
 
 | 特性 | 说明 |
 |------|------|
-| 模型 | gemini-3.1-pro, gemini-3-flash, gemini-3-flash-thinking |
-| 媒体生成 | 图像(Nano Banana 2), 视频(Veo 3.1), 音乐(Lyria 3) |
-| 工具数量 | 15+ MCP 工具 |
+| 模型 | 旧别名 + 运行时模型发现 |
+| 媒体生成 | 图像(Nano Banana 2), 视频(Veo 3.1), 音乐(Lyria 3 / Lyria 3 Pro) |
+| 推荐工具面 | `core` 默认，`manage` / `prompts` 按需附加 |
 | Deep Research | ✅ AI Plus 支持 |
 | Gem 管理 | ✅ 自定义助手管理 |
 

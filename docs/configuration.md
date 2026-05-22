@@ -12,7 +12,8 @@
 | GEMINI_PSIDTS | ❌ | Cookie __Secure-1PSIDTS | - |
 | GEMINI_PROXY | ❌ | 代理地址 | - |
 | GEMINI_AUTO_REFRESH | ❌ | 自动刷新 Cookie | true |
-| GEMINI_TOOLS | ❌ | 加载的工具组 | basic |
+| GEMINI_TOOLS | ❌ | 加载的工具组 | core |
+| GEMINI_CHAT_RETENTION_SECONDS | ❌ | 默认远端对话保留时间，0 表示尽快删除 | 1800 |
 
 ---
 
@@ -24,25 +25,22 @@ v2.0 支持分层加载，可以根据使用场景选择加载不同的工具组
 
 | 工具组 | 包含功能 | 用途 | Token 消耗 |
 |--------|---------|------|-----------|
-| `basic` | 对话功能 | 基础对话 | 低 |
-| `media` | 媒体生成 + 图像编辑 | 创作场景 | 中 |
-| `advanced` | 提示词管理 | 高级用户 | 中 |
-| `all` | 全部功能 | 完整体验 | 高 |
+| `core` | 对话 + 媒体 + 文件/URL + Deep Research | 推荐默认组合 | 中 |
+| `manage` | 历史对话、模型、Gems | 账户内容管理 | 中 |
+| `prompts` | 本地提示词库存取 | 可选附加能力 | 低 |
+| `all` | `core` + `manage` | 完整体验 | 高 |
 
 ### 配置示例
 
 ```bash
-# 仅加载基础对话功能（最小 Token 消耗）
-GEMINI_TOOLS=basic
-
-# 基础 + 媒体功能
-GEMINI_TOOLS=basic,media
+# 推荐默认工具面
+GEMINI_TOOLS=core
 
 # 全部功能
 GEMINI_TOOLS=all
 
 # 自定义组合
-GEMINI_TOOLS=basic,media,advanced
+GEMINI_TOOLS=core,manage
 ```
 
 ### Claude Desktop 配置
@@ -55,7 +53,7 @@ GEMINI_TOOLS=basic,media,advanced
       "args": ["-m", "src.server"],
       "env": {
         "GEMINI_PSID": "your-psid-value",
-        "GEMINI_TOOLS": "basic,media"
+        "GEMINI_TOOLS": "core"
       }
     }
   }
@@ -129,20 +127,20 @@ GEMINI_PSID=xxxxxxxxxxxxxxx
 GEMINI_PSIDTS=xxxxxxxxxxxxxxx
 GEMINI_PROXY=
 GEMINI_AUTO_REFRESH=true
-GEMINI_TOOLS=basic,media
+GEMINI_TOOLS=core
 ```
 
 ---
 
 ## 🔍 验证配置
 
-使用健康检查工具验证配置：
+使用 Cookie 状态工具验证配置：
 
 ```
-gemini_health_check
+gemini_get_cookie_status
 ```
 
-如果配置正确，应该看到 "✅ Gemini 连接正常"。
+需要验证真实上游连接时，再调用一个需要认证的聊天或管理工具。
 
 ---
 
