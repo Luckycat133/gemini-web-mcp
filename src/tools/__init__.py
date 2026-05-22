@@ -11,13 +11,15 @@ from .file import register_file_tools
 from .research import register_research_tools
 
 TOOL_GROUPS = {
+    "core": ["chat", "media", "file", "research"],
     "basic": ["chat"],
     "media": ["media", "image"],
     "advanced": ["prompts", "research"],
     "manage": ["manage"],
     "file": ["file"],
     "research": ["research"],
-    "all": ["chat", "media", "image", "prompts", "manage", "file", "research"],
+    "prompts": ["prompts"],
+    "all": ["chat", "media", "file", "research", "manage"],
 }
 
 def register_tools(mcp, groups: list = None):
@@ -27,18 +29,14 @@ def register_tools(mcp, groups: list = None):
     Args:
         mcp: FastMCP 实例
         groups: 要加载的工具组列表
-                - basic: 基础对话功能
-                - media: 媒体生成功能
-                - advanced: 高级功能（提示词管理等）
-                - all: 加载所有功能
-    
+
     Example:
-        register_tools(mcp, ["basic"])        # 仅基础对话
-        register_tools(mcp, ["basic", "media"]) # 基础+媒体
-        register_tools(mcp, ["all"])           # 全部加载
+        register_tools(mcp, ["core"])          # 推荐：聊天 + 媒体 + 文件 + 研究
+        register_tools(mcp, ["basic", "media"])
+        register_tools(mcp, ["all"])
     """
     if not groups:
-        groups = ["basic"]
+        groups = ["core"]
 
     selected = set()
     for group in groups:

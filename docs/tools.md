@@ -8,8 +8,9 @@
 
 - [对话工具](#对话工具)
 - [媒体工具](#媒体工具)
-- [图像编辑工具](#图像编辑工具-v20-新增)
-- [提示词管理](#提示词管理-高级)
+- [文件与 URL](#文件与-url)
+- [Deep Research](#deep-research)
+- [账户和 Gems](#账户和-gems)
 - [Cookie 管理](#cookie-管理)
 - [管理工具](#管理工具)
 
@@ -23,8 +24,13 @@
 
 **参数：**
 - `message`: str - 要发送的消息
-- `model`: "fast" | "thinking" | "pro" (默认: "fast")
+- `model`: str - `flash-lite` / `flash` / `pro`，兼容别名，或运行时模型名 (默认: `flash`)
+- `thinking_level`: str - `standard` / `extended` (默认: `standard`)
 - `image_paths`: list[str] - 可选图片路径
+- `gem_id`: str - 可选 Gem ID
+- `temporary`: bool - 是否使用 Temporary chat
+- `retain_chat`: bool - 是否保留远端聊天
+- `delete_after_seconds`: int - 可选远端聊天清理时间
 
 ### gemini_chat_stream
 
@@ -32,16 +38,21 @@
 
 **参数：**
 - `message`: str - 要发送的消息
-- `model`: "fast" | "thinking" | "pro" (默认: "fast")
+- `model`: str - MCP 别名或运行时模型名 (默认: `flash`)
+- `thinking_level`: str - `standard` / `extended` (默认: `standard`)
 - `image_paths`: list[str] - 可选图片路径
+- `gem_id`: str - 可选 Gem ID
+- `temporary`: bool - 是否使用 Temporary chat
 
 ### gemini_start_chat
 
 创建多轮会话。
 
 **参数：**
-- `system_instruction`: str - 可选系统提示
-- `model`: "fast" | "thinking" | "pro" (默认: "fast")
+- `model`: str - MCP 别名或运行时模型名 (默认: `flash`)
+- `thinking_level`: str - 创建会话后默认沿用的 `standard` / `extended`
+- `gem_id`: str - 可选 Gem ID
+- `temporary`: bool - 后续会话消息默认沿用的 Temporary chat 状态
 
 **返回：** 会话 ID，用于后续消息
 
@@ -53,6 +64,7 @@
 - `session_id`: str - 会话 ID
 - `message`: str - 消息内容
 - `image_paths`: list[str] - 可选图片路径
+- `temporary`: bool - 可选，覆盖会话默认 Temporary chat 状态
 
 ### gemini_send_message_stream
 
@@ -62,6 +74,7 @@
 - `session_id`: str - 会话 ID
 - `message`: str - 消息内容
 - `image_paths`: list[str] - 可选图片路径
+- `temporary`: bool - 可选，覆盖会话默认 Temporary chat 状态
 
 ### gemini_list_sessions
 
@@ -87,8 +100,14 @@
 **参数：**
 - `prompt`: str - 生成描述
 - `media_type`: "image" | "video" | "music"
-- `model`: "fast" | "thinking" | "pro" (默认: "fast")
+- `model`: str - MCP 别名或运行时模型名 (默认: `flash`)
+- `thinking_level`: str - `standard` / `extended` (默认: `standard`)
 - `image_path`: str - 可选参考图片
+
+**真实网页行为：**
+- `image`: 首轮生成始终走 `Nano Banana 2`
+- `music`: `flash` 系列走 `Lyria 3`，`pro` 走 `Lyria 3 Pro`
+- `image + model=pro` 不会直接切换首轮图像后端；Pro redo 是网页生成后的二次操作
 
 ### gemini_generate_music
 
@@ -96,50 +115,60 @@
 
 **参数：**
 - `prompt`: str - 音乐描述
-- `model`: "fast" | "thinking" | "pro" (默认: "thinking")
+- `model`: str - MCP 别名或运行时模型名 (默认: `flash`)
+- `thinking_level`: str - `standard` / `extended` (默认: `extended`)
 
-**音乐时长：**
-- `fast` - Lyria 3 Clip: 30秒
-- `thinking/pro` - Lyria 3 Pro: 完整歌曲
-
----
-
-## 图像编辑工具 (0.2.0 新增)
-
-### gemini_edit_image
-
-图像编辑。
-
-**参数：**
-- `prompt`: str - 编辑提示词
-- `image_path`: str - 原始图像路径
-- `model`: "fast" | "thinking" | "pro" (默认: "fast")
-
-### gemini_variations
-
-图像变体生成。
-
-**参数：**
-- `prompt`: str - 可选风格描述
-- `image_path`: str - 可选参考图像
-- `num_variations`: int - 变体数量 (1-4)
-- `model`: "fast" | "thinking" | "pro" (默认: "fast")
+媒体工具通过 Gemini Web 通用生成接口触发图像、视频和音乐能力。
+账号可用性、上游排队和响应形状仍由 Gemini Web 决定。
 
 ---
 
-## 提示词管理 (高级)
+## 文件与 URL
 
-### gemini_manage_prompts
+### gemini_upload_file
 
-提示词 CRUD 管理。
+上传本地文件并分析。代码文件也走这个本地文件路径；它不等同于
+Gemini Web 的 Google Drive 选择器。
 
-**参数：**
-- `action`: "list" | "list_categories" | "get" | "create" | "update" | "delete"
-- `prompt_id`: str - 提示词 ID (get/update/delete)
-- `name`: str - 提示词名称 (create/update)
-- `content`: str - 提示词内容 (create/update)
-- `category`: str - 分类 (可选)
-- `description`: str - 描述 (可选)
+**关键参数：**
+- `model`: str - MCP 别名或运行时模型名
+- `thinking_level`: str - `standard` / `extended` (默认: `standard`)
+
+### gemini_analyze_url
+
+让 Gemini 分析网页或视频 URL。
+
+**关键参数：**
+- `model`: str - MCP 别名或运行时模型名
+- `thinking_level`: str - `standard` / `extended` (默认: `standard`)
+
+---
+
+## Deep Research
+
+### gemini_deep_research
+
+创建研究计划、启动研究，并在当前客户端能力允许时轮询最终结果。
+
+**关键参数：**
+- `model`: str - MCP 别名或运行时模型名
+- `thinking_level`: str - `standard` / `extended` (默认: `extended`)
+
+---
+
+## 账户和 Gems
+
+### gemini_list_chats
+
+列出当前客户端缓存的历史聊天。
+
+### gemini_list_models
+
+列出 MCP 模型别名和认证账户运行时模型注册表。
+
+### gemini_manage_gems
+
+列出、创建、更新或删除 Gems。
 
 ---
 
@@ -165,12 +194,6 @@
 ### gemini_reset
 
 重置客户端。
-
-**参数：** 无
-
-### gemini_list_features
-
-列出可用功能。
 
 **参数：** 无
 
@@ -213,26 +236,24 @@ AI 可以根据错误信息自动调用相应工具解决问题，无需人工�
 
 ## 💡 使用提示
 
-### 模型选择建议
+### 工具组建议
 
-| 场景 | 推荐模型 |
+| 场景 | 推荐工具组 |
 |------|---------|
-| 快速问答 | fast |
-| 需要推理 | thinking |
-| 复杂任务 | pro |
-| 音乐生成 | thinking/pro |
-| 图像编辑 | fast |
+| 默认接入大多数 AI 客户端 | `core` |
+| 需要历史对话 / Gems / 运行时模型 | `core,manage` |
+| 还需要本地提示词库 | `core,prompts` |
 
 ### 工具组配置
 
 根据需要通过 `GEMINI_TOOLS` 环境变量配置加载的工具：
 
 ```bash
-# 仅基础对话
-GEMINI_TOOLS=basic
+# 推荐默认工具面
+GEMINI_TOOLS=core
 
-# 基础 + 媒体
-GEMINI_TOOLS=basic,media
+# 增加账户内容管理
+GEMINI_TOOLS=core,manage
 
 # 全部功能
 GEMINI_TOOLS=all

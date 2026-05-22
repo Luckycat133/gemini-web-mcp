@@ -1,12 +1,18 @@
+import asyncio
 import os
 import logging
-from typing import Optional, Literal
+from typing import Optional
 
 from mcp.server.fastmcp import FastMCP
 from mcp.types import TextContent
 
-from ..client_wrapper import get_gemini_client, initialize_client
-from ..constants import MODEL_CONFIG
+from ..client_wrapper import (
+    cleanup_due_remote_chats,
+    get_gemini_client,
+    initialize_client,
+    schedule_remote_chat_cleanup_from_response,
+)
+from ..constants import resolve_model_name
 
 logger = logging.getLogger(__name__)
 
@@ -73,7 +79,10 @@ def register_file_tools(mcp: FastMCP) -> None:
     async def gemini_upload_file(
         file_path: str,
         analysis_prompt: Optional[str] = None,
-        model: Literal["fast", "thinking", "pro"] = "fast",
+        model: str = "fast",
+        thinking_level: str = "standard",
+        retain_chat: bool = False,
+        delete_after_seconds: Optional[int] = None,
     ) -> list[TextContent]:
         """上传文件供 Gemini 分析。
 
@@ -104,20 +113,32 @@ def register_file_tools(mcp: FastMCP) -> None:
 
         client = get_gemini_client()
         await initialize_client()
-        config = MODEL_CONFIG[model]
+        await cleanup_due_remote_chats(client)
+        model_name = resolve_model_name(model)
 
         logger.info(f"上传文件: {safe_file_path}")
 
         try:
             prompt = analysis_prompt or "Please analyze this file and tell me what you see."
 
-            response = await client.generate_content(
-                prompt,
-                files=[safe_file_path],
-                model=config["name"],
+            response = await asyncio.wait_for(
+                client.generate_content(
+                    prompt,
+                    files=[safe_file_path],
+                    model=model_name,
+                    thinking_level=thinking_level,
+                    timeout=60,
+                ),
+                timeout=60,
             )
 
             result_text = response.text
+            schedule_remote_chat_cleanup_from_response(
+                response,
+                retain_chat=retain_chat,
+                delete_after_seconds=delete_after_seconds,
+                source="gemini_upload_file",
+            )
 
             if response.images:
                 result_text += "\n\n📷 Images in response:\n"
@@ -133,6 +154,9 @@ def register_file_tools(mcp: FastMCP) -> None:
                     text=f"✅ Successfully analyzed {os.path.basename(safe_file_path)}\n\n{result_text}"
                 )
             ]
+        except asyncio.TimeoutError:
+            logger.error("Error uploading/analyzing file: request timed out")
+            return [TextContent(type="text", text="❌ Error: 文件分析超时，请检查认证状态或稍后重试。")]
         except Exception as e:
             logger.error(f"Error uploading/analyzing file: {e}")
             return [TextContent(type="text", text=f"❌ Error: {str(e)}")]
@@ -141,7 +165,10 @@ def register_file_tools(mcp: FastMCP) -> None:
     async def gemini_analyze_url(
         url: str,
         analysis_prompt: Optional[str] = None,
-        model: Literal["fast", "thinking", "pro"] = "fast",
+        model: str = "fast",
+        thinking_level: str = "standard",
+        retain_chat: bool = False,
+        delete_after_seconds: Optional[int] = None,
     ) -> list[TextContent]:
         """分析 URL 内容。
 
@@ -164,16 +191,38 @@ def register_file_tools(mcp: FastMCP) -> None:
 
         client = get_gemini_client()
         await initialize_client()
-        config = MODEL_CONFIG[model]
+        await cleanup_due_remote_chats(client)
+        model_name = resolve_model_name(model)
 
-        prompt = analysis_prompt or f"Please analyze the content at this URL: {valid_url}"
+        if analysis_prompt:
+            prompt = (
+                f"{analysis_prompt}\n\n"
+                f"URL: {valid_url}\n"
+                "Use the URL above as the content source for your answer."
+            )
+        else:
+            prompt = f"Please analyze the content at this URL: {valid_url}"
 
         logger.info(f"分析 URL: {valid_url}")
 
         try:
-            response = await client.generate_content(prompt, model=config["name"])
+            response = await asyncio.wait_for(
+                client.generate_content(
+                    prompt,
+                    model=model_name,
+                    thinking_level=thinking_level,
+                    timeout=60,
+                ),
+                timeout=60,
+            )
 
             result_text = response.text
+            schedule_remote_chat_cleanup_from_response(
+                response,
+                retain_chat=retain_chat,
+                delete_after_seconds=delete_after_seconds,
+                source="gemini_analyze_url",
+            )
 
             if response.images:
                 result_text += "\n\n📷 Images in response:\n"
@@ -184,6 +233,9 @@ def register_file_tools(mcp: FastMCP) -> None:
                     result_text += f"\n{img_info}"
 
             return [TextContent(type="text", text=result_text)]
+        except asyncio.TimeoutError:
+            logger.error("Error analyzing URL: request timed out")
+            return [TextContent(type="text", text="❌ Error: URL 分析超时，请稍后重试。")]
         except Exception as e:
             logger.error(f"Error analyzing URL: {e}")
             return [TextContent(type="text", text=f"❌ Error: {str(e)}")]
