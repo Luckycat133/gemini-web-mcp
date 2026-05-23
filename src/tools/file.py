@@ -79,7 +79,7 @@ def register_file_tools(mcp: FastMCP) -> None:
     async def gemini_upload_file(
         file_path: str,
         analysis_prompt: Optional[str] = None,
-        model: str = "fast",
+        model: str = "flash",
         thinking_level: str = "standard",
         retain_chat: bool = False,
         delete_after_seconds: Optional[int] = None,
@@ -91,7 +91,7 @@ def register_file_tools(mcp: FastMCP) -> None:
         Args:
             file_path: 文件路径
             analysis_prompt: 可选分析提示词
-            model: 模型选择 (fast/thinking/pro)
+            model: 模型选择 (flash-lite/flash/pro; fast/thinking 为兼容别名)
         """
         is_safe, safe_path_or_error = _validate_file_path(file_path)
         if not is_safe:
@@ -165,7 +165,7 @@ def register_file_tools(mcp: FastMCP) -> None:
     async def gemini_analyze_url(
         url: str,
         analysis_prompt: Optional[str] = None,
-        model: str = "fast",
+        model: str = "flash",
         thinking_level: str = "standard",
         retain_chat: bool = False,
         delete_after_seconds: Optional[int] = None,

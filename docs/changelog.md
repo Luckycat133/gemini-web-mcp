@@ -16,6 +16,9 @@ Gemini MCP Server 版本更新历史记录。
 - 新默认工具组改为 `core`
 - `all` 现在聚焦高价值 AI 工作流，不再默认加载本地提示词工具
 - 移除 `gemini_list_features`，减少低价值枚举型工具
+- 当前默认工具面为 15 个 `core` 工具；`all` 额外提供
+  `gemini_list_chats`、`gemini_list_models`、`gemini_manage_gems`
+- `gemini_manage_prompts` 保留为 `prompts` 可选分组，不属于默认工具面
 
 ### 文档与验证
 - 补充 Gemini Web live UI 覆盖说明和媒体路由说明
@@ -46,7 +49,10 @@ Gemini MCP Server 版本更新历史记录。
 - 新增 `gemini_deep_research` 工具
 - 深度研究与报告生成
 
-#### 完整工具系统（15+ 工具）
+#### 完整工具系统（历史记录）
+
+以下为 v2.0.0 发布时的历史工具面；当前支持情况以
+`docs/tools.md` 和 `docs/api-reference.md` 为准。
 
 **对话工具：**
 - `gemini_chat` - 单次对话（支持图片输入）

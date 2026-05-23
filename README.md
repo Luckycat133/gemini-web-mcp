@@ -131,6 +131,45 @@ GEMINI_TOOLS=all python -m src.server
 
 ## 🛠️ 可用工具
 
+### 当前工具清单
+
+按当前代码和 `list_tools()` 实际输出整理如下。
+
+#### 默认启用 (`GEMINI_TOOLS=core`)
+
+- `gemini_chat`
+- `gemini_chat_stream`
+- `gemini_start_chat`
+- `gemini_send_message`
+- `gemini_send_message_stream`
+- `gemini_list_sessions`
+- `gemini_reset_session`
+- `gemini_generate_media`
+- `gemini_generate_music`
+- `gemini_upload_file`
+- `gemini_analyze_url`
+- `gemini_deep_research`
+- `gemini_get_cookie_status`
+- `gemini_get_cookie_from_browser`
+- `gemini_reset`
+
+#### 可选启用
+
+`GEMINI_TOOLS=all` 会在 `core` 基础上增加：
+
+- `gemini_list_chats`
+- `gemini_list_models`
+- `gemini_manage_gems`
+
+`GEMINI_TOOLS=prompts` 会额外提供：
+
+- `gemini_manage_prompts`
+
+#### 已移除 / 不再单独暴露
+
+- `gemini_list_features` 已移除
+- 独立图片工具不再单独暴露，统一合并到 `gemini_generate_media`
+
 ### 对话工具
 - `gemini_chat`: 单次对话
 - `gemini_chat_stream`: 单次流式对话

@@ -68,7 +68,7 @@ def register_media_tools(mcp: FastMCP):
     async def gemini_generate_media(
         prompt: str,
         media_type: Literal["image", "video", "music"],
-        model: str = "fast",
+        model: str = "flash",
         thinking_level: str = "standard",
         image_path: Optional[str] = None,
         timeout_seconds: Optional[int] = None,

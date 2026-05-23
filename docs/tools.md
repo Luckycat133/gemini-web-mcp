@@ -16,6 +16,47 @@
 
 ---
 
+## 当前支持的工具
+
+下面这份清单对应当前仓库真实注册结果，而不是历史文档残留。
+
+### 默认启用 (`GEMINI_TOOLS=core`)
+
+- `gemini_chat`
+- `gemini_chat_stream`
+- `gemini_start_chat`
+- `gemini_send_message`
+- `gemini_send_message_stream`
+- `gemini_list_sessions`
+- `gemini_reset_session`
+- `gemini_generate_media`
+- `gemini_generate_music`
+- `gemini_upload_file`
+- `gemini_analyze_url`
+- `gemini_deep_research`
+- `gemini_get_cookie_status`
+- `gemini_get_cookie_from_browser`
+- `gemini_reset`
+
+### 可选启用
+
+`GEMINI_TOOLS=all` 额外增加：
+
+- `gemini_list_chats`
+- `gemini_list_models`
+- `gemini_manage_gems`
+
+`GEMINI_TOOLS=prompts` 单独提供：
+
+- `gemini_manage_prompts`
+
+### 已移除 / 已合并
+
+- `gemini_list_features` 已移除
+- 旧的独立图片工具已并入 `gemini_generate_media`
+
+---
+
 ## 对话工具
 
 ### gemini_chat

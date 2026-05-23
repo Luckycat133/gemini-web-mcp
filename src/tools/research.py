@@ -26,7 +26,7 @@ def register_research_tools(mcp: FastMCP):
     @mcp.tool()
     async def gemini_deep_research(
         query: str,
-        model: str = "thinking",
+        model: str = "flash",
         thinking_level: str = "extended",
         timeout_seconds: int = 600,
         poll_interval_seconds: int = 10,
