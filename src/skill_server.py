@@ -192,8 +192,7 @@ async def chat(
         await initialize_client()
 
         model = _normalize_model(model)
-        media_request = resolve_media_request(model, media_type)
-        model_name = media_request["request_model"]
+        model_name = resolve_model_name(model)
         files = [image_path] if image_path else None
 
         if session_id and session_id in _sessions:
@@ -221,7 +220,7 @@ async def chat(
 async def create(
     prompt: str,
     type: Literal["image", "video", "music"] = "image",
-    model: str = "fast",
+    model: str = "flash",
     thinking_level: str = "standard",
     image_path: Optional[str] = None,
 ) -> list[TextContent]:
@@ -232,7 +231,8 @@ async def create(
 
         model = _normalize_model(model)
         media_type = _normalize_media_type(type)
-        model_name = resolve_model_name(model)
+        media_request = resolve_media_request(model, media_type)
+        model_name = media_request["request_model"]
 
         prefixes = {
             "image": "Generate image: ",
@@ -295,7 +295,7 @@ async def session(
     action: Literal["create", "send", "list", "reset"],
     session_id: Optional[str] = None,
     message: Optional[str] = None,
-    model: str = "fast",
+    model: str = "flash",
     thinking_level: str = "standard",
     image_path: Optional[str] = None,
 ) -> list[TextContent]:

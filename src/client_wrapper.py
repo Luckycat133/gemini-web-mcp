@@ -229,7 +229,7 @@ def load_images(image_paths: List[str]) -> List[Any]:
 def store_session(
     session_id: str,
     session: Any,
-    model: str = "fast",
+    model: str = "flash",
     thinking_level: str = "standard",
     temporary: bool = False,
     retain_chat: bool = False,

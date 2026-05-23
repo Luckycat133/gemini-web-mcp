@@ -31,7 +31,7 @@ def register_chat_tools(mcp: FastMCP):
     @mcp.tool()
     async def gemini_chat(
         message: str,
-        model: str = "fast",
+        model: str = "flash",
         thinking_level: str = "standard",
         image_paths: Optional[list[str]] = None,
         gem_id: Optional[str] = None,
@@ -63,7 +63,7 @@ def register_chat_tools(mcp: FastMCP):
 
     @mcp.tool()
     async def gemini_start_chat(
-        model: str = "fast",
+        model: str = "flash",
         thinking_level: str = "standard",
         gem_id: Optional[str] = None,
         temporary: bool = False,
@@ -146,7 +146,7 @@ def register_chat_tools(mcp: FastMCP):
     @mcp.tool()
     async def gemini_chat_stream(
         message: str,
-        model: str = "fast",
+        model: str = "flash",
         thinking_level: str = "standard",
         image_paths: Optional[list[str]] = None,
         gem_id: Optional[str] = None,

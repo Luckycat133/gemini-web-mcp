@@ -412,6 +412,50 @@ def test_skill_server_uses_v2_file_attachment_contract(monkeypatch):
     ]
 
 
+def test_skill_server_create_routes_current_media_backends(monkeypatch):
+    import src.skill_server as skill_server
+
+    calls = []
+
+    class FakeResponse:
+        text = "ok"
+        images = []
+        videos = []
+
+    class FakeClient:
+        async def generate_content(self, prompt, files=None, model=None, thinking_level=None):
+            calls.append((prompt, files, model, thinking_level))
+            return FakeResponse()
+
+    async def noop_initialize():
+        return None
+
+    monkeypatch.setattr(skill_server, "get_gemini_client", lambda: FakeClient())
+    monkeypatch.setattr(skill_server, "initialize_client", noop_initialize)
+
+    async def run():
+        image_result = await skill_server.create(
+            prompt="studio portrait",
+            type="image",
+            model="pro",
+        )
+        music_result = await skill_server.create(
+            prompt="cinematic trailer",
+            type="music",
+            model="pro",
+            thinking_level="extended",
+        )
+        assert "Backend: Nano Banana 2" in image_result[0].text
+        assert "Backend: Lyria 3 Pro" in music_result[0].text
+
+    asyncio.run(run())
+
+    assert calls == [
+        ("Generate image: studio portrait", None, "gemini-3-flash", "standard"),
+        ("Create music: cinematic trailer", None, "gemini-3-pro", "extended"),
+    ]
+
+
 def test_model_listing_prefers_runtime_registry(monkeypatch):
     import src.tools.manage as manage_tools
 
