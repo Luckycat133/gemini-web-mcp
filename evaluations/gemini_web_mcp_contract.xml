@@ -1,0 +1,42 @@
+<evaluation>
+  <qa_pair>
+    <question>Using only read-only metadata tools, identify the tool that an agent should call first to learn safety, privacy, pagination, availability, and workflow metadata. Answer with the exact tool name.</question>
+    <answer>gemini_get_tool_manifest</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>Inspect the history tool manifest. Which history tool is marked destructive? Answer with the exact tool name.</question>
+    <answer>gemini_delete_chat</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>Inspect the history tool manifest. Which privacy label is attached to the chat export tool? Answer with the exact privacy label.</question>
+    <answer>reads_private_chat_text</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>Inspect the manifest workflows. Which workflow is recommended for finding and exporting Gemini chat history? Answer with the workflow name.</question>
+    <answer>chat_history_find_and_export</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>Inspect the observed Web capability manifest. Which MCP model alias maps to the displayed Gemini Web model named 3.1 Pro? Answer with the alias only.</question>
+    <answer>pro</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>Inspect the observed Web capability manifest. What is the RPC id for the tool or mode status probe observed around Canvas and Guided Learning toggles? Answer with the RPC id only.</question>
+    <answer>MyzX6c</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>Inspect the account tool manifest. Which paginated account tool reads active or inactive scheduled-action entries? Answer with the exact tool name.</question>
+    <answer>gemini_list_scheduled_actions</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>Inspect the account tool manifest and capability notes. Which tool lists localized Library capability/template entries rather than private Library assets? Answer with the exact tool name.</question>
+    <answer>gemini_list_library_capabilities</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>Inspect the manifest entry for the local prompt-library tool. Which availability group must be enabled for gemini_manage_prompts? Answer with the group name only.</question>
+    <answer>prompts</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>Inspect the manifest safety notes. What exact boolean value should an agent infer for the destructive field of gemini_manage_gems? Answer True or False.</question>
+    <answer>True</answer>
+  </qa_pair>
+</evaluation>

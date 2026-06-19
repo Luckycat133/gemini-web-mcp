@@ -14,6 +14,7 @@
 - **pro** → Web UI `3.1 Pro`
 - 上述三个模型都支持 `thinking_level=standard` / `extended`
 - **thinking** 仍保留为旧兼容别名
+- `learning_mode` 可触发网页 `学习辅导` companion：互动测验、抽认卡、模拟测试、备考/学习指南
 
 ### 🎨 媒体生成
 - **图像**: 首轮生成固定为 Nano Banana 2；`pro` 只对应网页生成后的 Pro redo 语义
@@ -25,6 +26,7 @@
 - 多轮会话 (支持流式输出)
 - Temporary chat (不进入 Gemini 历史记录)
 - 使用已保存 Gem 进行对话
+- 学习模式 (`learning_mode=quiz` / `flashcards` / `practice_test` / `study_guide`)
 - 会话管理
 
 ### 🖼️ 参考图像
@@ -149,6 +151,7 @@ GEMINI_TOOLS=all python -m src.server
 - `gemini_upload_file`
 - `gemini_analyze_url`
 - `gemini_deep_research`
+- `gemini_get_tool_manifest`
 - `gemini_get_cookie_status`
 - `gemini_get_cookie_from_browser`
 - `gemini_reset`
@@ -158,6 +161,18 @@ GEMINI_TOOLS=all python -m src.server
 `GEMINI_TOOLS=all` 会在 `core` 基础上增加：
 
 - `gemini_list_chats`
+- `gemini_search_chats`
+- `gemini_read_chat`
+- `gemini_export_chat`
+- `gemini_delete_chat`
+- `gemini_inspect_account`
+- `gemini_get_web_capabilities`
+- `gemini_probe_web_features`
+- `gemini_list_public_links`
+- `gemini_get_usage_limits`
+- `gemini_list_library_capabilities`
+- `gemini_list_scheduled_actions`
+- `gemini_get_tool_mode_status`
 - `gemini_list_models`
 - `gemini_manage_gems`
 
@@ -179,6 +194,10 @@ GEMINI_TOOLS=all python -m src.server
 - `gemini_list_sessions`: 列会话
 - `gemini_reset_session`: 重置会话
 
+对话工具支持 `thinking_level=standard|extended`，并可选
+`learning_mode=interactive_quiz|flashcards|practice_test|study_guide` 来对齐
+Gemini Web `学习辅导` 输入模式。
+
 默认情况下，工具调用产生的 Gemini 网页端对话会在一段时间后自动删除。需要保留时传入 `retain_chat=true`；需要调整本次调用保留时间时传入 `delete_after_seconds`。
 
 ### 媒体工具
@@ -193,7 +212,20 @@ GEMINI_TOOLS=all python -m src.server
 - `gemini_deep_research`: 创建研究计划、启动研究，并轮询最终报告或返回清晰进度状态
 
 ### 账户和内容管理
-- `gemini_list_chats`: 列出历史对话
+- `gemini_inspect_account`: 检查当前账号 Web RPC/能力状态
+- `gemini_get_tool_manifest`: 返回工具安全/隐私/分页/推荐工作流清单，供 agent 规划调用
+- `gemini_get_web_capabilities`: 返回实测 Pro 网页模型、思考等级、工具菜单、设置入口和 MCP 覆盖清单
+- `gemini_list_chats`: 分页列出历史对话元数据
+- `gemini_search_chats`: 分页搜索历史对话标题/ID；显式 `scan_turns=true` 时才读取正文匹配
+- `gemini_read_chat`: 读取指定历史对话内容
+- `gemini_export_chat`: 将单个历史对话导出为 Markdown 或 JSON
+- `gemini_delete_chat`: 删除指定历史对话
+- `gemini_probe_web_features`: 探测 Library、公开链接、用量、个性化、记忆导入等新版 Web 入口的只读 RPC 可达性
+- `gemini_list_public_links`: 列出“你的公开链接”页面返回的公开链接
+- `gemini_get_usage_limits`: 读取用量限额页面的限额/模型状态结构
+- `gemini_list_library_capabilities`: 列出 Library 页面暴露的本地化能力/模板条目
+- `gemini_list_scheduled_actions`: 只读列出“定时操作”页面返回的任务条目
+- `gemini_get_tool_mode_status`: 读取 Gemini Web 工具/模式状态枚举
 - `gemini_list_models`: 列出可用模型说明
 - `gemini_manage_gems`: Gems 的 list/create/update/delete
 
@@ -203,6 +235,23 @@ GEMINI_TOOLS=all python -m src.server
 
 ### 管理工具
 - `gemini_reset`: 重置客户端
+
+### 低 token Skill 入口
+`src.skill_server` 提供更短工具名的 skills 兼容入口，适合希望减少工具描述 token 的客户端：
+
+- `chat`: 对话
+- `create`: 图片/视频/音乐生成
+- `edit`: 图片编辑
+- `session`: 本地多轮会话
+- `history`: Gemini Web 历史对话 list/search/read/export/delete
+- `account`: 账号状态、工具清单、模型列表、功能探测、公开链接、用量和 Library 能力
+- `prompts`: 本地提示词库
+- `cookie`: Cookie 状态和浏览器获取
+
+### Codex Skill
+`.codex/skills/gemini-web-mcp` 提供项目内 Codex skill，指导 agent 先读取
+`gemini_get_tool_manifest`，按隐私/destructive 边界选择工具，并使用
+`evaluations/gemini_web_mcp_contract.xml` 验证 MCP contract。
 
 ---
 
@@ -257,6 +306,14 @@ gemini-mcp-server/
 ```bash
 python -c "import sys; sys.path.insert(0, '.'); from src import client_wrapper, constants; print('✓ OK')"
 ```
+
+运行测试与 MCP contract evaluation:
+```bash
+pytest -q
+```
+
+`evaluations/gemini_web_mcp_contract.xml` 提供 10 个只读、稳定答案的 MCP 评估问题，
+覆盖工具安全清单、历史记录工作流、Web 能力映射和分页/隐私元数据。
 
 使用 MCP Inspector 调试:
 ```bash

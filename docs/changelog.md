@@ -8,21 +8,50 @@ Gemini MCP Server 版本更新历史记录。
 
 ### Web UI 对齐
 - 对齐 2026-05-22 观察到的 Gemini Web 模型面：`3.1 Flash-Lite`、`3.5 Flash`、`3.1 Pro`
+- 复核 2026-06-18 Pro 账号网页面：工具菜单包含上传、Drive、导入代码、图片、视频、Canvas、Deep Research、音乐、学习辅导、个性化/Labs；设置菜单包含活动记录、记忆导入、用量限额、定时操作、公开链接等入口
 - 将 `standard` / `extended` 固化为独立 `thinking_level` 选择
+- 新增 `learning_mode`，对齐 2026-06-19 Web 前端学习辅导 Input Companion：
+  互动测验、抽认卡、模拟测试、备考/学习指南会写入对应 `X9b` / `GOa` 请求字段
 - 在媒体工具中显式写入网页实际后端规则：
   图像首轮固定为 Nano Banana 2，音乐按 `flash` / `pro` 分流到 Lyria 3 / Lyria 3 Pro
+
+### 账号和聊天管理
+- 新增 `gemini_inspect_account`，检查当前账号 Web RPC/能力状态并隐藏原始 RPC 预览
+- 新增 `gemini_read_chat`，按 chat ID 读取历史对话 turns
+- 新增 `gemini_search_chats`，分页搜索历史对话标题/ID，并可显式扫描当前页正文片段
+- 新增 `gemini_export_chat`，将单个历史对话导出为 Markdown 或 JSON
+- 新增 `gemini_delete_chat`，删除指定远端历史对话
+- 新增 `gemini_get_tool_manifest`，为 agent 暴露工具安全、隐私、分页、可用分组、当前启用状态和推荐工作流元数据
+- primary MCP 工具增加 MCP `ToolAnnotations`，标记只读、远端修改、本地修改和 destructive 操作
+- 新增 `gemini_probe_web_features`，用浏览器实测到的只读 RPC 探测 Library、公开链接、用量、个性化、记忆导入等新版 Web 入口
+- 新增 `gemini_get_web_capabilities`，返回 Pro 网页模型、思考等级、工具菜单、设置入口和 MCP 覆盖清单
+- 新增 `gemini_list_public_links`、`gemini_get_usage_limits`、`gemini_list_library_capabilities`，把可稳定解析的新版 Web 入口从 probe 升级为只读工具
+- 新增 `gemini_list_scheduled_actions`，只读列出定时操作页面返回的 active/inactive 任务条目
+- 新增 `gemini_get_tool_mode_status`，只读读取 Canvas / 学习辅导等工具模式附近出现的 Web 内部状态枚举
+- `gemini_list_chats` 增加 `offset`、`response_format` 和分页元数据
+- `gemini_list_public_links`、`gemini_list_library_capabilities`、`gemini_list_scheduled_actions`
+  和 `gemini_get_tool_mode_status` 增加统一分页元数据，便于 agent 分页读取账号内容
+- 忽略不可达的本地 `GEMINI_PROXY`，避免旧代理端口导致客户端初始化失败
+- 低 token `src.skill_server` 增加 `history`，并扩展 `history` 支持 search/export、`account` 支持 manifest/features/links/usage/library
+- 新增项目内 Codex skill：`.codex/skills/gemini-web-mcp`，用于指导 agent 安全使用 manifest、聊天记录和验证流程
 
 ### 工具面收缩
 - 新默认工具组改为 `core`
 - `all` 现在聚焦高价值 AI 工作流，不再默认加载本地提示词工具
 - 移除 `gemini_list_features`，减少低价值枚举型工具
-- 当前默认工具面为 15 个 `core` 工具；`all` 额外提供
-  `gemini_list_chats`、`gemini_list_models`、`gemini_manage_gems`
+- 当前默认工具面为 16 个工具：`core` 加始终可用的 `gemini_get_tool_manifest`；`all` 额外提供
+  `gemini_inspect_account`、`gemini_list_chats`、`gemini_search_chats`、
+  `gemini_read_chat`、`gemini_export_chat`、`gemini_delete_chat`、
+  `gemini_get_web_capabilities`、`gemini_probe_web_features`、`gemini_list_public_links`、
+  `gemini_get_usage_limits`、`gemini_list_library_capabilities`、
+  `gemini_list_scheduled_actions`、`gemini_get_tool_mode_status`、
+  `gemini_list_models`、`gemini_manage_gems`
 - `gemini_manage_prompts` 保留为 `prompts` 可选分组，不属于默认工具面
 
 ### 文档与验证
 - 补充 Gemini Web live UI 覆盖说明和媒体路由说明
-- 扩展测试以校验媒体后端分流和默认工具面
+- 新增 `evaluations/gemini_web_mcp_contract.xml`，提供 10 个只读、稳定答案的 MCP contract evaluation
+- 扩展测试以校验媒体后端分流、学习模式请求注入、工具 annotations、evaluation XML、Codex skill 和默认工具面
 
 ---
 

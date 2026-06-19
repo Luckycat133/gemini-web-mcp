@@ -94,6 +94,39 @@ THINKING_MODE_IDS = {
     "e6fa609c3fa255c0": 3,
 }
 
+LEARNING_MODE_CONFIG = {
+    "interactive_quiz": {
+        "id": 18,
+        "x9b_field": "h5d",
+        "x9b_value": 1,
+        "prompt_prefix": "生成一份关于以下内容的互动式测验： ",
+    },
+    "quiz": {
+        "alias_for": "interactive_quiz",
+    },
+    "flashcards": {
+        "id": 19,
+        "x9b_field": "h5d",
+        "x9b_value": 2,
+        "prompt_prefix": "为以下内容生成互动式抽认卡： ",
+    },
+    "practice_test": {
+        "id": 20,
+        "x9b_field": "h5d",
+        "x9b_value": 3,
+        "prompt_prefix": "创建模拟测试，考察主题是",
+    },
+    "study_guide": {
+        "id": 21,
+        "x9b_field": "h5d",
+        "x9b_value": 4,
+        "prompt_prefix": "帮我准备 ",
+    },
+    "exam_prep": {
+        "alias_for": "study_guide",
+    },
+}
+
 
 def resolve_model_name(model: str) -> str:
     """Resolve MCP aliases while keeping runtime Gemini model names intact."""
@@ -190,3 +223,23 @@ def resolve_thinking_level_id(thinking_level: str | None) -> int | None:
     if thinking_level is None:
         return None
     return THINKING_LEVEL_IDS.get(thinking_level.strip().lower())
+
+
+def resolve_learning_mode_config(learning_mode: str | None) -> dict[str, object] | None:
+    """Resolve Gemini Web guided-learning companion modes observed in the UI."""
+    if not learning_mode:
+        return None
+
+    key = learning_mode.strip().lower().replace("-", "_")
+    config = LEARNING_MODE_CONFIG.get(key)
+    if not config:
+        return None
+    alias = config.get("alias_for")
+    if isinstance(alias, str):
+        config = LEARNING_MODE_CONFIG[alias]
+    return dict(config)
+
+
+def supported_learning_modes() -> str:
+    """Return user-facing learning mode names."""
+    return "interactive_quiz/quiz, flashcards, practice_test, study_guide/exam_prep"

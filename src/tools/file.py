@@ -13,6 +13,8 @@ from ..client_wrapper import (
     schedule_remote_chat_cleanup_from_response,
 )
 from ..constants import resolve_model_name
+from .annotations import MUTATES_REMOTE
+from .utils import extract_remote_chat_id
 
 logger = logging.getLogger(__name__)
 
@@ -75,7 +77,7 @@ def register_file_tools(mcp: FastMCP) -> None:
         mcp: FastMCP server instance
     """
 
-    @mcp.tool()
+    @mcp.tool(annotations=MUTATES_REMOTE)
     async def gemini_upload_file(
         file_path: str,
         analysis_prompt: Optional[str] = None,
@@ -147,6 +149,9 @@ def register_file_tools(mcp: FastMCP) -> None:
                     if hasattr(img, "url"):
                         img_info += f": {img.url}"
                     result_text += f"\n{img_info}"
+            remote_chat_id = extract_remote_chat_id(response)
+            if remote_chat_id:
+                result_text += f"\n\nRemote chat ID: {remote_chat_id}"
 
             return [
                 TextContent(
@@ -161,7 +166,7 @@ def register_file_tools(mcp: FastMCP) -> None:
             logger.error(f"Error uploading/analyzing file: {e}")
             return [TextContent(type="text", text=f"❌ Error: {str(e)}")]
 
-    @mcp.tool()
+    @mcp.tool(annotations=MUTATES_REMOTE)
     async def gemini_analyze_url(
         url: str,
         analysis_prompt: Optional[str] = None,
@@ -231,6 +236,9 @@ def register_file_tools(mcp: FastMCP) -> None:
                     if hasattr(img, "url"):
                         img_info += f": {img.url}"
                     result_text += f"\n{img_info}"
+            remote_chat_id = extract_remote_chat_id(response)
+            if remote_chat_id:
+                result_text += f"\n\nRemote chat ID: {remote_chat_id}"
 
             return [TextContent(type="text", text=result_text)]
         except asyncio.TimeoutError:

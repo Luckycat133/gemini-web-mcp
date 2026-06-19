@@ -17,13 +17,14 @@ from ..client_wrapper import (
     schedule_remote_chat_cleanup_from_response,
 )
 from ..constants import resolve_model_name
+from .annotations import MUTATES_REMOTE
 
 logger = logging.getLogger(__name__)
 
 
 def register_research_tools(mcp: FastMCP):
 
-    @mcp.tool()
+    @mcp.tool(annotations=MUTATES_REMOTE)
     async def gemini_deep_research(
         query: str,
         model: str = "flash",

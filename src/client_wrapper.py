@@ -4,10 +4,12 @@ Gemini 客户端封装 - 线程安全版本
 
 import asyncio
 import os
+import socket
 import time
 import threading
 import logging
 from typing import Optional, Dict, Any, List
+from urllib.parse import urlparse
 
 logger = logging.getLogger(__name__)
 
@@ -107,6 +109,25 @@ def get_default_chat_retention_seconds() -> int:
         return 1800
 
 
+def get_configured_proxy() -> Optional[str]:
+    """Return a usable proxy, ignoring stale local proxy endpoints."""
+    proxy = os.environ.get("GEMINI_PROXY", "").strip()
+    if not proxy:
+        return None
+
+    parsed = urlparse(proxy if "://" in proxy else f"http://{proxy}")
+    host = parsed.hostname
+    port = parsed.port
+    if host in {"127.0.0.1", "localhost", "::1"} and port:
+        try:
+            with socket.create_connection((host, port), timeout=0.25):
+                pass
+        except OSError:
+            logger.warning("GEMINI_PROXY=%s is not reachable; continuing without proxy", proxy)
+            return None
+    return proxy
+
+
 def get_gemini_client() -> Any:
     """获取或初始化 GeminiClient 实例"""
     global _client
@@ -119,7 +140,7 @@ def get_gemini_client() -> Any:
                 raise ImportError("请先安装 gemini-webapi")
             psid = os.environ.get("GEMINI_PSID")
             psidts = os.environ.get("GEMINI_PSIDTS", "")
-            proxy = os.environ.get("GEMINI_PROXY")
+            proxy = get_configured_proxy()
             logger.info("正在初始化 GeminiClient...")
             _client = ThinkingLevelGeminiClient(psid, psidts, proxy=proxy)
             extra_cookies = _get_extra_cookies()
@@ -231,6 +252,7 @@ def store_session(
     session: Any,
     model: str = "flash",
     thinking_level: str = "standard",
+    learning_mode: Optional[str] = None,
     temporary: bool = False,
     retain_chat: bool = False,
     delete_after_seconds: Optional[int] = None,
@@ -241,6 +263,7 @@ def store_session(
             "session": session,
             "model": model,
             "thinking_level": thinking_level,
+            "learning_mode": learning_mode,
             "temporary": temporary,
             "created_at": time.time(),
             "retain_chat": retain_chat,

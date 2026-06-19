@@ -21,6 +21,7 @@ from ..client_wrapper import (
     schedule_remote_chat_cleanup_from_response,
 )
 from ..constants import describe_model_name, resolve_model_name
+from .annotations import DESTRUCTIVE_REMOTE, MUTATES_REMOTE, READ_ONLY_LOCAL
 from .utils import get_stream_text_piece, parse_response
 
 logger = logging.getLogger(__name__)
@@ -28,11 +29,12 @@ logger = logging.getLogger(__name__)
 
 def register_chat_tools(mcp: FastMCP):
 
-    @mcp.tool()
+    @mcp.tool(annotations=MUTATES_REMOTE)
     async def gemini_chat(
         message: str,
         model: str = "flash",
         thinking_level: str = "standard",
+        learning_mode: Optional[str] = None,
         image_paths: Optional[list[str]] = None,
         gem_id: Optional[str] = None,
         temporary: bool = False,
@@ -45,14 +47,17 @@ def register_chat_tools(mcp: FastMCP):
         await cleanup_due_remote_chats(client)
         model_name = resolve_model_name(model)
         logger.info(f"正在使用 {model_name} 生成响应...")
-        response = await client.generate_content(
-            prompt=message,
-            files=image_paths,
-            model=model_name,
-            thinking_level=thinking_level,
-            gem=gem_id,
-            temporary=temporary,
-        )
+        request_kwargs = {
+            "prompt": message,
+            "files": image_paths,
+            "model": model_name,
+            "thinking_level": thinking_level,
+            "gem": gem_id,
+            "temporary": temporary,
+        }
+        if learning_mode:
+            request_kwargs["learning_mode"] = learning_mode
+        response = await client.generate_content(**request_kwargs)
         schedule_remote_chat_cleanup_from_response(
             response,
             retain_chat=retain_chat,
@@ -61,10 +66,11 @@ def register_chat_tools(mcp: FastMCP):
         )
         return parse_response(response, model)
 
-    @mcp.tool()
+    @mcp.tool(annotations=MUTATES_REMOTE)
     async def gemini_start_chat(
         model: str = "flash",
         thinking_level: str = "standard",
+        learning_mode: Optional[str] = None,
         gem_id: Optional[str] = None,
         temporary: bool = False,
         retain_chat: bool = False,
@@ -82,6 +88,7 @@ def register_chat_tools(mcp: FastMCP):
             session,
             model,
             thinking_level=thinking_level,
+            learning_mode=learning_mode,
             temporary=temporary,
             retain_chat=retain_chat,
             delete_after_seconds=delete_after_seconds,
@@ -91,11 +98,12 @@ def register_chat_tools(mcp: FastMCP):
             text=f"✅ 会话创建成功！\nID: {session_id}\n模型: {model_name}\n使用 gemini_send_message 继续对话"
         )]
 
-    @mcp.tool()
+    @mcp.tool(annotations=MUTATES_REMOTE)
     async def gemini_send_message(
         session_id: str,
         message: str,
         image_paths: Optional[list[str]] = None,
+        learning_mode: Optional[str] = None,
         temporary: Optional[bool] = None,
         retain_chat: Optional[bool] = None,
         delete_after_seconds: Optional[int] = None,
@@ -105,12 +113,16 @@ def register_chat_tools(mcp: FastMCP):
         if not session_data:
             return [TextContent(type="text", text=f"❌ 会话 {session_id} 不存在")]
         use_temporary = session_data.get("temporary", False) if temporary is None else temporary
-        response = await session_data["session"].send_message(
-            prompt=message,
-            files=image_paths,
-            temporary=use_temporary,
-            thinking_level=session_data.get("thinking_level", "standard"),
-        )
+        request_kwargs = {
+            "prompt": message,
+            "files": image_paths,
+            "temporary": use_temporary,
+            "thinking_level": session_data.get("thinking_level", "standard"),
+        }
+        use_learning_mode = learning_mode or session_data.get("learning_mode")
+        if use_learning_mode:
+            request_kwargs["learning_mode"] = use_learning_mode
+        response = await session_data["session"].send_message(**request_kwargs)
         keep_chat = session_data.get("retain_chat", False) if retain_chat is None else retain_chat
         ttl = delete_after_seconds
         if ttl is None:
@@ -123,7 +135,7 @@ def register_chat_tools(mcp: FastMCP):
         )
         return [TextContent(type="text", text=response.text)]
 
-    @mcp.tool()
+    @mcp.tool(annotations=DESTRUCTIVE_REMOTE)
     async def gemini_reset_session(session_id: str) -> list[TextContent]:
         """重置会话"""
         session_data = pop_session(session_id)
@@ -131,7 +143,7 @@ def register_chat_tools(mcp: FastMCP):
             await delete_remote_chat(getattr(session_data["session"], "cid", None))
         return [TextContent(type="text", text=f"✅ 会话 {session_id} 已重置")]
 
-    @mcp.tool()
+    @mcp.tool(annotations=READ_ONLY_LOCAL)
     async def gemini_list_sessions() -> list[TextContent]:
         """列出会话"""
         sessions = list_sessions()
@@ -143,11 +155,12 @@ def register_chat_tools(mcp: FastMCP):
             session_list.append(f"{i}. {sid} - {describe_model_name(data['model'])} ({retain_text})")
         return [TextContent(type="text", text="\n".join(session_list))]
 
-    @mcp.tool()
+    @mcp.tool(annotations=MUTATES_REMOTE)
     async def gemini_chat_stream(
         message: str,
         model: str = "flash",
         thinking_level: str = "standard",
+        learning_mode: Optional[str] = None,
         image_paths: Optional[list[str]] = None,
         gem_id: Optional[str] = None,
         temporary: bool = False,
@@ -161,14 +174,17 @@ def register_chat_tools(mcp: FastMCP):
         model_name = resolve_model_name(model)
         full_text = ""
         final_response = None
-        async for response in client.generate_content_stream(
-            prompt=message,
-            files=image_paths,
-            model=model_name,
-            thinking_level=thinking_level,
-            gem=gem_id,
-            temporary=temporary,
-        ):
+        request_kwargs = {
+            "prompt": message,
+            "files": image_paths,
+            "model": model_name,
+            "thinking_level": thinking_level,
+            "gem": gem_id,
+            "temporary": temporary,
+        }
+        if learning_mode:
+            request_kwargs["learning_mode"] = learning_mode
+        async for response in client.generate_content_stream(**request_kwargs):
             full_text += get_stream_text_piece(response)
             final_response = response
         if final_response:
@@ -185,11 +201,12 @@ def register_chat_tools(mcp: FastMCP):
             )
         return [TextContent(type="text", text=full_text)]
 
-    @mcp.tool()
+    @mcp.tool(annotations=MUTATES_REMOTE)
     async def gemini_send_message_stream(
         session_id: str,
         message: str,
         image_paths: Optional[list[str]] = None,
+        learning_mode: Optional[str] = None,
         temporary: Optional[bool] = None,
         retain_chat: Optional[bool] = None,
         delete_after_seconds: Optional[int] = None,
@@ -201,12 +218,16 @@ def register_chat_tools(mcp: FastMCP):
         full_text = ""
         final_response = None
         use_temporary = session_data.get("temporary", False) if temporary is None else temporary
-        async for response in session_data["session"].send_message_stream(
-            prompt=message,
-            files=image_paths,
-            temporary=use_temporary,
-            thinking_level=session_data.get("thinking_level", "standard"),
-        ):
+        request_kwargs = {
+            "prompt": message,
+            "files": image_paths,
+            "temporary": use_temporary,
+            "thinking_level": session_data.get("thinking_level", "standard"),
+        }
+        use_learning_mode = learning_mode or session_data.get("learning_mode")
+        if use_learning_mode:
+            request_kwargs["learning_mode"] = use_learning_mode
+        async for response in session_data["session"].send_message_stream(**request_kwargs):
             full_text += get_stream_text_piece(response)
             final_response = response
         keep_chat = session_data.get("retain_chat", False) if retain_chat is None else retain_chat

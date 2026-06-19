@@ -12,6 +12,8 @@ import logging
 import uuid
 from datetime import datetime
 
+from .annotations import DESTRUCTIVE_LOCAL
+
 logger = logging.getLogger(__name__)
 
 DEFAULT_PROMPTS_FILE = "prompts.json"
@@ -122,7 +124,7 @@ def get_prompt_manager() -> PromptManager:
 
 def register_prompts_tools(mcp: FastMCP):
 
-    @mcp.tool()
+    @mcp.tool(annotations=DESTRUCTIVE_LOCAL)
     async def gemini_manage_prompts(
         action: Literal["list", "list_categories", "get", "create", "update", "delete"],
         prompt_id: Optional[str] = None,
@@ -157,7 +159,7 @@ def register_prompts_tools(mcp: FastMCP):
                 prompt_list.append("")
                 
                 for i, prompt in enumerate(prompts, 1):
-                    prompt_list.append(f"{i}. {prompt['name']} (ID: {prompt['id'][:8]}...)")
+                    prompt_list.append(f"{i}. {prompt['name']} (ID: {prompt['id']})")
                     prompt_list.append(f"   分类: {prompt['category']}")
                     if prompt.get('description'):
                         prompt_list.append(f"   描述: {prompt['description']}")
