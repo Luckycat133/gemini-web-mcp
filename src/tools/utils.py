@@ -6,6 +6,19 @@ from typing import List, Optional
 from mcp.types import TextContent
 
 
+def extract_remote_chat_id(response) -> Optional[str]:
+    cid = getattr(response, "cid", None)
+    if isinstance(cid, str) and cid.startswith("c_"):
+        return cid
+
+    metadata = getattr(response, "metadata", None)
+    if isinstance(metadata, list) and metadata:
+        cid = metadata[0]
+        if isinstance(cid, str) and cid.startswith("c_"):
+            return cid
+    return None
+
+
 def parse_response(
     response,
     model: str = "flash",
@@ -48,6 +61,10 @@ def parse_response(
             if hasattr(m, "url") and m.url:
                 info += f"\nURL: {m.url}"
             result_parts.append(info)
+
+    remote_chat_id = extract_remote_chat_id(response)
+    if remote_chat_id:
+        result_parts.append(f"\n\nRemote chat ID: {remote_chat_id}")
 
     return [TextContent(type="text", text="".join(result_parts))]
 

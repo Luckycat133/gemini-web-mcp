@@ -1,0 +1,4 @@
+interface:
+  display_name: "Gemini Web MCP"
+  short_description: "Use and maintain the Gemini Web MCP/skill tool surface safely."
+  default_prompt: "Use $gemini-web-mcp to inspect the manifest first, choose read-only Gemini Web tools when possible, and avoid destructive actions unless explicitly requested."

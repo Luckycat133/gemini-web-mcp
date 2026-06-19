@@ -15,6 +15,7 @@ from ..client_wrapper import (
     schedule_remote_chat_cleanup_from_response,
 )
 from ..constants import resolve_media_request
+from .annotations import MUTATES_REMOTE
 from .utils import parse_response
 
 logger = logging.getLogger(__name__)
@@ -64,7 +65,7 @@ def _restore_client_timeouts(
 
 def register_media_tools(mcp: FastMCP):
 
-    @mcp.tool()
+    @mcp.tool(annotations=MUTATES_REMOTE)
     async def gemini_generate_media(
         prompt: str,
         media_type: Literal["image", "video", "music"],
@@ -174,7 +175,7 @@ def register_media_tools(mcp: FastMCP):
             note_lines.append("说明: Pro redo 属于网页生成后的二次操作，不是独立首轮生成模型。")
         return _prepend_backend_note(parsed, note_lines)
 
-    @mcp.tool()
+    @mcp.tool(annotations=MUTATES_REMOTE)
     async def gemini_generate_music(
         prompt: str,
         model: str = "flash",

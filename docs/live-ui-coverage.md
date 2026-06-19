@@ -1,18 +1,19 @@
 # Gemini Web Live UI Coverage
 
-This page records the native Gemini Web surface observed in a signed-in Chrome
-session on 2026-05-22 and maps it to the primary MCP server in `src.server`.
-Browser extension UI injected into Gemini was ignored during this pass.
+This page records the native Gemini Web surface observed in a signed-in Pro
+account session on 2026-06-18 and maps it to the primary MCP server in
+`src.server`. Browser extension UI injected into Gemini was ignored during this
+pass.
 
 ## Observed Native UI
 
 The chat surface exposed:
 
 - New chat, chat search, Library, and Gems in the side navigation.
-- Temporary chat, export chat, and chat info controls.
+- Temporary chat, account switch/sign-out link, and settings controls.
 - Prompt upload/tools menu, model picker, microphone, and send controls.
 - Visible model picker entries: `3.1 Flash-Lite`, `3.5 Flash`, `3.1 Pro`,
-  plus a separate thinking-level submenu.
+  plus a separate thinking-level submenu with `标准` and `扩展`.
 
 The upload/tools menu exposed:
 
@@ -24,8 +25,8 @@ The upload/tools menu exposed:
 - Canvas.
 - Deep Research.
 - Create music.
-- Guided Learning.
-- Personalization toggle.
+- Guided Learning (`学习辅导`).
+- Personalization toggle under a `Labs` section.
 
 The settings menu exposed Activity, personalization, memory import, limits,
 scheduled actions, Gems, public links, theme, subscriptions, Ultra upsell,
@@ -43,13 +44,70 @@ NotebookLM, help/feedback, and location entries.
 | Create image/video/music | Covered in part | Generic web generation plus response parsing; account/UI gates still apply |
 | Deep Research | Covered | Full workflow when the installed client exposes research helpers |
 | Dynamic model discovery | Covered | `gemini_list_models` reports the account model registry after init |
-| Library | Not covered | No current library asset RPC wrapper |
-| Add from Google Drive | Not covered | No Drive picker or Drive attachment RPC wrapper |
-| Canvas | Not covered | No current Canvas RPC wrapper |
-| Guided Learning | Not covered | No current Guided Learning mode wrapper |
+| Observed Web Pro capability manifest | Covered | `gemini_get_web_capabilities` returns observed models, thinking levels, menu entries, and MCP coverage |
+| Account feature/RPC status | Covered | `gemini_inspect_account` summarizes account probes without raw previews |
+| Chat history listing | Covered | `gemini_list_chats` supports pagination and JSON output |
+| Chat history search | Covered | `gemini_search_chats` searches titles/IDs by default and only scans turn text when `scan_turns=true` |
+| Chat history reading | Covered | `gemini_read_chat` reads a specific chat by ID |
+| Chat history export | Covered | `gemini_export_chat` exports one selected chat as Markdown or JSON |
+| Chat deletion | Covered | `gemini_delete_chat` maps to the installed client's `delete_chat` |
+| Library capability/templates | Covered in part | `gemini_list_library_capabilities` parses observed `cYRIkd` capability entries |
+| Library assets | Probe covered | `gemini_probe_web_features(surface="library")` checks observed `sJBwce` and `VxUbXb`; no stable asset list wrapper yet |
+| Add from Google Drive | UI observed | Drive picker is visible in the tools menu and opens Google Picker; no Drive attachment RPC wrapper yet |
+| Canvas | Probe covered | Listed in tools menu and Library capabilities; `gemini_get_tool_mode_status` reads observed mode-status rows, but no Canvas document RPC wrapper yet |
+| Guided Learning | Covered in part | Chat tools accept `learning_mode` for observed Input Companion modes; `gemini_get_tool_mode_status` remains the read-only mode-status probe |
 | Thinking level submenu | Covered | Generation requests accept `thinking_level=standard/extended` |
-| Personalization and settings | Not covered | No settings CRUD wrapper in the installed client |
-| Scheduled actions and public links | Not covered | No current RPC wrapper |
+| Personalization and settings | Probe covered in part | `gemini_probe_web_features(surface="personalization")` checks observed settings RPC reachability; no settings CRUD wrapper yet |
+| Usage limits | Covered in part | `gemini_get_usage_limits` parses observed quota/model-state structures |
+| Public links | Covered in part | `gemini_list_public_links` lists observed public-link entries; no create/delete/update wrapper yet |
+| Scheduled actions | Covered in part | `gemini_list_scheduled_actions` reads observed active/inactive scheduled-action lists; no create/update/delete wrapper |
+| Memory import | Probe covered in part | `gemini_probe_web_features(surface="import")` checks observed import-entry RPC reachability; no import mutation wrapper yet |
+
+## Observed RPC Evidence
+
+The 2026-06-18 browser pass captured these read-only/probe-style RPC ids from
+native Gemini Web navigation. `gemini_probe_web_features` uses these ids without
+returning raw response bodies:
+
+| Surface | RPC ids |
+|---|---|
+| Library | `sJBwce`, `VxUbXb`, `cYRIkd` |
+| Public links / sharing | `K4WWud`, `GPRiHf`, `maGuAc`, `Te6DCf` |
+| Usage limits | `qpEbW` |
+| Personalization settings | `GPRiHf`, `maGuAc`, `Te6DCf` |
+| Memory import | `Te6DCf` |
+| Scheduled actions | `otAQ7b`, `MaZiqc` |
+| Tool/mode status | `MyzX6c` |
+
+The 2026-06-18 chat-page pass also observed the model picker and settings menu
+without additional raw response capture. The upload/tools button triggered
+`ESY5D` and `L5adhe` from `/app`; `L5adhe` carried a large client-state shaped
+payload, so it is documented as UI evidence rather than exposed as a general
+MCP wrapper.
+
+The 2026-06-18 scheduled-actions pass navigated to `/scheduled` and observed
+`otAQ7b` with payload `[]` plus two `MaZiqc` list variants:
+`[13,null,[1,null,1]]` and `[13,null,[0,null,1]]`. The MCP wrapper is read-only
+and intentionally does not create, update, delete, or page aggressively through
+scheduled tasks.
+
+The 2026-06-19 chat-page pass toggled Canvas and Guided Learning without
+sending a prompt. Both surfaces showed visible chips/placeholders and triggered
+`MyzX6c` with payload `[]`, which returns Web-internal mode status rows.
+
+Bundle inspection of the same Web build found the Guided Learning Input
+Companion path: selected options are copied into `GOa.H4`, translated into
+`X9b`, and sent through StreamGenerate. The MCP chat tools expose the confirmed
+learning entries as `learning_mode=interactive_quiz`, `flashcards`,
+`practice_test`, and `study_guide`. Canvas still remains probe/UI-only because a
+stable document creation or mutation RPC was not captured.
+
+The same pass opened the Google Drive picker entry without selecting a file.
+Gemini loaded `apis.google.com/js/api.js` and embedded
+`docs.google.com/picker/v2/home`; the picker document returned HTTP 401 in this
+session. No stable Gemini attachment RPC was observed, so Drive selection stays
+UI-only until a confirmed file-selection flow is captured with explicit user
+approval.
 
 ## Model Contract
 
@@ -59,6 +117,10 @@ Chat, file, and media generation tools accept the current Web aliases
 the installed `gemini-webapi` model registry. The Web UI thinking selector is
 separate from the model picker and maps to `thinking_level=standard` or
 `thinking_level=extended`.
+
+Guided Learning is separate from both the model picker and thinking selector.
+Use `learning_mode` only when the desired output is a learning artifact or
+guided study flow; leave it unset for ordinary chat.
 
 The visible model names in Gemini Web can drift faster than the package enum.
 Treat the runtime registry as the source of truth for an authenticated account.
