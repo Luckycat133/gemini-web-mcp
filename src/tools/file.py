@@ -2,6 +2,7 @@ import asyncio
 import os
 import logging
 from typing import Optional
+from urllib.parse import urlparse
 
 from mcp.server.fastmcp import FastMCP
 from mcp.types import TextContent
@@ -58,13 +59,12 @@ def _validate_url(url: str) -> tuple[bool, str]:
     """
     if not url:
         return False, "URL 不能为空"
-    
+
     try:
-        from urllib.parse import urlparse
         result = urlparse(url)
         if not result.scheme or not result.netloc:
             return False, "URL 格式无效"
-        
+
         return True, url
     except Exception as e:
         return False, f"URL 验证失败: {str(e)}"

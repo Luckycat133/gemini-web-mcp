@@ -153,6 +153,7 @@ GEMINI_TOOLS=all python -m src.server
 - `gemini_deep_research`
 - `gemini_get_tool_manifest`
 - `gemini_get_cookie_status`
+- `gemini_list_browser_cookie_profiles`
 - `gemini_get_cookie_from_browser`
 - `gemini_reset`
 
@@ -172,6 +173,9 @@ GEMINI_TOOLS=all python -m src.server
 - `gemini_get_usage_limits`
 - `gemini_list_library_capabilities`
 - `gemini_list_scheduled_actions`
+- `gemini_get_scheduled_action`
+- `gemini_create_scheduled_action`
+- `gemini_delete_scheduled_action`
 - `gemini_get_tool_mode_status`
 - `gemini_list_models`
 - `gemini_manage_gems`
@@ -225,13 +229,22 @@ Gemini Web `学习辅导` 输入模式。
 - `gemini_get_usage_limits`: 读取用量限额页面的限额/模型状态结构
 - `gemini_list_library_capabilities`: 列出 Library 页面暴露的本地化能力/模板条目
 - `gemini_list_scheduled_actions`: 只读列出“定时操作”页面返回的任务条目
+- `gemini_get_scheduled_action`: 按 ID 只读获取单个“定时操作”，用于创建后或已知 ID 的二次校验
+- `gemini_create_scheduled_action`: 创建每天固定小时触发的“定时操作”
+- `gemini_delete_scheduled_action`: 按 ID 删除“定时操作”（不会删除已产生的历史对话）
+- 定时操作 create 会返回 `visible_in_registry` / `verification_status`，delete 会返回
+  `verification_status` / `visible_after_delete` / `deleted_by_id_after_delete`；
+  list 会在空 registry 时返回 cookie/session 诊断，帮助识别 Chrome 多账号上下文不一致
+- 从 Chrome 获取 Cookie 时会隔离 gemini_webapi 的本地 cookie cache，并优先选择
+  scheduled registry 可见的本地 profile，避免旧 cache 或多账号 profile 导致列表为空
 - `gemini_get_tool_mode_status`: 读取 Gemini Web 工具/模式状态枚举
 - `gemini_list_models`: 列出可用模型说明
 - `gemini_manage_gems`: Gems 的 list/create/update/delete
 
 ### Cookie 管理
 - `gemini_get_cookie_status`: 查看 Cookie 状态
-- `gemini_get_cookie_from_browser`: 从浏览器自动获取 Cookie
+- `gemini_list_browser_cookie_profiles`: 列出本地浏览器 profile 诊断，包括 Chrome 当前选中 profile，不输出 Cookie 值
+- `gemini_get_cookie_from_browser`: 从浏览器或指定 profile 自动获取 Cookie
 
 ### 管理工具
 - `gemini_reset`: 重置客户端
@@ -244,7 +257,8 @@ Gemini Web `学习辅导` 输入模式。
 - `edit`: 图片编辑
 - `session`: 本地多轮会话
 - `history`: Gemini Web 历史对话 list/search/read/export/delete
-- `account`: 账号状态、工具清单、模型列表、功能探测、公开链接、用量和 Library 能力
+- `account`: 账号状态、工具清单、模型列表、功能探测、公开链接、用量、Library 能力和定时操作
+- `scheduled`: 定时操作 list/get/create/delete，create 仅支持每日固定小时
 - `prompts`: 本地提示词库
 - `cookie`: Cookie 状态和浏览器获取
 
@@ -312,7 +326,7 @@ python -c "import sys; sys.path.insert(0, '.'); from src import client_wrapper, 
 pytest -q
 ```
 
-`evaluations/gemini_web_mcp_contract.xml` 提供 10 个只读、稳定答案的 MCP 评估问题，
+`evaluations/gemini_web_mcp_contract.xml` 提供 11 个只读、稳定答案的 MCP 评估问题，
 覆盖工具安全清单、历史记录工作流、Web 能力映射和分页/隐私元数据。
 
 使用 MCP Inspector 调试:

@@ -19,6 +19,9 @@ ENDPOINTS = {
     "batchexecute": "https://gemini.google.com/_/BardChatUi/data/batchexecute",
 }
 
+# 默认的会话/远端聊天保留时间（秒），可通过 GEMINI_CHAT_RETENTION_SECONDS 环境变量覆盖
+DEFAULT_CHAT_RETENTION_SECONDS = 1800
+
 
 MODEL_CONFIG = {
     "flash-lite": {
@@ -151,9 +154,14 @@ def normalize_model_alias(model: str | None) -> str:
     return alias
 
 
-def resolve_media_request(model: str | None, media_type: str) -> dict[str, str]:
+def resolve_media_request(
+    model: str | None,
+    media_type: str,
+    thinking_level: str | None = None,
+) -> dict[str, str]:
     """Resolve the effective Gemini Web backend behavior for media generation."""
     alias = normalize_model_alias(model)
+    thinking = (thinking_level or "standard").strip().lower()
 
     if media_type == "image":
         return {
@@ -168,20 +176,20 @@ def resolve_media_request(model: str | None, media_type: str) -> dict[str, str]:
         }
 
     if media_type == "music":
-        if alias == "pro":
+        if alias == "pro" and thinking in {"extended", "扩展"}:
             return {
                 "requested_alias": alias,
                 "effective_alias": "pro",
-                "request_model": resolve_model_name("pro"),
+                "request_model": resolve_model_name(alias),
                 "backend_label": "Lyria 3 Pro",
-                "note": "音乐生成在 Web UI 中按模型分流：pro 对应 Lyria 3 Pro。",
+                "note": "实测当前 MCP/Web RPC 中 pro + extended / 扩展 对应 Lyria 3 fullsong。",
             }
         return {
             "requested_alias": alias,
             "effective_alias": "flash",
-            "request_model": resolve_model_name("flash"),
+            "request_model": resolve_model_name(alias),
             "backend_label": "Lyria 3",
-            "note": "音乐生成在 Web UI 中按模型分流：flash 系列对应 Lyria 3。",
+            "note": "实测当前 MCP/Web RPC 中非 pro+extended 音乐请求返回 Lyria 3 clip。",
         }
 
     return {

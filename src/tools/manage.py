@@ -12,7 +12,13 @@ import logging
 
 from ..client_wrapper import get_gemini_client, initialize_client
 from ..constants import MODEL_CONFIG
-from .annotations import DESTRUCTIVE_REMOTE, READ_ONLY_LOCAL, READ_ONLY_REMOTE, READS_PRIVATE_REMOTE
+from .annotations import (
+    DESTRUCTIVE_REMOTE,
+    MUTATES_REMOTE,
+    READ_ONLY_LOCAL,
+    READ_ONLY_REMOTE,
+    READS_PRIVATE_REMOTE,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -114,7 +120,11 @@ WEB_UI_CAPABILITIES = {
         {"name": "personalization", "label": "个性化智能服务", "coverage": "probe_only"},
         {"name": "memory_import", "label": "将记忆导入 Gemini", "coverage": "probe_only"},
         {"name": "usage_limits", "label": "用量限额", "coverage": "gemini_get_usage_limits"},
-        {"name": "scheduled_actions", "label": "定时操作", "coverage": "gemini_list_scheduled_actions"},
+        {
+            "name": "scheduled_actions",
+            "label": "定时操作",
+            "coverage": "gemini_list_scheduled_actions / gemini_get_scheduled_action / gemini_create_scheduled_action / gemini_delete_scheduled_action",
+        },
         {"name": "gems", "label": "Gem", "coverage": "gemini_manage_gems"},
         {"name": "public_links", "label": "你的公开链接", "coverage": "gemini_list_public_links"},
         {"name": "theme", "label": "主题", "coverage": "ui_only"},
@@ -128,7 +138,7 @@ WEB_UI_CAPABILITIES = {
     "notes": [
         "Runtime model registry is still preferred when available.",
         "Drive picker, link mutation, settings mutation, and memory import mutation are not automated without a safer confirmed RPC contract.",
-        "Scheduled actions are read-only; create/update/delete are intentionally not exposed.",
+        "Scheduled actions support daily create and explicit delete through observed Web RPCs; edit/toggle remain disabled until stable RPC contracts are confirmed.",
         "Probe tools intentionally omit raw response bodies and private account content.",
     ],
 }
@@ -233,6 +243,14 @@ WEB_FEATURE_PROBES = [
     },
     {
         "surface": "scheduled",
+        "name": "scheduled_actions_registry",
+        "rpcid": "XPSWpd",
+        "payload": "[]",
+        "source_path": "/scheduled",
+        "observed": "2026-06-19 Pro UI / Scheduled actions registry",
+    },
+    {
+        "surface": "scheduled",
         "name": "scheduled_actions_state",
         "rpcid": "otAQ7b",
         "payload": "[]",
@@ -291,9 +309,18 @@ def _truncate(text: object, max_chars: int) -> str:
     return value[:max_chars].rstrip() + "\n...[truncated]"
 
 
+def _clamp_int(value: object, default: int, minimum: int, maximum: int) -> int:
+    """Normalize user-provided numeric tool arguments into a safe inclusive range."""
+    try:
+        number = int(value)
+    except (TypeError, ValueError):
+        number = default
+    return min(max(number, minimum), maximum)
+
+
 def _paginate_items(items: list[Any], limit: int, offset: int, max_limit: int = 100) -> tuple[list[Any], dict[str, Any]]:
-    safe_limit = min(max(limit, 1), max_limit)
-    safe_offset = max(offset, 0)
+    safe_limit = _clamp_int(limit, default=max_limit, minimum=1, maximum=max_limit)
+    safe_offset = _clamp_int(offset, default=0, minimum=0, maximum=max(len(items), 0))
     page = items[safe_offset : safe_offset + safe_limit]
     next_offset = safe_offset + len(page)
     has_more = next_offset < len(items)
@@ -482,6 +509,84 @@ def _extract_rpc_bodies(response_text: str, rpcid: str) -> list[Any]:
     return bodies
 
 
+async def _fetch_scheduled_registry(client, max_chars: int) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    probe = _get_probe("scheduled", "scheduled_actions_registry")
+    response = await _execute_observed_rpc(client, probe)
+    bodies = _extract_rpc_bodies(response.text, probe["rpcid"])
+    body = bodies[0] if bodies else []
+    raw_entries = body[0] if isinstance(body, list) and body and isinstance(body[0], list) else []
+    entries = [_parse_scheduled_action_task_entry(item, max_chars) for item in raw_entries]
+    diagnostic = {
+        "source_rpc": probe["rpcid"],
+        "observed": probe["observed"],
+        "status_code": getattr(response, "status_code", None),
+        "response_length": len(getattr(response, "text", "") or ""),
+        "body_present": bool(bodies),
+        "raw_entry_count": len(raw_entries),
+        "client_language": getattr(client, "language", None),
+        "client_build_label": getattr(client, "build_label", None),
+        "has_session_id": bool(getattr(client, "session_id", None)),
+        "account_status": str(getattr(client, "account_status", "")),
+    }
+    if not entries:
+        diagnostic["empty_hint"] = (
+            "The current Gemini cookie/session returned an empty scheduled-actions registry. "
+            "If the Gemini Web UI shows scheduled actions, refresh cookies from the same signed-in "
+            "Chrome profile or check Google multi-account context."
+        )
+    return entries, diagnostic
+
+
+def _get_scheduled_task_entry_from_body(body: Any) -> Any:
+    if not isinstance(body, list) or not body:
+        return None
+    first = body[0]
+    if isinstance(first, list) and first and isinstance(first[0], str):
+        return first
+    if isinstance(first, str):
+        return body
+    return None
+
+
+async def _fetch_scheduled_task_by_id(
+    client,
+    action_id: str,
+    max_chars: int,
+) -> tuple[dict[str, Any] | None, dict[str, Any]]:
+    response = await client._batch_execute(
+        [_RawRPCData("kwDCne", json.dumps([action_id], ensure_ascii=False, separators=(",", ":")))],
+        source_path="/scheduled",
+        close_on_error=False,
+    )
+    bodies = _extract_rpc_bodies(response.text, "kwDCne")
+    body = bodies[0] if bodies else []
+    raw_entry = _get_scheduled_task_entry_from_body(body)
+    entry = _parse_scheduled_action_task_entry(raw_entry, max_chars) if raw_entry is not None else None
+    matched_task = bool(entry and entry.get("id") == action_id)
+    diagnostic = {
+        "source_rpc": "kwDCne",
+        "observed": "2026-06-20 Pro UI / Scheduled action get-by-id",
+        "status_code": getattr(response, "status_code", None),
+        "response_length": len(getattr(response, "text", "") or ""),
+        "body_present": bool(bodies),
+        "raw_body_type": type(body).__name__,
+        "raw_top_level_count": len(body) if isinstance(body, list) else None,
+        "matched_task": matched_task,
+        "client_language": getattr(client, "language", None),
+        "client_build_label": getattr(client, "build_label", None),
+        "has_session_id": bool(getattr(client, "session_id", None)),
+        "account_status": str(getattr(client, "account_status", "")),
+    }
+    if entry and not matched_task:
+        diagnostic["returned_id"] = entry.get("id", "")
+    if not matched_task:
+        diagnostic["empty_hint"] = (
+            "The current Gemini cookie/session did not return this scheduled action by id. "
+            "Check that the id belongs to the same Gemini account/profile context."
+        )
+    return (entry if matched_task else None), diagnostic
+
+
 def _parse_public_link_entry(entry: Any) -> dict[str, Any]:
     if not isinstance(entry, list):
         return {"raw_type": type(entry).__name__}
@@ -560,6 +665,152 @@ def _parse_scheduled_action_entry(entry: Any, max_chars: int) -> dict[str, Any]:
     }
 
 
+def _scheduled_daily_payload(
+    title: str,
+    instructions: str,
+    hour: int,
+    timezone_name: str,
+    locale: str,
+) -> str:
+    return json.dumps(
+        [
+            [
+                [instructions, None, title, 1],
+                None,
+                [[[[hour]], None, None, None, [1, 4], None, None, [timezone_name]]],
+                [None, locale],
+                None,
+                [1],
+            ]
+        ],
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
+
+
+def _parse_scheduled_action_create_body(body: Any) -> dict[str, Any]:
+    if not isinstance(body, list):
+        return {"raw_type": type(body).__name__}
+
+    task_id = body[0] if len(body) > 0 and isinstance(body[0], str) else ""
+    details = body[1] if len(body) > 1 and isinstance(body[1], list) else []
+    summary = details[1] if len(details) > 1 and isinstance(details[1], list) else []
+    title = ""
+    instructions = ""
+    schedule_label = ""
+    if summary and isinstance(summary[0], list):
+        row = summary[0]
+        instructions = row[0] if len(row) > 0 and isinstance(row[0], str) else ""
+        schedule_label = row[1] if len(row) > 1 and isinstance(row[1], str) else ""
+        title = row[2] if len(row) > 2 and isinstance(row[2], str) else ""
+    enabled = None
+    if len(details) > 5 and isinstance(details[5], list) and details[5]:
+        enabled = details[5][0] if isinstance(details[5][0], bool) else None
+
+    return {
+        "id": task_id,
+        "title": title,
+        "instructions": instructions,
+        "schedule_label": schedule_label,
+        "enabled": enabled,
+        "field_count": len(body),
+    }
+
+
+SCHEDULED_TASK_STATES = {
+    1: "created",
+    3: "running",
+    4: "paused",
+    5: "completed",
+    6: "deleted",
+    7: "error",
+}
+
+
+def _scheduled_task_state(metadata: Any) -> tuple[int | None, str]:
+    if not isinstance(metadata, list):
+        return None, ""
+
+    if len(metadata) > 0 and metadata[0] is not None:
+        state_id = 1
+    elif len(metadata) > 1 and metadata[1] is not None:
+        state_id = 3
+    elif len(metadata) > 4 and metadata[4] is not None:
+        state_id = 4
+    elif len(metadata) > 2 and metadata[2] is not None:
+        state_id = 5
+    elif len(metadata) > 3 and metadata[3] is not None:
+        state_id = 6
+    else:
+        state_id = None
+
+    return state_id, SCHEDULED_TASK_STATES.get(state_id, "") if state_id is not None else ""
+
+
+def _parse_scheduled_action_task_entry(entry: Any, max_chars: int) -> dict[str, Any]:
+    if not isinstance(entry, list):
+        return {"raw_type": type(entry).__name__}
+
+    task_id = entry[0] if len(entry) > 0 and isinstance(entry[0], str) else ""
+    details = entry[1] if len(entry) > 1 and isinstance(entry[1], list) else []
+    metadata = entry[2] if len(entry) > 2 and isinstance(entry[2], list) else []
+
+    row = details[0] if len(details) > 0 and isinstance(details[0], list) else []
+    instructions = row[0] if len(row) > 0 and isinstance(row[0], str) else ""
+    schedule_label = row[1] if len(row) > 1 and isinstance(row[1], str) else ""
+    title = row[2] if len(row) > 2 and isinstance(row[2], str) else ""
+
+    schedule = details[2] if len(details) > 2 and isinstance(details[2], list) else []
+    schedule_rule = schedule[0] if schedule and isinstance(schedule[0], list) else []
+    hour = None
+    if schedule_rule and isinstance(schedule_rule[0], list) and schedule_rule[0]:
+        hour_row = schedule_rule[0][0]
+        if isinstance(hour_row, list) and hour_row and isinstance(hour_row[0], int):
+            hour = hour_row[0]
+    timezone_name = ""
+    if len(schedule_rule) > 7 and isinstance(schedule_rule[7], list) and schedule_rule[7]:
+        timezone_name = schedule_rule[7][0] if isinstance(schedule_rule[7][0], str) else ""
+
+    source = details[3] if len(details) > 3 and isinstance(details[3], list) else []
+    enabled_flags = details[5] if len(details) > 5 and isinstance(details[5], list) else []
+    enabled = enabled_flags[0] if enabled_flags and isinstance(enabled_flags[0], bool) else None
+
+    created_timestamp = None
+    created_time = ""
+    created_at = metadata[5] if len(metadata) > 5 else None
+    if isinstance(created_at, list) and created_at and isinstance(created_at[0], (int, float)):
+        created_timestamp = float(created_at[0]) + (float(created_at[1] if len(created_at) > 1 else 0) / 1e9)
+        created_time = _format_timestamp(created_timestamp)
+
+    updated_timestamp = None
+    updated_time = ""
+    updated_at = metadata[6] if len(metadata) > 6 else None
+    if isinstance(updated_at, list) and updated_at and isinstance(updated_at[0], (int, float)):
+        updated_timestamp = float(updated_at[0]) + (float(updated_at[1] if len(updated_at) > 1 else 0) / 1e9)
+        updated_time = _format_timestamp(updated_timestamp)
+
+    task_state_id, task_state = _scheduled_task_state(metadata)
+    return {
+        "id": task_id,
+        "title": _truncate(title, max_chars),
+        "instructions": _truncate(instructions, max_chars),
+        "schedule_label": _truncate(schedule_label, max_chars),
+        "enabled": enabled,
+        "task_state_id": task_state_id,
+        "task_state": task_state,
+        "is_deleted": task_state_id == 6,
+        "hour": hour,
+        "timezone_name": timezone_name,
+        "source_chat_id": source[0] if source and isinstance(source[0], str) else "",
+        "created_timestamp": created_timestamp,
+        "created_time": created_time,
+        "updated_timestamp": updated_timestamp,
+        "updated_time": updated_time,
+        "metadata_field_count": len(metadata) if isinstance(metadata, list) else 0,
+        "field_count": len(entry),
+    }
+
+
 def _parse_tool_mode_entry(entry: Any) -> dict[str, Any]:
     if not isinstance(entry, list):
         return {"raw_type": type(entry).__name__}
@@ -604,12 +855,19 @@ def _web_capabilities_payload() -> dict[str, Any]:
             "gemini_get_usage_limits",
             "gemini_list_library_capabilities",
             "gemini_list_scheduled_actions",
+            "gemini_get_scheduled_action",
+            "gemini_create_scheduled_action",
+            "gemini_delete_scheduled_action",
             "gemini_get_tool_mode_status",
             "gemini_list_models",
         ],
         "media": ["gemini_generate_media", "gemini_generate_music"],
         "files": ["gemini_upload_file", "gemini_analyze_url"],
-        "research": ["gemini_deep_research"],
+        "research": [
+            "gemini_deep_research",
+            "gemini_list_research_report_actions",
+            "gemini_create_from_research_report",
+        ],
         "gems": ["gemini_manage_gems"],
     }
     return payload
@@ -722,6 +980,24 @@ TOOL_MANIFEST: list[dict[str, Any]] = [
         "read_only": False,
         "destructive": False,
         "privacy": "sends_research_query",
+        "pagination": False,
+    },
+    {
+        "name": "gemini_list_research_report_actions",
+        "group": "research",
+        "purpose": "List MCP-supported create actions for a completed Gemini Web Deep Research immersive report.",
+        "read_only": True,
+        "destructive": False,
+        "privacy": "reads_private_chat_text",
+        "pagination": False,
+    },
+    {
+        "name": "gemini_create_from_research_report",
+        "group": "research",
+        "purpose": "Create a local artifact matching observed Gemini Web report create-menu items: webpage, infographic, quiz, flashcards, audio overview, or custom app spec.",
+        "read_only": False,
+        "destructive": False,
+        "privacy": "reads_private_chat_text_and_writes_local_file",
         "pagination": False,
     },
     {
@@ -842,6 +1118,33 @@ TOOL_MANIFEST: list[dict[str, Any]] = [
         "pagination": True,
     },
     {
+        "name": "gemini_get_scheduled_action",
+        "group": "account",
+        "purpose": "Read one scheduled action by id using the observed Web GetTask RPC.",
+        "read_only": True,
+        "destructive": False,
+        "privacy": "reads_private_scheduled_action_details",
+        "pagination": False,
+    },
+    {
+        "name": "gemini_create_scheduled_action",
+        "group": "account",
+        "purpose": "Create a daily Gemini Web scheduled action through the observed scheduled-actions RPC.",
+        "read_only": False,
+        "destructive": False,
+        "privacy": "creates_private_scheduled_action",
+        "pagination": False,
+    },
+    {
+        "name": "gemini_delete_scheduled_action",
+        "group": "account",
+        "purpose": "Delete a Gemini Web scheduled action by id through the observed scheduled-actions RPC.",
+        "read_only": False,
+        "destructive": True,
+        "privacy": "deletes_private_scheduled_action",
+        "pagination": False,
+    },
+    {
         "name": "gemini_get_tool_mode_status",
         "group": "account",
         "purpose": "Read Web-internal Canvas/Guided Learning mode status rows.",
@@ -878,9 +1181,18 @@ TOOL_MANIFEST: list[dict[str, Any]] = [
         "pagination": False,
     },
     {
+        "name": "gemini_list_browser_cookie_profiles",
+        "group": "cookie",
+        "purpose": "List local browser cookie profiles and validation diagnostics without printing cookie values.",
+        "read_only": True,
+        "destructive": False,
+        "privacy": "local_browser_profile_auth_diagnostics",
+        "pagination": False,
+    },
+    {
         "name": "gemini_get_cookie_from_browser",
         "group": "cookie",
-        "purpose": "Load Gemini cookies from a local browser into the server runtime.",
+        "purpose": "Load Gemini cookies from a local browser/profile into the server runtime.",
         "read_only": False,
         "destructive": False,
         "privacy": "reads_local_browser_auth_secret",
@@ -946,6 +1258,16 @@ MANIFEST_WORKFLOWS = [
             "gemini_get_tool_mode_status",
         ],
         "notes": "Read-only but may reveal account-private metadata such as links and scheduled-action titles.",
+    },
+    {
+        "name": "scheduled_action_create_and_cleanup",
+        "steps": [
+            "gemini_create_scheduled_action",
+            "gemini_get_scheduled_action",
+            "gemini_list_scheduled_actions",
+            "gemini_delete_scheduled_action",
+        ],
+        "notes": "Creates and then deletes a daily scheduled action; use only with explicit user authorization and a unique test title when validating.",
     },
 ]
 
@@ -1120,17 +1442,10 @@ def register_manage_tools(mcp: FastMCP):
             if not chats:
                 return [TextContent(type="text", text="暂无历史对话。")]
 
-            safe_limit = min(max(limit, 1), 50)
-            safe_offset = max(offset, 0)
-            page = chats[safe_offset : safe_offset + safe_limit]
+            page, pagination = _paginate_items(chats, limit, offset, max_limit=50)
             items = [_chat_to_dict(chat) for chat in page]
             payload = {
-                "total_count": len(chats),
-                "count": len(items),
-                "offset": safe_offset,
-                "limit": safe_limit,
-                "has_more": safe_offset + len(items) < len(chats),
-                "next_offset": safe_offset + len(items) if safe_offset + len(items) < len(chats) else None,
+                **pagination,
                 "items": items,
             }
 
@@ -1141,7 +1456,7 @@ def register_manage_tools(mcp: FastMCP):
                 "## 📜 历史对话",
                 f"共 {payload['total_count']} 条；当前 {payload['offset']}..{payload['offset'] + payload['count'] - 1}",
             ]
-            for i, chat in enumerate(items, safe_offset + 1):
+            for i, chat in enumerate(items, payload["offset"] + 1):
                 pin = " 📌" if chat["is_pinned"] else ""
                 time_text = f" · {chat['time']}" if chat["time"] else ""
                 chat_list.append(f"{i}. {chat['title']}{pin} (ID: {chat['id']}){time_text}")
@@ -1221,11 +1536,9 @@ def register_manage_tools(mcp: FastMCP):
 
         try:
             chats = client.list_chats() or []
-            safe_limit = min(max(limit, 1), 50)
-            safe_offset = max(offset, 0)
-            safe_turn_limit = min(max(turns_per_chat, 1), 50)
-            safe_chars = min(max(max_chars_per_turn, 100), 4000)
-            page = chats[safe_offset : safe_offset + safe_limit]
+            page, pagination = _paginate_items(chats, limit, offset, max_limit=50)
+            safe_turn_limit = _clamp_int(turns_per_chat, default=20, minimum=1, maximum=50)
+            safe_chars = _clamp_int(max_chars_per_turn, default=1000, minimum=100, maximum=4000)
             matches = []
             lowered = needle.lower()
 
@@ -1269,17 +1582,12 @@ def register_manage_tools(mcp: FastMCP):
                         match["snippets"] = snippets[:5]
                     matches.append(match)
 
-            next_offset = safe_offset + len(page)
             payload = {
                 "query": needle,
                 "scan_turns": scan_turns,
-                "total_count": len(chats),
                 "scanned_count": len(page),
                 "match_count": len(matches),
-                "offset": safe_offset,
-                "limit": safe_limit,
-                "has_more": next_offset < len(chats),
-                "next_offset": next_offset if next_offset < len(chats) else None,
+                **pagination,
                 "matches": matches,
                 "note": "正文搜索只会在 scan_turns=true 时读取当前页聊天内容。",
             }
@@ -1702,69 +2010,337 @@ def register_manage_tools(mcp: FastMCP):
         if not hasattr(client, "_batch_execute"):
             return [TextContent(type="text", text="❌ 当前客户端不支持定时操作 RPC。")]
 
-        probe_names = []
-        if scope in {"active", "all"}:
-            probe_names.append("scheduled_actions_active")
-        if scope in {"inactive", "all"}:
-            probe_names.append("scheduled_actions_inactive")
-
         safe_chars = min(max(max_chars_per_field, 40), 4000)
-        results = []
         try:
-            for name in probe_names:
-                probe = _get_probe("scheduled", name)
-                response = await _execute_observed_rpc(client, probe)
-                bodies = _extract_rpc_bodies(response.text, probe["rpcid"])
-                body = bodies[0] if bodies else []
-                entries = []
-                cursor = None
-                if isinstance(body, list):
-                    cursor = body[1] if len(body) > 1 and isinstance(body[1], str) else None
-                    if len(body) > 2 and isinstance(body[2], list):
-                        entries = [
-                            _parse_scheduled_action_entry(item, safe_chars)
-                            for item in body[2]
-                        ]
-                page, page_info = _paginate_items(entries, limit, offset)
-                results.append(
-                    {
-                        "name": name,
-                        "source_rpc": probe["rpcid"],
-                        "observed": probe["observed"],
-                        **page_info,
-                        "has_more": page_info["has_more"] or bool(cursor),
-                        "cursor_present": bool(cursor),
-                        "items": page,
-                    }
-                )
+            entries, diagnostic = await _fetch_scheduled_registry(client, safe_chars)
+            if scope == "active":
+                entries = [item for item in entries if item.get("enabled") is True]
+            elif scope == "inactive":
+                entries = [item for item in entries if item.get("enabled") is False]
 
-            payload = {"scope": scope, "count": len(results), "results": results}
+            page, page_info = _paginate_items(entries, limit, offset)
+            result = {
+                "name": "scheduled_actions_registry",
+                "source_rpc": diagnostic["source_rpc"],
+                "observed": diagnostic["observed"],
+                **page_info,
+                "diagnostic": diagnostic,
+                "items": page,
+            }
+            payload = {"scope": scope, "count": 1, "results": [result]}
             if response_format == "json":
                 return [TextContent(type="text", text=json.dumps(payload, ensure_ascii=False, indent=2))]
 
             lines = ["## Gemini 定时操作", f"范围: {scope}"]
-            for result in results:
-                lines.extend(["", f"### {result['name']}"])
-                if not result["items"]:
-                    lines.append("- 暂无条目")
-                    continue
-                for item in result["items"]:
-                    enabled = item.get("enabled")
-                    enabled_text = "enabled" if enabled is True else "disabled" if enabled is False else "unknown"
-                    when = f", scheduled={item['scheduled_time']}" if item.get("scheduled_time") else ""
-                    label = f", label={item['schedule_label']}" if item.get("schedule_label") else ""
-                    lines.append(
-                        f"- {item.get('title') or '(untitled)'} ({item.get('id', '')}) [{enabled_text}]{when}{label}"
-                    )
-                if result["has_more"]:
-                    if result.get("next_offset") is not None:
-                        lines.append(f"- 下一页: offset={result['next_offset']}")
-                    else:
-                        lines.append("- 远端返回了 cursor；当前工具不会自动追踪 cursor 以避免过度读取账号内容。")
+            lines.extend(["", f"### {result['name']}"])
+            if not result["items"]:
+                lines.append("- 暂无条目")
+                if diagnostic.get("empty_hint"):
+                    lines.append(f"- 诊断: {diagnostic['empty_hint']}")
+            for item in result["items"]:
+                enabled = item.get("enabled")
+                enabled_text = "enabled" if enabled is True else "disabled" if enabled is False else "unknown"
+                label = f", label={item['schedule_label']}" if item.get("schedule_label") else ""
+                hour_text = f", hour={item['hour']}" if item.get("hour") is not None else ""
+                timezone_text = f", timezone={item['timezone_name']}" if item.get("timezone_name") else ""
+                lines.append(
+                    f"- {item.get('title') or '(untitled)'} ({item.get('id', '')}) [{enabled_text}]{label}{hour_text}{timezone_text}"
+                )
+            if result["has_more"] and result.get("next_offset") is not None:
+                lines.append(f"- 下一页: offset={result['next_offset']}")
             return [TextContent(type="text", text="\n".join(lines))]
         except Exception as e:
             logger.error(f"定时操作读取失败: {e}")
             return [TextContent(type="text", text=f"❌ 读取定时操作失败: {str(e)}")]
+
+    @mcp.tool(annotations=READS_PRIVATE_REMOTE)
+    async def gemini_get_scheduled_action(
+        action_id: str,
+        response_format: ResponseFormat = "markdown",
+        max_chars_per_field: int = 500,
+    ) -> list[TextContent]:
+        """按 id 读取单个 Gemini Web 定时操作。只读，不修改任务状态。"""
+        clean_id = action_id.strip()
+        if not clean_id:
+            return [TextContent(type="text", text="❌ action_id 不能为空。")]
+
+        client = get_gemini_client()
+        await initialize_client()
+        if not hasattr(client, "_batch_execute"):
+            return [TextContent(type="text", text="❌ 当前客户端不支持定时操作 RPC。")]
+
+        safe_chars = min(max(max_chars_per_field, 40), 4000)
+        try:
+            item, diagnostic = await _fetch_scheduled_task_by_id(client, clean_id, safe_chars)
+            payload = {
+                "ok": item is not None,
+                "id": clean_id,
+                "source_rpc": diagnostic["source_rpc"],
+                "observed": diagnostic["observed"],
+                "diagnostic": diagnostic,
+                "item": item,
+            }
+            if response_format == "json":
+                return [TextContent(type="text", text=json.dumps(payload, ensure_ascii=False, indent=2))]
+
+            if not item:
+                hint = f" {diagnostic['empty_hint']}" if diagnostic.get("empty_hint") else ""
+                return [TextContent(type="text", text=f"未读取到定时操作: {clean_id}.{hint}")]
+            enabled = item.get("enabled")
+            enabled_text = "enabled" if enabled is True else "disabled" if enabled is False else "unknown"
+            label = f"\n计划: {item['schedule_label']}" if item.get("schedule_label") else ""
+            hour_text = f"\n小时: {item['hour']}" if item.get("hour") is not None else ""
+            timezone_text = f"\n时区: {item['timezone_name']}" if item.get("timezone_name") else ""
+            return [
+                TextContent(
+                    type="text",
+                    text=(
+                        f"## Gemini 定时操作\n"
+                        f"ID: {item.get('id', clean_id)}\n"
+                        f"标题: {item.get('title') or '(untitled)'}\n"
+                        f"状态: {enabled_text}{label}{hour_text}{timezone_text}"
+                    ),
+                )
+            ]
+        except Exception as e:
+            logger.error(f"定时操作按 ID 读取失败: {e}")
+            return [TextContent(type="text", text=f"❌ 读取定时操作失败: {str(e)}")]
+
+    @mcp.tool(annotations=MUTATES_REMOTE)
+    async def gemini_create_scheduled_action(
+        title: str,
+        instructions: str,
+        hour: int = 9,
+        timezone_name: str = "Asia/Shanghai",
+        locale: str = "zh-CN",
+        response_format: ResponseFormat = "markdown",
+    ) -> list[TextContent]:
+        """
+        创建 Gemini Web 每日定时操作。
+
+        目前只开放已验证的 daily schedule 契约：每天在指定小时触发。edit/toggle/weekly
+        等变体等待稳定 RPC 证据后再开放。
+        """
+        clean_title = title.strip()
+        clean_instructions = instructions.strip()
+        clean_timezone = timezone_name.strip()
+        clean_locale = locale.strip() or "zh-CN"
+        if not clean_title:
+            return [TextContent(type="text", text="❌ title 不能为空。")]
+        if not clean_instructions:
+            return [TextContent(type="text", text="❌ instructions 不能为空。")]
+        if hour < 0 or hour > 23:
+            return [TextContent(type="text", text="❌ hour 必须在 0 到 23 之间。")]
+        if not clean_timezone:
+            return [TextContent(type="text", text="❌ timezone_name 不能为空。")]
+
+        client = get_gemini_client()
+        await initialize_client()
+        if not hasattr(client, "_batch_execute"):
+            return [TextContent(type="text", text="❌ 当前客户端不支持定时操作 RPC。")]
+
+        try:
+            request_payload = _scheduled_daily_payload(
+                clean_title,
+                clean_instructions,
+                hour,
+                clean_timezone,
+                clean_locale,
+            )
+            response = await client._batch_execute(
+                [_RawRPCData("Jba3ib", request_payload)],
+                source_path="/scheduled",
+                close_on_error=False,
+            )
+            bodies = _extract_rpc_bodies(response.text, "Jba3ib")
+            body = bodies[0] if bodies else []
+            if isinstance(body, list) and body and isinstance(body[0], list):
+                body = body[0]
+            created = _parse_scheduled_action_create_body(body)
+            visible_in_registry = False
+            readable_by_id_after_create = None
+            task_state_after_create = ""
+            task_state_id_after_create = None
+            verification_error = ""
+            get_task_error = ""
+            get_task_diagnostic: dict[str, Any] = {}
+            verification_status = "not_attempted"
+            if created.get("id"):
+                try:
+                    registry_entries, _ = await _fetch_scheduled_registry(client, 400)
+                    visible_in_registry = any(item.get("id") == created.get("id") for item in registry_entries)
+                    if visible_in_registry:
+                        verification_status = "visible_in_registry"
+                    elif registry_entries:
+                        verification_status = "not_visible_in_nonempty_registry"
+                    else:
+                        verification_status = "registry_empty_unverified"
+                except Exception as e:
+                    verification_error = str(e)
+                    verification_status = "verification_error"
+                try:
+                    task_by_id, get_task_diagnostic = await _fetch_scheduled_task_by_id(client, created["id"], 400)
+                    readable_by_id_after_create = task_by_id is not None
+                    if task_by_id:
+                        task_state_after_create = str(task_by_id.get("task_state") or "")
+                        task_state_id_after_create = task_by_id.get("task_state_id")
+                    if readable_by_id_after_create and verification_status == "registry_empty_unverified":
+                        verification_status = "readable_by_id_registry_empty"
+                    elif readable_by_id_after_create and verification_status == "not_visible_in_nonempty_registry":
+                        verification_status = "readable_by_id_not_visible_in_registry"
+                except Exception as e:
+                    get_task_error = str(e)
+            payload = {
+                "ok": response.status_code == 200 and bool(created.get("id")),
+                "id": created.get("id", ""),
+                "title": created.get("title") or clean_title,
+                "instructions": created.get("instructions") or clean_instructions,
+                "schedule_label": created.get("schedule_label", ""),
+                "enabled": created.get("enabled"),
+                "hour": hour,
+                "timezone_name": clean_timezone,
+                "locale": clean_locale,
+                "source_rpc": "Jba3ib",
+                "visible_in_registry": visible_in_registry,
+                "readable_by_id_after_create": readable_by_id_after_create,
+                "task_state_after_create": task_state_after_create,
+                "task_state_id_after_create": task_state_id_after_create,
+                "verification_status": verification_status,
+                "verification_error": verification_error,
+                "get_task_error": get_task_error,
+                "get_task_diagnostic": get_task_diagnostic,
+            }
+            if response_format == "json":
+                return [TextContent(type="text", text=json.dumps(payload, ensure_ascii=False, indent=2))]
+
+            if payload["ok"]:
+                label = f" ({payload['schedule_label']})" if payload.get("schedule_label") else ""
+                if visible_in_registry:
+                    visibility = ""
+                elif readable_by_id_after_create:
+                    visibility = "；按 ID 可读取，但当前 registry 未显示，请核对 Gemini 账号/profile 上下文。"
+                else:
+                    visibility = " ⚠️ 但当前 cookie/session 的列表校验尚未看到它，请用 gemini_list_scheduled_actions 核对账号上下文。"
+                return [
+                    TextContent(
+                        type="text",
+                        text=f"✅ 已创建 Gemini 定时操作: {payload['title']} [{payload['id']}]{label}{visibility}",
+                    )
+                ]
+            return [
+                TextContent(
+                    type="text",
+                    text="⚠️ 创建请求已发送，但未在响应中解析到定时操作 id。请用 gemini_list_scheduled_actions 核对。",
+                )
+            ]
+        except Exception as e:
+            logger.error(f"定时操作创建失败: {e}")
+            return [TextContent(type="text", text=f"❌ 创建定时操作失败: {str(e)}")]
+
+    @mcp.tool(annotations=DESTRUCTIVE_REMOTE)
+    async def gemini_delete_scheduled_action(
+        action_id: str,
+        response_format: ResponseFormat = "markdown",
+    ) -> list[TextContent]:
+        """按 id 删除 Gemini Web 定时操作。不会删除由该定时操作产生的历史对话。"""
+        clean_id = action_id.strip()
+        if not clean_id:
+            return [TextContent(type="text", text="❌ action_id 不能为空。")]
+
+        client = get_gemini_client()
+        await initialize_client()
+        if not hasattr(client, "_batch_execute"):
+            return [TextContent(type="text", text="❌ 当前客户端不支持定时操作 RPC。")]
+
+        try:
+            request_payload = json.dumps([None, [clean_id]], ensure_ascii=False, separators=(",", ":"))
+            response = await client._batch_execute(
+                [_RawRPCData("Q4Gw3c", request_payload)],
+                source_path="/scheduled",
+                close_on_error=False,
+            )
+            bodies = _extract_rpc_bodies(response.text, "Q4Gw3c")
+            visible_after_delete = None
+            readable_by_id_after_delete = None
+            deleted_by_id_after_delete = None
+            task_state_after_delete = ""
+            task_state_id_after_delete = None
+            verification_status = "not_attempted"
+            verification_error = ""
+            get_task_error = ""
+            get_task_diagnostic: dict[str, Any] = {}
+            if bodies:
+                try:
+                    registry_entries, _ = await _fetch_scheduled_registry(client, 400)
+                    visible_after_delete = any(item.get("id") == clean_id for item in registry_entries)
+                    if visible_after_delete:
+                        verification_status = "still_visible_in_registry"
+                    elif registry_entries:
+                        verification_status = "not_visible_in_nonempty_registry"
+                    else:
+                        verification_status = "registry_empty_unverified"
+                except Exception as e:
+                    verification_error = str(e)
+                    verification_status = "verification_error"
+                try:
+                    task_after_delete, get_task_diagnostic = await _fetch_scheduled_task_by_id(client, clean_id, 400)
+                    readable_by_id_after_delete = task_after_delete is not None
+                    if task_after_delete:
+                        task_state_after_delete = str(task_after_delete.get("task_state") or "")
+                        task_state_id_after_delete = task_after_delete.get("task_state_id")
+                    deleted_by_id_after_delete = task_state_id_after_delete == 6
+                    if deleted_by_id_after_delete:
+                        verification_status = "deleted_state_by_id"
+                    elif readable_by_id_after_delete:
+                        if verification_status == "registry_empty_unverified":
+                            verification_status = "registry_empty_active_or_unknown_by_id"
+                        elif verification_status == "not_visible_in_nonempty_registry":
+                            verification_status = "not_visible_active_or_unknown_by_id"
+                    elif verification_status == "registry_empty_unverified":
+                        verification_status = "registry_empty_not_readable_by_id"
+                    elif verification_status == "not_visible_in_nonempty_registry":
+                        verification_status = "not_visible_not_readable_by_id"
+                except Exception as e:
+                    get_task_error = str(e)
+            payload = {
+                "ok": response.status_code == 200 and bool(bodies),
+                "id": clean_id,
+                "source_rpc": "Q4Gw3c",
+                "visible_after_delete": visible_after_delete,
+                "readable_by_id_after_delete": readable_by_id_after_delete,
+                "deleted_by_id_after_delete": deleted_by_id_after_delete,
+                "task_state_after_delete": task_state_after_delete,
+                "task_state_id_after_delete": task_state_id_after_delete,
+                "verification_status": verification_status,
+                "verification_error": verification_error,
+                "get_task_error": get_task_error,
+                "get_task_diagnostic": get_task_diagnostic,
+            }
+            if response_format == "json":
+                return [TextContent(type="text", text=json.dumps(payload, ensure_ascii=False, indent=2))]
+
+            if payload["ok"]:
+                if deleted_by_id_after_delete is True:
+                    return [TextContent(type="text", text=f"✅ 已删除 Gemini 定时操作: {clean_id}；按 ID 校验状态为 deleted。")]
+                if readable_by_id_after_delete is True:
+                    return [
+                        TextContent(
+                            type="text",
+                            text=(
+                                f"⚠️ 删除 RPC 已被 Gemini 接受: {clean_id}；"
+                                f"但按 ID 仍可读取，校验状态: {verification_status}。请在 Gemini UI 中核对。"
+                            ),
+                        )
+                    ]
+                if verification_status in {"not_visible_in_nonempty_registry", "not_visible_not_readable_by_id"}:
+                    return [TextContent(type="text", text=f"✅ 已删除 Gemini 定时操作: {clean_id}")]
+                if verification_status in {"registry_empty_unverified", "registry_empty_not_readable_by_id"}:
+                    return [TextContent(type="text", text=f"✅ 删除请求已被 Gemini 接受: {clean_id}；当前 registry 为空，按 ID 校验状态: {verification_status}。")]
+                return [TextContent(type="text", text=f"✅ 删除请求已被 Gemini 接受: {clean_id}；校验状态: {verification_status}")]
+            return [TextContent(type="text", text=f"⚠️ 删除请求已发送，但响应无法确认: {clean_id}")]
+        except Exception as e:
+            logger.error(f"定时操作删除失败: {e}")
+            return [TextContent(type="text", text=f"❌ 删除定时操作失败: {str(e)}")]
 
     @mcp.tool(annotations=READ_ONLY_REMOTE)
     async def gemini_get_tool_mode_status(

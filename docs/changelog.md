@@ -26,31 +26,41 @@ Gemini MCP Server 版本更新历史记录。
 - 新增 `gemini_probe_web_features`，用浏览器实测到的只读 RPC 探测 Library、公开链接、用量、个性化、记忆导入等新版 Web 入口
 - 新增 `gemini_get_web_capabilities`，返回 Pro 网页模型、思考等级、工具菜单、设置入口和 MCP 覆盖清单
 - 新增 `gemini_list_public_links`、`gemini_get_usage_limits`、`gemini_list_library_capabilities`，把可稳定解析的新版 Web 入口从 probe 升级为只读工具
-- 新增 `gemini_list_scheduled_actions`，只读列出定时操作页面返回的 active/inactive 任务条目
+- 新增 `gemini_list_scheduled_actions`，列出定时操作页面返回的 active/inactive 任务条目
+- 新增 `gemini_get_scheduled_action`，用前端确认的 `kwDCne` / GetTask RPC 按 ID 只读校验定时操作
+- 新增 `gemini_create_scheduled_action` / `gemini_delete_scheduled_action`，支持每日定时操作的创建和按 ID 删除
 - 新增 `gemini_get_tool_mode_status`，只读读取 Canvas / 学习辅导等工具模式附近出现的 Web 内部状态枚举
+- 新增 `gemini_list_research_report_actions` / `gemini_create_from_research_report`，为 Deep Research 完成后的网页实测“创建”菜单提供 MCP 侧等价入口，可生成网页、信息图、测验、抽认卡、音频概览脚本和自定义应用规格；当前未观测到稳定原生网页菜单 mutation RPC
 - `gemini_list_chats` 增加 `offset`、`response_format` 和分页元数据
 - `gemini_list_public_links`、`gemini_list_library_capabilities`、`gemini_list_scheduled_actions`
   和 `gemini_get_tool_mode_status` 增加统一分页元数据，便于 agent 分页读取账号内容
 - 忽略不可达的本地 `GEMINI_PROXY`，避免旧代理端口导致客户端初始化失败
-- 低 token `src.skill_server` 增加 `history`，并扩展 `history` 支持 search/export、`account` 支持 manifest/features/links/usage/library
+- 从 Chrome 读取 Cookie 时验证多个本地 profile，隔离 gemini_webapi cookie cache，
+  并优先选择能读取 scheduled registry 的 profile
+- 新增 `gemini_list_browser_cookie_profiles`，用于列出 Chrome profile 的非敏感账号
+  诊断；`gemini_get_cookie_from_browser` 支持 `profile` 参数，便于手动对齐多账号上下文
+- `gemini_list_browser_cookie_profiles` 增加 `chrome_selected_profile` 诊断；定时操作
+  create/delete 增加 `verification_status`、by-id 可读性和 `task_state` 校验，区分 RPC 已接受、registry 已验证和 deleted tombstone
+- 低 token `src.skill_server` 增加 `history` 和 `scheduled`，其中 `scheduled` 支持 list/get/create/delete；并扩展 `history` 支持 search/export、`account` 支持 manifest/features/links/usage/library
 - 新增项目内 Codex skill：`.codex/skills/gemini-web-mcp`，用于指导 agent 安全使用 manifest、聊天记录和验证流程
 
 ### 工具面收缩
 - 新默认工具组改为 `core`
 - `all` 现在聚焦高价值 AI 工作流，不再默认加载本地提示词工具
 - 移除 `gemini_list_features`，减少低价值枚举型工具
-- 当前默认工具面为 16 个工具：`core` 加始终可用的 `gemini_get_tool_manifest`；`all` 额外提供
+- 当前默认工具面为 `core` 加始终可用的 manifest/cookie helpers；`all` 额外提供
   `gemini_inspect_account`、`gemini_list_chats`、`gemini_search_chats`、
   `gemini_read_chat`、`gemini_export_chat`、`gemini_delete_chat`、
   `gemini_get_web_capabilities`、`gemini_probe_web_features`、`gemini_list_public_links`、
   `gemini_get_usage_limits`、`gemini_list_library_capabilities`、
-  `gemini_list_scheduled_actions`、`gemini_get_tool_mode_status`、
+  `gemini_list_scheduled_actions`、`gemini_get_scheduled_action`、`gemini_create_scheduled_action`、
+  `gemini_delete_scheduled_action`、`gemini_get_tool_mode_status`、
   `gemini_list_models`、`gemini_manage_gems`
 - `gemini_manage_prompts` 保留为 `prompts` 可选分组，不属于默认工具面
 
 ### 文档与验证
 - 补充 Gemini Web live UI 覆盖说明和媒体路由说明
-- 新增 `evaluations/gemini_web_mcp_contract.xml`，提供 10 个只读、稳定答案的 MCP contract evaluation
+- 新增 `evaluations/gemini_web_mcp_contract.xml`，提供 11 个只读、稳定答案的 MCP contract evaluation
 - 扩展测试以校验媒体后端分流、学习模式请求注入、工具 annotations、evaluation XML、Codex skill 和默认工具面
 
 ---

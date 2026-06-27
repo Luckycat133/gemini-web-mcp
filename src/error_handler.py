@@ -3,6 +3,7 @@
 """
 
 import logging
+import functools
 from typing import Optional, Dict, Any
 from mcp.types import TextContent
 
@@ -124,6 +125,7 @@ def wrap_tool_error(func):
     """
     装饰器：自动捕获并处理工具执行错误
     """
+    @functools.wraps(func)
     async def wrapper(*args, **kwargs):
         try:
             return await func(*args, **kwargs)

@@ -7,3 +7,6 @@ __pycache__/
 cookies.json
 prompts.json
 *.log
+.DS_Store
+artifacts/
+generated_media/

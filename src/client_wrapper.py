@@ -1,15 +1,21 @@
 """
-Gemini 客户端封装 - 线程安全版本
+Gemini 客户端封装 - 门面模式
+提供统一的向后兼容接口，内部委托给专门的管理类
 """
 
-import asyncio
 import os
-import socket
-import time
-import threading
 import logging
 from typing import Optional, Dict, Any, List
-from urllib.parse import urlparse
+
+from .client_manager import (
+    ClientManager,
+    validate_config,
+    get_configured_proxy,
+    get_default_chat_retention_seconds,
+    prepare_browser_cookie_cache as _prepare_browser_cookie_cache,
+)
+from .session_manager import SessionManager, SessionData
+from .remote_chat_cleanup_manager import RemoteChatCleanupManager
 
 logger = logging.getLogger(__name__)
 
@@ -20,22 +26,169 @@ except ImportError:
     COOKIE_MANAGER_AVAILABLE = False
     logger.warning("cookie_manager 模块不可用")
 
-_client: Optional[Any] = None
-_initialized: bool = False
-_client_lock = threading.Lock()
-_sessions: Dict[str, Dict[str, Any]] = {}
-_sessions_lock = threading.Lock()
-_remote_chat_cleanup_lock = threading.Lock()
-_pending_remote_chat_cleanup: Dict[str, Dict[str, Any]] = {}
+# 全局管理器实例
+_client_manager = ClientManager()
+_session_manager = SessionManager()
+_cleanup_manager = RemoteChatCleanupManager(
+    client_provider=lambda: _client_manager.get_client(),
+    retention_provider=get_default_chat_retention_seconds,
+)
 
 
-def validate_config() -> None:
-    """验证必需的环境变量"""
-    required = ["GEMINI_PSID"]
-    missing = [var for var in required if not os.environ.get(var)]
-    if missing:
-        raise ValueError(f"缺少必需的环境变量: {', '.join(missing)}")
+def _session_data_to_dict(data: Optional[SessionData]) -> Optional[Dict[str, Any]]:
+    """将 SessionData 转换为字典以保持向后兼容"""
+    if data is None:
+        return None
+    return {
+        "session": data.session,
+        "model": data.model,
+        "thinking_level": data.thinking_level,
+        "learning_mode": data.learning_mode,
+        "temporary": data.temporary,
+        "created_at": data.created_at,
+        "retain_chat": data.retain_chat,
+        "delete_after_seconds": data.delete_after_seconds,
+    }
 
+
+# ============ 客户端管理接口 ============
+
+def get_gemini_client() -> Any:
+    """获取或初始化 GeminiClient 实例"""
+    return _client_manager.get_client()
+
+
+async def initialize_client() -> Any:
+    """完成客户端初始化"""
+    return await _client_manager.initialize()
+
+
+def reset_client() -> None:
+    """重置客户端"""
+    _client_manager.reset()
+    _session_manager.clear_sessions()
+
+
+# ============ 会话管理接口 ============
+
+def store_session(
+    session_id: str,
+    session: Any,
+    model: str = "flash",
+    thinking_level: str = "standard",
+    learning_mode: Optional[str] = None,
+    temporary: bool = False,
+    retain_chat: bool = False,
+    delete_after_seconds: Optional[int] = None,
+) -> None:
+    """存储会话"""
+    _session_manager.store_session(
+        session_id,
+        session,
+        model,
+        thinking_level=thinking_level,
+        learning_mode=learning_mode,
+        temporary=temporary,
+        retain_chat=retain_chat,
+        delete_after_seconds=delete_after_seconds,
+    )
+
+
+def get_session(session_id: str) -> Optional[Dict[str, Any]]:
+    """获取存储的会话"""
+    return _session_data_to_dict(_session_manager.get_session(session_id))
+
+
+def remove_session(session_id: str) -> None:
+    """移除会话"""
+    _session_manager.remove_session(session_id)
+
+
+def pop_session(session_id: str) -> Optional[Dict[str, Any]]:
+    """移除并返回会话数据。"""
+    return _session_data_to_dict(_session_manager.pop_session(session_id))
+
+
+def clear_sessions() -> None:
+    """清空所有会话"""
+    _session_manager.clear_sessions()
+
+
+def cleanup_expired_sessions() -> None:
+    """清理过期会话。"""
+    _session_manager.cleanup_expired_sessions()
+
+
+def list_sessions() -> Dict[str, Dict[str, Any]]:
+    """获取所有会话"""
+    sessions = _session_manager.list_sessions()
+    return {
+        sid: _session_data_to_dict(data)
+        for sid, data in sessions.items()
+    }
+
+
+# ============ 远程聊天清理接口 ============
+
+def schedule_remote_chat_cleanup_from_response(
+    response: Any,
+    retain_chat: bool = False,
+    delete_after_seconds: Optional[int] = None,
+    source: str = "",
+) -> Optional[str]:
+    """登记 response 产生的远端 chat，默认稍后自动删除。"""
+    return _cleanup_manager.schedule_cleanup_from_response(
+        response,
+        retain_chat=retain_chat,
+        delete_after_seconds=delete_after_seconds,
+        source=source,
+    )
+
+
+def schedule_remote_chat_cleanup(
+    cid: Optional[str],
+    retain_chat: bool = False,
+    delete_after_seconds: Optional[int] = None,
+    source: str = "",
+) -> None:
+    """登记远端 Gemini chat 的自动删除任务。"""
+    _cleanup_manager.schedule_cleanup(
+        cid,
+        retain_chat=retain_chat,
+        delete_after_seconds=delete_after_seconds,
+        source=source,
+    )
+
+
+async def delete_remote_chat(cid: Optional[str], client: Any = None) -> bool:
+    """立即删除远端 Gemini chat。"""
+    if client is None:
+        client = get_gemini_client()
+        await initialize_client()
+    return await _cleanup_manager.delete_chat(cid, client=client)
+
+
+async def cleanup_due_remote_chats(client: Any = None) -> int:
+    """清理已经到期的远端 Gemini chat。"""
+    if client is None:
+        client = get_gemini_client()
+        await initialize_client()
+    return await _cleanup_manager.cleanup_due_chats(client=client)
+
+
+def list_pending_remote_chat_cleanup() -> Dict[str, Dict[str, Any]]:
+    """返回待自动删除的远端 chat。"""
+    pending = _cleanup_manager.list_pending_cleanup()
+    return {
+        cid: {
+            "delete_at": data.delete_at,
+            "source": data.source,
+        }
+        for cid, data in pending.items()
+    }
+
+
+# ============ Cookie 管理接口 ============
 
 def _on_cookie_update(cookie_data: CookieData) -> None:
     """Cookie 更新回调"""
@@ -56,20 +209,24 @@ def init_cookie_manager_integration() -> None:
     logger.info("✅ Cookie Manager 集成已初始化")
 
 
-def get_cookie_from_browser(browser: str = "chrome") -> bool:
+def get_cookie_from_browser(browser: str = "chrome", profile: str = "") -> bool:
     """从浏览器获取 Cookie"""
     if not COOKIE_MANAGER_AVAILABLE:
         logger.error("❌ Cookie Manager 不可用")
         return False
+    _prepare_browser_cookie_cache(force=True)
     cm = get_cookie_manager()
-    cookies = cm.get_cookies_from_browser(browser)
+    cookies = cm.get_cookies_from_browser(browser, profile=profile)
     psid = cookies.get("__Secure-1PSID")
     psidts = cookies.get("__Secure-1PSIDTS", "")
     if psid:
+        source = f"browser_{browser}"
+        if profile:
+            source += f":{profile}"
         success = cm.update_cookie(
             psid,
             psidts,
-            source=f"browser_{browser}",
+            source=source,
             extra_cookies=cookies,
         )
         if success:
@@ -81,14 +238,13 @@ def get_cookie_from_browser(browser: str = "chrome") -> bool:
     return False
 
 
-def _get_extra_cookies() -> Dict[str, str]:
-    """获取当前 Cookie Manager 中的完整认证 Cookie。"""
+def list_browser_cookie_profiles(browser: str = "chrome", validate: bool = True) -> list[dict[str, Any]]:
+    """List local browser cookie profile diagnostics without exposing cookie values."""
     if not COOKIE_MANAGER_AVAILABLE:
-        return {}
-    cookie_data = get_cookie_manager().get_cookie()
-    if not cookie_data:
-        return {}
-    return cookie_data.extra_cookies
+        return [{"browser": browser, "error": "Cookie Manager unavailable"}]
+    if validate:
+        _prepare_browser_cookie_cache(force=True)
+    return get_cookie_manager().list_browser_cookie_profiles(browser, validate=validate)
 
 
 def get_cookie_status() -> Dict[str, Any]:
@@ -99,133 +255,7 @@ def get_cookie_status() -> Dict[str, Any]:
     return {"available": True, "status": status.value, **info}
 
 
-def get_default_chat_retention_seconds() -> int:
-    """远端 Gemini 对话默认保留时间。"""
-    raw_value = os.environ.get("GEMINI_CHAT_RETENTION_SECONDS", "1800")
-    try:
-        return max(0, int(raw_value))
-    except ValueError:
-        logger.warning(f"无效的 GEMINI_CHAT_RETENTION_SECONDS={raw_value!r}，使用 1800 秒")
-        return 1800
-
-
-def get_configured_proxy() -> Optional[str]:
-    """Return a usable proxy, ignoring stale local proxy endpoints."""
-    proxy = os.environ.get("GEMINI_PROXY", "").strip()
-    if not proxy:
-        return None
-
-    parsed = urlparse(proxy if "://" in proxy else f"http://{proxy}")
-    host = parsed.hostname
-    port = parsed.port
-    if host in {"127.0.0.1", "localhost", "::1"} and port:
-        try:
-            with socket.create_connection((host, port), timeout=0.25):
-                pass
-        except OSError:
-            logger.warning("GEMINI_PROXY=%s is not reachable; continuing without proxy", proxy)
-            return None
-    return proxy
-
-
-def get_gemini_client() -> Any:
-    """获取或初始化 GeminiClient 实例"""
-    global _client
-    with _client_lock:
-        if _client is None:
-            validate_config()
-            try:
-                from .thinking_client import ThinkingLevelGeminiClient
-            except ImportError:
-                raise ImportError("请先安装 gemini-webapi")
-            psid = os.environ.get("GEMINI_PSID")
-            psidts = os.environ.get("GEMINI_PSIDTS", "")
-            proxy = get_configured_proxy()
-            logger.info("正在初始化 GeminiClient...")
-            _client = ThinkingLevelGeminiClient(psid, psidts, proxy=proxy)
-            extra_cookies = _get_extra_cookies()
-            if extra_cookies:
-                _client.cookies = extra_cookies
-                logger.info(f"已加载 {len(extra_cookies)} 个完整认证 Cookie")
-    return _client
-
-
-async def initialize_client() -> Any:
-    """完成客户端初始化"""
-    global _client, _initialized
-    client = get_gemini_client()
-    if not _initialized:
-        logger.info("正在调用 client.init()...")
-        await client.init(
-            timeout=30,
-            auto_close=False,
-            auto_refresh=os.environ.get("GEMINI_AUTO_REFRESH", "true").lower() == "true"
-        )
-        with _client_lock:
-            _initialized = True
-        logger.info("✅ GeminiClient 初始化完成！")
-    return client
-
-
-def _clean_expired_sessions() -> None:
-    """清理过期会话（内部函数，需在锁内调用）"""
-    now = time.time()
-    max_age = 1800
-    expired = [sid for sid, data in _sessions.items() if now - data["created_at"] > max_age]
-    for sid in expired:
-        del _sessions[sid]
-    if expired:
-        logger.info(f"清理了 {len(expired)} 个过期会话")
-
-
-def cleanup_expired_sessions() -> None:
-    """清理过期会话。"""
-    with _sessions_lock:
-        _clean_expired_sessions()
-
-
-def get_session(session_id: str) -> Optional[Dict[str, Any]]:
-    """获取存储的会话"""
-    with _sessions_lock:
-        _clean_expired_sessions()
-        return _sessions.get(session_id)
-
-
-def remove_session(session_id: str) -> None:
-    """移除会话"""
-    with _sessions_lock:
-        if session_id in _sessions:
-            del _sessions[session_id]
-
-
-def pop_session(session_id: str) -> Optional[Dict[str, Any]]:
-    """移除并返回会话数据。"""
-    with _sessions_lock:
-        return _sessions.pop(session_id, None)
-
-
-def clear_sessions() -> None:
-    """清空所有会话"""
-    with _sessions_lock:
-        _sessions.clear()
-
-
-def reset_client() -> None:
-    """重置客户端"""
-    global _client, _initialized
-    with _client_lock:
-        _client = None
-        _initialized = False
-    clear_sessions()
-    logger.info("✅ 客户端已重置")
-
-
-def list_sessions() -> Dict[str, Dict[str, Any]]:
-    """获取所有会话"""
-    with _sessions_lock:
-        _clean_expired_sessions()
-        return _sessions.copy()
-
+# ============ 工具函数接口 ============
 
 def load_images(image_paths: List[str]) -> List[Any]:
     """安全加载图片"""
@@ -245,136 +275,3 @@ def load_images(image_paths: List[str]) -> List[Any]:
     except Exception as e:
         logger.error(f"加载图片出错: {e}")
     return images
-
-
-def store_session(
-    session_id: str,
-    session: Any,
-    model: str = "flash",
-    thinking_level: str = "standard",
-    learning_mode: Optional[str] = None,
-    temporary: bool = False,
-    retain_chat: bool = False,
-    delete_after_seconds: Optional[int] = None,
-) -> None:
-    """存储会话"""
-    with _sessions_lock:
-        _sessions[session_id] = {
-            "session": session,
-            "model": model,
-            "thinking_level": thinking_level,
-            "learning_mode": learning_mode,
-            "temporary": temporary,
-            "created_at": time.time(),
-            "retain_chat": retain_chat,
-            "delete_after_seconds": delete_after_seconds,
-        }
-
-
-def _extract_remote_chat_id(obj: Any) -> Optional[str]:
-    """从 Gemini response/chat/session 对象中提取远端 chat id。"""
-    cid = getattr(obj, "cid", None)
-    if isinstance(cid, str) and cid.startswith("c_"):
-        return cid
-
-    metadata = getattr(obj, "metadata", None)
-    if isinstance(metadata, list) and metadata:
-        cid = metadata[0]
-        if isinstance(cid, str) and cid.startswith("c_"):
-            return cid
-
-    return None
-
-
-def schedule_remote_chat_cleanup_from_response(
-    response: Any,
-    retain_chat: bool = False,
-    delete_after_seconds: Optional[int] = None,
-    source: str = "",
-) -> Optional[str]:
-    """登记 response 产生的远端 chat，默认稍后自动删除。"""
-    cid = _extract_remote_chat_id(response)
-    if cid:
-        schedule_remote_chat_cleanup(
-            cid,
-            retain_chat=retain_chat,
-            delete_after_seconds=delete_after_seconds,
-            source=source,
-        )
-    return cid
-
-
-def schedule_remote_chat_cleanup(
-    cid: Optional[str],
-    retain_chat: bool = False,
-    delete_after_seconds: Optional[int] = None,
-    source: str = "",
-) -> None:
-    """登记远端 Gemini chat 的自动删除任务。"""
-    if not cid or retain_chat:
-        return
-
-    ttl = get_default_chat_retention_seconds() if delete_after_seconds is None else max(0, delete_after_seconds)
-    delete_at = time.time() + ttl
-    with _remote_chat_cleanup_lock:
-        _pending_remote_chat_cleanup[cid] = {
-            "delete_at": delete_at,
-            "source": source,
-        }
-
-    try:
-        loop = asyncio.get_running_loop()
-    except RuntimeError:
-        return
-    loop.create_task(_delete_remote_chat_after_delay(cid, delete_at))
-
-
-async def _delete_remote_chat_after_delay(cid: str, delete_at: float) -> None:
-    await asyncio.sleep(max(0, delete_at - time.time()))
-    with _remote_chat_cleanup_lock:
-        pending = _pending_remote_chat_cleanup.get(cid)
-        if not pending or pending.get("delete_at") != delete_at:
-            return
-    await delete_remote_chat(cid)
-
-
-async def delete_remote_chat(cid: Optional[str], client: Any = None) -> bool:
-    """立即删除远端 Gemini chat。"""
-    if not cid:
-        return False
-    client = client or get_gemini_client()
-    await initialize_client()
-    if not hasattr(client, "delete_chat"):
-        logger.warning("当前 GeminiClient 不支持 delete_chat")
-        return False
-    try:
-        await client.delete_chat(cid)
-    except Exception as e:
-        logger.warning(f"删除远端 Gemini 对话失败 {cid}: {e}")
-        return False
-    with _remote_chat_cleanup_lock:
-        _pending_remote_chat_cleanup.pop(cid, None)
-    logger.info(f"已删除远端 Gemini 对话: {cid}")
-    return True
-
-
-async def cleanup_due_remote_chats(client: Any = None) -> int:
-    """清理已经到期的远端 Gemini chat。"""
-    now = time.time()
-    with _remote_chat_cleanup_lock:
-        due_cids = [
-            cid
-            for cid, data in _pending_remote_chat_cleanup.items()
-            if data.get("delete_at", 0) <= now
-        ]
-    deleted = 0
-    for cid in due_cids:
-        if await delete_remote_chat(cid, client=client):
-            deleted += 1
-    return deleted
-
-
-def list_pending_remote_chat_cleanup() -> Dict[str, Dict[str, Any]]:
-    """返回待自动删除的远端 chat。"""
-    with _remote_chat_cleanup_lock:
-        return dict(_pending_remote_chat_cleanup)

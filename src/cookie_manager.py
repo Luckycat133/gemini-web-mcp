@@ -3,12 +3,16 @@ Cookie 管理模块 - 自动刷新、监控和浏览器Cookie获取
 """
 
 import os
+import sys
 import time
 import threading
 import logging
-from typing import Optional, Dict, Tuple, Callable
+import asyncio
+import json
+from typing import Optional, Dict, Tuple, Callable, Any
 from dataclasses import dataclass, field
 from enum import Enum
+from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
@@ -96,22 +100,38 @@ class CookieManager:
         return cookies
 
     @staticmethod
-    def get_cookies_from_browser(browser: str = "chrome") -> Dict[str, str]:
-        """从浏览器获取 Gemini 所需的完整 Google 认证 Cookie。"""
-        cookie_names = {
+    def _google_cookie_names() -> set[str]:
+        return {
             "__Secure-1PSID",
             "__Secure-1PSIDTS",
             "__Secure-1PSIDCC",
+            "__Secure-1PAPISID",
             "__Secure-3PSID",
             "__Secure-3PSIDTS",
             "__Secure-3PSIDCC",
+            "__Secure-3PAPISID",
+            "__Secure-BUCKET",
             "SID",
+            "SIDCC",
             "HSID",
             "SSID",
             "APISID",
             "SAPISID",
             "NID",
+            "AEC",
+            "COMPASS",
+            "GCL_AW_P",
+            "SEARCH_SAMESITE",
+            "_ga",
+            "_ga_BF8Q35BMLM",
+            "_ga_WC57KJ50ZZ",
+            "_gcl_au",
         }
+
+    @staticmethod
+    def get_cookies_from_browser(browser: str = "chrome", profile: str = "") -> Dict[str, str]:
+        """从浏览器获取 Gemini 所需的完整 Google 认证 Cookie。"""
+        cookie_names = CookieManager._google_cookie_names()
 
         try:
             import browser_cookie3
@@ -134,22 +154,29 @@ class CookieManager:
 
         try:
             logger.info(f"🔍 正在从 {browser} 浏览器获取 Cookie...")
-            cj = cookie_functions[browser](domain_name="google.com")
-            cookies: Dict[str, str] = {}
-
-            for cookie in cj:
-                if cookie.name not in cookie_names or not cookie.value:
-                    continue
-                if cookie.domain not in {".google.com", "google.com"}:
-                    continue
-                cookies[cookie.name] = cookie.value
-                if cookie.name in {"__Secure-1PSID", "__Secure-1PSIDTS"}:
-                    logger.info(f"✅ 获取到 {cookie.name}")
+            candidates = CookieManager._browser_cookie_candidates(
+                browser_cookie3,
+                browser,
+                cookie_functions[browser],
+                cookie_names,
+            )
+            if profile and candidates:
+                cookies = CookieManager._select_named_cookie_candidate(candidates, profile)
+            elif not candidates:
+                cookies = CookieManager._read_cookie_jar(
+                    cookie_functions[browser](domain_name="google.com"),
+                    cookie_names,
+                )
+            else:
+                cookies = CookieManager._select_valid_cookie_candidate(candidates)
 
             if not cookies.get("__Secure-1PSID"):
                 logger.warning("⚠️ 未在浏览器中找到有效的 Cookie")
                 return {}
 
+            for name in ("__Secure-1PSID", "__Secure-1PSIDTS"):
+                if name in cookies:
+                    logger.info(f"✅ 获取到 {name}")
             logger.info(f"✅ 已获取 {len(cookies)} 个 Google 认证 Cookie")
             return cookies
         except Exception as e:
@@ -157,7 +184,292 @@ class CookieManager:
             return {}
 
     @staticmethod
-    def get_cookie_from_browser(browser: str = "chrome") -> Tuple[Optional[str], Optional[str]]:
+    def list_browser_cookie_profiles(browser: str = "chrome", validate: bool = True) -> list[dict[str, object]]:
+        """Return browser cookie profile diagnostics without exposing cookie values."""
+        cookie_names = CookieManager._google_cookie_names()
+
+        try:
+            import browser_cookie3
+        except ImportError:
+            return [{"browser": browser, "error": "browser-cookie3 not installed"}]
+
+        cookie_functions = {
+            "chrome": browser_cookie3.chrome,
+            "firefox": browser_cookie3.firefox,
+            "edge": browser_cookie3.edge,
+            "opera": browser_cookie3.opera,
+            "brave": browser_cookie3.brave,
+        }
+        if browser not in cookie_functions:
+            return [{"browser": browser, "error": f"unsupported browser: {browser}"}]
+
+        candidates = CookieManager._browser_cookie_candidates(
+            browser_cookie3,
+            browser,
+            cookie_functions[browser],
+            cookie_names,
+            require_psid=False,
+        )
+        if not candidates:
+            try:
+                cookies = CookieManager._read_cookie_jar(
+                    cookie_functions[browser](domain_name="google.com"),
+                    cookie_names,
+                )
+            except Exception as e:
+                return [{"browser": browser, "error": str(e)}]
+            candidates = [("auto", cookies)] if cookies else []
+
+        selected_profile = CookieManager._chrome_selected_profile_directory() if browser == "chrome" else ""
+        profiles = [
+            {
+                "browser": browser,
+                "profile": profile_name,
+                "chrome_selected_profile": bool(selected_profile and profile_name == selected_profile),
+                "chrome_selected_profile_directory": selected_profile,
+                "has_psid": bool(cookies.get("__Secure-1PSID")),
+                "has_psidts": bool(cookies.get("__Secure-1PSIDTS")),
+                "cookie_count": len(cookies),
+            }
+            for profile_name, cookies in candidates
+        ]
+        if validate and candidates:
+            validation_candidates = [(name, cookies) for name, cookies in candidates if cookies.get("__Secure-1PSID")]
+            validation = CookieManager._validate_cookie_candidate_profiles(validation_candidates)
+            validation_by_profile = {item["profile"]: item for item in validation}
+            for profile in profiles:
+                profile.update(validation_by_profile.get(profile["profile"], {}))
+        return profiles
+
+    @staticmethod
+    def _read_cookie_jar(cookie_jar, cookie_names: set[str]) -> Dict[str, str]:
+        cookies: Dict[str, str] = {}
+        for cookie in cookie_jar:
+            if cookie.name not in cookie_names or not cookie.value:
+                continue
+            if cookie.domain != "google.com" and not cookie.domain.endswith(".google.com"):
+                continue
+            cookies[cookie.name] = cookie.value
+        return cookies
+
+    @staticmethod
+    def _chrome_base_path() -> Optional[Path]:
+        """返回当前平台的 Chrome 用户数据目录路径。"""
+        if sys.platform == "darwin":
+            return Path.home() / "Library/Application Support/Google/Chrome"
+        elif sys.platform == "win32":
+            return Path.home() / "AppData/Local/Google/Chrome/User Data"
+        else:
+            return Path.home() / ".config/google-chrome"
+
+    @staticmethod
+    def _browser_cookie_candidates(
+        browser_cookie3,
+        browser: str,
+        cookie_function,
+        cookie_names: set[str],
+        require_psid: bool = True,
+    ) -> list[tuple[str, Dict[str, str]]]:
+        if browser != "chrome":
+            return []
+
+        base = CookieManager._chrome_base_path()
+        if base is None:
+            return []
+        paths = [base / "Default/Cookies", *sorted(base.glob("Profile */Cookies"))]
+        candidates: list[tuple[str, Dict[str, str]]] = []
+        try:
+            cookies = CookieManager._read_cookie_jar(cookie_function(domain_name="google.com"), cookie_names)
+            if cookies.get("__Secure-1PSID"):
+                candidates.append(("auto", cookies))
+        except Exception as e:
+            logger.debug("跳过 Chrome auto cookie: %s", e)
+
+        for path in paths:
+            if not path.exists():
+                continue
+            try:
+                cookies = CookieManager._read_cookie_jar(
+                    browser_cookie3.chrome(cookie_file=str(path), domain_name="google.com"),
+                    cookie_names,
+                )
+            except Exception as e:
+                logger.debug("跳过 Chrome profile cookie %s: %s", path.parent.name, e)
+                continue
+            if cookies.get("__Secure-1PSID") or not require_psid:
+                candidates.append((path.parent.name, cookies))
+
+        if not candidates:
+            return []
+        return candidates
+
+    @staticmethod
+    def _chrome_selected_profile_directory() -> str:
+        base = CookieManager._chrome_base_path()
+        if base is None:
+            return ""
+        local_state = base / "Local State"
+        try:
+            data = json.loads(local_state.read_text())
+        except Exception:
+            return ""
+        profile_info = data.get("profile") if isinstance(data, dict) else {}
+        if not isinstance(profile_info, dict):
+            return ""
+        selected = profile_info.get("last_used") or profile_info.get("last_active_profiles")
+        if isinstance(selected, str):
+            return selected
+        if isinstance(selected, list) and selected and isinstance(selected[0], str):
+            return selected[0]
+        return ""
+
+    @staticmethod
+    def _select_valid_cookie_candidate(candidates: list[tuple[str, Dict[str, str]]]) -> Dict[str, str]:
+        if len(candidates) == 1:
+            return candidates[0][1]
+
+        result: dict[str, Dict[str, str]] = {}
+
+        def validate_worker() -> None:
+            result["cookies"] = asyncio.run(CookieManager._validate_cookie_candidates_async(candidates))
+
+        thread = threading.Thread(target=validate_worker)
+        thread.start()
+        thread.join(timeout=45)
+        cookies = result.get("cookies")
+        if cookies:
+            return cookies
+
+        logger.warning("⚠️ 无法验证 Chrome profile，使用第一个可读取的 Cookie 候选")
+        return candidates[0][1]
+
+    @staticmethod
+    def _select_named_cookie_candidate(candidates: list[tuple[str, Dict[str, str]]], profile: str) -> Dict[str, str]:
+        requested = profile.strip().lower()
+        for profile_name, cookies in candidates:
+            if profile_name.lower() == requested:
+                logger.info("✅ 使用指定 Chrome profile: %s", profile_name)
+                return cookies
+        logger.warning("⚠️ 未找到指定 Chrome profile: %s", profile)
+        return {}
+
+    @staticmethod
+    def _validate_cookie_candidate_profiles(candidates: list[tuple[str, Dict[str, str]]]) -> list[dict[str, object]]:
+        result: dict[str, list[dict[str, object]]] = {}
+
+        def validate_worker() -> None:
+            result["profiles"] = asyncio.run(CookieManager._validate_cookie_candidate_profiles_async(candidates))
+
+        thread = threading.Thread(target=validate_worker)
+        thread.start()
+        thread.join(timeout=45)
+        return result.get("profiles", [])
+
+    @staticmethod
+    async def _validate_cookie_candidates_async(candidates: list[tuple[str, Dict[str, str]]]) -> Dict[str, str]:
+        try:
+            from gemini_webapi import GeminiClient
+            from gemini_webapi.constants import AccountStatus
+        except Exception:
+            return {}
+
+        first_available: Dict[str, str] = {}
+        for profile_name, cookies in candidates:
+            client = GeminiClient(cookies.get("__Secure-1PSID"), cookies.get("__Secure-1PSIDTS", ""))
+            client.cookies = cookies
+            try:
+                await client.init(timeout=15, auto_close=False, auto_refresh=False)
+                if getattr(client, "account_status", None) != AccountStatus.AVAILABLE:
+                    logger.debug("Chrome profile %s 的 Gemini 账号状态不可用", profile_name)
+                    continue
+                if not first_available:
+                    first_available = cookies
+                scheduled_count = await CookieManager._probe_scheduled_registry_count(client)
+                if scheduled_count > 0:
+                    logger.info("✅ Chrome profile %s 的 Gemini Cookie 验证通过，定时操作 %s 条", profile_name, scheduled_count)
+                    return cookies
+                logger.debug("Chrome profile %s 可用，但定时操作 registry 为空", profile_name)
+            except Exception as e:
+                logger.debug("Chrome profile %s 的 Gemini Cookie 验证失败: %s", profile_name, e)
+            finally:
+                try:
+                    await client.close()
+                except Exception:
+                    pass
+        if first_available:
+            logger.info("✅ Chrome profile Cookie 验证通过，但未发现定时操作 registry，使用首个可用账号")
+        return first_available
+
+    @staticmethod
+    async def _validate_cookie_candidate_profiles_async(candidates: list[tuple[str, Dict[str, str]]]) -> list[dict[str, object]]:
+        try:
+            from gemini_webapi import GeminiClient
+            from gemini_webapi.constants import AccountStatus
+        except Exception as e:
+            return [{"profile": profile_name, "validation_error": str(e)} for profile_name, _ in candidates]
+
+        profiles: list[dict[str, object]] = []
+        for profile_name, cookies in candidates:
+            info: dict[str, object] = {
+                "profile": profile_name,
+                "account_available": False,
+                "scheduled_registry_count": 0,
+            }
+            client = GeminiClient(cookies.get("__Secure-1PSID"), cookies.get("__Secure-1PSIDTS", ""))
+            client.cookies = cookies
+            try:
+                await client.init(timeout=15, auto_close=False, auto_refresh=False)
+                status = getattr(client, "account_status", None)
+                info["account_status"] = str(status)
+                info["account_available"] = status == AccountStatus.AVAILABLE
+                if info["account_available"]:
+                    info["scheduled_registry_count"] = await CookieManager._probe_scheduled_registry_count(client)
+                    info["language"] = getattr(client, "language", "")
+                    info["build_label"] = getattr(client, "build_label", "")
+            except Exception as e:
+                info["validation_error"] = str(e)
+            finally:
+                try:
+                    await client.close()
+                except Exception:
+                    pass
+            profiles.append(info)
+        return profiles
+
+    @staticmethod
+    async def _probe_scheduled_registry_count(client) -> int:
+        try:
+            from gemini_webapi.types import RPCData
+            from gemini_webapi.utils import extract_json_from_response, get_nested_value
+        except Exception:
+            return 0
+
+        previous_language = getattr(client, "language", None)
+        try:
+            client.language = "zh-CN"
+            response = await client._batch_execute(
+                [RPCData("XPSWpd", "[]")],
+                source_path="/scheduled",
+                close_on_error=False,
+            )
+            for part in extract_json_from_response(response.text):
+                if get_nested_value(part, [0]) != "wrb.fr":
+                    continue
+                if get_nested_value(part, [1]) != "XPSWpd":
+                    continue
+                body = get_nested_value(part, [2])
+                if isinstance(body, str):
+                    parsed = json.loads(body)
+                    return len(parsed[0]) if isinstance(parsed, list) and parsed and isinstance(parsed[0], list) else 0
+        except Exception as e:
+            logger.debug("Chrome profile 定时操作 registry 探测失败: %s", e)
+        finally:
+            if previous_language:
+                client.language = previous_language
+        return 0
+
+    @staticmethod
+    def get_cookie_from_browser(browser: str = "chrome", profile: str = "") -> Tuple[Optional[str], Optional[str]]:
         """
         从浏览器自动获取 Cookie
 
@@ -167,7 +479,7 @@ class CookieManager:
         Returns:
             (psid, psidts) 元组
         """
-        cookies = CookieManager.get_cookies_from_browser(browser)
+        cookies = CookieManager.get_cookies_from_browser(browser, profile=profile)
         return cookies.get("__Secure-1PSID"), cookies.get("__Secure-1PSIDTS")
 
     def update_cookie(
@@ -221,7 +533,7 @@ class CookieManager:
         with self._lock:
             return self._cookie_data
 
-    def get_cookie_status(self) -> Tuple[CookieStatus, Dict[str, any]]:
+    def get_cookie_status(self) -> Tuple[CookieStatus, Dict[str, Any]]:
         """
         获取 Cookie 状态
         

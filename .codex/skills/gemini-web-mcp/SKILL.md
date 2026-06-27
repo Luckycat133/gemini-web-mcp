@@ -13,7 +13,7 @@ Use this skill for this repository's Gemini Web MCP server and low-token skill s
 2. Check `current_enabled` before assuming a tool can be called in the current MCP process.
 3. Prefer read-only tools first: `gemini_get_tool_manifest`, `gemini_get_web_capabilities`, `gemini_probe_web_features`, `gemini_list_chats`, `gemini_search_chats` without `scan_turns`.
 4. Treat `privacy=reads_private_chat_text` tools as explicit-user-intent tools: `gemini_read_chat`, `gemini_export_chat`, and `gemini_search_chats(scan_turns=true)`.
-5. Treat destructive tools as requiring explicit user intent: `gemini_delete_chat`, `gemini_reset_session`, `gemini_manage_gems(action="delete")`, and prompt deletion.
+5. Treat destructive tools as requiring explicit user intent: `gemini_delete_chat`, `gemini_delete_scheduled_action`, `gemini_reset_session`, `gemini_manage_gems(action="delete")`, and prompt deletion.
 
 ## Tool Surfaces
 
@@ -24,6 +24,8 @@ Use this skill for this repository's Gemini Web MCP server and low-token skill s
 - Low-token skill server: `src.skill_server`
   - Use `account(action="manifest")` for compact tool guidance.
   - Use `history(action="list|search|read|export|delete")` for chat history.
+  - Use `scheduled(action="list|get|create|delete")` for compact scheduled-action workflows.
+  - Use `cookie(action="profiles")` before `cookie(action="get", profile="...")` when Chrome has multiple signed-in profiles.
 
 ## Chat History Workflow
 
@@ -42,7 +44,8 @@ Use this skill for this repository's Gemini Web MCP server and low-token skill s
 
 - `gemini_get_web_capabilities` is the static observed Pro Web surface map.
 - `gemini_probe_web_features` checks observed read-only RPC reachability and must not expose raw private RPC bodies.
-- Keep Drive picker, Canvas mutation, settings mutation, memory import mutation, public-link mutation, and scheduled-action mutation disabled unless a stable RPC contract and explicit user authorization exist.
+- Scheduled actions support observed daily create, registry list, by-id get, and explicit delete by id through `gemini_create_scheduled_action`, `gemini_list_scheduled_actions`, `gemini_get_scheduled_action`, and `gemini_delete_scheduled_action`; refresh Chrome cookies first when account context matters because browser-cookie refresh isolates gemini_webapi cookie cache and prefers profiles with visible scheduled registries. If the registry is still empty, call `gemini_list_browser_cookie_profiles` and then `gemini_get_cookie_from_browser(profile="...")` to explicitly align the profile; compare `chrome_selected_profile` with the profile that has Gemini cookies. After create/delete, check `verification_status`; after create also check `readable_by_id_after_create`, and after delete check `deleted_by_id_after_delete` or `task_state_after_delete=deleted` before claiming the task is gone. Keep edit/toggle/other recurrence variants disabled until stable RPC contracts exist.
+- Keep Drive picker, Canvas mutation, settings mutation, memory import mutation, and public-link mutation disabled unless a stable RPC contract and explicit user authorization exist.
 - Guided Learning is exposed through `learning_mode`; Canvas remains probe/UI-only unless stronger evidence appears.
 
 ## Validation

@@ -81,6 +81,8 @@ The Pro image redo control is a post-generation Gemini Web UI action.
 | Tool | Purpose |
 |------|---------|
 | `gemini_deep_research` | Create a Deep Research plan, start research, and poll for the result when supported by the client |
+| `gemini_list_research_report_actions` | List MCP-side create actions for a completed Deep Research immersive report |
+| `gemini_create_from_research_report` | Create a local webpage, infographic, quiz, flashcards, audio overview script, or custom app spec from a completed report |
 
 ### Discovery
 
@@ -93,7 +95,8 @@ The Pro image redo control is a post-generation Gemini Web UI action.
 | Tool | Purpose |
 |------|---------|
 | `gemini_get_cookie_status` | Report current cookie/auth status |
-| `gemini_get_cookie_from_browser` | Load Gemini cookies from Chrome, Firefox, or Edge |
+| `gemini_list_browser_cookie_profiles` | List local browser profile diagnostics without returning cookie values |
+| `gemini_get_cookie_from_browser` | Load Gemini cookies from Chrome, Firefox, Edge, or a selected Chrome profile |
 | `gemini_reset` | Reset the Gemini client |
 
 ---
@@ -118,6 +121,9 @@ Adds these management tools to `core`:
 | `gemini_get_usage_limits` | Read usage/quota structures from Gemini Web usage surface |
 | `gemini_list_library_capabilities` | List localized Library capability/template entries |
 | `gemini_list_scheduled_actions` | Read scheduled-action entries returned by Gemini Web scheduled actions surface |
+| `gemini_get_scheduled_action` | Read one scheduled action by id using the observed Web GetTask RPC |
+| `gemini_create_scheduled_action` | Create a daily Gemini Web scheduled action |
+| `gemini_delete_scheduled_action` | Delete a Gemini Web scheduled action by id |
 | `gemini_get_tool_mode_status` | Read Web-internal tool/mode status rows observed around Canvas and Guided Learning toggles |
 | `gemini_list_models` | Show MCP aliases and the account runtime model registry |
 | `gemini_manage_gems` | List, create, update, or delete Gems |

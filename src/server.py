@@ -23,6 +23,7 @@ from .client_wrapper import (
     reset_client,
     get_cookie_from_browser,
     get_cookie_status,
+    list_browser_cookie_profiles,
     init_cookie_manager_integration
 )
 from .error_handler import handle_error, format_error_response
@@ -117,13 +118,54 @@ Cookie: {cookie_text}
 刷新: {refresh_text}""")]
 
 
+@mcp.tool(annotations=READ_ONLY_LOCAL)
+async def gemini_list_browser_cookie_profiles(
+    browser: str = "chrome",
+    validate: bool = True,
+    response_format: ResponseFormat = "markdown",
+) -> list[TextContent]:
+    """列出本地浏览器 Cookie profile 诊断信息，不返回 Cookie 值。"""
+    try:
+        profiles = list_browser_cookie_profiles(browser, validate=validate)
+        if response_format == "json":
+            return [TextContent(type="text", text=json.dumps({"profiles": profiles}, ensure_ascii=False, indent=2))]
+
+        lines = [f"## {browser} Cookie Profiles"]
+        if not profiles:
+            lines.append("- No profiles found")
+        for item in profiles:
+            if item.get("error"):
+                lines.append(f"- error: {item['error']}")
+                continue
+            profile = item.get("profile", "unknown")
+            psid = "yes" if item.get("has_psid") else "no"
+            psidts = "yes" if item.get("has_psidts") else "no"
+            count = item.get("cookie_count", 0)
+            selected = "yes" if item.get("chrome_selected_profile") else "no"
+            selected_dir = item.get("chrome_selected_profile_directory") or "unknown"
+            account = item.get("account_status", "unvalidated")
+            available = item.get("account_available")
+            scheduled_count = item.get("scheduled_registry_count", "unvalidated")
+            available_text = "yes" if available is True else "no" if available is False else "unknown"
+            lines.append(
+                f"- {profile}: psid={psid}, psidts={psidts}, cookies={count}, "
+                f"chrome_selected={selected}, selected_dir={selected_dir}, "
+                f"account={account}, available={available_text}, scheduled_registry_count={scheduled_count}"
+            )
+        return [TextContent(type="text", text="\n".join(lines))]
+    except Exception as e:
+        error_info = handle_error(e)
+        return [format_error_response(error_info)]
+
+
 @mcp.tool(annotations=MUTATES_LOCAL)
-async def gemini_get_cookie_from_browser(browser: str = "chrome") -> list[TextContent]:
+async def gemini_get_cookie_from_browser(browser: str = "chrome", profile: str = "") -> list[TextContent]:
     """从浏览器获取 Cookie"""
     try:
-        success = get_cookie_from_browser(browser)
+        success = get_cookie_from_browser(browser, profile=profile)
         if success:
-            return [TextContent(type="text", text=f"✅ 已从 {browser} 获取 Cookie")]
+            suffix = f" profile={profile}" if profile else ""
+            return [TextContent(type="text", text=f"✅ 已从 {browser}{suffix} 获取 Cookie")]
         else:
             return [TextContent(type="text", text=f"❌ 获取失败，请确保已登录 gemini.google.com")]
     except Exception as e:

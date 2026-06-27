@@ -8,6 +8,7 @@ import os
 import json
 import shutil
 import logging
+import threading
 from pathlib import Path
 from typing import Optional, Literal, Any
 
@@ -24,6 +25,7 @@ from .client_wrapper import (
     reset_client,
     get_cookie_status,
     get_cookie_from_browser,
+    list_browser_cookie_profiles,
 )
 from .constants import resolve_media_request, resolve_model_name
 from .tools.annotations import (
@@ -41,6 +43,8 @@ from .tools.manage import (
     _chat_to_dict,
     _execute_observed_rpc,
     _extract_rpc_bodies,
+    _fetch_scheduled_registry,
+    _fetch_scheduled_task_by_id,
     _format_chat_export_markdown,
     _format_web_capabilities_markdown,
     _get_chat_id,
@@ -50,8 +54,12 @@ from .tools.manage import (
     _parse_library_capability,
     _parse_public_link_entry,
     _parse_scheduled_action_entry,
+    _parse_scheduled_action_create_body,
+    _parse_scheduled_action_task_entry,
     _parse_tool_mode_entry,
     _parse_usage_entry,
+    _paginate_items,
+    _scheduled_daily_payload,
     _format_tool_manifest_markdown,
     _summarize_probe_response,
     _tool_manifest_payload,
@@ -91,6 +99,7 @@ mcp = FastMCP(
 - **session**: conversation history
 - **history**: remote Gemini chat history
 - **account**: account, models, tool manifest, web capabilities, feature probes, links, usage, library, scheduled actions, modes
+- **scheduled**: list, get by id, create daily, or delete scheduled actions
 - **cookie**: authentication helper
 
 ## Models
@@ -209,6 +218,7 @@ def get_prompts() -> PromptManager:
 
 
 _sessions: dict[str, dict[str, Any]] = {}
+_sessions_lock = threading.Lock()
 
 
 def _truncate_text(text: Any, max_chars: int = 2000) -> str:
@@ -236,16 +246,22 @@ async def chat(
         model_name = resolve_model_name(model)
         files = [image_path] if image_path else None
 
-        if session_id and session_id in _sessions:
+        if session_id:
+            with _sessions_lock:
+                session_entry = _sessions.get(session_id)
+        else:
+            session_entry = None
+
+        if session_id and session_entry:
             request_kwargs = {
                 "prompt": message,
                 "files": files,
                 "thinking_level": thinking_level,
             }
-            use_learning_mode = learning_mode or _sessions[session_id].get("learning_mode")
+            use_learning_mode = learning_mode or session_entry.get("learning_mode")
             if use_learning_mode:
                 request_kwargs["learning_mode"] = use_learning_mode
-            response = await _sessions[session_id]["session"].send_message(**request_kwargs)
+            response = await session_entry["session"].send_message(**request_kwargs)
         else:
             request_kwargs = {
                 "prompt": message,
@@ -277,21 +293,20 @@ async def history(
     try:
         client = get_gemini_client()
         await initialize_client()
-        safe_limit = min(max(limit, 1), 50)
 
         if action == "list":
             chats = client.list_chats() if hasattr(client, "list_chats") else []
             chats = chats or []
-            page = chats[max(offset, 0) : max(offset, 0) + safe_limit]
+            page, pagination = _paginate_items(chats, limit, offset, max_limit=50)
             if not page:
                 return [TextContent(type="text", text="No chats")]
             lines = []
-            for i, item in enumerate(page, max(offset, 0) + 1):
+            for i, item in enumerate(page, pagination["offset"] + 1):
                 title = getattr(item, "title", "Untitled")
                 cid = getattr(item, "cid", "") or getattr(item, "id", "")
                 lines.append(f"{i}. {title} ({cid})")
-            if max(offset, 0) + len(page) < len(chats):
-                lines.append(f"next_offset={max(offset, 0) + len(page)}")
+            if pagination["has_more"]:
+                lines.append(f"next_offset={pagination['next_offset']}")
             return [TextContent(type="text", text="\n".join(lines))]
 
         if action == "search":
@@ -302,7 +317,7 @@ async def history(
                 return [TextContent(type="text", text="read_chat unavailable")]
             chats = client.list_chats() if hasattr(client, "list_chats") else []
             chats = chats or []
-            page = chats[max(offset, 0) : max(offset, 0) + safe_limit]
+            page, pagination = _paginate_items(chats, limit, offset, max_limit=50)
             lowered = needle.lower()
             lines = []
             for item in page:
@@ -310,7 +325,7 @@ async def history(
                 matched = lowered in chat["title"].lower() or lowered in chat["id"].lower()
                 snippets = []
                 if scan_turns and chat["id"]:
-                    _history, turns = await _read_chat_turns(client, chat["id"], min(safe_limit, 20), 1000)
+                    _history, turns = await _read_chat_turns(client, chat["id"], min(pagination["limit"], 20), 1000)
                     for idx, turn in enumerate(turns, 1):
                         if _turn_matches_query(turn, needle):
                             matched = True
@@ -318,8 +333,8 @@ async def history(
                 if matched:
                     lines.append(f"{chat['title']} ({chat['id']})")
                     lines.extend(f"  {snippet}" for snippet in snippets[:3])
-            if max(offset, 0) + len(page) < len(chats):
-                lines.append(f"next_offset={max(offset, 0) + len(page)}")
+            if pagination["has_more"]:
+                lines.append(f"next_offset={pagination['next_offset']}")
             return [TextContent(type="text", text="\n".join(lines) if lines else "No matches")]
 
         if action == "read":
@@ -327,12 +342,13 @@ async def history(
                 return [TextContent(type="text", text="chat_id required")]
             if not hasattr(client, "read_chat"):
                 return [TextContent(type="text", text="read_chat unavailable")]
-            chat = await client.read_chat(chat_id, limit=safe_limit)
+            read_limit = _paginate_items([], limit, 0, max_limit=50)[1]["limit"]
+            chat = await client.read_chat(chat_id, limit=read_limit)
             turns = getattr(chat, "turns", []) if chat else []
             if not turns:
                 return [TextContent(type="text", text="No turns")]
             lines = []
-            for turn in turns[:safe_limit]:
+            for turn in turns[:read_limit]:
                 role = getattr(turn, "role", "unknown")
                 text = _truncate_text(getattr(turn, "text", ""))
                 lines.append(f"{role}: {text}")
@@ -375,21 +391,6 @@ async def account(
 ) -> list[TextContent]:
     """Inspect Gemini account status and available models."""
     try:
-        client = get_gemini_client()
-        await initialize_client()
-
-        if action == "models":
-            models = client.list_models() if hasattr(client, "list_models") else []
-            if not models:
-                return [TextContent(type="text", text="No models")]
-            lines = []
-            for model in models:
-                display = getattr(model, "display_name", "") or "Unnamed"
-                name = getattr(model, "model_name", "") or "unknown"
-                available = "available" if getattr(model, "is_available", True) else "unavailable"
-                lines.append(f"{display}: {name} ({available})")
-            return [TextContent(type="text", text="\n".join(lines))]
-
         if action == "capabilities":
             return [
                 TextContent(
@@ -405,6 +406,21 @@ async def account(
                     text=_format_tool_manifest_markdown(_tool_manifest_payload("all")),
                 )
             ]
+
+        client = get_gemini_client()
+        await initialize_client()
+
+        if action == "models":
+            models = client.list_models() if hasattr(client, "list_models") else []
+            if not models:
+                return [TextContent(type="text", text="No models")]
+            lines = []
+            for model in models:
+                display = getattr(model, "display_name", "") or "Unnamed"
+                name = getattr(model, "model_name", "") or "unknown"
+                available = "available" if getattr(model, "is_available", True) else "unavailable"
+                lines.append(f"{display}: {name} ({available})")
+            return [TextContent(type="text", text="\n".join(lines))]
 
         if action == "features":
             if not hasattr(client, "_batch_execute"):
@@ -474,18 +490,16 @@ async def account(
             return [TextContent(type="text", text="\n".join(lines))]
 
         if action == "scheduled":
+            probe = _get_probe("scheduled", "scheduled_actions_registry")
+            response = await _execute_observed_rpc(client, probe)
+            bodies = _extract_rpc_bodies(response.text, probe["rpcid"])
+            body = bodies[0] if bodies else []
+            raw_entries = body[0] if isinstance(body, list) and body and isinstance(body[0], list) else []
+            entries = [_parse_scheduled_action_task_entry(item, 500) for item in raw_entries[:20]]
             lines = []
-            for probe_name in ("scheduled_actions_active", "scheduled_actions_inactive"):
-                probe = _get_probe("scheduled", probe_name)
-                response = await _execute_observed_rpc(client, probe)
-                bodies = _extract_rpc_bodies(response.text, probe["rpcid"])
-                body = bodies[0] if bodies else []
-                entries = []
-                if isinstance(body, list) and len(body) > 2 and isinstance(body[2], list):
-                    entries = [_parse_scheduled_action_entry(item, 500) for item in body[2][:20]]
-                for item in entries:
-                    when = f" {item.get('scheduled_time')}" if item.get("scheduled_time") else ""
-                    lines.append(f"{probe_name}: {item.get('title') or '(untitled)'} ({item.get('id', '')}){when}".strip())
+            for item in entries:
+                label = f" {item.get('schedule_label')}" if item.get("schedule_label") else ""
+                lines.append(f"{item.get('title') or '(untitled)'} ({item.get('id', '')}){label}".strip())
             return [TextContent(type="text", text="\n".join(lines) or "No scheduled actions")]
 
         if action == "modes":
@@ -518,6 +532,138 @@ async def account(
         return [TextContent(type="text", text=f"Error: {e}")]
 
 
+@mcp.tool(annotations=DESTRUCTIVE_REMOTE)
+async def scheduled(
+    action: Literal["list", "get", "create", "delete"] = "list",
+    title: str = "",
+    instructions: str = "",
+    action_id: str = "",
+    hour: int = 9,
+    timezone_name: str = "Asia/Shanghai",
+) -> list[TextContent]:
+    """List, get by id, create daily, or delete Gemini Web scheduled actions."""
+    try:
+        client = get_gemini_client()
+        await initialize_client()
+        if not hasattr(client, "_batch_execute"):
+            return [TextContent(type="text", text="scheduled actions unavailable")]
+
+        if action == "list":
+            entries, diagnostic = await _fetch_scheduled_registry(client, 500)
+            lines = []
+            for item in entries[:20]:
+                label = f" {item.get('schedule_label')}" if item.get("schedule_label") else ""
+                lines.append(f"{item.get('title') or '(untitled)'} ({item.get('id', '')}){label}".strip())
+            if not lines and diagnostic.get("empty_hint"):
+                lines.append("No scheduled actions")
+                lines.append(f"Diagnostic: {diagnostic['empty_hint']}")
+            return [TextContent(type="text", text="\n".join(lines) or "No scheduled actions")]
+
+        if action == "get":
+            clean_id = action_id.strip()
+            if not clean_id:
+                return [TextContent(type="text", text="action_id required")]
+            item, diagnostic = await _fetch_scheduled_task_by_id(client, clean_id, 500)
+            if not item:
+                status = "not_found_or_wrong_account"
+                if diagnostic.get("matched_task") is False:
+                    status = "not_readable_by_id"
+                return [TextContent(type="text", text=f"Get: {clean_id} ({status})")]
+            enabled = item.get("enabled")
+            enabled_text = "enabled" if enabled is True else "disabled" if enabled is False else "unknown"
+            state = f" state={item.get('task_state')}" if item.get("task_state") else ""
+            title = item.get("title") or "(untitled)"
+            label = f" {item.get('schedule_label')}" if item.get("schedule_label") else ""
+            return [TextContent(type="text", text=f"Get: {title} ({item.get('id', clean_id)}) [{enabled_text}{state}]{label}")]
+
+        if action == "create":
+            clean_title = title.strip()
+            clean_instructions = instructions.strip()
+            clean_timezone = timezone_name.strip()
+            if not clean_title:
+                return [TextContent(type="text", text="title required")]
+            if not clean_instructions:
+                return [TextContent(type="text", text="instructions required")]
+            if hour < 0 or hour > 23:
+                return [TextContent(type="text", text="hour must be 0..23")]
+            payload = _scheduled_daily_payload(clean_title, clean_instructions, hour, clean_timezone or "Asia/Shanghai", "zh-CN")
+            response = await client._batch_execute(
+                [_RawRPCData("Jba3ib", payload)],
+                source_path="/scheduled",
+                close_on_error=False,
+            )
+            bodies = _extract_rpc_bodies(response.text, "Jba3ib")
+            body = bodies[0] if bodies else []
+            if isinstance(body, list) and body and isinstance(body[0], list):
+                body = body[0]
+            created = _parse_scheduled_action_create_body(body)
+            created_id = created.get("id", "")
+            visible = False
+            readable_by_id = None
+            verification_status = "not_attempted"
+            if created_id:
+                registry_entries, _ = await _fetch_scheduled_registry(client, 200)
+                visible = any(item.get("id") == created_id for item in registry_entries)
+                if visible:
+                    verification_status = "visible_in_registry"
+                elif registry_entries:
+                    verification_status = "not_visible_in_nonempty_registry"
+                else:
+                    verification_status = "registry_empty_unverified"
+                task_by_id, _ = await _fetch_scheduled_task_by_id(client, created_id, 200)
+                readable_by_id = task_by_id is not None
+                if readable_by_id and verification_status == "registry_empty_unverified":
+                    verification_status = "readable_by_id_registry_empty"
+                elif readable_by_id and verification_status == "not_visible_in_nonempty_registry":
+                    verification_status = "readable_by_id_not_visible_in_registry"
+            suffix = "" if visible else f" ({verification_status}; verify account context)"
+            return [TextContent(type="text", text=f"Created: {created_id or clean_title}{suffix}")]
+
+        if action == "delete":
+            clean_id = action_id.strip()
+            if not clean_id:
+                return [TextContent(type="text", text="action_id required")]
+            payload = json.dumps([None, [clean_id]], ensure_ascii=False, separators=(",", ":"))
+            response = await client._batch_execute(
+                [_RawRPCData("Q4Gw3c", payload)],
+                source_path="/scheduled",
+                close_on_error=False,
+            )
+            bodies = _extract_rpc_bodies(response.text, "Q4Gw3c")
+            verification_status = "rpc_accepted" if bodies else "rpc_unconfirmed"
+            readable_by_id = None
+            deleted_by_id = None
+            if bodies:
+                registry_entries, _ = await _fetch_scheduled_registry(client, 200)
+                visible = any(item.get("id") == clean_id for item in registry_entries)
+                if visible:
+                    verification_status = "still_visible_in_registry"
+                elif registry_entries:
+                    verification_status = "not_visible_in_nonempty_registry"
+                else:
+                    verification_status = "registry_empty_unverified"
+                task_after_delete, _ = await _fetch_scheduled_task_by_id(client, clean_id, 200)
+                readable_by_id = task_after_delete is not None
+                deleted_by_id = bool(task_after_delete and task_after_delete.get("task_state_id") == 6)
+                if deleted_by_id:
+                    verification_status = "deleted_state_by_id"
+                elif readable_by_id:
+                    if verification_status == "registry_empty_unverified":
+                        verification_status = "registry_empty_active_or_unknown_by_id"
+                    elif verification_status == "not_visible_in_nonempty_registry":
+                        verification_status = "not_visible_active_or_unknown_by_id"
+                elif verification_status == "registry_empty_unverified":
+                    verification_status = "registry_empty_not_readable_by_id"
+                elif verification_status == "not_visible_in_nonempty_registry":
+                    verification_status = "not_visible_not_readable_by_id"
+            return [TextContent(type="text", text=f"Delete requested: {clean_id} ({verification_status})")]
+
+        return [TextContent(type="text", text="Invalid action")]
+    except Exception as e:
+        logger.error(f"Scheduled action error: {e}")
+        return [TextContent(type="text", text=f"Error: {e}")]
+
+
 @mcp.tool(annotations=MUTATES_REMOTE)
 async def create(
     prompt: str,
@@ -533,7 +679,7 @@ async def create(
 
         model = _normalize_model(model)
         media_type = _normalize_media_type(type)
-        media_request = resolve_media_request(model, media_type)
+        media_request = resolve_media_request(model, media_type, thinking_level)
         model_name = media_request["request_model"]
 
         prefixes = {
@@ -611,17 +757,20 @@ async def session(
 
         if action == "create":
             sess = client.start_chat(model=resolve_model_name(model))
-            sid = f"sess_{len(_sessions) + 1}"
-            _sessions[sid] = {
-                "session": sess,
-                "model": model,
-                "thinking_level": thinking_level,
-                "learning_mode": learning_mode,
-            }
+            with _sessions_lock:
+                sid = f"sess_{len(_sessions) + 1}"
+                _sessions[sid] = {
+                    "session": sess,
+                    "model": model,
+                    "thinking_level": thinking_level,
+                    "learning_mode": learning_mode,
+                }
             return [TextContent(type="text", text=f"Session created: {sid}")]
 
         elif action == "send":
-            if not session_id or session_id not in _sessions:
+            with _sessions_lock:
+                session_entry = _sessions.get(session_id) if session_id else None
+            if not session_id or not session_entry:
                 return [
                     TextContent(type="text", text=f"Invalid session: {session_id}")
                 ]
@@ -629,35 +778,41 @@ async def session(
             request_kwargs = {
                 "prompt": message or "",
                 "files": [image_path] if image_path else None,
-                "thinking_level": _sessions[session_id].get(
+                "thinking_level": session_entry.get(
                     "thinking_level",
                     thinking_level,
                 ),
             }
-            use_learning_mode = learning_mode or _sessions[session_id].get("learning_mode")
+            use_learning_mode = learning_mode or session_entry.get("learning_mode")
             if use_learning_mode:
                 request_kwargs["learning_mode"] = use_learning_mode
-            response = await _sessions[session_id]["session"].send_message(**request_kwargs)
+            response = await session_entry["session"].send_message(**request_kwargs)
             return _format_response(response)
 
         elif action == "list":
-            if not _sessions:
+            with _sessions_lock:
+                items = [
+                    f"{i}. {sid} ({data['model']})"
+                    for i, (sid, data) in enumerate(_sessions.items(), 1)
+                ]
+            if not items:
                 return [TextContent(type="text", text="No active sessions")]
-            items = [
-                f"{i}. {sid} ({data['model']})"
-                for i, (sid, data) in enumerate(_sessions.items(), 1)
-            ]
             return [TextContent(type="text", text="\n".join(items))]
 
         elif action == "reset":
-            if session_id and session_id in _sessions:
-                del _sessions[session_id]
-                return [
-                    TextContent(type="text", text=f"Session deleted: {session_id}")
-                ]
-            _sessions.clear()
-            reset_client()
-            return [TextContent(type="text", text="All sessions reset")]
+            with _sessions_lock:
+                if session_id and session_id in _sessions:
+                    del _sessions[session_id]
+                    cleared_all = False
+                else:
+                    _sessions.clear()
+                    cleared_all = True
+            if cleared_all:
+                reset_client()
+                return [TextContent(type="text", text="All sessions reset")]
+            return [
+                TextContent(type="text", text=f"Session deleted: {session_id}")
+            ]
 
         return [TextContent(type="text", text="Invalid action")]
 
@@ -721,8 +876,9 @@ async def prompts(
 
 @mcp.tool(annotations=MUTATES_LOCAL)
 async def cookie(
-    action: Literal["status", "get"],
+    action: Literal["status", "get", "profiles"],
     browser: Literal["chrome", "firefox", "edge"] = "chrome",
+    profile: str = "",
 ) -> list[TextContent]:
     """Manage authentication cookies."""
     try:
@@ -735,12 +891,31 @@ async def cookie(
                 )
             ]
 
+        elif action == "profiles":
+            profiles = list_browser_cookie_profiles(browser, validate=True)
+            lines = []
+            for item in profiles:
+                if item.get("error"):
+                    lines.append(f"error: {item['error']}")
+                    continue
+                available = "yes" if item.get("account_available") is True else "no"
+                selected = "yes" if item.get("chrome_selected_profile") else "no"
+                lines.append(
+                    f"{item.get('profile', 'unknown')}: "
+                    f"psid={'yes' if item.get('has_psid') else 'no'}, "
+                    f"chrome_selected={selected}, "
+                    f"account_available={available}, "
+                    f"scheduled_registry_count={item.get('scheduled_registry_count', 'unvalidated')}"
+                )
+            return [TextContent(type="text", text="\n".join(lines) or "No profiles")]
+
         elif action == "get":
-            success = get_cookie_from_browser(browser)
+            success = get_cookie_from_browser(browser, profile=profile)
+            suffix = f" {profile}" if profile else ""
             return [
                 TextContent(
                     type="text",
-                    text=f"Cookie: {'Loaded' if success else 'Failed'}",
+                    text=f"Cookie{suffix}: {'Loaded' if success else 'Failed'}",
                 )
             ]
 

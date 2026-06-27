@@ -106,8 +106,19 @@ def validate_cookies() -> bool:
 
 
 def get_cookie_dict() -> dict[str, str]:
-    """获取完整的 Cookie 字典用于 HTTP 请求"""
-    cookies = load_cookies_from_file()
-    if not cookies:
-        cookies = load_cookies_from_env()
+    """
+    获取完整的 Cookie 字典用于 HTTP 请求。
+
+    优先级: 环境变量 > cookies.json（与 get_auth_cookies 保持一致）
+    """
+    # 先尝试环境变量
+    cookies = load_cookies_from_env()
+    if cookies.get("__Secure-1PSID"):
+        return cookies
+
+    # 回退到文件
+    file_cookies = load_cookies_from_file()
+    if file_cookies:
+        return file_cookies
+
     return cookies
