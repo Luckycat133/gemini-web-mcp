@@ -21,6 +21,7 @@ Gemini MCP Server 版本更新历史记录。
 - 新增 `gemini_search_chats`，分页搜索历史对话标题/ID，并可显式扫描当前页正文片段
 - 新增 `gemini_export_chat`，将单个历史对话导出为 Markdown 或 JSON
 - 新增 `gemini_delete_chat`，删除指定远端历史对话
+- 新增 `gemini_cleanup_test_artifacts`，默认 dry-run 查找并可选删除显式 marker 匹配的测试聊天和测试定时任务
 - 新增 `gemini_get_tool_manifest`，为 agent 暴露工具安全、隐私、分页、可用分组、当前启用状态和推荐工作流元数据
 - primary MCP 工具增加 MCP `ToolAnnotations`，标记只读、远端修改、本地修改和 destructive 操作
 - 新增 `gemini_probe_web_features`，用浏览器实测到的只读 RPC 探测 Library、公开链接、用量、个性化、记忆导入等新版 Web 入口
@@ -39,6 +40,7 @@ Gemini MCP Server 版本更新历史记录。
   并优先选择能读取 scheduled registry 的 profile
 - 新增 `gemini_list_browser_cookie_profiles`，用于列出 Chrome profile 的非敏感账号
   诊断；`gemini_get_cookie_from_browser` 支持 `profile` 参数，便于手动对齐多账号上下文
+- 新增 `gemini_doctor`，用于只读预检工具面、Cookie 状态、浏览器 profile 对齐和媒体校验依赖
 - `gemini_list_browser_cookie_profiles` 增加 `chrome_selected_profile` 诊断；定时操作
   create/delete 增加 `verification_status`、by-id 可读性和 `task_state` 校验，区分 RPC 已接受、registry 已验证和 deleted tombstone
 - 低 token `src.skill_server` 增加 `history` 和 `scheduled`，其中 `scheduled` 支持 list/get/create/delete；并扩展 `history` 支持 search/export、`account` 支持 manifest/features/links/usage/library
@@ -49,7 +51,7 @@ Gemini MCP Server 版本更新历史记录。
 - `all` 现在聚焦高价值 AI 工作流，不再默认加载本地提示词工具
 - 移除 `gemini_list_features`，减少低价值枚举型工具
 - 当前默认工具面为 `core` 加始终可用的 manifest/cookie helpers；`all` 额外提供
-  `gemini_inspect_account`、`gemini_list_chats`、`gemini_search_chats`、
+  `gemini_inspect_account`、`gemini_cleanup_test_artifacts`、`gemini_list_chats`、`gemini_search_chats`、
   `gemini_read_chat`、`gemini_export_chat`、`gemini_delete_chat`、
   `gemini_get_web_capabilities`、`gemini_probe_web_features`、`gemini_list_public_links`、
   `gemini_get_usage_limits`、`gemini_list_library_capabilities`、
@@ -60,7 +62,7 @@ Gemini MCP Server 版本更新历史记录。
 
 ### 文档与验证
 - 补充 Gemini Web live UI 覆盖说明和媒体路由说明
-- 新增 `evaluations/gemini_web_mcp_contract.xml`，提供 11 个只读、稳定答案的 MCP contract evaluation
+- 新增 `evaluations/gemini_web_mcp_contract.xml`，提供 13 个只读、稳定答案的 MCP contract evaluation
 - 扩展测试以校验媒体后端分流、学习模式请求注入、工具 annotations、evaluation XML、Codex skill 和默认工具面
 
 ---

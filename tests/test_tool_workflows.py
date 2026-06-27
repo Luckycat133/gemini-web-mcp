@@ -58,6 +58,7 @@ def test_all_group_registers_unique_complete_tool_surface():
         assert "gemini_probe_web_features" in names
         assert "gemini_get_web_capabilities" in names
         assert "gemini_get_tool_manifest" in names
+        assert "gemini_cleanup_test_artifacts" in names
         assert "gemini_list_scheduled_actions" in names
         assert "gemini_create_scheduled_action" in names
         assert "gemini_delete_scheduled_action" in names
@@ -90,6 +91,7 @@ def test_all_group_tools_have_mcp_annotations():
         assert by_name["gemini_create_from_research_report"].annotations.readOnlyHint is False
         assert by_name["gemini_create_from_research_report"].annotations.openWorldHint is False
         assert by_name["gemini_delete_chat"].annotations.destructiveHint is True
+        assert by_name["gemini_cleanup_test_artifacts"].annotations.destructiveHint is True
         assert by_name["gemini_create_scheduled_action"].annotations.readOnlyHint is False
         assert by_name["gemini_create_scheduled_action"].annotations.destructiveHint is False
         assert by_name["gemini_delete_scheduled_action"].annotations.destructiveHint is True
@@ -416,6 +418,8 @@ def test_server_utility_tools_have_annotations():
         assert "gemini_get_tool_manifest" in by_name
         assert by_name["gemini_get_tool_manifest"].annotations.readOnlyHint is True
         assert by_name["gemini_get_tool_manifest"].annotations.openWorldHint is False
+        assert by_name["gemini_doctor"].annotations.readOnlyHint is True
+        assert by_name["gemini_doctor"].annotations.openWorldHint is False
         assert by_name["gemini_reset"].annotations.readOnlyHint is False
         assert by_name["gemini_reset"].annotations.openWorldHint is False
         assert by_name["gemini_get_cookie_status"].annotations.readOnlyHint is True
@@ -439,15 +443,73 @@ def test_skill_server_tools_have_mcp_annotations():
         assert by_name["chat"].annotations.openWorldHint is True
         assert by_name["history"].annotations.destructiveHint is True
         assert by_name["history"].annotations.openWorldHint is True
+        assert by_name["cleanup"].annotations.destructiveHint is True
+        assert by_name["cleanup"].annotations.openWorldHint is True
         assert by_name["account"].annotations.readOnlyHint is True
         assert by_name["account"].annotations.openWorldHint is True
         assert by_name["session"].annotations.destructiveHint is True
         assert by_name["prompts"].annotations.destructiveHint is True
         assert by_name["prompts"].annotations.openWorldHint is False
+        assert by_name["doctor"].annotations.readOnlyHint is True
+        assert by_name["doctor"].annotations.openWorldHint is False
         assert by_name["cookie"].annotations.readOnlyHint is False
         assert by_name["cookie"].annotations.openWorldHint is False
 
     asyncio.run(run())
+
+
+def test_doctor_payload_reports_profile_alignment_without_cookie_values(monkeypatch):
+    import src.tools.manage as manage_tools
+
+    monkeypatch.setenv("GEMINI_TOOLS", "core")
+    monkeypatch.setattr(
+        manage_tools,
+        "get_cookie_status",
+        lambda: {
+            "available": True,
+            "has_cookie": False,
+            "needs_refresh": False,
+            "status": "missing",
+            "source": "none",
+        },
+    )
+    monkeypatch.setattr(
+        manage_tools,
+        "list_browser_cookie_profiles",
+        lambda browser, validate=False: [
+            {
+                "browser": browser,
+                "profile": "Default",
+                "has_psid": False,
+                "has_psidts": False,
+                "cookie_count": 0,
+                "chrome_selected_profile": True,
+                "chrome_selected_profile_directory": "Default",
+            },
+            {
+                "browser": browser,
+                "profile": "Profile 1",
+                "has_psid": True,
+                "has_psidts": True,
+                "cookie_count": 22,
+                "chrome_selected_profile": False,
+                "chrome_selected_profile_directory": "Default",
+                "account_available": True if validate else None,
+                "scheduled_registry_count": 0 if validate else None,
+            },
+        ],
+    )
+    monkeypatch.setattr(manage_tools.shutil, "which", lambda name: "/opt/homebrew/bin/ffprobe" if name == "ffprobe" else None)
+    monkeypatch.setattr(manage_tools.os.path, "isdir", lambda path: path.endswith("generated_media"))
+
+    payload = manage_tools._doctor_payload(browser="chrome", validate_browser=True)
+    text = json.dumps(payload, ensure_ascii=False)
+
+    assert payload["overall_status"] == "warn"
+    assert any(check["name"] == "browser_profile_alignment" for check in payload["checks"])
+    assert "Profile 1" in payload["recommendations"][0]
+    assert "secret" not in text.lower()
+    assert "__Secure-1PSID" not in text
 
 
 def test_file_validation_runs_before_client_initialization(monkeypatch):
@@ -848,6 +910,27 @@ def test_skill_server_uses_v2_file_attachment_contract(monkeypatch):
 
     monkeypatch.setattr(skill_server, "get_gemini_client", lambda: FakeClient())
     monkeypatch.setattr(skill_server, "initialize_client", noop_initialize)
+    monkeypatch.setattr(
+        skill_server,
+        "_doctor_payload",
+        lambda browser="chrome", validate_browser=False: {
+            "name": "gemini_doctor",
+            "overall_status": "ok",
+            "safe": True,
+            "validate_browser": validate_browser,
+            "browser": browser,
+            "checks": [
+                {
+                    "name": "tool_surface",
+                    "status": "ok",
+                    "message": "test surface",
+                    "details": {},
+                }
+            ],
+            "browser_profiles": [],
+            "recommendations": [],
+        },
+    )
 
     async def run():
         result = await skill_server.edit(
@@ -1066,6 +1149,9 @@ def test_skill_server_account_and_history_tools(monkeypatch):
         assert "Delete requested: skill-task" in scheduled_delete_result[0].text
         assert "deleted_state_by_id" in scheduled_delete_result[0].text
 
+        doctor_result = await skill_server.doctor(validate_browser=False)
+        assert "Gemini Web MCP Doctor" in doctor_result[0].text
+
         modes_result = await skill_server.account("modes")
         assert "mode_id=1" in modes_result[0].text
         assert "mode_id=35" in modes_result[0].text
@@ -1086,6 +1172,10 @@ def test_skill_server_account_and_history_tools(monkeypatch):
 
         delete_result = await skill_server.history("delete", chat_id="c_1")
         assert "Deleted: c_1" in delete_result[0].text
+
+        cleanup_result = await skill_server.cleanup(markers="Chat one", target="chats", dry_run=True)
+        assert "Gemini Test Artifact Cleanup" in cleanup_result[0].text
+        assert "chats=1" in cleanup_result[0].text
 
     asyncio.run(run())
     assert deleted == ["c_1"]
@@ -1476,10 +1566,13 @@ def test_tool_manifest_and_annotations_expose_agent_safety_metadata():
         )
         payload = json.loads(_tool_text(json_result))
         assert payload["scope"] == "history"
-        assert payload["groups"] == {"history": 5}
+        assert payload["groups"] == {"history": 6}
         delete_entry = next(item for item in payload["tools"] if item["name"] == "gemini_delete_chat")
         assert delete_entry["destructive"] is True
         assert delete_entry["availability"] == ["manage", "all"]
+        cleanup_entry = next(item for item in payload["tools"] if item["name"] == "gemini_cleanup_test_artifacts")
+        assert cleanup_entry["destructive"] is True
+        assert cleanup_entry["availability"] == ["manage", "all"]
         export_entry = next(item for item in payload["tools"] if item["name"] == "gemini_export_chat")
         assert export_entry["privacy"] == "reads_private_chat_text"
         assert any(item["name"] == "chat_history_find_and_export" for item in payload["workflows"])
@@ -1516,6 +1609,7 @@ def test_tool_manifest_marks_currently_enabled_tools(monkeypatch):
     default_tools = {item["name"]: item for item in default_payload["tools"]}
     assert default_payload["current_tool_groups"] == ["core"]
     assert default_tools["gemini_chat"]["current_enabled"] is True
+    assert default_tools["gemini_doctor"]["current_enabled"] is True
     assert default_tools["gemini_get_cookie_status"]["current_enabled"] is True
     assert default_tools["gemini_get_tool_manifest"]["current_enabled"] is True
     assert default_tools["gemini_manage_prompts"]["current_enabled"] is False
@@ -1525,13 +1619,14 @@ def test_tool_manifest_marks_currently_enabled_tools(monkeypatch):
     all_tools = {item["name"]: item for item in all_payload["tools"]}
     assert all_tools["gemini_get_tool_manifest"]["current_enabled"] is True
     assert all_tools["gemini_manage_prompts"]["current_enabled"] is False
-    assert all_payload["current_enabled_count"] == 37
+    assert all_payload["current_enabled_count"] == 39
 
     monkeypatch.setenv("GEMINI_TOOLS", "prompts")
     prompts_payload = manage_tools._tool_manifest_payload("all")
     prompts_tools = {item["name"]: item for item in prompts_payload["tools"]}
     assert prompts_tools["gemini_manage_prompts"]["current_enabled"] is True
     assert prompts_tools["gemini_chat"]["current_enabled"] is False
+    assert prompts_tools["gemini_doctor"]["current_enabled"] is True
     assert prompts_tools["gemini_get_cookie_status"]["current_enabled"] is True
     assert prompts_tools["gemini_get_tool_manifest"]["current_enabled"] is True
 

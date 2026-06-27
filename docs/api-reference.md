@@ -95,6 +95,7 @@ The Pro image redo control is a post-generation Gemini Web UI action.
 | Tool | Purpose |
 |------|---------|
 | `gemini_get_cookie_status` | Report current cookie/auth status |
+| `gemini_doctor` | Run safe preflight over tool groups, cookie status, browser profile alignment, and media verification dependencies |
 | `gemini_list_browser_cookie_profiles` | List local browser profile diagnostics without returning cookie values |
 | `gemini_get_cookie_from_browser` | Load Gemini cookies from Chrome, Firefox, Edge, or a selected Chrome profile |
 | `gemini_reset` | Reset the Gemini client |
@@ -116,6 +117,7 @@ Adds these management tools to `core`:
 | `gemini_read_chat` | Read turns from a specific Gemini Web chat |
 | `gemini_export_chat` | Export one Gemini Web chat as Markdown or JSON |
 | `gemini_delete_chat` | Delete a specific Gemini Web chat |
+| `gemini_cleanup_test_artifacts` | Dry-run or delete marked test chats and scheduled actions |
 | `gemini_probe_web_features` | Probe observed read-only RPC reachability for newer Web UI surfaces |
 | `gemini_list_public_links` | List public links returned by Gemini Web sharing surface |
 | `gemini_get_usage_limits` | Read usage/quota structures from Gemini Web usage surface |

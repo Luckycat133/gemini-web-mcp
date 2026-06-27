@@ -16,6 +16,8 @@ from .tools.annotations import MUTATES_LOCAL, READ_ONLY_LOCAL
 from .tools.manage import (
     ManifestScope,
     ResponseFormat,
+    _doctor_payload,
+    _format_doctor_markdown,
     _format_tool_manifest_markdown,
     _tool_manifest_payload,
 )
@@ -98,6 +100,19 @@ async def gemini_reset() -> list[TextContent]:
     """重置客户端"""
     reset_client()
     return [TextContent(type="text", text="✅ 客户端已重置")]
+
+
+@mcp.tool(annotations=READ_ONLY_LOCAL)
+async def gemini_doctor(
+    browser: str = "chrome",
+    validate_browser: bool = False,
+    response_format: ResponseFormat = "markdown",
+) -> list[TextContent]:
+    """运行安全预检，不输出 Cookie 原值。"""
+    payload = _doctor_payload(browser=browser, validate_browser=validate_browser)
+    if response_format == "json":
+        return [TextContent(type="text", text=json.dumps(payload, ensure_ascii=False, indent=2))]
+    return [TextContent(type="text", text=_format_doctor_markdown(payload))]
 
 
 @mcp.tool(annotations=READ_ONLY_LOCAL)

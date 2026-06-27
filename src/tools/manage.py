@@ -4,13 +4,20 @@
 
 import json
 import os
+import shutil
+import sys
 from datetime import datetime, timezone
 from mcp.server.fastmcp import FastMCP
 from mcp.types import TextContent
 from typing import Any, Literal, Optional
 import logging
 
-from ..client_wrapper import get_gemini_client, initialize_client
+from ..client_wrapper import (
+    get_cookie_status,
+    get_gemini_client,
+    initialize_client,
+    list_browser_cookie_profiles,
+)
 from ..constants import MODEL_CONFIG
 from .annotations import (
     DESTRUCTIVE_REMOTE,
@@ -49,6 +56,8 @@ ManifestScope = Literal[
     "cookie",
     "prompts",
 ]
+DoctorStatus = Literal["ok", "warn", "error", "skip"]
+CleanupTarget = Literal["all", "chats", "scheduled"]
 TOOL_GROUP_MODULES = {
     "core": {"core", "media", "files", "research"},
     "basic": {"core"},
@@ -840,6 +849,7 @@ def _web_capabilities_payload() -> dict[str, Any]:
     payload["mcp_tools"] = {
         "chat": ["gemini_chat", "gemini_chat_stream", "gemini_start_chat", "gemini_send_message"],
         "history": [
+            "gemini_cleanup_test_artifacts",
             "gemini_list_chats",
             "gemini_search_chats",
             "gemini_read_chat",
@@ -869,6 +879,7 @@ def _web_capabilities_payload() -> dict[str, Any]:
             "gemini_create_from_research_report",
         ],
         "gems": ["gemini_manage_gems"],
+        "cookie": ["gemini_doctor", "gemini_get_cookie_status", "gemini_list_browser_cookie_profiles", "gemini_get_cookie_from_browser"],
     }
     return payload
 
@@ -998,6 +1009,15 @@ TOOL_MANIFEST: list[dict[str, Any]] = [
         "read_only": False,
         "destructive": False,
         "privacy": "reads_private_chat_text_and_writes_local_file",
+        "pagination": False,
+    },
+    {
+        "name": "gemini_cleanup_test_artifacts",
+        "group": "history",
+        "purpose": "Find and optionally delete test chats and scheduled actions whose metadata matches explicit test markers.",
+        "read_only": False,
+        "destructive": True,
+        "privacy": "reads_private_chat_and_scheduled_metadata",
         "pagination": False,
     },
     {
@@ -1172,6 +1192,15 @@ TOOL_MANIFEST: list[dict[str, Any]] = [
         "pagination": False,
     },
     {
+        "name": "gemini_doctor",
+        "group": "cookie",
+        "purpose": "Run a safe local preflight over tool groups, cookie status, browser profile alignment, and media verification dependencies.",
+        "read_only": True,
+        "destructive": False,
+        "privacy": "local_runtime_and_browser_profile_diagnostics",
+        "pagination": False,
+    },
+    {
         "name": "gemini_get_cookie_status",
         "group": "cookie",
         "purpose": "Report local cookie availability without printing cookie values.",
@@ -1262,12 +1291,31 @@ MANIFEST_WORKFLOWS = [
     {
         "name": "scheduled_action_create_and_cleanup",
         "steps": [
+            "gemini_doctor",
             "gemini_create_scheduled_action",
             "gemini_get_scheduled_action",
             "gemini_list_scheduled_actions",
             "gemini_delete_scheduled_action",
         ],
         "notes": "Creates and then deletes a daily scheduled action; use only with explicit user authorization and a unique test title when validating.",
+    },
+    {
+        "name": "operational_preflight",
+        "steps": [
+            "gemini_doctor",
+            "gemini_get_tool_manifest",
+            "gemini_list_browser_cookie_profiles",
+        ],
+        "notes": "Read-only local/profile diagnostics before live account workflows; use validate_browser=true only when account validation is needed.",
+    },
+    {
+        "name": "test_artifact_cleanup",
+        "steps": [
+            "gemini_cleanup_test_artifacts with dry_run=true",
+            "review matched IDs",
+            "gemini_cleanup_test_artifacts with dry_run=false",
+        ],
+        "notes": "Deletes only chats and scheduled actions matching explicit test markers; scan_turns=true reads private chat text and should be used narrowly.",
     },
 ]
 
@@ -1375,6 +1423,418 @@ def _format_tool_manifest_markdown(payload: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def _doctor_check(name: str, status: DoctorStatus, message: str, **details: Any) -> dict[str, Any]:
+    return {
+        "name": name,
+        "status": status,
+        "message": message,
+        "details": {key: value for key, value in details.items() if value is not None},
+    }
+
+
+def _doctor_overall_status(checks: list[dict[str, Any]]) -> DoctorStatus:
+    statuses = {check["status"] for check in checks}
+    if "error" in statuses:
+        return "error"
+    if "warn" in statuses:
+        return "warn"
+    if "skip" in statuses and statuses == {"skip"}:
+        return "skip"
+    return "ok"
+
+
+def _doctor_payload(browser: str = "chrome", validate_browser: bool = False) -> dict[str, Any]:
+    """Build a safe preflight report without exposing cookie values."""
+    checks: list[dict[str, Any]] = []
+    current_tool_groups, enabled_groups = _current_enabled_manifest_groups()
+    manifest = _tool_manifest_payload("all")
+
+    checks.append(
+        _doctor_check(
+            "python_runtime",
+            "ok",
+            f"Python {sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}",
+            executable=sys.executable,
+        )
+    )
+
+    checks.append(
+        _doctor_check(
+            "tool_surface",
+            "ok",
+            f"{manifest['current_enabled_count']} of {manifest['total_count']} manifest tools are enabled",
+            current_tool_groups=current_tool_groups,
+            enabled_groups=sorted(enabled_groups),
+            total_count=manifest["total_count"],
+            current_enabled_count=manifest["current_enabled_count"],
+        )
+    )
+
+    cookie_status = get_cookie_status()
+    has_cookie = bool(cookie_status.get("has_cookie"))
+    needs_refresh = bool(cookie_status.get("needs_refresh", False))
+    if not cookie_status.get("available", False):
+        cookie_check = _doctor_check("cookie_status", "warn", "Cookie manager is unavailable")
+    elif not has_cookie:
+        cookie_check = _doctor_check("cookie_status", "warn", "No runtime Gemini cookie is configured")
+    elif needs_refresh:
+        cookie_check = _doctor_check(
+            "cookie_status",
+            "warn",
+            "Runtime Gemini cookie exists but should be refreshed",
+            source=cookie_status.get("source"),
+            status=cookie_status.get("status"),
+        )
+    else:
+        cookie_check = _doctor_check(
+            "cookie_status",
+            "ok",
+            "Runtime Gemini cookie is configured",
+            source=cookie_status.get("source"),
+            status=cookie_status.get("status"),
+        )
+    checks.append(cookie_check)
+
+    browser_profiles: list[dict[str, Any]] = []
+    if browser:
+        try:
+            raw_profiles = list_browser_cookie_profiles(browser, validate=validate_browser)
+            for item in raw_profiles:
+                browser_profiles.append(
+                    {
+                        "browser": item.get("browser", browser),
+                        "profile": item.get("profile"),
+                        "has_psid": item.get("has_psid"),
+                        "has_psidts": item.get("has_psidts"),
+                        "cookie_count": item.get("cookie_count"),
+                        "chrome_selected_profile": item.get("chrome_selected_profile"),
+                        "chrome_selected_profile_directory": item.get("chrome_selected_profile_directory"),
+                        "account_available": item.get("account_available"),
+                        "scheduled_registry_count": item.get("scheduled_registry_count"),
+                        "error": item.get("error"),
+                    }
+                )
+        except Exception as e:
+            browser_profiles = [{"browser": browser, "error": f"{type(e).__name__}: {e}"}]
+
+    profile_errors = [item for item in browser_profiles if item.get("error")]
+    profiles_with_psid = [item for item in browser_profiles if item.get("has_psid")]
+    selected_profile = next((item for item in browser_profiles if item.get("chrome_selected_profile")), None)
+    recommended_profile = next(
+        (item for item in profiles_with_psid if item.get("account_available") is True),
+        profiles_with_psid[0] if profiles_with_psid else None,
+    )
+
+    if not browser:
+        checks.append(_doctor_check("browser_profiles", "skip", "Browser profile diagnostics were disabled"))
+    elif profile_errors and not profiles_with_psid:
+        checks.append(
+            _doctor_check(
+                "browser_profiles",
+                "warn",
+                f"Could not read usable {browser} Gemini cookies",
+                errors=profile_errors,
+            )
+        )
+    elif not profiles_with_psid:
+        checks.append(
+            _doctor_check(
+                "browser_profiles",
+                "warn",
+                f"No {browser} profile has a Gemini PSID",
+                profiles=browser_profiles,
+            )
+        )
+    elif selected_profile and not selected_profile.get("has_psid"):
+        checks.append(
+            _doctor_check(
+                "browser_profile_alignment",
+                "warn",
+                "Chrome selected profile has no Gemini PSID, but another profile does",
+                selected_profile=selected_profile.get("profile"),
+                selected_profile_directory=selected_profile.get("chrome_selected_profile_directory"),
+                recommended_profile=recommended_profile.get("profile") if recommended_profile else None,
+                validate_browser=validate_browser,
+            )
+        )
+    else:
+        checks.append(
+            _doctor_check(
+                "browser_profile_alignment",
+                "ok",
+                f"{browser} has a usable Gemini cookie profile",
+                selected_profile=selected_profile.get("profile") if selected_profile else None,
+                recommended_profile=recommended_profile.get("profile") if recommended_profile else None,
+                validate_browser=validate_browser,
+            )
+        )
+
+    ffprobe_path = shutil.which("ffprobe")
+    checks.append(
+        _doctor_check(
+            "ffprobe",
+            "ok" if ffprobe_path else "warn",
+            "ffprobe is available for media duration verification" if ffprobe_path else "ffprobe was not found in PATH",
+            path=ffprobe_path,
+        )
+    )
+
+    generated_media_dir = os.path.abspath("generated_media")
+    checks.append(
+        _doctor_check(
+            "generated_media_dir",
+            "ok" if os.path.isdir(generated_media_dir) else "warn",
+            "generated_media directory exists" if os.path.isdir(generated_media_dir) else "generated_media directory does not exist yet",
+            path=generated_media_dir,
+        )
+    )
+
+    recommendations: list[str] = []
+    if recommended_profile and selected_profile and not selected_profile.get("has_psid"):
+        recommendations.append(
+            f"Use gemini_get_cookie_from_browser(browser=\"{browser}\", profile=\"{recommended_profile.get('profile')}\") before live account checks."
+        )
+    elif not has_cookie and recommended_profile:
+        recommendations.append(
+            f"Load cookies with gemini_get_cookie_from_browser(browser=\"{browser}\", profile=\"{recommended_profile.get('profile')}\")."
+        )
+    if validate_browser is False:
+        recommendations.append("Run gemini_doctor(validate_browser=true) when you need live account/profile validation.")
+    if not ffprobe_path:
+        recommendations.append("Install ffmpeg/ffprobe before relying on music/video duration checks.")
+
+    payload = {
+        "name": "gemini_doctor",
+        "overall_status": _doctor_overall_status(checks),
+        "safe": True,
+        "validate_browser": validate_browser,
+        "browser": browser,
+        "checks": checks,
+        "browser_profiles": browser_profiles,
+        "recommendations": recommendations,
+    }
+    return payload
+
+
+def _format_doctor_markdown(payload: dict[str, Any]) -> str:
+    lines = [
+        "## Gemini Web MCP Doctor",
+        f"Overall: {payload['overall_status']}",
+        f"Browser: {payload['browser'] or 'disabled'} · validate_browser={payload['validate_browser']}",
+        "",
+        "### Checks",
+    ]
+    for check in payload["checks"]:
+        lines.append(f"- {check['name']}: {check['status']} - {check['message']}")
+        details = check.get("details") if isinstance(check.get("details"), dict) else {}
+        for key in ("source", "selected_profile", "recommended_profile", "path"):
+            if details.get(key):
+                lines.append(f"  {key}: {details[key]}")
+
+    if payload.get("browser_profiles"):
+        lines.extend(["", "### Browser Profiles"])
+        for item in payload["browser_profiles"]:
+            if item.get("error"):
+                lines.append(f"- {item.get('profile') or item.get('browser')}: error={item['error']}")
+                continue
+            selected = "yes" if item.get("chrome_selected_profile") else "no"
+            account = item.get("account_available")
+            account_text = "yes" if account is True else "no" if account is False else "unvalidated"
+            lines.append(
+                f"- {item.get('profile')}: psid={'yes' if item.get('has_psid') else 'no'}, "
+                f"selected={selected}, account={account_text}, "
+                f"scheduled_registry_count={item.get('scheduled_registry_count', 'unvalidated')}"
+            )
+
+    if payload.get("recommendations"):
+        lines.extend(["", "### Recommendations"])
+        lines.extend(f"- {item}" for item in payload["recommendations"])
+    return "\n".join(lines)
+
+
+def _split_cleanup_markers(markers: str) -> list[str]:
+    values = [item.strip() for item in markers.split(",")]
+    return [item for item in values if item]
+
+
+def _marker_hits(text: object, markers: list[str]) -> list[str]:
+    haystack = str(text or "").lower()
+    return [marker for marker in markers if marker.lower() in haystack]
+
+
+async def _cleanup_test_artifacts_payload(
+    client: object,
+    markers: str = "codex-,Cleanup Verification Marker",
+    target: CleanupTarget = "all",
+    dry_run: bool = True,
+    max_chats: int = 25,
+    scan_turns: bool = False,
+) -> dict[str, Any]:
+    marker_list = _split_cleanup_markers(markers)
+    if not marker_list:
+        marker_list = ["codex-"]
+
+    safe_chat_limit = _clamp_int(max_chats, default=25, minimum=1, maximum=100)
+    include_chats = target in {"all", "chats"}
+    include_scheduled = target in {"all", "scheduled"}
+    matched_chats: list[dict[str, Any]] = []
+    matched_scheduled: list[dict[str, Any]] = []
+    errors: list[dict[str, str]] = []
+
+    if include_chats:
+        if not hasattr(client, "list_chats"):
+            errors.append({"target": "chats", "error": "list_chats unavailable"})
+        else:
+            chats = (client.list_chats() or [])[:safe_chat_limit]
+            for chat in chats:
+                item = _chat_to_dict(chat)
+                matched_fields: list[str] = []
+                matched_markers = _marker_hits(item.get("id"), marker_list)
+                if matched_markers:
+                    matched_fields.append("id")
+                title_hits = _marker_hits(item.get("title"), marker_list)
+                if title_hits:
+                    matched_fields.append("title")
+                    matched_markers.extend(title_hits)
+
+                if scan_turns and item.get("id") and hasattr(client, "read_chat"):
+                    try:
+                        _history, turns = await _read_chat_turns(client, item["id"], 20, 300)
+                        for turn in turns:
+                            turn_hits = _marker_hits(turn.get("text"), marker_list)
+                            if turn_hits:
+                                matched_fields.append("turn")
+                                matched_markers.extend(turn_hits)
+                                break
+                    except Exception as e:
+                        errors.append({"target": f"chat:{item.get('id')}", "error": f"{type(e).__name__}: {e}"})
+
+                if matched_fields:
+                    deleted = False
+                    delete_error = ""
+                    if not dry_run:
+                        if not hasattr(client, "delete_chat"):
+                            delete_error = "delete_chat unavailable"
+                        else:
+                            try:
+                                await client.delete_chat(item["id"])
+                                deleted = True
+                            except Exception as e:
+                                delete_error = f"{type(e).__name__}: {e}"
+                    matched_chats.append(
+                        {
+                            "id": item.get("id"),
+                            "title": item.get("title"),
+                            "matched_fields": sorted(set(matched_fields)),
+                            "matched_markers": sorted(set(matched_markers)),
+                            "deleted": deleted,
+                            "delete_error": delete_error,
+                        }
+                    )
+
+    if include_scheduled:
+        if not hasattr(client, "_batch_execute"):
+            errors.append({"target": "scheduled", "error": "_batch_execute unavailable"})
+        else:
+            try:
+                entries, diagnostic = await _fetch_scheduled_registry(client, 300)
+                for item in entries:
+                    search_text = "\n".join(
+                        str(item.get(key, ""))
+                        for key in ("id", "title", "instructions", "schedule_label")
+                    )
+                    matched_markers = _marker_hits(search_text, marker_list)
+                    if not matched_markers:
+                        continue
+                    deleted = False
+                    delete_error = ""
+                    verification_status = "dry_run"
+                    if not dry_run:
+                        try:
+                            request_payload = json.dumps([None, [item["id"]]], ensure_ascii=False, separators=(",", ":"))
+                            response = await client._batch_execute(
+                                [_RawRPCData("Q4Gw3c", request_payload)],
+                                source_path="/scheduled",
+                                close_on_error=False,
+                            )
+                            bodies = _extract_rpc_bodies(response.text, "Q4Gw3c")
+                            verification_status = "rpc_accepted" if bodies else "rpc_unconfirmed"
+                            task_after_delete, _ = await _fetch_scheduled_task_by_id(client, item["id"], 300)
+                            if task_after_delete and task_after_delete.get("task_state_id") == 6:
+                                verification_status = "deleted_state_by_id"
+                                deleted = True
+                            elif bodies:
+                                deleted = True
+                        except Exception as e:
+                            delete_error = f"{type(e).__name__}: {e}"
+                            verification_status = "delete_error"
+                    matched_scheduled.append(
+                        {
+                            "id": item.get("id"),
+                            "title": item.get("title"),
+                            "task_state": item.get("task_state"),
+                            "matched_markers": sorted(set(matched_markers)),
+                            "deleted": deleted,
+                            "verification_status": verification_status,
+                            "delete_error": delete_error,
+                        }
+                    )
+            except Exception as e:
+                errors.append({"target": "scheduled", "error": f"{type(e).__name__}: {e}"})
+
+    return {
+        "name": "gemini_cleanup_test_artifacts",
+        "dry_run": dry_run,
+        "target": target,
+        "markers": marker_list,
+        "scan_turns": scan_turns,
+        "max_chats": safe_chat_limit,
+        "matched_chat_count": len(matched_chats),
+        "matched_scheduled_count": len(matched_scheduled),
+        "deleted_chat_count": sum(1 for item in matched_chats if item.get("deleted")),
+        "deleted_scheduled_count": sum(1 for item in matched_scheduled if item.get("deleted")),
+        "matched_chats": matched_chats,
+        "matched_scheduled_actions": matched_scheduled,
+        "errors": errors,
+    }
+
+
+def _format_cleanup_markdown(payload: dict[str, Any]) -> str:
+    lines = [
+        "## Gemini Test Artifact Cleanup",
+        f"Dry run: {payload['dry_run']} · Target: {payload['target']} · Markers: {', '.join(payload['markers'])}",
+        (
+            f"Matches: chats={payload['matched_chat_count']}, "
+            f"scheduled={payload['matched_scheduled_count']} · "
+            f"Deleted: chats={payload['deleted_chat_count']}, scheduled={payload['deleted_scheduled_count']}"
+        ),
+    ]
+    if payload["matched_chats"]:
+        lines.extend(["", "### Chats"])
+        for item in payload["matched_chats"]:
+            status = "deleted" if item.get("deleted") else "matched"
+            if item.get("delete_error"):
+                status = f"error={item['delete_error']}"
+            lines.append(
+                f"- {item.get('title') or '(untitled)'} ({item.get('id')}) "
+                f"[{status}; fields={','.join(item.get('matched_fields', []))}]"
+            )
+    if payload["matched_scheduled_actions"]:
+        lines.extend(["", "### Scheduled Actions"])
+        for item in payload["matched_scheduled_actions"]:
+            status = item.get("verification_status") or ("deleted" if item.get("deleted") else "matched")
+            if item.get("delete_error"):
+                status = f"error={item['delete_error']}"
+            lines.append(f"- {item.get('title') or '(untitled)'} ({item.get('id')}) [{status}]")
+    if payload["errors"]:
+        lines.extend(["", "### Errors"])
+        for item in payload["errors"]:
+            lines.append(f"- {item['target']}: {item['error']}")
+    if payload["dry_run"]:
+        lines.extend(["", "Set dry_run=false to delete the matched test artifacts."])
+    return "\n".join(lines)
+
+
 def _format_web_capabilities_markdown(payload: dict[str, Any]) -> str:
     lines = [
         "## Gemini Web Pro 能力清单",
@@ -1426,6 +1886,35 @@ def _format_web_capabilities_markdown(payload: dict[str, Any]) -> str:
 
 
 def register_manage_tools(mcp: FastMCP):
+
+    @mcp.tool(annotations=DESTRUCTIVE_REMOTE)
+    async def gemini_cleanup_test_artifacts(
+        markers: str = "codex-,Cleanup Verification Marker",
+        target: CleanupTarget = "all",
+        dry_run: bool = True,
+        max_chats: int = 25,
+        scan_turns: bool = False,
+        response_format: ResponseFormat = "markdown",
+    ) -> list[TextContent]:
+        """
+        查找并可选删除测试产物。
+
+        默认 dry_run=true；只有显式 dry_run=false 才删除命中 marker 的聊天或定时任务。
+        scan_turns=true 会读取最近聊天正文，仅在需要清理正文 marker 时使用。
+        """
+        client = get_gemini_client()
+        await initialize_client()
+        payload = await _cleanup_test_artifacts_payload(
+            client,
+            markers=markers,
+            target=target,
+            dry_run=dry_run,
+            max_chats=max_chats,
+            scan_turns=scan_turns,
+        )
+        if response_format == "json":
+            return [TextContent(type="text", text=json.dumps(payload, ensure_ascii=False, indent=2))]
+        return [TextContent(type="text", text=_format_cleanup_markdown(payload))]
 
     @mcp.tool(annotations=READS_PRIVATE_REMOTE)
     async def gemini_list_chats(
