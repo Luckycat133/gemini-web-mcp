@@ -28,6 +28,10 @@
     <answer>gemini_list_scheduled_actions</answer>
   </qa_pair>
   <qa_pair>
+    <question>Inspect the account tool manifest. Which read-only account tool reads one scheduled action by id using the observed Web GetTask RPC? Answer with the exact tool name.</question>
+    <answer>gemini_get_scheduled_action</answer>
+  </qa_pair>
+  <qa_pair>
     <question>Inspect the account tool manifest and capability notes. Which tool lists localized Library capability/template entries rather than private Library assets? Answer with the exact tool name.</question>
     <answer>gemini_list_library_capabilities</answer>
   </qa_pair>
@@ -36,7 +40,7 @@
     <answer>prompts</answer>
   </qa_pair>
   <qa_pair>
-    <question>Inspect the manifest safety notes. What exact boolean value should an agent infer for the destructive field of gemini_manage_gems? Answer True or False.</question>
-    <answer>True</answer>
+    <question>Inspect the manifest workflows. Which workflow should an agent use after explicit authorization to create, verify, and clean up a scheduled action? Answer with the workflow name.</question>
+    <answer>scheduled_action_create_and_cleanup</answer>
   </qa_pair>
 </evaluation>

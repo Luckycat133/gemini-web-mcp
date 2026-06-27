@@ -14,7 +14,7 @@ def _qa_pairs():
 def test_gemini_web_mcp_contract_evaluation_shape():
     pairs = _qa_pairs()
 
-    assert len(pairs) == 10
+    assert len(pairs) == 11
     for pair in pairs:
         question = pair.findtext("question")
         answer = pair.findtext("answer")
@@ -59,6 +59,12 @@ def test_gemini_web_mcp_contract_answers_match_static_manifest():
 
     assert account_tools["gemini_list_scheduled_actions"]["pagination"] is True
     assert pairs["gemini_list_scheduled_actions"]
+    assert account_tools["gemini_get_scheduled_action"]["read_only"] is True
+    assert account_tools["gemini_get_scheduled_action"]["privacy"] == "reads_private_scheduled_action_details"
+    assert pairs["gemini_get_scheduled_action"]
+    assert account_tools["gemini_create_scheduled_action"]["read_only"] is False
+    assert account_tools["gemini_create_scheduled_action"]["destructive"] is False
+    assert account_tools["gemini_delete_scheduled_action"]["destructive"] is True
 
     assert account_tools["gemini_list_library_capabilities"]["pagination"] is True
     assert pairs["gemini_list_library_capabilities"]
@@ -66,5 +72,5 @@ def test_gemini_web_mcp_contract_answers_match_static_manifest():
     assert tools["gemini_manage_prompts"]["availability"] == ["prompts"]
     assert pairs["prompts"]
 
-    assert tools["gemini_manage_gems"]["destructive"] is True
-    assert pairs["True"]
+    assert "scheduled_action_create_and_cleanup" in workflow_names
+    assert pairs["scheduled_action_create_and_cleanup"]

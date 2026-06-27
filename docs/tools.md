@@ -34,8 +34,11 @@
 - `gemini_upload_file`
 - `gemini_analyze_url`
 - `gemini_deep_research`
+- `gemini_list_research_report_actions`
+- `gemini_create_from_research_report`
 - `gemini_get_tool_manifest`
 - `gemini_get_cookie_status`
+- `gemini_list_browser_cookie_profiles`
 - `gemini_get_cookie_from_browser`
 - `gemini_reset`
 
@@ -55,6 +58,9 @@
 - `gemini_get_usage_limits`
 - `gemini_list_library_capabilities`
 - `gemini_list_scheduled_actions`
+- `gemini_get_scheduled_action`
+- `gemini_create_scheduled_action`
+- `gemini_delete_scheduled_action`
 - `gemini_get_tool_mode_status`
 - `gemini_list_models`
 - `gemini_manage_gems`
@@ -224,6 +230,27 @@ Gemini Web 的 Google Drive 选择器。
 - `model`: str - MCP 别名或运行时模型名
 - `thinking_level`: str - `standard` / `extended` (默认: `extended`)
 
+### gemini_list_research_report_actions
+
+读取已完成 Deep Research 聊天中的沉浸式报告，并列出 MCP 侧支持的“从报告创建”动作。
+当前 raw `READ_CHAT` payload 能稳定暴露报告、来源和沉浸式报告 ID，但未观测到网页下拉菜单的稳定 mutation RPC。
+
+**关键参数：**
+- `chat_id`: str - Deep Research 所在的 Gemini Web chat ID
+- `response_format`: `"markdown"` | `"json"`
+
+### gemini_create_from_research_report
+
+从已完成 Deep Research 报告创建本地产物。2026-06-21 网页实测的原生“创建”菜单项为
+`webpage`、`infographic`、`quiz`、`flashcards`、`audio_overview`，并带有一个
+自定义应用描述入口 `custom_app`。当前 MCP 工具生成本地等价产物，不直接调用未稳定观测到的
+Gemini 私有 mutation RPC。
+
+**关键参数：**
+- `chat_id`: str - Deep Research 所在的 Gemini Web chat ID
+- `artifact_type`: str - 要创建的产物类型
+- `output_dir`: str - 本地输出目录，默认 `generated_media/research_artifacts`
+
 ---
 
 ## 账户和 Gems
@@ -295,8 +322,55 @@ Gemini Web 的 Google Drive 选择器。
 - `response_format`: "markdown" | "json"
 - `max_chars_per_field`: int - 单个文本字段截断长度
 
-这个工具不会创建、修改或删除定时任务。定时任务标题和时间可能属于账号私人内容，
-应只在用户需要查看定时任务时调用。
+定时任务标题和时间可能属于账号私人内容，应只在用户需要查看定时任务时调用。
+JSON 输出包含 `diagnostic`，当当前 cookie/session 返回空 registry 时会给出
+账号上下文提示，方便区分“确实没有任务”和“浏览器多账号上下文不一致”。
+从 Chrome 刷新 Cookie 时，服务器会隔离 gemini_webapi 的本地 cookie cache，并在
+可用时优先选择能读到 scheduled registry 的 Chrome profile。
+
+### gemini_get_scheduled_action
+
+按 ID 只读获取单个 Gemini Web “定时操作”。适合在创建返回 ID 后做二次校验，或在
+用户提供已知任务 ID 时查看详情。
+
+**参数：**
+- `action_id`: str - 定时操作 ID
+- `response_format`: "markdown" | "json"
+- `max_chars_per_field`: int - 单个文本字段截断长度
+
+JSON 输出包含 `diagnostic.matched_task`、`item.task_state` 和 `item.is_deleted`。如果当前
+cookie/session 无法按 ID 读取任务，工具会返回 `ok=false` 和账号/profile 上下文提示。
+
+### gemini_create_scheduled_action
+
+创建 Gemini Web “定时操作”。当前只开放已实测稳定的每日计划：每天在指定小时触发。
+
+**参数：**
+- `title`: str - 定时操作名称
+- `instructions`: str - 定时执行时发送给 Gemini 的指令
+- `hour`: int - 0 到 23，默认 9
+- `timezone_name`: str - 默认 `Asia/Shanghai`
+- `locale`: str - 默认 `zh-CN`
+- `response_format`: "markdown" | "json"
+
+这个工具会修改 Gemini Web 账号状态。只有在用户明确要求创建定时任务时调用。
+JSON 输出包含 `visible_in_registry`、`readable_by_id_after_create` 和
+`verification_status`。如果创建 RPC 返回了 ID，但随后列表校验没有看到该 ID，调用方应再用
+`gemini_get_scheduled_action` 按 ID 校验，并提示用户检查当前 Gemini cookie/session 是否与浏览器
+可见账号一致。
+
+### gemini_delete_scheduled_action
+
+按 ID 删除 Gemini Web “定时操作”。删除定时操作不会删除它已经产生的历史对话。
+
+**参数：**
+- `action_id`: str - `gemini_list_scheduled_actions` 或创建结果返回的定时操作 ID
+- `response_format`: "markdown" | "json"
+
+JSON 输出包含 `verification_status`、`visible_after_delete`、`readable_by_id_after_delete`
+和 `deleted_by_id_after_delete`。Gemini 的 `GetTask` 在删除后可能仍返回 tombstone 对象；
+只有按 ID 读到 `task_state=deleted` 时，工具才把删除标记为已校验。
+这个工具是 destructive 远端操作。只删除用户明确指定或当前验证流程刚创建的任务。
 
 ### gemini_get_tool_mode_status
 
@@ -397,12 +471,27 @@ Gemini Web 的 Google Drive 选择器。
 
 **参数：** 无
 
+### gemini_list_browser_cookie_profiles
+
+列出本地浏览器 Cookie profile 诊断信息，不返回任何 Cookie 原值。
+
+**参数：**
+- `browser`: str - 浏览器类型 (默认: "chrome")
+- `validate`: bool - 是否初始化 Gemini 客户端验证账号与 scheduled registry (默认: true)
+- `response_format`: "markdown" | "json"
+
+当定时任务 create 返回 ID 但 list 的 registry 为空时，先调用这个工具，检查
+`chrome_selected_profile`、`chrome_selected_profile_directory`、`scheduled_registry_count`
+和 `account_available`，再用
+`gemini_get_cookie_from_browser(profile="...")` 刷新当前运行时 Cookie。
+
 ### gemini_get_cookie_from_browser
 
 从浏览器获取 Cookie。
 
 **参数：**
 - `browser`: str - 浏览器类型 (默认: "chrome")
+- `profile`: str - Chrome profile 名称，可从 `gemini_list_browser_cookie_profiles` 获取
 
 ---
 
@@ -427,9 +516,10 @@ Gemini Web 的 Google Drive 选择器。
 | `edit` | 基于参考图片编辑 |
 | `session` | 创建、发送、列出、重置本地多轮会话 |
 | `history` | 远端 Gemini Web 历史对话 list/search/read/export/delete |
-| `account` | 账号状态、工具清单、可用模型、功能探测、公开链接、用量和 Library 能力 |
+| `account` | 账号状态、工具清单、可用模型、功能探测、公开链接、用量、Library 能力和定时操作只读列表 |
+| `scheduled` | 定时操作 list/get/create/delete，create 仅支持每日固定小时 |
 | `prompts` | 本地提示词库 |
-| `cookie` | Cookie 状态和浏览器获取 |
+| `cookie` | Cookie 状态、浏览器 profile 诊断和浏览器获取 |
 
 ---
 

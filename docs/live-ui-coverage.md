@@ -60,7 +60,7 @@ NotebookLM, help/feedback, and location entries.
 | Personalization and settings | Probe covered in part | `gemini_probe_web_features(surface="personalization")` checks observed settings RPC reachability; no settings CRUD wrapper yet |
 | Usage limits | Covered in part | `gemini_get_usage_limits` parses observed quota/model-state structures |
 | Public links | Covered in part | `gemini_list_public_links` lists observed public-link entries; no create/delete/update wrapper yet |
-| Scheduled actions | Covered in part | `gemini_list_scheduled_actions` reads observed active/inactive scheduled-action lists; no create/update/delete wrapper |
+| Scheduled actions | Covered in part | `gemini_list_scheduled_actions` reads the observed registry; `gemini_get_scheduled_action` reads known IDs and task state; `gemini_create_scheduled_action` creates daily actions; `gemini_delete_scheduled_action` sends delete by id and verifies `task_state=deleted` when available; edit/toggle still disabled |
 | Memory import | Probe covered in part | `gemini_probe_web_features(surface="import")` checks observed import-entry RPC reachability; no import mutation wrapper yet |
 
 ## Observed RPC Evidence
@@ -76,7 +76,7 @@ returning raw response bodies:
 | Usage limits | `qpEbW` |
 | Personalization settings | `GPRiHf`, `maGuAc`, `Te6DCf` |
 | Memory import | `Te6DCf` |
-| Scheduled actions | `otAQ7b`, `MaZiqc` |
+| Scheduled actions | `otAQ7b`, `XPSWpd`, `MaZiqc`, `kwDCne`, `Jba3ib`, `Q4Gw3c` |
 | Tool/mode status | `MyzX6c` |
 
 The 2026-06-18 chat-page pass also observed the model picker and settings menu
@@ -86,10 +86,53 @@ payload, so it is documented as UI evidence rather than exposed as a general
 MCP wrapper.
 
 The 2026-06-18 scheduled-actions pass navigated to `/scheduled` and observed
-`otAQ7b` with payload `[]` plus two `MaZiqc` list variants:
-`[13,null,[1,null,1]]` and `[13,null,[0,null,1]]`. The MCP wrapper is read-only
-and intentionally does not create, update, delete, or page aggressively through
-scheduled tasks.
+`otAQ7b` with payload `[]` plus two `MaZiqc` history/related-chat pagination
+variants: `[13,null,[1,null,1]]` and `[13,null,[0,null,1]]`.
+
+The 2026-06-19 scheduled-actions pass created and deleted temporary marked
+tasks, confirming `XPSWpd` for the current scheduled-task registry, `Jba3ib`
+for daily create, and `Q4Gw3c` for explicit delete by id. The 2026-06-20
+scheduled module inspection also confirmed `kwDCne` as `/BardFrontendService.GetTask`.
+The MCP wrapper exposes only those confirmed mutations and reports
+`visible_in_registry` plus by-id readability after create. If a local
+cookie/session creates an ID but cannot see it in `XPSWpd`, the tool returns a
+diagnostic instead of silently treating the task as registry-verified; edit,
+toggle, weekly and other recurrence variants stay disabled until their RPC
+contracts are captured and verified.
+
+The 2026-06-19 cookie-context follow-up found that gemini_webapi's default
+cookie cache can select a stale-but-authenticated session before freshly loaded
+Chrome cookies. Browser-cookie refresh now uses a dedicated cache path and
+Chrome profile validation probes `XPSWpd`, preferring a profile whose scheduled
+registry is visible.
+
+The 2026-06-20 cookie-context pass added explicit profile diagnostics. On this
+machine, Chrome's selected profile is `Default` and has no Gemini PSID, while
+`Profile 1` has a valid Gemini account cookie but still returns
+`scheduled_registry_count=0`. A controlled create/delete smoke test returned a
+new scheduled-action id and accepted the delete RPC; no scheduled registry
+entries were visible afterward. This is surfaced as an account/profile-context
+diagnostic rather than treated as a verified visible list state.
+
+A follow-up 2026-06-20 smoke test verified that a newly created scheduled-action
+ID was immediately readable through `kwDCne`; after `Q4Gw3c` delete, the same
+ID remained readable as a tombstone with the frontend `Rg=6` / `Deleted` state.
+The delete wrapper therefore reports `verification_status=deleted_state_by_id`
+and `deleted_by_id_after_delete=true` when by-id readability proves a deleted
+state rather than an active residual task.
+
+The final 2026-06-20 MCP E2E smoke test created
+`codex-final-scheduled-e2e-*`, verified the returned task by id as
+`task_state=created`, deleted it, then verified the same id as
+`task_state=deleted` with `verification_status=deleted_state_by_id`. The
+scheduled registry remained empty before creation, after creation, and after
+deletion for the current cookie/profile context.
+
+The final 2026-06-20 chat-history E2E smoke test created a temporary marked
+Gemini chat, found it by scanning recent turn text, deleted the returned chat
+ID, then searched the marker again. The post-delete search returned
+`match_count=0` across the scanned recent chats, so the temporary verification
+chat was cleaned up.
 
 The 2026-06-19 chat-page pass toggled Canvas and Guided Learning without
 sending a prompt. Both surfaces showed visible chips/placeholders and triggered

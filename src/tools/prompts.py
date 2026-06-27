@@ -77,7 +77,7 @@ class PromptManager:
 
     def list_categories(self) -> List[str]:
         categories = set(p['category'] for p in self.prompts.values())
-        return sorted(list(categories))
+        return sorted(categories)
 
     def update_prompt(
         self,
@@ -89,18 +89,19 @@ class PromptManager:
     ) -> bool:
         if prompt_id not in self.prompts:
             return False
-        
+
         prompt = self.prompts[prompt_id]
-        if name:
+        # 使用 `is not None` 检查，允许显式设置空字符串等 falsy 值
+        if name is not None:
             prompt['name'] = name
-        if content:
+        if content is not None:
             prompt['content'] = content
-        if category:
+        if category is not None:
             prompt['category'] = category
         if description is not None:
             prompt['description'] = description
         prompt['updated_at'] = datetime.now().isoformat()
-        
+
         self._save_prompts()
         return True
 
