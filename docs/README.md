@@ -59,7 +59,7 @@
 | 推荐工具面 | `core` 默认，`manage` / `prompts` 按需附加 |
 | Deep Research | ✅ AI Plus 支持 |
 | Gem 管理 | ✅ 自定义助手管理 |
-| MCP 评估 | ✅ 11 个只读 contract-level QA |
+| MCP 评估 | ✅ 13 个只读 contract-level QA |
 | Codex Skill | ✅ 项目内 `.codex/skills/gemini-web-mcp` |
 
 ---

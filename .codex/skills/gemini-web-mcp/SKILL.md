@@ -11,7 +11,7 @@ Use this skill for this repository's Gemini Web MCP server and low-token skill s
 
 1. Prefer `gemini_get_tool_manifest` before choosing tools. It is always exposed by `src.server`, even when `GEMINI_TOOLS=core` or `GEMINI_TOOLS=prompts`.
 2. Check `current_enabled` before assuming a tool can be called in the current MCP process.
-3. Prefer read-only tools first: `gemini_get_tool_manifest`, `gemini_get_web_capabilities`, `gemini_probe_web_features`, `gemini_list_chats`, `gemini_search_chats` without `scan_turns`.
+3. Prefer read-only tools first: `gemini_doctor`, `gemini_get_tool_manifest`, `gemini_get_web_capabilities`, `gemini_probe_web_features`, `gemini_list_chats`, `gemini_search_chats` without `scan_turns`.
 4. Treat `privacy=reads_private_chat_text` tools as explicit-user-intent tools: `gemini_read_chat`, `gemini_export_chat`, and `gemini_search_chats(scan_turns=true)`.
 5. Treat destructive tools as requiring explicit user intent: `gemini_delete_chat`, `gemini_delete_scheduled_action`, `gemini_reset_session`, `gemini_manage_gems(action="delete")`, and prompt deletion.
 
@@ -24,7 +24,9 @@ Use this skill for this repository's Gemini Web MCP server and low-token skill s
 - Low-token skill server: `src.skill_server`
   - Use `account(action="manifest")` for compact tool guidance.
   - Use `history(action="list|search|read|export|delete")` for chat history.
+  - Use `cleanup(dry_run=true)` before deleting test chats or scheduled actions by marker.
   - Use `scheduled(action="list|get|create|delete")` for compact scheduled-action workflows.
+  - Use `doctor(validate_browser=false)` for low-cost local preflight before live account workflows.
   - Use `cookie(action="profiles")` before `cookie(action="get", profile="...")` when Chrome has multiple signed-in profiles.
 
 ## Chat History Workflow

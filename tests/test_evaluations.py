@@ -14,7 +14,7 @@ def _qa_pairs():
 def test_gemini_web_mcp_contract_evaluation_shape():
     pairs = _qa_pairs()
 
-    assert len(pairs) == 11
+    assert len(pairs) == 13
     for pair in pairs:
         question = pair.findtext("question")
         answer = pair.findtext("answer")
@@ -38,9 +38,13 @@ def test_gemini_web_mcp_contract_answers_match_static_manifest():
 
     assert "gemini_get_tool_manifest" in tools
     assert pairs["gemini_get_tool_manifest"]
+    assert tools["gemini_doctor"]["availability"] == ["always"]
+    assert tools["gemini_doctor"]["read_only"] is True
+    assert pairs["gemini_doctor"]
 
     assert history_tools["gemini_delete_chat"]["destructive"] is True
     assert pairs["gemini_delete_chat"]
+    assert history_tools["gemini_cleanup_test_artifacts"]["destructive"] is True
 
     assert history_tools["gemini_export_chat"]["privacy"] == "reads_private_chat_text"
     assert pairs["reads_private_chat_text"]
@@ -48,6 +52,8 @@ def test_gemini_web_mcp_contract_answers_match_static_manifest():
     workflow_names = {workflow["name"] for workflow in manifest["workflows"]}
     assert "chat_history_find_and_export" in workflow_names
     assert pairs["chat_history_find_and_export"]
+    assert "test_artifact_cleanup" in workflow_names
+    assert pairs["test_artifact_cleanup"]
 
     pro_model = next(model for model in capabilities["models"] if model["display_name"] == "3.1 Pro")
     assert pro_model["alias"] == "pro"

@@ -152,6 +152,7 @@ GEMINI_TOOLS=all python -m src.server
 - `gemini_analyze_url`
 - `gemini_deep_research`
 - `gemini_get_tool_manifest`
+- `gemini_doctor`
 - `gemini_get_cookie_status`
 - `gemini_list_browser_cookie_profiles`
 - `gemini_get_cookie_from_browser`
@@ -161,6 +162,7 @@ GEMINI_TOOLS=all python -m src.server
 
 `GEMINI_TOOLS=all` 会在 `core` 基础上增加：
 
+- `gemini_cleanup_test_artifacts`
 - `gemini_list_chats`
 - `gemini_search_chats`
 - `gemini_read_chat`
@@ -224,6 +226,7 @@ Gemini Web `学习辅导` 输入模式。
 - `gemini_read_chat`: 读取指定历史对话内容
 - `gemini_export_chat`: 将单个历史对话导出为 Markdown 或 JSON
 - `gemini_delete_chat`: 删除指定历史对话
+- `gemini_cleanup_test_artifacts`: dry-run 或删除匹配显式 marker 的测试聊天/定时任务；`scan_turns=true` 时才读取正文
 - `gemini_probe_web_features`: 探测 Library、公开链接、用量、个性化、记忆导入等新版 Web 入口的只读 RPC 可达性
 - `gemini_list_public_links`: 列出“你的公开链接”页面返回的公开链接
 - `gemini_get_usage_limits`: 读取用量限额页面的限额/模型状态结构
@@ -242,6 +245,7 @@ Gemini Web `学习辅导` 输入模式。
 - `gemini_manage_gems`: Gems 的 list/create/update/delete
 
 ### Cookie 管理
+- `gemini_doctor`: 只读预检工具组、Cookie 状态、浏览器 profile 对齐和媒体校验依赖，不输出 Cookie 值
 - `gemini_get_cookie_status`: 查看 Cookie 状态
 - `gemini_list_browser_cookie_profiles`: 列出本地浏览器 profile 诊断，包括 Chrome 当前选中 profile，不输出 Cookie 值
 - `gemini_get_cookie_from_browser`: 从浏览器或指定 profile 自动获取 Cookie
@@ -257,6 +261,7 @@ Gemini Web `学习辅导` 输入模式。
 - `edit`: 图片编辑
 - `session`: 本地多轮会话
 - `history`: Gemini Web 历史对话 list/search/read/export/delete
+- `cleanup`: 默认 dry-run 清理匹配 marker 的测试聊天和测试定时任务
 - `account`: 账号状态、工具清单、模型列表、功能探测、公开链接、用量、Library 能力和定时操作
 - `scheduled`: 定时操作 list/get/create/delete，create 仅支持每日固定小时
 - `prompts`: 本地提示词库
@@ -326,7 +331,7 @@ python -c "import sys; sys.path.insert(0, '.'); from src import client_wrapper, 
 pytest -q
 ```
 
-`evaluations/gemini_web_mcp_contract.xml` 提供 11 个只读、稳定答案的 MCP 评估问题，
+`evaluations/gemini_web_mcp_contract.xml` 提供 13 个只读、稳定答案的 MCP 评估问题，
 覆盖工具安全清单、历史记录工作流、Web 能力映射和分页/隐私元数据。
 
 使用 MCP Inspector 调试:

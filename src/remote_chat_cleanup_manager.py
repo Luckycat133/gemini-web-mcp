@@ -39,10 +39,17 @@ def extract_remote_chat_id(obj: Any) -> Optional[str]:
 class RemoteChatCleanupManager:
     """远程聊天清理管理器 - 线程安全的清理任务调度"""
 
-    def __init__(self, default_retention_seconds: int = DEFAULT_CHAT_RETENTION_SECONDS):
+    def __init__(
+        self,
+        default_retention_seconds: int = DEFAULT_CHAT_RETENTION_SECONDS,
+        client_provider: Optional[Callable[[], Any]] = None,
+        retention_provider: Optional[Callable[[], int]] = None,
+    ):
         self._pending_cleanup: Dict[str, CleanupTask] = {}
         self._lock = threading.Lock()
         self._default_retention = default_retention_seconds
+        self._client_provider = client_provider
+        self._retention_provider = retention_provider
 
     def schedule_cleanup_from_response(
         self,
@@ -73,6 +80,8 @@ class RemoteChatCleanupManager:
         if not cid or retain_chat:
             return
 
+        if delete_after_seconds is None and self._retention_provider is not None:
+            delete_after_seconds = self._retention_provider()
         ttl = self._default_retention if delete_after_seconds is None else max(0, delete_after_seconds)
         delete_at = time.time() + ttl
 
@@ -109,8 +118,11 @@ class RemoteChatCleanupManager:
         if not cid:
             return False
 
-        if client is None and client_initializer is not None:
-            client = client_initializer()
+        if client is None:
+            if client_initializer is not None:
+                client = client_initializer()
+            elif self._client_provider is not None:
+                client = self._client_provider()
 
         if not hasattr(client, "delete_chat"):
             logger.warning("当前 GeminiClient 不支持 delete_chat")
@@ -142,8 +154,11 @@ class RemoteChatCleanupManager:
                 if data.delete_at <= now
             ]
 
-        if client is None and client_initializer is not None:
-            client = client_initializer()
+        if client is None:
+            if client_initializer is not None:
+                client = client_initializer()
+            elif self._client_provider is not None:
+                client = self._client_provider()
 
         deleted = 0
         for cid in due_cids:

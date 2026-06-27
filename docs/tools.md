@@ -37,6 +37,7 @@
 - `gemini_list_research_report_actions`
 - `gemini_create_from_research_report`
 - `gemini_get_tool_manifest`
+- `gemini_doctor`
 - `gemini_get_cookie_status`
 - `gemini_list_browser_cookie_profiles`
 - `gemini_get_cookie_from_browser`
@@ -46,6 +47,7 @@
 
 `GEMINI_TOOLS=all` 额外增加：
 
+- `gemini_cleanup_test_artifacts`
 - `gemini_list_chats`
 - `gemini_search_chats`
 - `gemini_read_chat`
@@ -300,6 +302,19 @@ Gemini 私有 mutation RPC。
 - `max_chars_per_turn`: int - 单条 turn 最大字符数，最大 20000
 - `include_metadata`: bool - 是否附带标题、时间等元数据
 
+### gemini_cleanup_test_artifacts
+
+查找并可选删除匹配显式 marker 的测试聊天和测试定时任务。默认 `dry_run=true`，
+先返回将被删除的 ID；只有传入 `dry_run=false` 才执行删除。
+
+**参数：**
+- `markers`: str - 逗号分隔的 marker，默认 `codex-,Cleanup Verification Marker`
+- `target`: "all" | "chats" | "scheduled"
+- `dry_run`: bool - 是否只预览，默认 true
+- `max_chats`: int - 最多扫描最近多少个聊天，最大 100
+- `scan_turns`: bool - 是否读取正文查找 marker，默认 false
+- `response_format`: "markdown" | "json"
+
 ### gemini_get_web_capabilities
 
 返回 2026-06-18 在 Pro 账号网页中实测到的模型、思考等级、上传/工具菜单、
@@ -465,6 +480,16 @@ JSON 输出包含 `verification_status`、`visible_after_delete`、`readable_by_
 
 ## Cookie 管理
 
+### gemini_doctor
+
+只读预检 Gemini Web MCP 运行状态，不输出 Cookie 原值。默认只做本地和静态检查；
+`validate_browser=true` 时会验证浏览器 profile 的账号状态和 scheduled registry 计数。
+
+**参数：**
+- `browser`: str - 浏览器类型 (默认: "chrome")
+- `validate_browser`: bool - 是否执行账号/profile 远端验证 (默认: false)
+- `response_format`: "markdown" | "json"
+
 ### gemini_get_cookie_status
 
 查看 Cookie 状态。
@@ -515,7 +540,7 @@ JSON 输出包含 `verification_status`、`visible_after_delete`、`readable_by_
 | `create` | 生成图片、视频或音乐 |
 | `edit` | 基于参考图片编辑 |
 | `session` | 创建、发送、列出、重置本地多轮会话 |
-| `history` | 远端 Gemini Web 历史对话 list/search/read/export/delete |
+| `history` | 远端 Gemini Web 历史对话 list/search/read/export/delete 和测试产物清理 |
 | `account` | 账号状态、工具清单、可用模型、功能探测、公开链接、用量、Library 能力和定时操作只读列表 |
 | `scheduled` | 定时操作 list/get/create/delete，create 仅支持每日固定小时 |
 | `prompts` | 本地提示词库 |

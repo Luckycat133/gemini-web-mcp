@@ -4,8 +4,16 @@
     <answer>gemini_get_tool_manifest</answer>
   </qa_pair>
   <qa_pair>
+    <question>Inspect the manifest workflows. Which always-available local diagnostic tool should an agent call for tool-surface, cookie, browser-profile, and media-dependency preflight checks? Answer with the exact tool name.</question>
+    <answer>gemini_doctor</answer>
+  </qa_pair>
+  <qa_pair>
     <question>Inspect the history tool manifest. Which history tool is marked destructive? Answer with the exact tool name.</question>
     <answer>gemini_delete_chat</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>Inspect the manifest workflows. Which workflow should an agent use to dry-run, review, and then delete marked test chats or scheduled actions? Answer with the workflow name.</question>
+    <answer>test_artifact_cleanup</answer>
   </qa_pair>
   <qa_pair>
     <question>Inspect the history tool manifest. Which privacy label is attached to the chat export tool? Answer with the exact privacy label.</question>

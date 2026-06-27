@@ -33,6 +33,7 @@ from .tools.annotations import (
     DESTRUCTIVE_REMOTE,
     MUTATES_LOCAL,
     MUTATES_REMOTE,
+    READ_ONLY_LOCAL,
     READS_PRIVATE_REMOTE,
 )
 from .tools.utils import extract_remote_chat_id
@@ -45,7 +46,11 @@ from .tools.manage import (
     _extract_rpc_bodies,
     _fetch_scheduled_registry,
     _fetch_scheduled_task_by_id,
+    _cleanup_test_artifacts_payload,
+    _doctor_payload,
+    _format_cleanup_markdown,
     _format_chat_export_markdown,
+    _format_doctor_markdown,
     _format_web_capabilities_markdown,
     _get_chat_id,
     _get_probe,
@@ -101,6 +106,8 @@ mcp = FastMCP(
 - **account**: account, models, tool manifest, web capabilities, feature probes, links, usage, library, scheduled actions, modes
 - **scheduled**: list, get by id, create daily, or delete scheduled actions
 - **cookie**: authentication helper
+- **doctor**: local preflight diagnostics
+- **cleanup**: dry-run or delete test artifacts by marker
 
 ## Models
 - flash-lite, flash (default), pro
@@ -923,6 +930,46 @@ async def cookie(
 
     except Exception as e:
         logger.error(f"Cookie error: {e}")
+        return [TextContent(type="text", text=f"Error: {e}")]
+
+
+@mcp.tool(annotations=READ_ONLY_LOCAL)
+async def doctor(
+    browser: Literal["chrome", "firefox", "edge"] = "chrome",
+    validate_browser: bool = False,
+) -> list[TextContent]:
+    """Run local preflight diagnostics without exposing cookie values."""
+    try:
+        payload = _doctor_payload(browser=browser, validate_browser=validate_browser)
+        return [TextContent(type="text", text=_format_doctor_markdown(payload))]
+    except Exception as e:
+        logger.error(f"Doctor error: {e}")
+        return [TextContent(type="text", text=f"Error: {e}")]
+
+
+@mcp.tool(annotations=DESTRUCTIVE_REMOTE)
+async def cleanup(
+    markers: str = "codex-,Cleanup Verification Marker",
+    target: Literal["all", "chats", "scheduled"] = "all",
+    dry_run: bool = True,
+    max_chats: int = 25,
+    scan_turns: bool = False,
+) -> list[TextContent]:
+    """Find or delete test artifacts by explicit marker. Defaults to dry-run."""
+    try:
+        client = get_gemini_client()
+        await initialize_client()
+        payload = await _cleanup_test_artifacts_payload(
+            client,
+            markers=markers,
+            target=target,
+            dry_run=dry_run,
+            max_chats=max_chats,
+            scan_turns=scan_turns,
+        )
+        return [TextContent(type="text", text=_format_cleanup_markdown(payload))]
+    except Exception as e:
+        logger.error(f"Cleanup error: {e}")
         return [TextContent(type="text", text=f"Error: {e}")]
 
 
