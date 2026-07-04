@@ -1483,7 +1483,7 @@ def _doctor_payload(browser: str = "chrome", validate_browser: bool = False) -> 
             "warn",
             "Runtime Gemini cookie exists but should be refreshed",
             source=cookie_status.get("source"),
-            status=cookie_status.get("status"),
+            cookie_status=cookie_status.get("status"),
         )
     else:
         cookie_check = _doctor_check(
@@ -1491,7 +1491,7 @@ def _doctor_payload(browser: str = "chrome", validate_browser: bool = False) -> 
             "ok",
             "Runtime Gemini cookie is configured",
             source=cookie_status.get("source"),
-            status=cookie_status.get("status"),
+            cookie_status=cookie_status.get("status"),
         )
     checks.append(cookie_check)
 
@@ -1883,6 +1883,36 @@ def _format_web_capabilities_markdown(payload: dict[str, Any]) -> str:
     lines.extend(["", "### 说明"])
     lines.extend(f"- {note}" for note in payload["notes"])
     return "\n".join(lines)
+
+
+def _iter_gem_values(gems: Any) -> list[Any]:
+    if not gems:
+        return []
+    if hasattr(gems, "values"):
+        return list(gems.values())
+    return list(gems)
+
+
+def _find_gem_by_id(gems: Any, gem_id: str) -> Any:
+    if hasattr(gems, "get"):
+        gem = gems.get(gem_id)
+        if gem is not None:
+            return gem
+    for gem in _iter_gem_values(gems):
+        if _gem_field(gem, "id", "gem_id")[1] == gem_id:
+            return gem
+    return None
+
+
+def _gem_field(gem: Any, *names: str) -> tuple[bool, str]:
+    for name in names:
+        if isinstance(gem, dict) and name in gem and gem[name] is not None:
+            return True, str(gem[name])
+        if hasattr(gem, name):
+            value = getattr(gem, name)
+            if value is not None:
+                return True, str(value)
+    return False, ""
 
 
 def register_manage_tools(mcp: FastMCP):
@@ -2974,8 +3004,7 @@ def register_manage_tools(mcp: FastMCP):
                     return [TextContent(type="text", text="暂无保存的 Gems。")]
 
                 gem_list = ["## 💎 Gems 列表"]
-                gem_values = gems.values() if hasattr(gems, "values") else gems
-                for i, gem in enumerate(gem_values, 1):
+                for i, gem in enumerate(_iter_gem_values(gems), 1):
                     gem_name = getattr(gem, "name", "Untitled")
                     gem_id_val = getattr(gem, "id", "")
                     gem_desc = getattr(gem, "description", "")[:30]
@@ -3001,12 +3030,52 @@ def register_manage_tools(mcp: FastMCP):
             elif action == "update":
                 if not gem_id:
                     return [TextContent(type="text", text="❌ 更新 Gem 需要提供 gem_id。")]
-                
+
+                existing_gem = None
+                if name is None or instructions is None or description is None:
+                    gems = await client.fetch_gems()
+                    existing_gem = _find_gem_by_id(gems, gem_id)
+                    if existing_gem is None:
+                        return [
+                            TextContent(
+                                type="text",
+                                text="❌ 局部更新 Gem 前需要读取现有 Gem，但未找到该 gem_id。请提供完整 name、instructions 和 description 后重试。",
+                            )
+                        ]
+
+                missing_fields: list[str] = []
+                if name is None:
+                    found, update_name = _gem_field(existing_gem, "name")
+                    if not found:
+                        missing_fields.append("name")
+                else:
+                    update_name = name
+
+                if instructions is None:
+                    found, update_prompt = _gem_field(existing_gem, "prompt", "instructions")
+                    if not found:
+                        missing_fields.append("instructions")
+                else:
+                    update_prompt = instructions
+
+                if description is None:
+                    _found, update_description = _gem_field(existing_gem, "description")
+                else:
+                    update_description = description
+
+                if missing_fields:
+                    return [
+                        TextContent(
+                            type="text",
+                            text=f"❌ 局部更新 Gem 缺少现有字段: {', '.join(missing_fields)}。请显式提供这些字段后重试。",
+                        )
+                    ]
+
                 await client.update_gem(
                     gem=gem_id,
-                    name=name or "",
-                    prompt=instructions or "",
-                    description=description,
+                    name=update_name,
+                    prompt=update_prompt,
+                    description=update_description,
                 )
                 return [TextContent(type="text", text=f"✅ Gem {gem_id} 更新成功。")]
 

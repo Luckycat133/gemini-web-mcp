@@ -609,6 +609,49 @@ def test_gem_management_uses_current_gemini_webapi_contract(monkeypatch):
     ]
 
 
+def test_gem_partial_update_preserves_existing_fields(monkeypatch):
+    import src.tools.manage as manage_tools
+
+    calls = []
+
+    class FakeClient:
+        async def fetch_gems(self):
+            return {
+                "gem-created": SimpleNamespace(
+                    id="gem-created",
+                    name="Writer",
+                    prompt="Write clearly.",
+                    description="Drafts copy",
+                )
+            }
+
+        async def update_gem(self, gem, name, prompt, description=""):
+            calls.append(("update", gem, name, prompt, description))
+
+    async def noop_initialize():
+        return None
+
+    monkeypatch.setattr(manage_tools, "get_gemini_client", lambda: FakeClient())
+    monkeypatch.setattr(manage_tools, "initialize_client", noop_initialize)
+
+    async def run():
+        mcp = FastMCP("test")
+        manage_tools.register_manage_tools(mcp)
+        result = await mcp.call_tool(
+            "gemini_manage_gems",
+            {
+                "action": "update",
+                "gem_id": "gem-created",
+                "description": "Drafts better copy",
+            },
+        )
+        assert "更新成功" in _tool_text(result)
+
+    asyncio.run(run())
+
+    assert calls == [("update", "gem-created", "Writer", "Write clearly.", "Drafts better copy")]
+
+
 def test_stream_tools_use_text_delta(monkeypatch):
     import src.tools.chat as chat_tools
 
@@ -796,6 +839,29 @@ def test_chat_tool_accepts_runtime_model_name(monkeypatch):
     assert calls == ["3.5 Flash"]
 
 
+def test_chat_tool_rejects_invalid_image_attachment_before_client(monkeypatch):
+    import src.tools.chat as chat_tools
+
+    def fail_get_client():
+        raise AssertionError("invalid local attachment should not initialize Gemini client")
+
+    monkeypatch.setattr(chat_tools, "get_gemini_client", fail_get_client)
+
+    async def run():
+        mcp = FastMCP("test")
+        chat_tools.register_chat_tools(mcp)
+        result = await mcp.call_tool(
+            "gemini_chat",
+            {
+                "message": "inspect this",
+                "image_paths": ["../secret.png"],
+            },
+        )
+        assert "路径遍历" in _tool_text(result)
+
+    asyncio.run(run())
+
+
 def test_thinking_level_transport_extends_stream_generate_payload():
     import orjson
 
@@ -872,10 +938,13 @@ def test_current_web_models_resolve_thinking_mode_buckets():
     from src.constants import (
         resolve_learning_mode_config,
         resolve_media_request,
+        resolve_model_name,
         resolve_thinking_level_id,
         resolve_thinking_mode_id,
     )
 
+    assert resolve_model_name("flash-lite") == "3.1 Flash-Lite"
+    assert resolve_model_name("lite") == "3.1 Flash-Lite"
     assert resolve_thinking_mode_id("3.1 Flash-Lite") == 6
     assert resolve_thinking_mode_id("3.5 Flash") == 1
     assert resolve_thinking_mode_id("3.1 Pro") == 3
@@ -883,6 +952,7 @@ def test_current_web_models_resolve_thinking_mode_buckets():
     assert resolve_thinking_level_id("extended") == 2
     assert resolve_media_request("flash-lite", "image")["backend_label"] == "Nano Banana 2"
     assert resolve_media_request("flash-lite", "music", "standard")["backend_label"] == "Lyria 3"
+    assert resolve_media_request("flash-lite", "video")["request_model"] == "3.1 Flash-Lite"
     assert resolve_media_request("flash", "music", "extended")["request_model"] == "gemini-3-flash"
     assert resolve_media_request("flash", "music", "extended")["backend_label"] == "Lyria 3"
     assert resolve_media_request("pro", "music", "extended")["backend_label"] == "Lyria 3 Pro"
@@ -890,15 +960,20 @@ def test_current_web_models_resolve_thinking_mode_buckets():
     assert resolve_learning_mode_config("study-guide")["x9b_value"] == 4
 
 
-def test_skill_server_uses_v2_file_attachment_contract(monkeypatch):
+def test_skill_server_uses_v2_file_attachment_contract(monkeypatch, tmp_path):
     import src.skill_server as skill_server
 
     calls = []
+    scheduled = []
+    reference_path = tmp_path / "reference.png"
+    reference_path.write_bytes(b"fake image bytes")
 
     class FakeResponse:
         text = "ok"
         images = []
         videos = []
+        media = []
+        metadata = []
 
     class FakeClient:
         async def generate_content(self, prompt, files=None, model=None, thinking_level=None):
@@ -908,8 +983,17 @@ def test_skill_server_uses_v2_file_attachment_contract(monkeypatch):
     async def noop_initialize():
         return None
 
+    async def noop_cleanup(client=None):
+        return 0
+
+    def fake_schedule(response, **kwargs):
+        scheduled.append(kwargs.get("source"))
+        return "c_skill_edit"
+
     monkeypatch.setattr(skill_server, "get_gemini_client", lambda: FakeClient())
     monkeypatch.setattr(skill_server, "initialize_client", noop_initialize)
+    monkeypatch.setattr(skill_server, "cleanup_due_remote_chats", noop_cleanup)
+    monkeypatch.setattr(skill_server, "schedule_remote_chat_cleanup_from_response", fake_schedule)
     monkeypatch.setattr(
         skill_server,
         "_doctor_payload",
@@ -934,7 +1018,7 @@ def test_skill_server_uses_v2_file_attachment_contract(monkeypatch):
 
     async def run():
         result = await skill_server.edit(
-            image_path="/tmp/reference.png",
+            image_path=str(reference_path),
             prompt="make it brighter",
             model="pro",
         )
@@ -945,10 +1029,51 @@ def test_skill_server_uses_v2_file_attachment_contract(monkeypatch):
     assert calls == [
         (
             "Edit this image: make it brighter",
-            ["/tmp/reference.png"],
+            [str(reference_path.resolve())],
             "gemini-3-pro",
         )
     ]
+    assert scheduled == ["skill_edit"]
+
+
+def test_skill_server_chat_schedules_remote_cleanup(monkeypatch):
+    import src.skill_server as skill_server
+
+    scheduled = []
+
+    class FakeResponse:
+        text = "ok"
+        images = []
+        videos = []
+        media = []
+        metadata = ["c_skill_chat", "r_response"]
+
+    class FakeClient:
+        async def generate_content(self, **kwargs):
+            return FakeResponse()
+
+    async def noop_initialize():
+        return None
+
+    async def noop_cleanup(client=None):
+        return 0
+
+    def fake_schedule(response, **kwargs):
+        scheduled.append((response.metadata[0], kwargs.get("source")))
+        return response.metadata[0]
+
+    monkeypatch.setattr(skill_server, "get_gemini_client", lambda: FakeClient())
+    monkeypatch.setattr(skill_server, "initialize_client", noop_initialize)
+    monkeypatch.setattr(skill_server, "cleanup_due_remote_chats", noop_cleanup)
+    monkeypatch.setattr(skill_server, "schedule_remote_chat_cleanup_from_response", fake_schedule)
+
+    async def run():
+        result = await skill_server.chat("hello")
+        assert "Remote chat ID: c_skill_chat" in result[0].text
+
+    asyncio.run(run())
+
+    assert scheduled == [("c_skill_chat", "skill_chat")]
 
 
 def test_skill_server_create_routes_current_media_backends(monkeypatch):

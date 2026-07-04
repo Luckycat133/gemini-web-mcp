@@ -1,6 +1,6 @@
 import asyncio
-import os
 import logging
+from pathlib import Path
 from typing import Optional
 from urllib.parse import urlparse
 
@@ -15,37 +15,14 @@ from ..client_wrapper import (
 )
 from ..constants import resolve_model_name
 from .annotations import MUTATES_REMOTE
-from .utils import extract_remote_chat_id
+from .utils import extract_remote_chat_id, validate_local_file_path
 
 logger = logging.getLogger(__name__)
 
 
 def _validate_file_path(file_path: str) -> tuple[bool, str]:
-    """验证文件路径安全性，防止路径遍历攻击。
-    
-    Args:
-        file_path: 要验证的文件路径
-        
-    Returns:
-        (is_safe, message): 是否安全及原因
-    """
-    if not file_path:
-        return False, "文件路径不能为空"
-    
-    try:
-        # 检查是否包含路径遍历序列
-        if ".." in file_path:
-            return False, "检测到路径遍历尝试，不允许使用 '..' 序列"
-        
-        normalized_path = os.path.normpath(file_path)
-        
-        if os.path.isabs(normalized_path):
-            return True, normalized_path
-        else:
-            abs_path = os.path.abspath(normalized_path)
-            return True, abs_path
-    except Exception as e:
-        return False, f"路径验证失败: {str(e)}"
+    """验证文件路径安全性，防止路径遍历攻击。"""
+    return validate_local_file_path(file_path)
 
 
 def _validate_url(url: str) -> tuple[bool, str]:
@@ -105,14 +82,6 @@ def register_file_tools(mcp: FastMCP) -> None:
             ]
         safe_file_path = safe_path_or_error
 
-        if not os.path.exists(safe_file_path):
-            return [
-                TextContent(
-                    type="text",
-                    text=f"❌ 文件未找到: {safe_file_path}"
-                )
-            ]
-
         client = get_gemini_client()
         await initialize_client()
         await cleanup_due_remote_chats(client)
@@ -156,7 +125,7 @@ def register_file_tools(mcp: FastMCP) -> None:
             return [
                 TextContent(
                     type="text",
-                    text=f"✅ Successfully analyzed {os.path.basename(safe_file_path)}\n\n{result_text}"
+                    text=f"✅ Successfully analyzed {Path(safe_file_path).name}\n\n{result_text}"
                 )
             ]
         except asyncio.TimeoutError:

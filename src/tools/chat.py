@@ -22,7 +22,7 @@ from ..client_wrapper import (
 )
 from ..constants import describe_model_name, resolve_model_name
 from .annotations import DESTRUCTIVE_REMOTE, MUTATES_REMOTE, READ_ONLY_LOCAL
-from .utils import get_stream_text_piece, parse_response
+from .utils import get_stream_text_piece, parse_response, validate_image_paths
 
 logger = logging.getLogger(__name__)
 
@@ -42,6 +42,10 @@ def register_chat_tools(mcp: FastMCP):
         delete_after_seconds: Optional[int] = None,
     ) -> list[TextContent]:
         """单次对话"""
+        valid_images, safe_image_paths, image_error = validate_image_paths(image_paths)
+        if not valid_images:
+            return [TextContent(type="text", text=f"❌ {image_error}")]
+
         client = get_gemini_client()
         await initialize_client()
         await cleanup_due_remote_chats(client)
@@ -49,7 +53,7 @@ def register_chat_tools(mcp: FastMCP):
         logger.info(f"正在使用 {model_name} 生成响应...")
         request_kwargs = {
             "prompt": message,
-            "files": image_paths,
+            "files": safe_image_paths or None,
             "model": model_name,
             "thinking_level": thinking_level,
             "gem": gem_id,
@@ -109,13 +113,17 @@ def register_chat_tools(mcp: FastMCP):
         delete_after_seconds: Optional[int] = None,
     ) -> list[TextContent]:
         """会话消息"""
+        valid_images, safe_image_paths, image_error = validate_image_paths(image_paths)
+        if not valid_images:
+            return [TextContent(type="text", text=f"❌ {image_error}")]
+
         session_data = get_session(session_id)
         if not session_data:
             return [TextContent(type="text", text=f"❌ 会话 {session_id} 不存在")]
         use_temporary = session_data.get("temporary", False) if temporary is None else temporary
         request_kwargs = {
             "prompt": message,
-            "files": image_paths,
+            "files": safe_image_paths or None,
             "temporary": use_temporary,
             "thinking_level": session_data.get("thinking_level", "standard"),
         }
@@ -168,6 +176,10 @@ def register_chat_tools(mcp: FastMCP):
         delete_after_seconds: Optional[int] = None,
     ) -> list[TextContent]:
         """流式对话"""
+        valid_images, safe_image_paths, image_error = validate_image_paths(image_paths)
+        if not valid_images:
+            return [TextContent(type="text", text=f"❌ {image_error}")]
+
         client = get_gemini_client()
         await initialize_client()
         await cleanup_due_remote_chats(client)
@@ -176,7 +188,7 @@ def register_chat_tools(mcp: FastMCP):
         final_response = None
         request_kwargs = {
             "prompt": message,
-            "files": image_paths,
+            "files": safe_image_paths or None,
             "model": model_name,
             "thinking_level": thinking_level,
             "gem": gem_id,
@@ -212,6 +224,10 @@ def register_chat_tools(mcp: FastMCP):
         delete_after_seconds: Optional[int] = None,
     ) -> list[TextContent]:
         """会话流式消息"""
+        valid_images, safe_image_paths, image_error = validate_image_paths(image_paths)
+        if not valid_images:
+            return [TextContent(type="text", text=f"❌ {image_error}")]
+
         session_data = get_session(session_id)
         if not session_data:
             return [TextContent(type="text", text=f"❌ 会话 {session_id} 不存在")]
@@ -220,7 +236,7 @@ def register_chat_tools(mcp: FastMCP):
         use_temporary = session_data.get("temporary", False) if temporary is None else temporary
         request_kwargs = {
             "prompt": message,
-            "files": image_paths,
+            "files": safe_image_paths or None,
             "temporary": use_temporary,
             "thinking_level": session_data.get("thinking_level", "standard"),
         }
