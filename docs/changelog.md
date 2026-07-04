@@ -6,6 +6,10 @@ Gemini MCP Server 版本更新历史记录。
 
 ## Unreleased
 
+- 暂无。
+
+## v2.1.0 (2026-07-04)
+
 ### Web UI 对齐
 - 对齐 2026-05-22 观察到的 Gemini Web 模型面：`3.1 Flash-Lite`、`3.5 Flash`、`3.1 Pro`
 - 复核 2026-06-18 Pro 账号网页面：工具菜单包含上传、Drive、导入代码、图片、视频、Canvas、Deep Research、音乐、学习辅导、个性化/Labs；设置菜单包含活动记录、记忆导入、用量限额、定时操作、公开链接等入口
@@ -21,16 +25,22 @@ Gemini MCP Server 版本更新历史记录。
 - 新增 `gemini_search_chats`，分页搜索历史对话标题/ID，并可显式扫描当前页正文片段
 - 新增 `gemini_export_chat`，将单个历史对话导出为 Markdown 或 JSON
 - 新增 `gemini_delete_chat`，删除指定远端历史对话
+- 新增 `gemini_scan_chat_history_sources`，按前端观测到的多个历史 RPC 过滤器、
+  原生 notebook 对话和 Remy goal conversation 引用深度枚举聊天元数据，便于验证历史覆盖范围
+- 新增 `gemini_history` 作为只读历史聚合入口，把 list/scan/search/read/export 合并到一个 agent-facing 工具
 - 新增 `gemini_cleanup_test_artifacts`，默认 dry-run 查找并可选删除显式 marker 匹配的测试聊天和测试定时任务
 - 新增 `gemini_get_tool_manifest`，为 agent 暴露工具安全、隐私、分页、可用分组、当前启用状态和推荐工作流元数据
 - primary MCP 工具增加 MCP `ToolAnnotations`，标记只读、远端修改、本地修改和 destructive 操作
 - 新增 `gemini_probe_web_features`，用浏览器实测到的只读 RPC 探测 Library、公开链接、用量、个性化、记忆导入等新版 Web 入口
 - 新增 `gemini_get_web_capabilities`，返回 Pro 网页模型、思考等级、工具菜单、设置入口和 MCP 覆盖清单
 - 新增 `gemini_list_public_links`、`gemini_get_usage_limits`、`gemini_list_library_capabilities`，把可稳定解析的新版 Web 入口从 probe 升级为只读工具
+- 新增 `gemini_list_notebooks`、`gemini_list_notebook_chats`、`gemini_move_chat_to_notebook`，支持 Gemini Web 原生笔记本列表、笔记本内最近对话读取，以及把已有聊天移动到目标笔记本并校验
+- 新增 `gemini_notebooks` 作为原生 Notebook 只读聚合入口，供 `history-organize` 使用
 - 新增 `gemini_list_scheduled_actions`，列出定时操作页面返回的 active/inactive 任务条目
 - 新增 `gemini_get_scheduled_action`，用前端确认的 `kwDCne` / GetTask RPC 按 ID 只读校验定时操作
 - 新增 `gemini_create_scheduled_action` / `gemini_delete_scheduled_action`，支持每日定时操作的创建和按 ID 删除
 - 新增 `gemini_get_tool_mode_status`，只读读取 Canvas / 学习辅导等工具模式附近出现的 Web 内部状态枚举
+- 新增 `gemini_account_inventory` 作为账号只读聚合入口，把 capabilities/status/features/links/usage/library/notebooks/scheduled/modes/models 收口到一个工具
 - 新增 `gemini_list_research_report_actions` / `gemini_create_from_research_report`，为 Deep Research 完成后的网页实测“创建”菜单提供 MCP 侧等价入口，可生成网页、信息图、测验、抽认卡、音频概览脚本和自定义应用规格；当前未观测到稳定原生网页菜单 mutation RPC
 - `gemini_list_chats` 增加 `offset`、`response_format` 和分页元数据
 - `gemini_list_public_links`、`gemini_list_library_capabilities`、`gemini_list_scheduled_actions`
@@ -48,13 +58,22 @@ Gemini MCP Server 版本更新历史记录。
 
 ### 工具面收缩
 - 新默认工具组改为 `core`
-- `all` 现在聚焦高价值 AI 工作流，不再默认加载本地提示词工具
+- 新增意图型工具 profile：`model`/`chat` 仅调用模型，`history` 只读历史整理，
+  `history-organize` 允许将历史对话移动到 native Notebook，`account-read` 只读盘点账号
+  Web surface，`scheduled-read`/`scheduled-admin` 分离定时操作读写权限
+- `history` 和 `account-read` 改为 facade-first：普通 agent 分别只看到 `gemini_history`
+  和 `gemini_account_inventory`；旧颗粒工具继续保留在 `manage` / `all` 作为兼容维护面
+- `all` 保留完整维护/验证工具面，但不再加载本地提示词工具
+- `manage` 内部改为按 profile 分层注册，避免只想整理历史的 agent 同时拿到账号写操作、
+  scheduled mutation 或 Gems 管理工具
 - 移除 `gemini_list_features`，减少低价值枚举型工具
 - 当前默认工具面为 `core` 加始终可用的 manifest/cookie helpers；`all` 额外提供
+  `gemini_history`、`gemini_account_inventory`、`gemini_notebooks`、
   `gemini_inspect_account`、`gemini_cleanup_test_artifacts`、`gemini_list_chats`、`gemini_search_chats`、
-  `gemini_read_chat`、`gemini_export_chat`、`gemini_delete_chat`、
+  `gemini_scan_chat_history_sources`、`gemini_read_chat`、`gemini_export_chat`、`gemini_delete_chat`、
   `gemini_get_web_capabilities`、`gemini_probe_web_features`、`gemini_list_public_links`、
   `gemini_get_usage_limits`、`gemini_list_library_capabilities`、
+  `gemini_list_notebooks`、`gemini_list_notebook_chats`、`gemini_move_chat_to_notebook`、
   `gemini_list_scheduled_actions`、`gemini_get_scheduled_action`、`gemini_create_scheduled_action`、
   `gemini_delete_scheduled_action`、`gemini_get_tool_mode_status`、
   `gemini_list_models`、`gemini_manage_gems`
@@ -62,7 +81,7 @@ Gemini MCP Server 版本更新历史记录。
 
 ### 文档与验证
 - 补充 Gemini Web live UI 覆盖说明和媒体路由说明
-- 新增 `evaluations/gemini_web_mcp_contract.xml`，提供 13 个只读、稳定答案的 MCP contract evaluation
+- 新增 `evaluations/gemini_web_mcp_contract.xml`，提供 17 个只读、稳定答案的 MCP contract evaluation
 - 扩展测试以校验媒体后端分流、学习模式请求注入、工具 annotations、evaluation XML、Codex skill 和默认工具面
 
 ---

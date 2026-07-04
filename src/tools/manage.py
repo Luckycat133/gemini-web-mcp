@@ -33,7 +33,10 @@ logger = logging.getLogger(__name__)
 ResponseFormat = Literal["markdown", "json"]
 FeatureSurface = Literal[
     "all",
+    "history",
     "library",
+    "notebooks",
+    "remy",
     "sharing",
     "usage",
     "personalization",
@@ -43,12 +46,29 @@ FeatureSurface = Literal[
 ]
 UsageScope = Literal["quota", "model_state", "all"]
 ScheduledScope = Literal["active", "inactive", "all"]
+HistoryAction = Literal["list", "scan", "search", "read", "export"]
+NotebookAction = Literal["list", "chats"]
+AccountInventorySurface = Literal[
+    "capabilities",
+    "status",
+    "features",
+    "links",
+    "usage",
+    "library",
+    "notebooks",
+    "notebook_chats",
+    "scheduled",
+    "modes",
+    "models",
+]
 ManifestScope = Literal[
     "all",
     "chat",
     "core",
     "history",
     "account",
+    "notebooks",
+    "scheduled",
     "media",
     "files",
     "research",
@@ -61,10 +81,21 @@ CleanupTarget = Literal["all", "chats", "scheduled"]
 TOOL_GROUP_MODULES = {
     "core": {"core", "media", "files", "research"},
     "basic": {"core"},
+    "model": {"core"},
+    "chat": {"core"},
+    "invoke": {"core"},
     "media": {"media"},
     "advanced": {"prompts", "research"},
     "manage": {"history", "account", "gems"},
+    "history": {"history"},
+    "history-read": {"history"},
+    "history-organize": {"history", "account"},
+    "account-read": {"account"},
+    "scheduled-read": {"account"},
+    "scheduled-admin": {"account"},
+    "admin": {"history", "account", "gems"},
     "file": {"files"},
+    "files": {"files"},
     "research": {"research"},
     "prompts": {"prompts"},
     "all": {"core", "media", "files", "research", "history", "account", "gems"},
@@ -148,12 +179,37 @@ WEB_UI_CAPABILITIES = {
         "Runtime model registry is still preferred when available.",
         "Drive picker, link mutation, settings mutation, and memory import mutation are not automated without a safer confirmed RPC contract.",
         "Scheduled actions support daily create and explicit delete through observed Web RPCs; edit/toggle remain disabled until stable RPC contracts are confirmed.",
+        "Native Gemini Web Notebooks are covered for list, recent-chat list, and chat move operations; this is distinct from external NotebookLM.",
         "Probe tools intentionally omit raw response bodies and private account content.",
     ],
 }
 
 
 WEB_FEATURE_PROBES = [
+    {
+        "surface": "remy",
+        "name": "conversation_history_recent",
+        "rpcid": "MaZiqc",
+        "payload": "[13,null,[false,null,true]]",
+        "source_path": "/app",
+        "observed": "2026-07-04 Pro UI / Conversation history recent bucket",
+    },
+    {
+        "surface": "history",
+        "name": "conversation_history_pinned",
+        "rpcid": "MaZiqc",
+        "payload": "[13,null,[true,null,true]]",
+        "source_path": "/app",
+        "observed": "2026-07-04 Pro UI / Conversation history pinned bucket",
+    },
+    {
+        "surface": "history",
+        "name": "remy_goals",
+        "rpcid": "GS7W1",
+        "payload": "[13]",
+        "source_path": "/app",
+        "observed": "2026-07-04 Pro UI / Remy goals with conversation references",
+    },
     {
         "surface": "library",
         "name": "library_index",
@@ -177,6 +233,14 @@ WEB_FEATURE_PROBES = [
         "payload": '["zh-CN"]',
         "source_path": "/app/library",
         "observed": "2026-06-18 Pro UI / Library",
+    },
+    {
+        "surface": "notebooks",
+        "name": "native_notebooks_list",
+        "rpcid": "CNgdBe",
+        "payload": '[2,["zh-CN"],false,null,[2]]',
+        "source_path": "/notebooks/view",
+        "observed": "2026-07-04 Pro UI / Native Gemini Notebooks",
     },
     {
         "surface": "sharing",
@@ -303,6 +367,45 @@ class _RawRPCData:
 
     def serialize(self) -> list:
         return [self.rpcid, self.payload, None, self.identifier]
+
+
+CONVERSATION_HISTORY_FILTERS: tuple[dict[str, Any], ...] = (
+    {
+        "name": "ui_recent",
+        "filter": [False, None, True],
+        "description": "Main Gemini Web recent conversation history bucket.",
+    },
+    {
+        "name": "ui_pinned",
+        "filter": [True, None, True],
+        "description": "Main Gemini Web pinned conversation history bucket.",
+    },
+    {
+        "name": "recent_p3_true",
+        "filter": [False, None, True, None, True],
+        "description": "Recent bucket with the frontend P3 metadata flag set true.",
+    },
+    {
+        "name": "pinned_p3_true",
+        "filter": [True, None, True, None, True],
+        "description": "Pinned bucket with the frontend P3 metadata flag set true.",
+    },
+    {
+        "name": "recent_p3_false",
+        "filter": [False, None, True, None, False],
+        "description": "Recent bucket variant used by frontend refill paths after history mutations.",
+    },
+    {
+        "name": "pinned_p3_false",
+        "filter": [True, None, True, None, False],
+        "description": "Pinned bucket variant used by frontend refill paths after history mutations.",
+    },
+    {
+        "name": "recent_field3_false_p3_true",
+        "filter": [False, None, False, None, True],
+        "description": "Recent bucket with the frontend field-3 boolean disabled and P3 set true.",
+    },
+)
 
 
 def _format_timestamp(timestamp: object) -> str:
@@ -648,6 +751,529 @@ def _parse_library_capability(entry: Any) -> dict[str, Any]:
     }
 
 
+def _parse_native_notebook(entry: Any) -> dict[str, Any]:
+    if not isinstance(entry, list):
+        return {"raw_type": type(entry).__name__}
+
+    metadata = entry[1] if len(entry) > 1 and isinstance(entry[1], list) else []
+    summary = entry[2] if len(entry) > 2 and isinstance(entry[2], list) else []
+    project_metadata = metadata[12] if len(metadata) > 12 and isinstance(metadata[12], list) else []
+    display = metadata[14] if len(metadata) > 14 and isinstance(metadata[14], list) else []
+    sources = metadata[10] if len(metadata) > 10 and isinstance(metadata[10], list) else []
+    source_rows = sources[1] if len(sources) > 1 and isinstance(sources[1], list) else []
+
+    return {
+        "id": entry[0] if len(entry) > 0 and isinstance(entry[0], str) else "",
+        "title": metadata[0] if len(metadata) > 0 and isinstance(metadata[0], str) else "",
+        "description": metadata[1] if len(metadata) > 1 and isinstance(metadata[1], str) else "",
+        "summary": summary[0] if len(summary) > 0 and isinstance(summary[0], str) else "",
+        "emoji": display[0] if len(display) > 0 and isinstance(display[0], str) else "",
+        "source_count": len(source_rows),
+        "project_type": project_metadata[0] if len(project_metadata) > 0 else None,
+        "project_subtype": project_metadata[4] if len(project_metadata) > 4 else None,
+        "pinned": entry[3] if len(entry) > 3 and isinstance(entry[3], bool) else None,
+        "field_count": len(entry),
+    }
+
+
+def _parse_notebook_category(entry: Any) -> dict[str, Any]:
+    if not isinstance(entry, list):
+        return {"raw_type": type(entry).__name__}
+    return {
+        "subtype": entry[0] if len(entry) > 0 else None,
+        "label": entry[1] if len(entry) > 1 and isinstance(entry[1], str) else "",
+    }
+
+
+def _native_notebooks_payload(locale: str = "zh-CN") -> str:
+    return json.dumps([2, [locale or "zh-CN"], False, None, [2]], ensure_ascii=False, separators=(",", ":"))
+
+
+async def _fetch_native_notebooks(client, locale: str = "zh-CN") -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    response = await client._batch_execute(
+        [_RawRPCData("CNgdBe", _native_notebooks_payload(locale))],
+        source_path="/notebooks/view",
+        close_on_error=False,
+    )
+    bodies = _extract_rpc_bodies(response.text, "CNgdBe")
+    body = bodies[0] if bodies else []
+    raw_entries = body[2] if isinstance(body, list) and len(body) > 2 and isinstance(body[2], list) else []
+    raw_categories = body[3] if isinstance(body, list) and len(body) > 3 and isinstance(body[3], list) else []
+    notebooks = [_parse_native_notebook(item) for item in raw_entries]
+    diagnostic = {
+        "source_rpc": "CNgdBe",
+        "observed": "2026-07-04 Pro UI / Native Gemini Notebooks",
+        "status_code": getattr(response, "status_code", None),
+        "response_length": len(getattr(response, "text", "") or ""),
+        "body_present": bool(bodies),
+        "raw_entry_count": len(raw_entries),
+        "categories": [_parse_notebook_category(item) for item in raw_categories],
+        "client_language": getattr(client, "language", None),
+        "client_build_label": getattr(client, "build_label", None),
+    }
+    return notebooks, diagnostic
+
+
+def _conversation_project_id(entry: Any) -> str:
+    if not isinstance(entry, list):
+        return ""
+    bot_id = entry[7] if len(entry) > 7 and isinstance(entry[7], str) else ""
+    project_metadata = entry[13] if len(entry) > 13 and isinstance(entry[13], list) else None
+    return bot_id if bot_id and project_metadata is not None else ""
+
+
+def _parse_conversation_metadata(entry: Any) -> dict[str, Any]:
+    if not isinstance(entry, list):
+        return {"raw_type": type(entry).__name__}
+
+    timestamp = None
+    timestamp_value = entry[5] if len(entry) > 5 else None
+    if isinstance(timestamp_value, list) and timestamp_value and isinstance(timestamp_value[0], (int, float)):
+        timestamp = float(timestamp_value[0]) + (float(timestamp_value[1] if len(timestamp_value) > 1 else 0) / 1e9)
+
+    return {
+        "id": entry[0] if len(entry) > 0 and isinstance(entry[0], str) else "",
+        "title": entry[1] if len(entry) > 1 and isinstance(entry[1], str) else "",
+        "is_pinned": bool(entry[2]) if len(entry) > 2 and entry[2] is not None else False,
+        "timestamp": timestamp,
+        "time": _format_timestamp(timestamp),
+        "project_id": _conversation_project_id(entry),
+        "bot_id": entry[7] if len(entry) > 7 and isinstance(entry[7], str) else "",
+        "field_count": len(entry),
+    }
+
+
+def _conversation_history_payload(
+    filter_payload: list[Any],
+    page_size: int,
+    next_page_token: str | None = None,
+) -> str:
+    return json.dumps(
+        [page_size, next_page_token, filter_payload],
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
+
+
+async def _fetch_conversation_metadata_source(
+    client,
+    source_name: str,
+    filter_payload: list[Any],
+    max_items: int,
+    page_size: int = 100,
+    max_pages: int = 50,
+) -> dict[str, Any]:
+    safe_page_size = _clamp_int(page_size, default=100, minimum=1, maximum=100)
+    safe_max_pages = _clamp_int(max_pages, default=50, minimum=1, maximum=200)
+    safe_max_items = _clamp_int(max_items, default=5000, minimum=1, maximum=10000)
+    items: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    next_page_token: str | None = None
+    response_length = 0
+    pages: list[dict[str, Any]] = []
+    stopped_reason = "max_pages"
+
+    for page_index in range(safe_max_pages):
+        response = await client._batch_execute(
+            [_RawRPCData("MaZiqc", _conversation_history_payload(filter_payload, safe_page_size, next_page_token))],
+            source_path="/app",
+            close_on_error=False,
+        )
+        response_text = getattr(response, "text", "") or ""
+        response_length += len(response_text)
+        bodies = _extract_rpc_bodies(response_text, "MaZiqc")
+        body = bodies[0] if bodies else []
+        raw_entries = body[2] if isinstance(body, list) and len(body) > 2 and isinstance(body[2], list) else []
+        parsed_entries = [_parse_conversation_metadata(item) for item in raw_entries]
+        new_unique_count = 0
+        for item in parsed_entries:
+            item_id = item.get("id")
+            if not item_id or item_id in seen:
+                continue
+            seen.add(item_id)
+            item["history_source"] = source_name
+            items.append(item)
+            new_unique_count += 1
+            if len(items) >= safe_max_items:
+                break
+
+        next_page_token = body[1] if isinstance(body, list) and len(body) > 1 and isinstance(body[1], str) else None
+        pages.append(
+            {
+                "page": page_index + 1,
+                "raw_count": len(raw_entries),
+                "new_unique_count": new_unique_count,
+                "unique_so_far": len(items),
+                "next_page_token_present": bool(next_page_token),
+                "response_length": len(response_text),
+                "first_id": parsed_entries[0].get("id") if parsed_entries else "",
+                "last_id": parsed_entries[-1].get("id") if parsed_entries else "",
+                "last_title": parsed_entries[-1].get("title") if parsed_entries else "",
+            }
+        )
+
+        if len(items) >= safe_max_items:
+            stopped_reason = "max_items"
+            break
+        if not raw_entries:
+            stopped_reason = "empty_page"
+            break
+        if not next_page_token:
+            stopped_reason = "no_next_page_token"
+            break
+        if new_unique_count == 0:
+            stopped_reason = "no_new_unique_items"
+            break
+
+    return {
+        "name": source_name,
+        "rpcid": "MaZiqc",
+        "filter_payload": filter_payload,
+        "items": items,
+        "diagnostic": {
+            "source_rpc": "MaZiqc",
+            "observed": "2026-07-04 Pro UI / conversation history metadata source",
+            "filter_name": source_name,
+            "filter_payload": filter_payload,
+            "page_size": safe_page_size,
+            "max_pages": safe_max_pages,
+            "max_items": safe_max_items,
+            "page_count": len(pages),
+            "fetched_count": len(items),
+            "response_length": response_length,
+            "next_page_token_present": bool(next_page_token),
+            "stopped_reason": stopped_reason,
+            "pages": pages,
+        },
+    }
+
+
+async def _fetch_conversation_metadata_sources(
+    client,
+    filters: tuple[dict[str, Any], ...] = CONVERSATION_HISTORY_FILTERS,
+    max_items_per_source: int = 5000,
+    page_size: int = 100,
+    max_pages_per_source: int = 50,
+) -> list[dict[str, Any]]:
+    sources: list[dict[str, Any]] = []
+    for source in filters:
+        sources.append(
+            await _fetch_conversation_metadata_source(
+                client,
+                source["name"],
+                list(source["filter"]),
+                max_items=max_items_per_source,
+                page_size=page_size,
+                max_pages=max_pages_per_source,
+            )
+        )
+    return sources
+
+
+def _merge_conversation_source_items(source_blocks: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], dict[str, list[str]]]:
+    by_id: dict[str, dict[str, Any]] = {}
+    sources_by_id: dict[str, list[str]] = {}
+    for block in source_blocks:
+        source_name = str(block.get("name") or block.get("notebook_title") or block.get("source") or "unknown")
+        for item in block.get("items", []):
+            item_id = item.get("id")
+            if not item_id:
+                continue
+            sources_by_id.setdefault(item_id, [])
+            if source_name not in sources_by_id[item_id]:
+                sources_by_id[item_id].append(source_name)
+            if item_id not in by_id:
+                merged_item = dict(item)
+                merged_item["sources"] = sources_by_id[item_id]
+                by_id[item_id] = merged_item
+                continue
+
+            existing = by_id[item_id]
+            if not existing.get("project_id") and item.get("project_id"):
+                existing["project_id"] = item["project_id"]
+            if not existing.get("bot_id") and item.get("bot_id"):
+                existing["bot_id"] = item["bot_id"]
+            if not existing.get("time") and item.get("time"):
+                existing["time"] = item["time"]
+                existing["timestamp"] = item.get("timestamp")
+            existing["sources"] = sources_by_id[item_id]
+
+    return sorted(
+        by_id.values(),
+        key=lambda item: (float(item.get("timestamp") or 0), str(item.get("id") or "")),
+        reverse=True,
+    ), sources_by_id
+
+
+def _parse_remy_goal_entry(entry: Any) -> dict[str, Any]:
+    if not isinstance(entry, list):
+        return {"raw_type": type(entry).__name__}
+
+    created_timestamp = None
+    created = entry[16] if len(entry) > 16 else None
+    if isinstance(created, list) and created and isinstance(created[0], (int, float)):
+        created_timestamp = float(created[0]) + (float(created[1] if len(created) > 1 else 0) / 1e9)
+
+    updated_timestamp = None
+    updated = entry[17] if len(entry) > 17 else None
+    if isinstance(updated, list) and updated and isinstance(updated[0], (int, float)):
+        updated_timestamp = float(updated[0]) + (float(updated[1] if len(updated) > 1 else 0) / 1e9)
+
+    return {
+        "id": entry[13] if len(entry) > 13 and isinstance(entry[13], str) else "",
+        "title": entry[1] if len(entry) > 1 and isinstance(entry[1], str) else "",
+        "description": entry[1] if len(entry) > 1 and isinstance(entry[1], str) else "",
+        "is_pinned": bool(entry[19]) if len(entry) > 19 and entry[19] is not None else False,
+        "status": entry[2] if len(entry) > 2 else None,
+        "channel": entry[4] if len(entry) > 4 and isinstance(entry[4], str) else "",
+        "created_timestamp": created_timestamp,
+        "created_time": _format_timestamp(created_timestamp),
+        "updated_timestamp": updated_timestamp,
+        "updated_time": _format_timestamp(updated_timestamp),
+        "field_count": len(entry),
+    }
+
+
+async def _fetch_remy_goal_conversation_refs(
+    client,
+    max_items: int,
+    page_size: int = 100,
+    max_pages: int = 50,
+) -> dict[str, Any]:
+    safe_page_size = _clamp_int(page_size, default=100, minimum=1, maximum=100)
+    safe_max_pages = _clamp_int(max_pages, default=50, minimum=1, maximum=200)
+    safe_max_items = _clamp_int(max_items, default=5000, minimum=1, maximum=10000)
+    items: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    next_page_token: str | None = None
+    pages: list[dict[str, Any]] = []
+    response_length = 0
+    stopped_reason = "max_pages"
+
+    for page_index in range(safe_max_pages):
+        request_payload = [safe_page_size, next_page_token] if next_page_token else [safe_page_size]
+        response = await client._batch_execute(
+            [_RawRPCData("GS7W1", json.dumps(request_payload, ensure_ascii=False, separators=(",", ":")))],
+            source_path="/app",
+            close_on_error=False,
+        )
+        response_text = getattr(response, "text", "") or ""
+        response_length += len(response_text)
+        bodies = _extract_rpc_bodies(response_text, "GS7W1")
+        body = bodies[0] if bodies else []
+        raw_entries = body[0] if isinstance(body, list) and body and isinstance(body[0], list) else []
+        parsed_entries = [_parse_remy_goal_entry(item) for item in raw_entries]
+        new_unique_count = 0
+        for item in parsed_entries:
+            item_id = item.get("id")
+            if not item_id or item_id in seen:
+                continue
+            seen.add(item_id)
+            item["history_source"] = "remy_goals"
+            items.append(item)
+            new_unique_count += 1
+            if len(items) >= safe_max_items:
+                break
+
+        next_page_token = body[1] if isinstance(body, list) and len(body) > 1 and isinstance(body[1], str) else None
+        pages.append(
+            {
+                "page": page_index + 1,
+                "raw_count": len(raw_entries),
+                "new_unique_count": new_unique_count,
+                "unique_so_far": len(items),
+                "next_page_token_present": bool(next_page_token),
+                "response_length": len(response_text),
+            }
+        )
+        if len(items) >= safe_max_items:
+            stopped_reason = "max_items"
+            break
+        if not raw_entries:
+            stopped_reason = "empty_page"
+            break
+        if not next_page_token:
+            stopped_reason = "no_next_page_token"
+            break
+        if new_unique_count == 0:
+            stopped_reason = "no_new_unique_items"
+            break
+
+    return {
+        "name": "remy_goals",
+        "rpcid": "GS7W1",
+        "items": items,
+        "diagnostic": {
+            "source_rpc": "GS7W1",
+            "observed": "2026-07-04 Pro UI / Remy goals conversation references",
+            "page_size": safe_page_size,
+            "max_pages": safe_max_pages,
+            "max_items": safe_max_items,
+            "page_count": len(pages),
+            "fetched_count": len(items),
+            "response_length": response_length,
+            "next_page_token_present": bool(next_page_token),
+            "stopped_reason": stopped_reason,
+            "pages": pages,
+        },
+    }
+
+
+def _notebook_chats_payload(notebook_id: str, page_size: int, next_page_token: str | None = None) -> str:
+    return json.dumps(
+        [page_size, next_page_token, [None, None, True, notebook_id, True]],
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
+
+
+async def _fetch_notebook_chats(
+    client,
+    notebook_id: str,
+    limit: int,
+    offset: int,
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    safe_limit = _clamp_int(limit, default=20, minimum=1, maximum=100)
+    safe_offset = _clamp_int(offset, default=0, minimum=0, maximum=10000)
+    target_count = safe_offset + safe_limit
+    page_size = min(max(target_count, 10), 100)
+    items: list[dict[str, Any]] = []
+    next_page_token: str | None = None
+    response_length = 0
+    page_count = 0
+
+    while len(items) < target_count:
+        response = await client._batch_execute(
+            [_RawRPCData("MaZiqc", _notebook_chats_payload(notebook_id, page_size, next_page_token))],
+            source_path=f"/notebook/{notebook_id.rsplit('/', 1)[-1]}",
+            close_on_error=False,
+        )
+        response_length += len(getattr(response, "text", "") or "")
+        page_count += 1
+        bodies = _extract_rpc_bodies(response.text, "MaZiqc")
+        body = bodies[0] if bodies else []
+        raw_entries = body[2] if isinstance(body, list) and len(body) > 2 and isinstance(body[2], list) else []
+        items.extend(_parse_conversation_metadata(item) for item in raw_entries)
+        next_page_token = body[1] if isinstance(body, list) and len(body) > 1 and isinstance(body[1], str) else None
+        if not next_page_token or not raw_entries:
+            break
+
+    page = items[safe_offset : safe_offset + safe_limit]
+    diagnostic = {
+        "source_rpc": "MaZiqc",
+        "observed": "2026-07-04 Pro UI / Native Gemini Notebook recent chats",
+        "response_length": response_length,
+        "page_count": page_count,
+        "fetched_count": len(items),
+        "has_remote_more": bool(next_page_token),
+        "next_page_token_present": bool(next_page_token),
+    }
+    page_info = {
+        "total_count": len(items),
+        "count": len(page),
+        "offset": safe_offset,
+        "limit": safe_limit,
+        "has_more": bool(next_page_token) or safe_offset + len(page) < len(items),
+        "next_offset": safe_offset + len(page) if bool(next_page_token) or safe_offset + len(page) < len(items) else None,
+    }
+    return page, {**page_info, "diagnostic": diagnostic}
+
+
+def _find_notebook(
+    notebooks: list[dict[str, Any]],
+    notebook_id: str = "",
+    notebook_title: str = "",
+) -> dict[str, Any] | None:
+    clean_id = notebook_id.strip()
+    clean_title = notebook_title.strip()
+    if clean_id:
+        return next((item for item in notebooks if item.get("id") == clean_id), None)
+    if clean_title:
+        exact = [item for item in notebooks if item.get("title") == clean_title]
+        if len(exact) == 1:
+            return exact[0]
+        folded = clean_title.casefold()
+        matches = [item for item in notebooks if str(item.get("title", "")).casefold() == folded]
+        if len(matches) == 1:
+            return matches[0]
+    return None
+
+
+def _move_chat_to_notebook_payload(chat_id: str, notebook_id: str, project_type: int = 2) -> str:
+    conversation = [None] * 14
+    conversation[0] = chat_id
+    conversation[7] = notebook_id
+    conversation[13] = [project_type]
+    return json.dumps(
+        [None, [["bot_id", "bot_project_metadata"]], conversation],
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
+
+
+def _conversation_metadata_payload(
+    pinned: bool,
+    page_size: int,
+    next_page_token: str | None = None,
+) -> str:
+    return _conversation_history_payload([pinned, None, True], page_size, next_page_token)
+
+
+async def _fetch_conversation_metadata_bucket(
+    client,
+    pinned: bool,
+    target_count: int,
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    source_name = "ui_pinned" if pinned else "ui_recent"
+    source = await _fetch_conversation_metadata_source(
+        client,
+        source_name,
+        [pinned, None, True],
+        max_items=target_count,
+        page_size=min(max(target_count, 10), 100),
+        max_pages=100,
+    )
+    diagnostic = dict(source["diagnostic"])
+    diagnostic.update(
+        {
+            "pinned": pinned,
+            "has_remote_more": bool(diagnostic.get("next_page_token_present")),
+        }
+    )
+    return source["items"], {
+        "pinned": pinned,
+        **diagnostic,
+    }
+
+
+async def _fetch_recent_conversation_metadata(
+    client,
+    target_count: int,
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    safe_target = _clamp_int(target_count, default=50, minimum=1, maximum=5000)
+    source_filters = tuple(source for source in CONVERSATION_HISTORY_FILTERS if source["name"] in {"ui_pinned", "ui_recent"})
+    sources = await _fetch_conversation_metadata_sources(
+        client,
+        source_filters,
+        max_items_per_source=safe_target,
+        page_size=min(max(safe_target, 10), 100),
+        max_pages_per_source=100,
+    )
+    combined, _sources_by_id = _merge_conversation_source_items(sources)
+    pinned_diag = next((source["diagnostic"] for source in sources if source["name"] == "ui_pinned"), {})
+    recent_diag = next((source["diagnostic"] for source in sources if source["name"] == "ui_recent"), {})
+    return combined, {
+        "source_rpc": "MaZiqc",
+        "observed": "2026-07-04 Pro UI / paginated conversation metadata",
+        "target_count_per_bucket": safe_target,
+        "pinned": pinned_diag,
+        "recent": recent_diag,
+        "has_remote_more": bool(
+            pinned_diag.get("next_page_token_present") or recent_diag.get("next_page_token_present")
+        ),
+    }
+
+
 def _parse_scheduled_action_entry(entry: Any, max_chars: int) -> dict[str, Any]:
     if not isinstance(entry, list):
         return {"raw_type": type(entry).__name__}
@@ -849,20 +1475,27 @@ def _web_capabilities_payload() -> dict[str, Any]:
     payload["mcp_tools"] = {
         "chat": ["gemini_chat", "gemini_chat_stream", "gemini_start_chat", "gemini_send_message"],
         "history": [
+            "gemini_history",
             "gemini_cleanup_test_artifacts",
             "gemini_list_chats",
+            "gemini_scan_chat_history_sources",
             "gemini_search_chats",
             "gemini_read_chat",
             "gemini_export_chat",
             "gemini_delete_chat",
         ],
         "account": [
+            "gemini_account_inventory",
             "gemini_inspect_account",
             "gemini_get_tool_manifest",
             "gemini_get_web_capabilities",
             "gemini_probe_web_features",
             "gemini_list_public_links",
             "gemini_get_usage_limits",
+            "gemini_notebooks",
+            "gemini_list_notebooks",
+            "gemini_list_notebook_chats",
+            "gemini_move_chat_to_notebook",
             "gemini_list_library_capabilities",
             "gemini_list_scheduled_actions",
             "gemini_get_scheduled_action",
@@ -1012,6 +1645,15 @@ TOOL_MANIFEST: list[dict[str, Any]] = [
         "pagination": False,
     },
     {
+        "name": "gemini_history",
+        "group": "history",
+        "purpose": "Read-only facade for Gemini chat history list, deep metadata scan, search, read, and export actions.",
+        "read_only": True,
+        "destructive": False,
+        "privacy": "reads_private_chat_metadata_and_optional_turn_text",
+        "pagination": True,
+    },
+    {
         "name": "gemini_cleanup_test_artifacts",
         "group": "history",
         "purpose": "Find and optionally delete test chats and scheduled actions whose metadata matches explicit test markers.",
@@ -1024,6 +1666,15 @@ TOOL_MANIFEST: list[dict[str, Any]] = [
         "name": "gemini_list_chats",
         "group": "history",
         "purpose": "List Gemini Web chat-history metadata.",
+        "read_only": True,
+        "destructive": False,
+        "privacy": "reads_private_chat_metadata",
+        "pagination": True,
+    },
+    {
+        "name": "gemini_scan_chat_history_sources",
+        "group": "history",
+        "purpose": "Deep-scan Gemini Web chat-history metadata sources and report coverage across observed RPC filters.",
         "read_only": True,
         "destructive": False,
         "privacy": "reads_private_chat_metadata",
@@ -1102,6 +1753,15 @@ TOOL_MANIFEST: list[dict[str, Any]] = [
         "pagination": False,
     },
     {
+        "name": "gemini_account_inventory",
+        "group": "account",
+        "purpose": "Read-only facade for account inventory surfaces such as capabilities, links, usage, library, notebooks, scheduled entries, modes, and models.",
+        "read_only": True,
+        "destructive": False,
+        "privacy": "reads_private_account_inventory",
+        "pagination": True,
+    },
+    {
         "name": "gemini_list_public_links",
         "group": "account",
         "purpose": "List Gemini Web public-link entries.",
@@ -1127,6 +1787,42 @@ TOOL_MANIFEST: list[dict[str, Any]] = [
         "destructive": False,
         "privacy": "reads_template_capabilities",
         "pagination": True,
+    },
+    {
+        "name": "gemini_notebooks",
+        "group": "account",
+        "purpose": "Read-only facade for native Gemini Web Notebook list and notebook-chat metadata.",
+        "read_only": True,
+        "destructive": False,
+        "privacy": "reads_private_notebook_metadata",
+        "pagination": True,
+    },
+    {
+        "name": "gemini_list_notebooks",
+        "group": "account",
+        "purpose": "List native Gemini Web Notebooks with ids, titles, emoji, source counts, and subtype metadata.",
+        "read_only": True,
+        "destructive": False,
+        "privacy": "reads_private_notebook_metadata",
+        "pagination": True,
+    },
+    {
+        "name": "gemini_list_notebook_chats",
+        "group": "account",
+        "purpose": "List recent Gemini Web chats already assigned to a native notebook.",
+        "read_only": True,
+        "destructive": False,
+        "privacy": "reads_private_notebook_chat_metadata",
+        "pagination": True,
+    },
+    {
+        "name": "gemini_move_chat_to_notebook",
+        "group": "account",
+        "purpose": "Move an existing Gemini Web chat into a native Gemini Web Notebook using the observed UpdateConversation RPC.",
+        "read_only": False,
+        "destructive": False,
+        "privacy": "moves_private_chat_metadata",
+        "pagination": False,
     },
     {
         "name": "gemini_list_scheduled_actions",
@@ -1248,6 +1944,200 @@ TOOL_MANIFEST: list[dict[str, Any]] = [
 ]
 
 
+COOKIE_TOOL_NAMES = {
+    "gemini_doctor",
+    "gemini_get_cookie_status",
+    "gemini_list_browser_cookie_profiles",
+    "gemini_get_cookie_from_browser",
+    "gemini_reset",
+}
+MANIFEST_TOOL_NAMES = {"gemini_get_tool_manifest"}
+HISTORY_FACADE_TOOL_NAMES = {"gemini_history"}
+NOTEBOOKS_FACADE_TOOL_NAMES = {"gemini_notebooks"}
+ACCOUNT_INVENTORY_TOOL_NAMES = {"gemini_account_inventory"}
+CHAT_TOOL_NAMES = {
+    "gemini_chat",
+    "gemini_chat_stream",
+    "gemini_start_chat",
+    "gemini_send_message",
+    "gemini_send_message_stream",
+    "gemini_list_sessions",
+    "gemini_reset_session",
+}
+HISTORY_READ_TOOL_NAMES = {
+    "gemini_list_chats",
+    "gemini_scan_chat_history_sources",
+    "gemini_search_chats",
+    "gemini_read_chat",
+    "gemini_export_chat",
+}
+HISTORY_WRITE_TOOL_NAMES = {
+    "gemini_cleanup_test_artifacts",
+    "gemini_delete_chat",
+}
+NOTEBOOKS_READ_TOOL_NAMES = {
+    "gemini_list_notebooks",
+    "gemini_list_notebook_chats",
+}
+NOTEBOOKS_WRITE_TOOL_NAMES = {"gemini_move_chat_to_notebook"}
+ACCOUNT_READ_TOOL_NAMES = {
+    "gemini_inspect_account",
+    "gemini_probe_web_features",
+    "gemini_get_web_capabilities",
+    "gemini_list_public_links",
+    "gemini_get_usage_limits",
+    "gemini_list_library_capabilities",
+    "gemini_get_tool_mode_status",
+    "gemini_list_models",
+    *NOTEBOOKS_READ_TOOL_NAMES,
+}
+SCHEDULED_READ_TOOL_NAMES = {
+    "gemini_list_scheduled_actions",
+    "gemini_get_scheduled_action",
+}
+SCHEDULED_WRITE_TOOL_NAMES = {
+    "gemini_create_scheduled_action",
+    "gemini_delete_scheduled_action",
+}
+GEMS_TOOL_NAMES = {"gemini_manage_gems"}
+MANAGE_TOOL_LAYER_NAMES = {
+    "history-read": HISTORY_FACADE_TOOL_NAMES,
+    "history-write": HISTORY_WRITE_TOOL_NAMES,
+    "history-granular": HISTORY_READ_TOOL_NAMES,
+    "notebooks-read": NOTEBOOKS_FACADE_TOOL_NAMES,
+    "notebooks-write": NOTEBOOKS_WRITE_TOOL_NAMES,
+    "notebooks-granular": NOTEBOOKS_READ_TOOL_NAMES,
+    "account-read": ACCOUNT_INVENTORY_TOOL_NAMES,
+    "account-granular": ACCOUNT_READ_TOOL_NAMES | SCHEDULED_READ_TOOL_NAMES,
+    "scheduled-read": SCHEDULED_READ_TOOL_NAMES,
+    "scheduled-write": SCHEDULED_WRITE_TOOL_NAMES,
+    "gems": GEMS_TOOL_NAMES,
+}
+ALL_MANAGE_TOOL_NAMES = (
+    MANIFEST_TOOL_NAMES
+    | HISTORY_FACADE_TOOL_NAMES
+    | HISTORY_READ_TOOL_NAMES
+    | HISTORY_WRITE_TOOL_NAMES
+    | ACCOUNT_INVENTORY_TOOL_NAMES
+    | ACCOUNT_READ_TOOL_NAMES
+    | NOTEBOOKS_FACADE_TOOL_NAMES
+    | SCHEDULED_READ_TOOL_NAMES
+    | SCHEDULED_WRITE_TOOL_NAMES
+    | NOTEBOOKS_WRITE_TOOL_NAMES
+    | GEMS_TOOL_NAMES
+)
+MANAGE_TOOL_LAYER_NAMES["all"] = ALL_MANAGE_TOOL_NAMES
+
+TOOL_PROFILE_GUIDE = [
+    {
+        "name": "model",
+        "gemini_tools": "model",
+        "purpose": "Call Gemini models only; exposes chat/session tools plus always-on manifest and cookie diagnostics.",
+        "writes_remote": True,
+    },
+    {
+        "name": "history",
+        "gemini_tools": "history",
+        "purpose": "Read, search, and export Gemini chat history through the gemini_history facade without delete, scheduled actions, or Gems.",
+        "writes_remote": False,
+    },
+    {
+        "name": "history-organize",
+        "gemini_tools": "history-organize",
+        "purpose": "Use gemini_history and gemini_notebooks, then move selected chats into native Gemini Web Notebooks.",
+        "writes_remote": True,
+    },
+    {
+        "name": "account-read",
+        "gemini_tools": "account-read",
+        "purpose": "Read account inventory through the gemini_account_inventory facade.",
+        "writes_remote": False,
+    },
+    {
+        "name": "scheduled-admin",
+        "gemini_tools": "scheduled-admin",
+        "purpose": "Create or delete scheduled actions after explicit user authorization.",
+        "writes_remote": True,
+    },
+    {
+        "name": "core",
+        "gemini_tools": "core",
+        "purpose": "Broad content work: model calls, media, file/URL analysis, and Deep Research.",
+        "writes_remote": True,
+    },
+    {
+        "name": "all",
+        "gemini_tools": "all",
+        "purpose": "Full maintenance and verification surface; not recommended as a default for general agents.",
+        "writes_remote": True,
+    },
+]
+
+
+def resolve_manage_tool_names(layers: list[str] | set[str] | tuple[str, ...] | None = None) -> set[str]:
+    configured = {str(layer).strip() for layer in (layers or ["all"]) if str(layer).strip()}
+    if not configured:
+        configured = {"all"}
+    enabled = set(MANIFEST_TOOL_NAMES)
+    for layer in configured:
+        enabled.update(MANAGE_TOOL_LAYER_NAMES.get(layer, {layer}))
+    return enabled
+
+
+def _configured_tool_groups() -> list[str]:
+    configured = [
+        item.strip()
+        for item in os.environ.get("GEMINI_TOOLS", "core").split(",")
+        if item.strip()
+    ]
+    return configured or ["core"]
+
+
+def _configured_manage_layers(configured: list[str]) -> set[str]:
+    layers: set[str] = set()
+    profile_layers = {
+        "manage": {"all"},
+        "all": {"all"},
+        "admin": {"all"},
+        "history": {"history-read"},
+        "history-read": {"history-read"},
+        "history-organize": {"history-read", "notebooks-read", "notebooks-write"},
+        "account-read": {"account-read"},
+        "scheduled-read": {"scheduled-read"},
+        "scheduled-admin": {"scheduled-read", "scheduled-write"},
+    }
+    for group in configured:
+        if group.startswith("manage:"):
+            layers.add(group.split(":", 1)[1])
+        else:
+            layers.update(profile_layers.get(group, set()))
+    return layers
+
+
+def _enabled_manifest_tool_names(configured: list[str], enabled_groups: set[str]) -> set[str]:
+    enabled_tools = set(MANIFEST_TOOL_NAMES) | set(COOKIE_TOOL_NAMES)
+    manage_layers = _configured_manage_layers(configured)
+    if manage_layers:
+        enabled_tools.update(resolve_manage_tool_names(manage_layers))
+    for item in TOOL_MANIFEST:
+        group = item["group"]
+        if group == "prompts":
+            if "prompts" in enabled_groups:
+                enabled_tools.add(item["name"])
+            continue
+        if group in {"history", "account", "gems", "cookie"}:
+            continue
+        if item["name"] in CHAT_TOOL_NAMES:
+            if any(group_name in {"model", "chat", "invoke", "basic"} for group_name in configured):
+                enabled_tools.add(item["name"])
+            elif group in enabled_groups:
+                enabled_tools.add(item["name"])
+            continue
+        if group in enabled_groups:
+            enabled_tools.add(item["name"])
+    return enabled_tools
+
+
 MANIFEST_WORKFLOWS = [
     {
         "name": "safe_account_audit",
@@ -1262,9 +2152,9 @@ MANIFEST_WORKFLOWS = [
     {
         "name": "chat_history_find_and_export",
         "steps": [
-            "gemini_list_chats",
-            "gemini_search_chats",
-            "gemini_read_chat or gemini_export_chat",
+            "gemini_history(action='scan') when completeness matters",
+            "gemini_history(action='list'|'search')",
+            "gemini_history(action='read'|'export') for one selected chat",
         ],
         "notes": "Start with metadata search. Use scan_turns=true only when the user asks to search chat text.",
     },
@@ -1280,13 +2170,20 @@ MANIFEST_WORKFLOWS = [
     {
         "name": "web_surface_inventory",
         "steps": [
-            "gemini_list_public_links",
-            "gemini_get_usage_limits",
-            "gemini_list_library_capabilities",
-            "gemini_list_scheduled_actions",
-            "gemini_get_tool_mode_status",
+            "gemini_account_inventory(surface='capabilities')",
+            "gemini_account_inventory(surface='links'|'usage'|'library'|'notebooks'|'scheduled'|'modes'|'models')",
         ],
         "notes": "Read-only but may reveal account-private metadata such as links and scheduled-action titles.",
+    },
+    {
+        "name": "chat_history_to_native_notebooks",
+        "steps": [
+            "gemini_history(action='scan'|'list')",
+            "gemini_notebooks(action='list')",
+            "gemini_move_chat_to_notebook",
+            "gemini_notebooks(action='chats')",
+        ],
+        "notes": "Moves existing Gemini Web chats into native Gemini Web Notebooks; delete unrelated chats only through explicit destructive tools.",
     },
     {
         "name": "scheduled_action_create_and_cleanup",
@@ -1323,11 +2220,34 @@ MANIFEST_WORKFLOWS = [
 def _tool_availability(tool: dict[str, Any]) -> list[str]:
     if tool["name"] == "gemini_get_tool_manifest":
         return ["always"]
+    name = tool["name"]
     group = tool["group"]
-    if group in {"core", "media", "files", "research"}:
+    if name in CHAT_TOOL_NAMES:
+        return ["model", "chat", "core", "all"]
+    if group in {"media", "files", "research"}:
         return ["core", "all"]
-    if group in {"history", "account", "gems"}:
+    if name in HISTORY_FACADE_TOOL_NAMES:
+        return ["history", "history-organize", "manage", "all"]
+    if name in NOTEBOOKS_FACADE_TOOL_NAMES:
+        return ["history-organize", "account-read", "manage", "all"]
+    if name in ACCOUNT_INVENTORY_TOOL_NAMES:
+        return ["account-read", "manage", "all"]
+    if name in HISTORY_READ_TOOL_NAMES:
         return ["manage", "all"]
+    if name in HISTORY_WRITE_TOOL_NAMES:
+        return ["admin", "manage", "all"]
+    if name in NOTEBOOKS_READ_TOOL_NAMES:
+        return ["manage", "all"]
+    if name in NOTEBOOKS_WRITE_TOOL_NAMES:
+        return ["history-organize", "admin", "manage", "all"]
+    if name in SCHEDULED_READ_TOOL_NAMES:
+        return ["scheduled-read", "scheduled-admin", "manage", "all"]
+    if name in SCHEDULED_WRITE_TOOL_NAMES:
+        return ["scheduled-admin", "admin", "manage", "all"]
+    if name in ACCOUNT_READ_TOOL_NAMES:
+        return ["manage", "all"]
+    if name in GEMS_TOOL_NAMES:
+        return ["admin", "manage", "all"]
     if group == "cookie":
         return ["always"]
     if group == "prompts":
@@ -1336,31 +2256,30 @@ def _tool_availability(tool: dict[str, Any]) -> list[str]:
 
 
 def _current_enabled_manifest_groups() -> tuple[list[str], set[str]]:
-    configured = [
-        item.strip()
-        for item in os.environ.get("GEMINI_TOOLS", "core").split(",")
-        if item.strip()
-    ]
+    configured = _configured_tool_groups()
     enabled = {"cookie"}
-    for group in configured or ["core"]:
+    for group in configured:
         enabled.update(TOOL_GROUP_MODULES.get(group, {group}))
     enabled.add("manifest")
-    return configured or ["core"], enabled
+    return configured, enabled
 
 
 def _tool_manifest_payload(scope: ManifestScope = "all") -> dict[str, Any]:
     current_tool_groups, enabled_groups = _current_enabled_manifest_groups()
     filter_scope = "core" if scope == "chat" else scope
+    enabled_tool_names = _enabled_manifest_tool_names(current_tool_groups, enabled_groups)
     tools = [
         {
             **item,
             "availability": _tool_availability(item),
-            "current_enabled": item["group"] in enabled_groups or item["name"] == "gemini_get_tool_manifest",
+            "current_enabled": item["name"] in enabled_tool_names,
         }
         for item in TOOL_MANIFEST
         if filter_scope == "all"
         or item["group"] == filter_scope
         or (filter_scope == "core" and item["group"] == "core")
+        or (filter_scope == "notebooks" and item["name"] in NOTEBOOKS_READ_TOOL_NAMES | NOTEBOOKS_WRITE_TOOL_NAMES)
+        or (filter_scope == "scheduled" and item["name"] in SCHEDULED_READ_TOOL_NAMES | SCHEDULED_WRITE_TOOL_NAMES)
     ]
     groups: dict[str, int] = {}
     for tool in tools:
@@ -1373,8 +2292,9 @@ def _tool_manifest_payload(scope: ManifestScope = "all") -> dict[str, Any]:
         "current_tool_groups": current_tool_groups,
         "current_enabled_count": sum(1 for item in tools if item["current_enabled"]),
         "groups": groups,
+        "profiles": TOOL_PROFILE_GUIDE,
         "tools": tools,
-        "workflows": MANIFEST_WORKFLOWS if filter_scope in {"all", "core", "history", "account"} else [],
+        "workflows": MANIFEST_WORKFLOWS if filter_scope in {"all", "core", "history", "account", "notebooks", "scheduled"} else [],
         "safety_notes": [
             "Annotations and manifest metadata are planning hints, not a permission system.",
             "Tools marked privacy=reads_private_chat_text return private Gemini chat content.",
@@ -1398,6 +2318,12 @@ def _format_tool_manifest_markdown(payload: dict[str, Any]) -> str:
     ]
     for group, count in sorted(payload["groups"].items()):
         lines.append(f"- {group}: {count}")
+
+    if payload.get("profiles"):
+        lines.extend(["", "### Recommended Profiles"])
+        for profile in payload["profiles"]:
+            write_note = "writes remote data" if profile["writes_remote"] else "read-only"
+            lines.append(f"- `{profile['gemini_tools']}` ({write_note}): {profile['purpose']}")
 
     lines.extend(["", "### Tools"])
     for item in payload["tools"]:
@@ -1915,9 +2841,18 @@ def _gem_field(gem: Any, *names: str) -> tuple[bool, str]:
     return False, ""
 
 
-def register_manage_tools(mcp: FastMCP):
+def register_manage_tools(mcp: FastMCP, layers: list[str] | set[str] | tuple[str, ...] | None = None):
+    enabled_tool_names = resolve_manage_tool_names(layers)
 
-    @mcp.tool(annotations=DESTRUCTIVE_REMOTE)
+    def _tool(tool_name: str, annotations):
+        def decorator(func):
+            if tool_name in enabled_tool_names:
+                return mcp.tool(annotations=annotations)(func)
+            return func
+
+        return decorator
+
+    @_tool("gemini_cleanup_test_artifacts", DESTRUCTIVE_REMOTE)
     async def gemini_cleanup_test_artifacts(
         markers: str = "codex-,Cleanup Verification Marker",
         target: CleanupTarget = "all",
@@ -1946,7 +2881,7 @@ def register_manage_tools(mcp: FastMCP):
             return [TextContent(type="text", text=json.dumps(payload, ensure_ascii=False, indent=2))]
         return [TextContent(type="text", text=_format_cleanup_markdown(payload))]
 
-    @mcp.tool(annotations=READS_PRIVATE_REMOTE)
+    @_tool("gemini_list_chats", READS_PRIVATE_REMOTE)
     async def gemini_list_chats(
         limit: int = 10,
         offset: int = 0,
@@ -1957,15 +2892,26 @@ def register_manage_tools(mcp: FastMCP):
         await initialize_client()
 
         try:
-            chats = client.list_chats() or []
-            if not chats:
+            if hasattr(client, "_batch_execute"):
+                target_count = _clamp_int(limit, default=10, minimum=1, maximum=50) + _clamp_int(
+                    offset, default=0, minimum=0, maximum=5000
+                )
+                items, diagnostic = await _fetch_recent_conversation_metadata(client, target_count)
+            else:
+                chats = client.list_chats() or []
+                items = [_chat_to_dict(chat) for chat in chats]
+                diagnostic = {"source": "client_cache", "fetched_count": len(items), "has_remote_more": False}
+            if not items:
                 return [TextContent(type="text", text="暂无历史对话。")]
 
-            page, pagination = _paginate_items(chats, limit, offset, max_limit=50)
-            items = [_chat_to_dict(chat) for chat in page]
+            page, pagination = _paginate_items(items, limit, offset, max_limit=50)
+            if diagnostic.get("has_remote_more") and not pagination["has_more"]:
+                pagination["has_more"] = True
+                pagination["next_offset"] = pagination["offset"] + pagination["count"]
             payload = {
                 **pagination,
-                "items": items,
+                "items": page,
+                "diagnostic": diagnostic,
             }
 
             if response_format == "json":
@@ -1975,7 +2921,7 @@ def register_manage_tools(mcp: FastMCP):
                 "## 📜 历史对话",
                 f"共 {payload['total_count']} 条；当前 {payload['offset']}..{payload['offset'] + payload['count'] - 1}",
             ]
-            for i, chat in enumerate(items, payload["offset"] + 1):
+            for i, chat in enumerate(page, payload["offset"] + 1):
                 pin = " 📌" if chat["is_pinned"] else ""
                 time_text = f" · {chat['time']}" if chat["time"] else ""
                 chat_list.append(f"{i}. {chat['title']}{pin} (ID: {chat['id']}){time_text}")
@@ -1987,7 +2933,186 @@ def register_manage_tools(mcp: FastMCP):
             logger.error(f"获取聊天列表失败: {e}")
             return [TextContent(type="text", text=f"❌ 获取失败: {str(e)}")]
 
-    @mcp.tool(annotations=READS_PRIVATE_REMOTE)
+    @_tool("gemini_scan_chat_history_sources", READS_PRIVATE_REMOTE)
+    async def gemini_scan_chat_history_sources(
+        limit: int = 50,
+        offset: int = 0,
+        max_items_per_source: int = 5000,
+        page_size: int = 100,
+        max_pages_per_source: int = 50,
+        include_notebook_chats: bool = True,
+        include_remy_goals: bool = True,
+        response_format: ResponseFormat = "markdown",
+    ) -> list[TextContent]:
+        """
+        深度枚举 Gemini Web 历史对话元数据来源。
+
+        只读：合并前端已观测的 ListConversations 过滤器、原生 notebook 对话列表，
+        以及 Remy goals 中携带的 conversationId 引用。不读取 turn 正文，不删除或移动聊天。
+        """
+        client = get_gemini_client()
+        await initialize_client()
+        if not hasattr(client, "_batch_execute"):
+            return [TextContent(type="text", text="❌ 当前客户端不支持 Gemini Web RPC 深度扫描。")]
+
+        try:
+            safe_max_items = _clamp_int(max_items_per_source, default=5000, minimum=1, maximum=10000)
+            safe_page_size = _clamp_int(page_size, default=100, minimum=1, maximum=100)
+            safe_max_pages = _clamp_int(max_pages_per_source, default=50, minimum=1, maximum=200)
+            source_blocks = await _fetch_conversation_metadata_sources(
+                client,
+                CONVERSATION_HISTORY_FILTERS,
+                max_items_per_source=safe_max_items,
+                page_size=safe_page_size,
+                max_pages_per_source=safe_max_pages,
+            )
+
+            notebook_summary: list[dict[str, Any]] = []
+            notebook_diagnostic: dict[str, Any] | None = None
+            if include_notebook_chats:
+                notebooks, notebook_diagnostic = await _fetch_native_notebooks(client)
+                for notebook in notebooks:
+                    notebook_id = notebook.get("id", "")
+                    if not notebook_id:
+                        continue
+                    notebook_items: list[dict[str, Any]] = []
+                    notebook_pages: list[dict[str, Any]] = []
+                    next_offset = 0
+                    while len(notebook_items) < safe_max_items:
+                        batch_limit = min(100, safe_max_items - len(notebook_items))
+                        page_items, page_payload = await _fetch_notebook_chats(client, notebook_id, batch_limit, next_offset)
+                        source_name = f"notebook:{notebook.get('title') or notebook_id}"
+                        for item in page_items:
+                            item["history_source"] = source_name
+                        notebook_items.extend(page_items)
+                        notebook_pages.append(
+                            {
+                                "offset": next_offset,
+                                "count": len(page_items),
+                                "has_more": bool(page_payload.get("has_more")),
+                                "next_offset": page_payload.get("next_offset"),
+                            }
+                        )
+                        if not page_payload.get("has_more") or not page_items:
+                            break
+                        new_offset = page_payload.get("next_offset")
+                        if not isinstance(new_offset, int) or new_offset <= next_offset:
+                            break
+                        next_offset = new_offset
+                    notebook_summary.append(
+                        {
+                            "notebook_id": notebook_id,
+                            "title": notebook.get("title", ""),
+                            "fetched_count": len(notebook_items),
+                            "pages": notebook_pages,
+                        }
+                    )
+                    source_blocks.append(
+                        {
+                            "name": f"notebook:{notebook.get('title') or notebook_id}",
+                            "rpcid": "MaZiqc",
+                            "items": notebook_items,
+                            "diagnostic": {
+                                "source_rpc": "MaZiqc",
+                                "observed": "2026-07-04 Pro UI / Native Gemini Notebook recent chats",
+                                "notebook_id": notebook_id,
+                                "notebook_title": notebook.get("title", ""),
+                                "fetched_count": len(notebook_items),
+                                "pages": notebook_pages,
+                            },
+                        }
+                    )
+
+            if include_remy_goals:
+                source_blocks.append(
+                    await _fetch_remy_goal_conversation_refs(
+                        client,
+                        max_items=safe_max_items,
+                        page_size=safe_page_size,
+                        max_pages=safe_max_pages,
+                    )
+                )
+
+            merged_items, _sources_by_id = _merge_conversation_source_items(source_blocks)
+            page, page_info = _paginate_items(merged_items, limit, offset, max_limit=500)
+            source_diagnostics = [
+                {
+                    "name": block.get("name"),
+                    "rpcid": block.get("rpcid"),
+                    "fetched_count": len(block.get("items", [])),
+                    "diagnostic": block.get("diagnostic", {}),
+                }
+                for block in source_blocks
+            ]
+            coverage_warnings = []
+            for block in source_diagnostics:
+                diagnostic = block.get("diagnostic", {})
+                stopped_reason = diagnostic.get("stopped_reason")
+                if stopped_reason in {"max_items", "max_pages"}:
+                    coverage_warnings.append(
+                        {
+                            "source": block.get("name"),
+                            "stopped_reason": stopped_reason,
+                            "message": "This source may have more remote items than this scan fetched.",
+                        }
+                    )
+
+            payload = {
+                "ok": True,
+                **page_info,
+                "items": page,
+                "source_rpc": "MaZiqc",
+                "observed": "2026-07-04 Pro UI / deep conversation history metadata scan",
+                "scan_parameters": {
+                    "max_items_per_source": safe_max_items,
+                    "page_size": safe_page_size,
+                    "max_pages_per_source": safe_max_pages,
+                    "include_notebook_chats": include_notebook_chats,
+                    "include_remy_goals": include_remy_goals,
+                },
+                "source_counts": {str(block.get("name")): len(block.get("items", [])) for block in source_blocks},
+                "source_diagnostics": source_diagnostics,
+                "notebooks": {
+                    "included": include_notebook_chats,
+                    "diagnostic": notebook_diagnostic,
+                    "items": notebook_summary,
+                },
+                "coverage_warnings": coverage_warnings,
+                "note": "This is metadata-only and does not read chat turns. Use read/export tools only for selected chat IDs.",
+            }
+            if response_format == "json":
+                return [TextContent(type="text", text=json.dumps(payload, ensure_ascii=False, indent=2))]
+
+            lines = [
+                "## Gemini 历史对话深度扫描",
+                f"合并唯一对话: {payload['total_count']}；当前 offset={payload['offset']} count={payload['count']}",
+                "",
+                "### 来源计数",
+            ]
+            for name, count in payload["source_counts"].items():
+                lines.append(f"- {name}: {count}")
+            if coverage_warnings:
+                lines.extend(["", "### 覆盖警告"])
+                for warning in coverage_warnings:
+                    lines.append(f"- {warning['source']}: {warning['stopped_reason']}")
+            lines.extend(["", "### 当前页"])
+            for idx, item in enumerate(page, payload["offset"] + 1):
+                pin = " 📌" if item.get("is_pinned") else ""
+                time_text = f" · {item['time']}" if item.get("time") else ""
+                sources = ", ".join(item.get("sources", []))
+                lines.append(f"{idx}. {item.get('title') or '(untitled)'}{pin} (ID: {item.get('id', '')}){time_text}")
+                if sources:
+                    lines.append(f"   sources: {sources}")
+                if item.get("project_id"):
+                    lines.append(f"   project_id: {item['project_id']}")
+            if payload["has_more"]:
+                lines.append(f"\n下一页: offset={payload['next_offset']}")
+            return [TextContent(type="text", text="\n".join(lines))]
+        except Exception as e:
+            logger.error(f"深度扫描聊天历史失败: {e}")
+            return [TextContent(type="text", text=f"❌ 深度扫描失败: {str(e)}")]
+
+    @_tool("gemini_read_chat", READS_PRIVATE_REMOTE)
     async def gemini_read_chat(
         chat_id: str,
         limit: int = 20,
@@ -2029,7 +3154,7 @@ def register_manage_tools(mcp: FastMCP):
             logger.error(f"读取聊天失败: {e}")
             return [TextContent(type="text", text=f"❌ 读取失败: {str(e)}")]
 
-    @mcp.tool(annotations=READS_PRIVATE_REMOTE)
+    @_tool("gemini_search_chats", READS_PRIVATE_REMOTE)
     async def gemini_search_chats(
         query: str,
         limit: int = 10,
@@ -2054,15 +3179,24 @@ def register_manage_tools(mcp: FastMCP):
             return [TextContent(type="text", text="❌ 当前 gemini-webapi 不支持正文搜索需要的 read_chat。")]
 
         try:
-            chats = client.list_chats() or []
-            page, pagination = _paginate_items(chats, limit, offset, max_limit=50)
+            safe_limit = _clamp_int(limit, default=10, minimum=1, maximum=50)
+            safe_offset = _clamp_int(offset, default=0, minimum=0, maximum=5000)
+            if hasattr(client, "_batch_execute"):
+                chats, diagnostic = await _fetch_recent_conversation_metadata(client, safe_limit + safe_offset)
+            else:
+                chats = [_chat_to_dict(chat) for chat in client.list_chats() or []]
+                diagnostic = {"source": "client_cache", "fetched_count": len(chats), "has_remote_more": False}
+            page, pagination = _paginate_items(chats, safe_limit, safe_offset, max_limit=50)
+            if diagnostic.get("has_remote_more") and not pagination["has_more"]:
+                pagination["has_more"] = True
+                pagination["next_offset"] = pagination["offset"] + pagination["count"]
             safe_turn_limit = _clamp_int(turns_per_chat, default=20, minimum=1, maximum=50)
             safe_chars = _clamp_int(max_chars_per_turn, default=1000, minimum=100, maximum=4000)
             matches = []
             lowered = needle.lower()
 
             for chat in page:
-                item = _chat_to_dict(chat)
+                item = chat if isinstance(chat, dict) else _chat_to_dict(chat)
                 fields = []
                 snippets = []
                 if lowered in item["title"].lower():
@@ -2108,6 +3242,7 @@ def register_manage_tools(mcp: FastMCP):
                 "match_count": len(matches),
                 **pagination,
                 "matches": matches,
+                "diagnostic": diagnostic,
                 "note": "正文搜索只会在 scan_turns=true 时读取当前页聊天内容。",
             }
 
@@ -2140,7 +3275,7 @@ def register_manage_tools(mcp: FastMCP):
             logger.error(f"搜索聊天失败: {e}")
             return [TextContent(type="text", text=f"❌ 搜索失败: {str(e)}")]
 
-    @mcp.tool(annotations=READS_PRIVATE_REMOTE)
+    @_tool("gemini_export_chat", READS_PRIVATE_REMOTE)
     async def gemini_export_chat(
         chat_id: str,
         response_format: ResponseFormat = "markdown",
@@ -2168,10 +3303,14 @@ def register_manage_tools(mcp: FastMCP):
             if include_metadata:
                 metadata = {"id": chat_id}
                 try:
-                    chats = client.list_chats() if hasattr(client, "list_chats") else []
+                    if hasattr(client, "_batch_execute"):
+                        chats, _diagnostic = await _fetch_recent_conversation_metadata(client, 500)
+                    else:
+                        chats = [_chat_to_dict(chat) for chat in client.list_chats()] if hasattr(client, "list_chats") else []
                     for chat in chats or []:
-                        if _get_chat_id(chat) == chat_id:
-                            metadata = _chat_to_dict(chat)
+                        item = chat if isinstance(chat, dict) else _chat_to_dict(chat)
+                        if item.get("id") == chat_id:
+                            metadata = item
                             break
                 except Exception as e:
                     metadata["metadata_warning"] = f"{type(e).__name__}: {e}"
@@ -2184,7 +3323,70 @@ def register_manage_tools(mcp: FastMCP):
             logger.error(f"导出聊天失败: {e}")
             return [TextContent(type="text", text=f"❌ 导出失败: {str(e)}")]
 
-    @mcp.tool(annotations=DESTRUCTIVE_REMOTE)
+    @_tool("gemini_history", READS_PRIVATE_REMOTE)
+    async def gemini_history(
+        action: HistoryAction = "list",
+        chat_id: str = "",
+        query: str = "",
+        limit: int = 10,
+        offset: int = 0,
+        scan_turns: bool = False,
+        turns_per_chat: int = 20,
+        max_chars_per_turn: int = 4000,
+        max_items_per_source: int = 5000,
+        page_size: int = 100,
+        max_pages_per_source: int = 50,
+        include_notebook_chats: bool = True,
+        include_remy_goals: bool = True,
+        include_metadata: bool = True,
+        response_format: ResponseFormat = "markdown",
+    ) -> list[TextContent]:
+        """
+        Read, scan, search, or export Gemini Web chat history through action=list/scan/search/read/export.
+
+        This read-only entrypoint never deletes or moves chats. Use it for narrow history agents.
+        """
+        if action == "list":
+            return await gemini_list_chats(limit=limit, offset=offset, response_format=response_format)
+        if action == "scan":
+            return await gemini_scan_chat_history_sources(
+                limit=limit,
+                offset=offset,
+                max_items_per_source=max_items_per_source,
+                page_size=page_size,
+                max_pages_per_source=max_pages_per_source,
+                include_notebook_chats=include_notebook_chats,
+                include_remy_goals=include_remy_goals,
+                response_format=response_format,
+            )
+        if action == "search":
+            return await gemini_search_chats(
+                query=query,
+                limit=limit,
+                offset=offset,
+                scan_turns=scan_turns,
+                turns_per_chat=turns_per_chat,
+                max_chars_per_turn=max_chars_per_turn,
+                response_format=response_format,
+            )
+        if action == "read":
+            return await gemini_read_chat(
+                chat_id=chat_id,
+                limit=limit,
+                response_format=response_format,
+                max_chars_per_turn=max_chars_per_turn,
+            )
+        if action == "export":
+            return await gemini_export_chat(
+                chat_id=chat_id,
+                response_format=response_format,
+                limit=limit,
+                max_chars_per_turn=max_chars_per_turn,
+                include_metadata=include_metadata,
+            )
+        return [TextContent(type="text", text=f"❌ 不支持的 history action: {action}")]
+
+    @_tool("gemini_delete_chat", DESTRUCTIVE_REMOTE)
     async def gemini_delete_chat(chat_id: str) -> list[TextContent]:
         """删除指定 Gemini 历史对话。该操作会修改远端聊天记录。"""
         client = get_gemini_client()
@@ -2202,7 +3404,7 @@ def register_manage_tools(mcp: FastMCP):
             logger.error(f"删除聊天失败: {e}")
             return [TextContent(type="text", text=f"❌ 删除失败: {str(e)}")]
 
-    @mcp.tool(annotations=READS_PRIVATE_REMOTE)
+    @_tool("gemini_inspect_account", READS_PRIVATE_REMOTE)
     async def gemini_inspect_account(
         response_format: ResponseFormat = "markdown",
     ) -> list[TextContent]:
@@ -2240,7 +3442,7 @@ def register_manage_tools(mcp: FastMCP):
             logger.error(f"账号状态检查失败: {e}")
             return [TextContent(type="text", text=f"❌ 检查失败: {str(e)}")]
 
-    @mcp.tool(annotations=READ_ONLY_REMOTE)
+    @_tool("gemini_probe_web_features", READ_ONLY_REMOTE)
     async def gemini_probe_web_features(
         surface: FeatureSurface = "all",
         response_format: ResponseFormat = "markdown",
@@ -2328,7 +3530,7 @@ def register_manage_tools(mcp: FastMCP):
         lines.append("\n说明: 输出已省略原始响应正文和账号内容。")
         return [TextContent(type="text", text="\n".join(lines))]
 
-    @mcp.tool(annotations=READ_ONLY_REMOTE)
+    @_tool("gemini_get_web_capabilities", READ_ONLY_REMOTE)
     async def gemini_get_web_capabilities(
         response_format: ResponseFormat = "markdown",
     ) -> list[TextContent]:
@@ -2342,7 +3544,7 @@ def register_manage_tools(mcp: FastMCP):
             return [TextContent(type="text", text=json.dumps(payload, ensure_ascii=False, indent=2))]
         return [TextContent(type="text", text=_format_web_capabilities_markdown(payload))]
 
-    @mcp.tool(annotations=READ_ONLY_LOCAL)
+    @_tool("gemini_get_tool_manifest", READ_ONLY_LOCAL)
     async def gemini_get_tool_manifest(
         scope: ManifestScope = "all",
         response_format: ResponseFormat = "markdown",
@@ -2357,7 +3559,72 @@ def register_manage_tools(mcp: FastMCP):
             return [TextContent(type="text", text=json.dumps(payload, ensure_ascii=False, indent=2))]
         return [TextContent(type="text", text=_format_tool_manifest_markdown(payload))]
 
-    @mcp.tool(annotations=READS_PRIVATE_REMOTE)
+    @_tool("gemini_account_inventory", READS_PRIVATE_REMOTE)
+    async def gemini_account_inventory(
+        surface: AccountInventorySurface = "capabilities",
+        feature_surface: FeatureSurface = "all",
+        usage_scope: UsageScope = "all",
+        scheduled_scope: ScheduledScope = "all",
+        notebook_action: NotebookAction = "list",
+        notebook_id: str = "",
+        notebook_title: str = "",
+        limit: int = 20,
+        offset: int = 0,
+        locale: str = "zh-CN",
+        response_format: ResponseFormat = "markdown",
+    ) -> list[TextContent]:
+        """
+        Read Gemini Web account inventory by surface.
+
+        Supports capabilities, status, features, links, usage, library, notebooks, scheduled, modes, and models
+        without mutating account data.
+        """
+        if surface == "capabilities":
+            return await gemini_get_web_capabilities(response_format=response_format)
+        if surface == "status":
+            return await gemini_inspect_account(response_format=response_format)
+        if surface == "features":
+            return await gemini_probe_web_features(surface=feature_surface, response_format=response_format)
+        if surface == "links":
+            return await gemini_list_public_links(limit=limit, offset=offset, response_format=response_format)
+        if surface == "usage":
+            return await gemini_get_usage_limits(scope=usage_scope, response_format=response_format)
+        if surface == "library":
+            return await gemini_list_library_capabilities(limit=limit, offset=offset, response_format=response_format)
+        if surface == "notebooks":
+            return await gemini_notebooks(
+                action=notebook_action,
+                notebook_id=notebook_id,
+                notebook_title=notebook_title,
+                limit=limit,
+                offset=offset,
+                locale=locale,
+                response_format=response_format,
+            )
+        if surface == "notebook_chats":
+            return await gemini_notebooks(
+                action="chats",
+                notebook_id=notebook_id,
+                notebook_title=notebook_title,
+                limit=limit,
+                offset=offset,
+                locale=locale,
+                response_format=response_format,
+            )
+        if surface == "scheduled":
+            return await gemini_list_scheduled_actions(
+                scope=scheduled_scope,
+                limit=limit,
+                offset=offset,
+                response_format=response_format,
+            )
+        if surface == "modes":
+            return await gemini_get_tool_mode_status(limit=limit, offset=offset, response_format=response_format)
+        if surface == "models":
+            return await gemini_list_models()
+        return [TextContent(type="text", text=f"❌ 不支持的 account inventory surface: {surface}")]
+
+    @_tool("gemini_list_public_links", READS_PRIVATE_REMOTE)
     async def gemini_list_public_links(
         limit: int = 20,
         offset: int = 0,
@@ -2403,7 +3670,7 @@ def register_manage_tools(mcp: FastMCP):
             logger.error(f"公开链接列表读取失败: {e}")
             return [TextContent(type="text", text=f"❌ 读取公开链接失败: {str(e)}")]
 
-    @mcp.tool(annotations=READS_PRIVATE_REMOTE)
+    @_tool("gemini_get_usage_limits", READS_PRIVATE_REMOTE)
     async def gemini_get_usage_limits(
         scope: UsageScope = "all",
         response_format: ResponseFormat = "markdown",
@@ -2467,7 +3734,7 @@ def register_manage_tools(mcp: FastMCP):
             logger.error(f"用量限额读取失败: {e}")
             return [TextContent(type="text", text=f"❌ 读取用量限额失败: {str(e)}")]
 
-    @mcp.tool(annotations=READ_ONLY_REMOTE)
+    @_tool("gemini_list_library_capabilities", READ_ONLY_REMOTE)
     async def gemini_list_library_capabilities(
         limit: int = 20,
         offset: int = 0,
@@ -2515,7 +3782,233 @@ def register_manage_tools(mcp: FastMCP):
             logger.error(f"Library 能力读取失败: {e}")
             return [TextContent(type="text", text=f"❌ 读取 Library 能力失败: {str(e)}")]
 
-    @mcp.tool(annotations=READS_PRIVATE_REMOTE)
+    @_tool("gemini_list_notebooks", READS_PRIVATE_REMOTE)
+    async def gemini_list_notebooks(
+        limit: int = 50,
+        offset: int = 0,
+        locale: str = "zh-CN",
+        response_format: ResponseFormat = "markdown",
+    ) -> list[TextContent]:
+        """列出 Gemini Web 原生笔记本。只读，不访问 NotebookLM。"""
+        client = get_gemini_client()
+        await initialize_client()
+        if not hasattr(client, "_batch_execute"):
+            return [TextContent(type="text", text="❌ 当前客户端不支持 Gemini Notebooks RPC。")]
+
+        try:
+            notebooks, diagnostic = await _fetch_native_notebooks(client, locale)
+            page, page_info = _paginate_items(notebooks, limit, offset, max_limit=100)
+            payload = {
+                "ok": True,
+                **page_info,
+                "items": page,
+                "source_rpc": diagnostic["source_rpc"],
+                "observed": diagnostic["observed"],
+                "diagnostic": diagnostic,
+                "note": "These are native Gemini Web Notebooks, not NotebookLM notebooks.",
+            }
+            if response_format == "json":
+                return [TextContent(type="text", text=json.dumps(payload, ensure_ascii=False, indent=2))]
+
+            if not page:
+                return [TextContent(type="text", text="暂无 Gemini 原生笔记本。")]
+            lines = [
+                "## Gemini 原生笔记本",
+                f"共 {payload['total_count']} 个；当前 offset={payload['offset']} count={payload['count']}",
+            ]
+            for idx, item in enumerate(page, payload["offset"] + 1):
+                emoji = f"{item['emoji']} " if item.get("emoji") else ""
+                sources = f" · sources={item['source_count']}" if item.get("source_count") is not None else ""
+                lines.append(f"{idx}. {emoji}{item.get('title') or '(untitled)'}{sources}\n   ID: {item.get('id', '')}")
+            if payload["has_more"]:
+                lines.append(f"\n下一页: offset={payload['next_offset']}")
+            return [TextContent(type="text", text="\n".join(lines))]
+        except Exception as e:
+            logger.error(f"Gemini Notebooks 列表读取失败: {e}")
+            return [TextContent(type="text", text=f"❌ 读取 Gemini Notebooks 失败: {str(e)}")]
+
+    @_tool("gemini_list_notebook_chats", READS_PRIVATE_REMOTE)
+    async def gemini_list_notebook_chats(
+        notebook_id: str = "",
+        notebook_title: str = "",
+        limit: int = 20,
+        offset: int = 0,
+        locale: str = "zh-CN",
+        response_format: ResponseFormat = "markdown",
+    ) -> list[TextContent]:
+        """列出某个 Gemini 原生笔记本内的最近对话元数据。"""
+        client = get_gemini_client()
+        await initialize_client()
+        if not hasattr(client, "_batch_execute"):
+            return [TextContent(type="text", text="❌ 当前客户端不支持 Gemini Notebooks RPC。")]
+
+        try:
+            notebooks, diagnostic = await _fetch_native_notebooks(client, locale)
+            notebook = _find_notebook(notebooks, notebook_id, notebook_title)
+            if not notebook:
+                available = [item.get("title", "") for item in notebooks if item.get("title")]
+                payload = {
+                    "ok": False,
+                    "notebook_id": notebook_id,
+                    "notebook_title": notebook_title,
+                    "available_titles": available,
+                    "diagnostic": diagnostic,
+                }
+                if response_format == "json":
+                    return [TextContent(type="text", text=json.dumps(payload, ensure_ascii=False, indent=2))]
+                return [TextContent(type="text", text=f"未找到匹配的 Gemini 原生笔记本。可用标题: {', '.join(available)}")]
+
+            items, page_payload = await _fetch_notebook_chats(client, notebook["id"], limit, offset)
+            payload = {
+                "ok": True,
+                "notebook": notebook,
+                **page_payload,
+                "items": items,
+                "source_rpc": "MaZiqc",
+                "observed": "2026-07-04 Pro UI / Native Gemini Notebook recent chats",
+            }
+            if response_format == "json":
+                return [TextContent(type="text", text=json.dumps(payload, ensure_ascii=False, indent=2))]
+
+            lines = [
+                f"## Notebook Chats: {notebook.get('title') or notebook['id']}",
+                f"当前 offset={payload['offset']} count={payload['count']}；fetched={payload['diagnostic']['fetched_count']}",
+            ]
+            if not items:
+                lines.append("- 暂无最近对话。")
+            for idx, item in enumerate(items, payload["offset"] + 1):
+                time_text = f" · {item['time']}" if item.get("time") else ""
+                lines.append(f"{idx}. {item.get('title') or '(untitled)'} (ID: {item.get('id', '')}){time_text}")
+            if payload["has_more"]:
+                lines.append(f"\n下一页: offset={payload['next_offset']}")
+            return [TextContent(type="text", text="\n".join(lines))]
+        except Exception as e:
+            logger.error(f"Gemini Notebook 对话读取失败: {e}")
+            return [TextContent(type="text", text=f"❌ 读取 Gemini Notebook 对话失败: {str(e)}")]
+
+    @_tool("gemini_notebooks", READS_PRIVATE_REMOTE)
+    async def gemini_notebooks(
+        action: NotebookAction = "list",
+        notebook_id: str = "",
+        notebook_title: str = "",
+        limit: int = 20,
+        offset: int = 0,
+        locale: str = "zh-CN",
+        response_format: ResponseFormat = "markdown",
+    ) -> list[TextContent]:
+        """
+        List native Gemini Web Notebooks or recent chats inside one notebook.
+
+        This read-only entrypoint does not move, create, or delete notebooks/chats.
+        """
+        if action == "list":
+            return await gemini_list_notebooks(
+                limit=limit,
+                offset=offset,
+                locale=locale,
+                response_format=response_format,
+            )
+        if action == "chats":
+            return await gemini_list_notebook_chats(
+                notebook_id=notebook_id,
+                notebook_title=notebook_title,
+                limit=limit,
+                offset=offset,
+                locale=locale,
+                response_format=response_format,
+            )
+        return [TextContent(type="text", text=f"❌ 不支持的 notebook action: {action}")]
+
+    @_tool("gemini_move_chat_to_notebook", MUTATES_REMOTE)
+    async def gemini_move_chat_to_notebook(
+        chat_id: str,
+        notebook_id: str = "",
+        notebook_title: str = "",
+        locale: str = "zh-CN",
+        response_format: ResponseFormat = "markdown",
+    ) -> list[TextContent]:
+        """把已有 Gemini Web 对话移动到 Gemini 原生笔记本。该操作修改远端聊天元数据，但不删除聊天。"""
+        clean_chat_id = chat_id.strip()
+        if not clean_chat_id:
+            return [TextContent(type="text", text="❌ chat_id 不能为空。")]
+        if not notebook_id.strip() and not notebook_title.strip():
+            return [TextContent(type="text", text="❌ 需要提供 notebook_id 或 notebook_title。")]
+
+        client = get_gemini_client()
+        await initialize_client()
+        if not hasattr(client, "_batch_execute"):
+            return [TextContent(type="text", text="❌ 当前客户端不支持 Gemini Notebooks RPC。")]
+
+        try:
+            notebooks, list_diagnostic = await _fetch_native_notebooks(client, locale)
+            notebook = _find_notebook(notebooks, notebook_id, notebook_title)
+            if not notebook:
+                available = [item.get("title", "") for item in notebooks if item.get("title")]
+                payload = {
+                    "ok": False,
+                    "chat_id": clean_chat_id,
+                    "notebook_id": notebook_id,
+                    "notebook_title": notebook_title,
+                    "available_titles": available,
+                    "diagnostic": list_diagnostic,
+                }
+                if response_format == "json":
+                    return [TextContent(type="text", text=json.dumps(payload, ensure_ascii=False, indent=2))]
+                return [TextContent(type="text", text=f"未找到匹配的 Gemini 原生笔记本。可用标题: {', '.join(available)}")]
+
+            project_type = notebook.get("project_type") if isinstance(notebook.get("project_type"), int) else 2
+            request_payload = _move_chat_to_notebook_payload(clean_chat_id, notebook["id"], project_type)
+            response = await client._batch_execute(
+                [_RawRPCData("MUAZcd", request_payload)],
+                source_path="/app",
+                close_on_error=False,
+            )
+            bodies = _extract_rpc_bodies(response.text, "MUAZcd")
+            updated_entry = None
+            body = bodies[0] if bodies else []
+            if isinstance(body, list):
+                candidate = body[1] if len(body) > 1 and isinstance(body[1], list) else None
+                updated_entry = _parse_conversation_metadata(candidate) if candidate else None
+
+            verify_items, verify_payload = await _fetch_notebook_chats(client, notebook["id"], 100, 0)
+            verified = any(item.get("id") == clean_chat_id for item in verify_items)
+            payload = {
+                "ok": response.status_code == 200 and bool(bodies),
+                "chat_id": clean_chat_id,
+                "notebook": notebook,
+                "source_rpc": "MUAZcd",
+                "status_code": response.status_code,
+                "body_present": bool(bodies),
+                "updated_entry": updated_entry,
+                "verified_in_target_notebook": verified,
+                "verification": verify_payload,
+            }
+            if response_format == "json":
+                return [TextContent(type="text", text=json.dumps(payload, ensure_ascii=False, indent=2))]
+
+            if payload["ok"] and verified:
+                return [
+                    TextContent(
+                        type="text",
+                        text=f"✅ 已移动聊天 {clean_chat_id} 到笔记本: {notebook.get('title')} ({notebook.get('id')})",
+                    )
+                ]
+            if payload["ok"]:
+                return [
+                    TextContent(
+                        type="text",
+                        text=(
+                            f"⚠️ Gemini 接受了移动请求，但目标笔记本最近对话列表未验证到 {clean_chat_id}。"
+                            "请稍后用 gemini_list_notebook_chats 复查。"
+                        ),
+                    )
+                ]
+            return [TextContent(type="text", text=f"❌ 移动聊天失败: {clean_chat_id}")]
+        except Exception as e:
+            logger.error(f"Gemini Notebook 移动失败: {e}")
+            return [TextContent(type="text", text=f"❌ 移动 Gemini Notebook 聊天失败: {str(e)}")]
+
+    @_tool("gemini_list_scheduled_actions", READS_PRIVATE_REMOTE)
     async def gemini_list_scheduled_actions(
         scope: ScheduledScope = "all",
         limit: int = 20,
@@ -2572,7 +4065,7 @@ def register_manage_tools(mcp: FastMCP):
             logger.error(f"定时操作读取失败: {e}")
             return [TextContent(type="text", text=f"❌ 读取定时操作失败: {str(e)}")]
 
-    @mcp.tool(annotations=READS_PRIVATE_REMOTE)
+    @_tool("gemini_get_scheduled_action", READS_PRIVATE_REMOTE)
     async def gemini_get_scheduled_action(
         action_id: str,
         response_format: ResponseFormat = "markdown",
@@ -2625,7 +4118,7 @@ def register_manage_tools(mcp: FastMCP):
             logger.error(f"定时操作按 ID 读取失败: {e}")
             return [TextContent(type="text", text=f"❌ 读取定时操作失败: {str(e)}")]
 
-    @mcp.tool(annotations=MUTATES_REMOTE)
+    @_tool("gemini_create_scheduled_action", MUTATES_REMOTE)
     async def gemini_create_scheduled_action(
         title: str,
         instructions: str,
@@ -2756,7 +4249,7 @@ def register_manage_tools(mcp: FastMCP):
             logger.error(f"定时操作创建失败: {e}")
             return [TextContent(type="text", text=f"❌ 创建定时操作失败: {str(e)}")]
 
-    @mcp.tool(annotations=DESTRUCTIVE_REMOTE)
+    @_tool("gemini_delete_scheduled_action", DESTRUCTIVE_REMOTE)
     async def gemini_delete_scheduled_action(
         action_id: str,
         response_format: ResponseFormat = "markdown",
@@ -2861,7 +4354,7 @@ def register_manage_tools(mcp: FastMCP):
             logger.error(f"定时操作删除失败: {e}")
             return [TextContent(type="text", text=f"❌ 删除定时操作失败: {str(e)}")]
 
-    @mcp.tool(annotations=READ_ONLY_REMOTE)
+    @_tool("gemini_get_tool_mode_status", READ_ONLY_REMOTE)
     async def gemini_get_tool_mode_status(
         limit: int = 50,
         offset: int = 0,
@@ -2926,7 +4419,7 @@ def register_manage_tools(mcp: FastMCP):
             logger.error(f"工具模式状态读取失败: {e}")
             return [TextContent(type="text", text=f"❌ 读取工具模式状态失败: {str(e)}")]
 
-    @mcp.tool(annotations=READS_PRIVATE_REMOTE)
+    @_tool("gemini_list_models", READS_PRIVATE_REMOTE)
     async def gemini_list_models() -> list[TextContent]:
         """列出所有可用模型及其说明"""
         aliases = """🤖 MCP 模型别名:
@@ -2976,7 +4469,7 @@ def register_manage_tools(mcp: FastMCP):
             model_lines.append(f"- {display_name}: {model_name} ({available})\n  {description}")
         return [TextContent(type="text", text="\n".join(model_lines))]
 
-    @mcp.tool(annotations=DESTRUCTIVE_REMOTE)
+    @_tool("gemini_manage_gems", DESTRUCTIVE_REMOTE)
     async def gemini_manage_gems(
         action: Literal["list", "create", "update", "delete"],
         gem_id: Optional[str] = None,

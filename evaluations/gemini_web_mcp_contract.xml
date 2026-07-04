@@ -20,8 +20,20 @@
     <answer>reads_private_chat_text</answer>
   </qa_pair>
   <qa_pair>
+    <question>Inspect the history tool manifest. Which read-only paginated tool deep-scans Gemini Web chat-history metadata sources across observed RPC filters? Answer with the exact tool name.</question>
+    <answer>gemini_scan_chat_history_sources</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>Inspect the history tool manifest. Which read-only facade combines Gemini chat history list, scan, search, read, and export actions? Answer with the exact tool name.</question>
+    <answer>gemini_history</answer>
+  </qa_pair>
+  <qa_pair>
     <question>Inspect the manifest workflows. Which workflow is recommended for finding and exporting Gemini chat history? Answer with the workflow name.</question>
     <answer>chat_history_find_and_export</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>Inspect the manifest profiles. Which GEMINI_TOOLS profile should an agent use for read-only chat history organization and export without delete, scheduled action mutation, or Gems tools? Answer with the profile name only.</question>
+    <answer>history</answer>
   </qa_pair>
   <qa_pair>
     <question>Inspect the observed Web capability manifest. Which MCP model alias maps to the displayed Gemini Web model named 3.1 Pro? Answer with the alias only.</question>
@@ -42,6 +54,10 @@
   <qa_pair>
     <question>Inspect the account tool manifest and capability notes. Which tool lists localized Library capability/template entries rather than private Library assets? Answer with the exact tool name.</question>
     <answer>gemini_list_library_capabilities</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>Inspect the account tool manifest. Which non-destructive mutation tool moves an existing Gemini Web chat into a native Gemini Web Notebook? Answer with the exact tool name.</question>
+    <answer>gemini_move_chat_to_notebook</answer>
   </qa_pair>
   <qa_pair>
     <question>Inspect the manifest entry for the local prompt-library tool. Which availability group must be enabled for gemini_manage_prompts? Answer with the group name only.</question>

@@ -58,6 +58,9 @@ def test_all_group_registers_unique_complete_tool_surface():
         assert "gemini_probe_web_features" in names
         assert "gemini_get_web_capabilities" in names
         assert "gemini_get_tool_manifest" in names
+        assert "gemini_history" in names
+        assert "gemini_account_inventory" in names
+        assert "gemini_notebooks" in names
         assert "gemini_cleanup_test_artifacts" in names
         assert "gemini_list_scheduled_actions" in names
         assert "gemini_create_scheduled_action" in names
@@ -90,6 +93,9 @@ def test_all_group_tools_have_mcp_annotations():
         assert by_name["gemini_list_research_report_actions"].annotations.readOnlyHint is True
         assert by_name["gemini_create_from_research_report"].annotations.readOnlyHint is False
         assert by_name["gemini_create_from_research_report"].annotations.openWorldHint is False
+        assert by_name["gemini_history"].annotations.readOnlyHint is True
+        assert by_name["gemini_account_inventory"].annotations.readOnlyHint is True
+        assert by_name["gemini_notebooks"].annotations.readOnlyHint is True
         assert by_name["gemini_delete_chat"].annotations.destructiveHint is True
         assert by_name["gemini_cleanup_test_artifacts"].annotations.destructiveHint is True
         assert by_name["gemini_create_scheduled_action"].annotations.readOnlyHint is False
@@ -115,6 +121,54 @@ def test_core_group_stays_focused_on_high_value_ai_tools():
         assert "gemini_create_from_research_report" in names
         assert "gemini_manage_prompts" not in names
         assert "gemini_list_chats" not in names
+
+    asyncio.run(run())
+
+
+def test_intent_profiles_expose_focused_tool_surfaces():
+    from src.tools import register_tools
+
+    async def tool_names(groups):
+        mcp = FastMCP("test")
+        register_tools(mcp, groups)
+        return {tool.name for tool in await mcp.list_tools()}
+
+    async def run():
+        model_names = await tool_names(["model"])
+        assert "gemini_chat" in model_names
+        assert "gemini_send_message_stream" in model_names
+        assert "gemini_generate_media" not in model_names
+        assert "gemini_list_chats" not in model_names
+
+        history_names = await tool_names(["history"])
+        assert {"gemini_get_tool_manifest", "gemini_history"} <= history_names
+        assert "gemini_list_chats" not in history_names
+        assert "gemini_export_chat" not in history_names
+        assert "gemini_delete_chat" not in history_names
+        assert "gemini_create_scheduled_action" not in history_names
+        assert "gemini_manage_gems" not in history_names
+
+        organize_names = await tool_names(["history-organize"])
+        assert "gemini_move_chat_to_notebook" in organize_names
+        assert "gemini_history" in organize_names
+        assert "gemini_notebooks" in organize_names
+        assert "gemini_list_notebooks" not in organize_names
+        assert "gemini_delete_chat" not in organize_names
+        assert "gemini_create_scheduled_action" not in organize_names
+
+        account_read_names = await tool_names(["account-read"])
+        assert "gemini_account_inventory" in account_read_names
+        assert "gemini_list_public_links" not in account_read_names
+        assert "gemini_get_usage_limits" not in account_read_names
+        assert "gemini_list_scheduled_actions" not in account_read_names
+        assert "gemini_move_chat_to_notebook" not in account_read_names
+        assert "gemini_delete_scheduled_action" not in account_read_names
+
+        scheduled_admin_names = await tool_names(["scheduled-admin"])
+        assert "gemini_list_scheduled_actions" in scheduled_admin_names
+        assert "gemini_create_scheduled_action" in scheduled_admin_names
+        assert "gemini_delete_scheduled_action" in scheduled_admin_names
+        assert "gemini_list_chats" not in scheduled_admin_names
 
     asyncio.run(run())
 
@@ -1163,6 +1217,13 @@ def test_skill_server_account_and_history_tools(monkeypatch):
                 body = [[[[None, 11], 2, 3, [1781794431, 0], 100, 80]], ""]
             elif rpcid == "cYRIkd":
                 body = [[[["canvas"], "Canvas", "Create and edit documents", ""]]]
+            elif rpcid == "CNgdBe":
+                metadata = [None] * 15
+                metadata[0] = "高中数学"
+                metadata[10] = [None, [["source-1"]]]
+                metadata[12] = [2]
+                metadata[14] = ["📐"]
+                body = [None, None, [["notebooks/math", metadata, ["Math notebook summary"]]]]
             elif rpcid == "MaZiqc":
                 body = [None, None, [["task-1", "Morning brief", True, None, None, [1781794431, 0], None, "Daily", None, 2]]]
             elif rpcid == "XPSWpd":
@@ -1245,6 +1306,10 @@ def test_skill_server_account_and_history_tools(monkeypatch):
 
         library_result = await skill_server.account("library")
         assert "Canvas" in library_result[0].text
+
+        notebooks_result = await skill_server.account("notebooks")
+        assert "高中数学" in notebooks_result[0].text
+        assert "notebooks/math" in notebooks_result[0].text
 
         scheduled_result = await skill_server.account("scheduled")
         assert "Morning brief" in scheduled_result[0].text
@@ -1657,9 +1722,11 @@ def test_web_capabilities_manifest_describes_observed_pro_surface():
         assert any(item["name"] == "scheduled_actions" for item in payload["settings_menu"])
         assert any(probe["rpcid"] == "K4WWud" for probe in payload["feature_probes"])
         assert any(probe["rpcid"] == "MaZiqc" for probe in payload["feature_probes"])
+        assert any(probe["name"] == "native_notebooks_list" and probe["rpcid"] == "CNgdBe" for probe in payload["feature_probes"])
         assert any(probe["rpcid"] == "XPSWpd" for probe in payload["feature_probes"])
         assert any(probe["rpcid"] == "MyzX6c" for probe in payload["feature_probes"])
         assert "gemini_get_tool_manifest" in payload["mcp_tools"]["account"]
+        assert "gemini_move_chat_to_notebook" in payload["mcp_tools"]["account"]
         assert "gemini_get_scheduled_action" in payload["mcp_tools"]["account"]
         assert "gemini_create_scheduled_action" in payload["mcp_tools"]["account"]
         assert "gemini_delete_scheduled_action" in payload["mcp_tools"]["account"]
@@ -1682,7 +1749,11 @@ def test_tool_manifest_and_annotations_expose_agent_safety_metadata():
         tools = await mcp.list_tools()
         by_name = {tool.name: tool for tool in tools}
         assert by_name["gemini_list_chats"].annotations.readOnlyHint is True
+        assert by_name["gemini_scan_chat_history_sources"].annotations.readOnlyHint is True
         assert by_name["gemini_delete_chat"].annotations.destructiveHint is True
+        assert by_name["gemini_list_notebooks"].annotations.readOnlyHint is True
+        assert by_name["gemini_move_chat_to_notebook"].annotations.readOnlyHint is False
+        assert by_name["gemini_move_chat_to_notebook"].annotations.destructiveHint is False
         assert by_name["gemini_manage_gems"].annotations.destructiveHint is True
 
         json_result = await mcp.call_tool(
@@ -1691,13 +1762,20 @@ def test_tool_manifest_and_annotations_expose_agent_safety_metadata():
         )
         payload = json.loads(_tool_text(json_result))
         assert payload["scope"] == "history"
-        assert payload["groups"] == {"history": 6}
+        assert payload["groups"] == {"history": 8}
+        history_entry = next(item for item in payload["tools"] if item["name"] == "gemini_history")
+        assert history_entry["read_only"] is True
+        assert history_entry["availability"] == ["history", "history-organize", "manage", "all"]
         delete_entry = next(item for item in payload["tools"] if item["name"] == "gemini_delete_chat")
         assert delete_entry["destructive"] is True
-        assert delete_entry["availability"] == ["manage", "all"]
+        assert delete_entry["availability"] == ["admin", "manage", "all"]
         cleanup_entry = next(item for item in payload["tools"] if item["name"] == "gemini_cleanup_test_artifacts")
         assert cleanup_entry["destructive"] is True
-        assert cleanup_entry["availability"] == ["manage", "all"]
+        assert cleanup_entry["availability"] == ["admin", "manage", "all"]
+        scan_entry = next(item for item in payload["tools"] if item["name"] == "gemini_scan_chat_history_sources")
+        assert scan_entry["read_only"] is True
+        assert scan_entry["pagination"] is True
+        assert scan_entry["availability"] == ["manage", "all"]
         export_entry = next(item for item in payload["tools"] if item["name"] == "gemini_export_chat")
         assert export_entry["privacy"] == "reads_private_chat_text"
         assert any(item["name"] == "chat_history_find_and_export" for item in payload["workflows"])
@@ -1720,6 +1798,7 @@ def test_tool_manifest_and_annotations_expose_agent_safety_metadata():
         markdown_result = await mcp.call_tool("gemini_get_tool_manifest", {})
         manifest_text = _tool_text(markdown_result)
         assert "Gemini MCP Tool Manifest" in manifest_text
+        assert "Recommended Profiles" in manifest_text
         assert "privacy:" in manifest_text
         assert "destructive" in manifest_text
 
@@ -1744,7 +1823,42 @@ def test_tool_manifest_marks_currently_enabled_tools(monkeypatch):
     all_tools = {item["name"]: item for item in all_payload["tools"]}
     assert all_tools["gemini_get_tool_manifest"]["current_enabled"] is True
     assert all_tools["gemini_manage_prompts"]["current_enabled"] is False
-    assert all_payload["current_enabled_count"] == 39
+    assert all_payload["current_enabled_count"] == 46
+
+    monkeypatch.setenv("GEMINI_TOOLS", "model")
+    model_payload = manage_tools._tool_manifest_payload("all")
+    model_tools = {item["name"]: item for item in model_payload["tools"]}
+    assert model_tools["gemini_chat"]["current_enabled"] is True
+    assert model_tools["gemini_generate_media"]["current_enabled"] is False
+    assert model_tools["gemini_list_chats"]["current_enabled"] is False
+
+    monkeypatch.setenv("GEMINI_TOOLS", "history")
+    history_payload = manage_tools._tool_manifest_payload("all")
+    history_tools = {item["name"]: item for item in history_payload["tools"]}
+    assert history_tools["gemini_history"]["current_enabled"] is True
+    assert history_tools["gemini_list_chats"]["current_enabled"] is False
+    assert history_tools["gemini_export_chat"]["current_enabled"] is False
+    assert history_tools["gemini_delete_chat"]["current_enabled"] is False
+    assert history_tools["gemini_create_scheduled_action"]["current_enabled"] is False
+
+    monkeypatch.setenv("GEMINI_TOOLS", "history-organize")
+    organize_payload = manage_tools._tool_manifest_payload("all")
+    organize_tools = {item["name"]: item for item in organize_payload["tools"]}
+    assert organize_tools["gemini_history"]["current_enabled"] is True
+    assert organize_tools["gemini_notebooks"]["current_enabled"] is True
+    assert organize_tools["gemini_list_chats"]["current_enabled"] is False
+    assert organize_tools["gemini_list_notebooks"]["current_enabled"] is False
+    assert organize_tools["gemini_move_chat_to_notebook"]["current_enabled"] is True
+    assert organize_tools["gemini_delete_chat"]["current_enabled"] is False
+
+    monkeypatch.setenv("GEMINI_TOOLS", "account-read")
+    account_payload = manage_tools._tool_manifest_payload("all")
+    account_tools = {item["name"]: item for item in account_payload["tools"]}
+    assert account_tools["gemini_account_inventory"]["current_enabled"] is True
+    assert account_tools["gemini_list_public_links"]["current_enabled"] is False
+    assert account_tools["gemini_list_scheduled_actions"]["current_enabled"] is False
+    assert account_tools["gemini_move_chat_to_notebook"]["current_enabled"] is False
+    assert account_tools["gemini_delete_scheduled_action"]["current_enabled"] is False
 
     monkeypatch.setenv("GEMINI_TOOLS", "prompts")
     prompts_payload = manage_tools._tool_manifest_payload("all")
@@ -1764,6 +1878,7 @@ def test_parsed_web_surface_tools_return_structured_data(monkeypatch):
     class FakeClient:
         def __init__(self):
             self.deleted_scheduled_ids = set()
+            self.moved_chat_ids = set()
 
         async def _batch_execute(self, payloads, source_path="/app", close_on_error=True):
             serialized = payloads[0].serialize()
@@ -1783,37 +1898,64 @@ def test_parsed_web_surface_tools_return_structured_data(monkeypatch):
                         [["guided_learning"], "Guided Learning", "Study help", ""],
                     ]
                 ]
-            elif rpcid == "MaZiqc":
+            elif rpcid == "CNgdBe":
+                metadata = [None] * 15
+                metadata[0] = "高中数学"
+                metadata[10] = [None, [["source-1"], ["source-2"]]]
+                metadata[12] = [2]
+                metadata[14] = ["📐"]
                 body = [
                     None,
-                    "cursor",
-                    [
-                        [
-                            "task-1",
-                            "Morning brief",
-                            True,
-                            None,
-                            None,
-                            [1781794431, 0],
-                            None,
-                            "Daily",
-                            None,
-                            2,
-                        ],
-                        [
-                            "task-2",
-                            "Weekly plan",
-                            False,
-                            None,
-                            None,
-                            [1781880831, 0],
-                            None,
-                            "Weekly",
-                            None,
-                            2,
-                        ]
-                    ],
+                    None,
+                    [["notebooks/math", metadata, ["Math notebook summary"]]],
+                    [[1, "General"], [3, "Study"]],
                 ]
+            elif rpcid == "MaZiqc":
+                request_payload = json.loads(serialized[1])
+                filter_payload = request_payload[2] if len(request_payload) > 2 else []
+                if isinstance(filter_payload, list) and len(filter_payload) > 3 and filter_payload[3] == "notebooks/math":
+                    chat_ids = ["c_math_existing", *sorted(self.moved_chat_ids)]
+                    entries = []
+                    for chat_id in chat_ids:
+                        entry = [None] * 14
+                        entry[0] = chat_id
+                        entry[1] = "Moved math chat" if chat_id != "c_math_existing" else "Existing math chat"
+                        entry[5] = [1781794431, 0]
+                        entry[7] = "notebooks/math"
+                        entry[13] = [2]
+                        entries.append(entry)
+                    body = [None, None, entries]
+                else:
+                    body = [
+                        None,
+                        "cursor",
+                        [
+                            [
+                                "task-1",
+                                "Morning brief",
+                                True,
+                                None,
+                                None,
+                                [1781794431, 0],
+                                None,
+                                "Daily",
+                                None,
+                                2,
+                            ],
+                            [
+                                "task-2",
+                                "Weekly plan",
+                                False,
+                                None,
+                                None,
+                                [1781880831, 0],
+                                None,
+                                "Weekly",
+                                None,
+                                2,
+                            ]
+                        ],
+                    ]
             elif rpcid == "XPSWpd":
                 body = [[
                     [
@@ -1879,6 +2021,11 @@ def test_parsed_web_surface_tools_return_structured_data(monkeypatch):
                 for item in payload[1] if len(payload) > 1 and isinstance(payload[1], list) else []:
                     self.deleted_scheduled_ids.add(item)
                 body = [[]]
+            elif rpcid == "MUAZcd":
+                payload = json.loads(serialized[1])
+                conversation = payload[2]
+                self.moved_chat_ids.add(conversation[0])
+                body = [None, conversation]
             elif rpcid == "MyzX6c":
                 body = [True, [[1, True, 1, 0, None, 1], [35, True, 0, 0, None, 0]]]
             else:
@@ -1939,6 +2086,76 @@ def test_parsed_web_surface_tools_return_structured_data(monkeypatch):
         library_page = json.loads(_tool_text(library_page_result))
         assert library_page["items"][0]["name"] == "Guided Learning"
 
+        notebooks_result = await mcp.call_tool(
+            "gemini_list_notebooks",
+            {"response_format": "json"},
+        )
+        notebooks = json.loads(_tool_text(notebooks_result))
+        assert notebooks["ok"] is True
+        assert notebooks["items"][0]["id"] == "notebooks/math"
+        assert notebooks["items"][0]["title"] == "高中数学"
+        assert notebooks["items"][0]["emoji"] == "📐"
+        assert notebooks["items"][0]["source_count"] == 2
+        assert notebooks["diagnostic"]["categories"][1]["label"] == "Study"
+
+        notebooks_facade_result = await mcp.call_tool(
+            "gemini_notebooks",
+            {"action": "list", "response_format": "json"},
+        )
+        notebooks_facade = json.loads(_tool_text(notebooks_facade_result))
+        assert notebooks_facade["items"][0]["id"] == notebooks["items"][0]["id"]
+
+        inventory_notebooks_result = await mcp.call_tool(
+            "gemini_account_inventory",
+            {"surface": "notebooks", "response_format": "json"},
+        )
+        inventory_notebooks = json.loads(_tool_text(inventory_notebooks_result))
+        assert inventory_notebooks["items"][0]["title"] == "高中数学"
+
+        notebook_chats_result = await mcp.call_tool(
+            "gemini_list_notebook_chats",
+            {"notebook_title": "高中数学", "response_format": "json"},
+        )
+        notebook_chats = json.loads(_tool_text(notebook_chats_result))
+        assert notebook_chats["ok"] is True
+        assert notebook_chats["items"][0]["id"] == "c_math_existing"
+        assert notebook_chats["items"][0]["project_id"] == "notebooks/math"
+
+        notebook_chats_facade_result = await mcp.call_tool(
+            "gemini_notebooks",
+            {"action": "chats", "notebook_title": "高中数学", "response_format": "json"},
+        )
+        notebook_chats_facade = json.loads(_tool_text(notebook_chats_facade_result))
+        assert notebook_chats_facade["items"][0]["project_id"] == "notebooks/math"
+
+        deep_scan_result = await mcp.call_tool(
+            "gemini_scan_chat_history_sources",
+            {"response_format": "json", "limit": 10, "include_remy_goals": False},
+        )
+        deep_scan = json.loads(_tool_text(deep_scan_result))
+        assert deep_scan["ok"] is True
+        assert deep_scan["total_count"] >= 3
+        assert deep_scan["source_counts"]["ui_recent"] == 2
+        assert deep_scan["source_counts"]["notebook:高中数学"] == 1
+        assert any(item["id"] == "c_math_existing" for item in deep_scan["items"])
+
+        history_scan_result = await mcp.call_tool(
+            "gemini_history",
+            {"action": "scan", "response_format": "json", "limit": 10, "include_remy_goals": False},
+        )
+        history_scan = json.loads(_tool_text(history_scan_result))
+        assert history_scan["source_counts"]["ui_recent"] == 2
+        assert history_scan["source_counts"]["notebook:高中数学"] == 1
+
+        move_result = await mcp.call_tool(
+            "gemini_move_chat_to_notebook",
+            {"chat_id": "c_move_me", "notebook_title": "高中数学", "response_format": "json"},
+        )
+        moved = json.loads(_tool_text(move_result))
+        assert moved["ok"] is True
+        assert moved["notebook"]["id"] == "notebooks/math"
+        assert moved["verified_in_target_notebook"] is True
+
         scheduled_result = await mcp.call_tool(
             "gemini_list_scheduled_actions",
             {"scope": "active", "response_format": "json", "limit": 1},
@@ -1954,6 +2171,13 @@ def test_parsed_web_surface_tools_return_structured_data(monkeypatch):
         assert item["created_time"].endswith("UTC")
         assert scheduled["results"][0]["total_count"] == 1
         assert scheduled["results"][0]["diagnostic"]["raw_entry_count"] == 2
+
+        inventory_scheduled_result = await mcp.call_tool(
+            "gemini_account_inventory",
+            {"surface": "scheduled", "scheduled_scope": "active", "response_format": "json", "limit": 1},
+        )
+        inventory_scheduled = json.loads(_tool_text(inventory_scheduled_result))
+        assert inventory_scheduled["results"][0]["items"][0]["id"] == "sched-1"
 
         scheduled_page_result = await mcp.call_tool(
             "gemini_list_scheduled_actions",
@@ -2042,6 +2266,16 @@ def test_parsed_web_surface_tools_return_structured_data(monkeypatch):
     assert delete_payload == ["Q4Gw3c", "[null,[\"created-task\"]]", None, "generic"]
     assert delete_source_path == "/scheduled"
     assert delete_close_on_error is False
+
+    move_call = next(call for call in calls if call[0][0] == "MUAZcd")
+    move_payload, move_source_path, move_close_on_error = move_call
+    assert move_source_path == "/app"
+    assert move_close_on_error is False
+    serialized_move_body = json.loads(move_payload[1])
+    assert serialized_move_body[1] == [["bot_id", "bot_project_metadata"]]
+    assert serialized_move_body[2][0] == "c_move_me"
+    assert serialized_move_body[2][7] == "notebooks/math"
+    assert serialized_move_body[2][13] == [2]
 
 
 def test_url_analysis_preserves_url_and_timeout(monkeypatch):

@@ -14,7 +14,7 @@ def _qa_pairs():
 def test_gemini_web_mcp_contract_evaluation_shape():
     pairs = _qa_pairs()
 
-    assert len(pairs) == 13
+    assert len(pairs) == 17
     for pair in pairs:
         question = pair.findtext("question")
         answer = pair.findtext("answer")
@@ -48,12 +48,21 @@ def test_gemini_web_mcp_contract_answers_match_static_manifest():
 
     assert history_tools["gemini_export_chat"]["privacy"] == "reads_private_chat_text"
     assert pairs["reads_private_chat_text"]
+    assert history_tools["gemini_history"]["read_only"] is True
+    assert history_tools["gemini_history"]["pagination"] is True
+    assert pairs["gemini_history"]
+    assert history_tools["gemini_scan_chat_history_sources"]["read_only"] is True
+    assert history_tools["gemini_scan_chat_history_sources"]["pagination"] is True
+    assert pairs["gemini_scan_chat_history_sources"]
 
     workflow_names = {workflow["name"] for workflow in manifest["workflows"]}
     assert "chat_history_find_and_export" in workflow_names
     assert pairs["chat_history_find_and_export"]
     assert "test_artifact_cleanup" in workflow_names
     assert pairs["test_artifact_cleanup"]
+    profile_names = {profile["name"] for profile in manifest["profiles"]}
+    assert "history" in profile_names
+    assert pairs["history"]
 
     pro_model = next(model for model in capabilities["models"] if model["display_name"] == "3.1 Pro")
     assert pro_model["alias"] == "pro"
@@ -74,6 +83,12 @@ def test_gemini_web_mcp_contract_answers_match_static_manifest():
 
     assert account_tools["gemini_list_library_capabilities"]["pagination"] is True
     assert pairs["gemini_list_library_capabilities"]
+    assert account_tools["gemini_account_inventory"]["read_only"] is True
+    assert account_tools["gemini_notebooks"]["read_only"] is True
+    assert account_tools["gemini_move_chat_to_notebook"]["read_only"] is False
+    assert account_tools["gemini_move_chat_to_notebook"]["destructive"] is False
+    assert account_tools["gemini_move_chat_to_notebook"]["privacy"] == "moves_private_chat_metadata"
+    assert pairs["gemini_move_chat_to_notebook"]
 
     assert tools["gemini_manage_prompts"]["availability"] == ["prompts"]
     assert pairs["prompts"]

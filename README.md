@@ -98,10 +98,16 @@ pip install pillow
 ### 4. 启动服务器
 
 ```bash
-# 推荐默认工具面
+# 只调用模型
+GEMINI_TOOLS=model python -m src.server
+
+# 只读整理历史
+GEMINI_TOOLS=history python -m src.server
+
+# 通用内容工作流
 GEMINI_TOOLS=core python -m src.server
 
-# 全部功能
+# 完整维护/验证工具面
 GEMINI_TOOLS=all python -m src.server
 ```
 
@@ -124,10 +130,15 @@ GEMINI_TOOLS=all python -m src.server
 
 | 工具组 | 包含功能 | 用途 | Token 消耗 |
 |--------|---------|------|-----------|
-| `core` | 对话 + 媒体 + 文件/URL + Deep Research | 推荐默认组合 | 中 |
-| `manage` | 历史对话、模型、Gems 管理 | 账户内容管理 | 中 |
+| `model` / `chat` | 仅对话和会话工具 | 只想调用 Gemini 模型的 AI agent | 低 |
+| `history` | `gemini_history` 聚合 list/scan/search/read/export + manifest | 只整理或导出对话历史，不暴露删除/账号写操作 | 低 |
+| `history-organize` | `gemini_history` + `gemini_notebooks` + Notebook move | 把选定对话整理进 Gemini 原生 Notebook | 中 |
+| `account-read` | `gemini_account_inventory` 聚合账号只读盘点 | 账号能力和 Web surface 审计 | 低 |
+| `scheduled-admin` | scheduled list/get/create/delete | 明确授权后管理定时操作 | 中 |
+| `core` | 对话 + 媒体 + 文件/URL + Deep Research | 通用内容工作流 | 中 |
+| `manage` | 聚合入口 + 历史、账号、scheduled、Gems 颗粒工具 | 兼容旧配置；普通 agent 不建议默认使用 | 高 |
 | `prompts` | 本地提示词库存取 | 可选附加能力 | 低 |
-| `all` | `core` + `manage` | 完整 Gemini 工作流 | 高 |
+| `all` | `core` + `manage` | 完整维护/验证工具面 | 高 |
 
 ---
 
@@ -151,6 +162,8 @@ GEMINI_TOOLS=all python -m src.server
 - `gemini_upload_file`
 - `gemini_analyze_url`
 - `gemini_deep_research`
+- `gemini_list_research_report_actions`
+- `gemini_create_from_research_report`
 - `gemini_get_tool_manifest`
 - `gemini_doctor`
 - `gemini_get_cookie_status`
@@ -162,8 +175,12 @@ GEMINI_TOOLS=all python -m src.server
 
 `GEMINI_TOOLS=all` 会在 `core` 基础上增加：
 
+- `gemini_history`
+- `gemini_account_inventory`
+- `gemini_notebooks`
 - `gemini_cleanup_test_artifacts`
 - `gemini_list_chats`
+- `gemini_scan_chat_history_sources`
 - `gemini_search_chats`
 - `gemini_read_chat`
 - `gemini_export_chat`
@@ -174,6 +191,9 @@ GEMINI_TOOLS=all python -m src.server
 - `gemini_list_public_links`
 - `gemini_get_usage_limits`
 - `gemini_list_library_capabilities`
+- `gemini_list_notebooks`
+- `gemini_list_notebook_chats`
+- `gemini_move_chat_to_notebook`
 - `gemini_list_scheduled_actions`
 - `gemini_get_scheduled_action`
 - `gemini_create_scheduled_action`
@@ -181,6 +201,14 @@ GEMINI_TOOLS=all python -m src.server
 - `gemini_get_tool_mode_status`
 - `gemini_list_models`
 - `gemini_manage_gems`
+
+更窄的常用配置：
+
+- `GEMINI_TOOLS=model`: 只调用模型，不暴露媒体、文件、历史或账号工具
+- `GEMINI_TOOLS=history`: 暴露 `gemini_history`，只读整理历史，不暴露删除、scheduled 写操作或 Gems
+- `GEMINI_TOOLS=history-organize`: 在 `history` 基础上增加 `gemini_notebooks` 和 move 到 native Notebook
+- `GEMINI_TOOLS=account-read`: 暴露 `gemini_account_inventory`，只读盘点账号 Web surface
+- `GEMINI_TOOLS=scheduled-admin`: 只暴露定时操作 list/get/create/delete
 
 `GEMINI_TOOLS=prompts` 会额外提供：
 
@@ -218,6 +246,9 @@ Gemini Web `学习辅导` 输入模式。
 - `gemini_deep_research`: 创建研究计划、启动研究，并轮询最终报告或返回清晰进度状态
 
 ### 账户和内容管理
+- `gemini_history`: 历史对话只读聚合入口，支持 `action=list|scan|search|read|export`
+- `gemini_account_inventory`: 账号 Web surface 只读聚合入口，支持 capabilities/status/features/links/usage/library/notebooks/scheduled/modes/models
+- `gemini_notebooks`: Gemini Web 原生笔记本只读聚合入口，支持 `action=list|chats`
 - `gemini_inspect_account`: 检查当前账号 Web RPC/能力状态
 - `gemini_get_tool_manifest`: 返回工具安全/隐私/分页/推荐工作流清单，供 agent 规划调用
 - `gemini_get_web_capabilities`: 返回实测 Pro 网页模型、思考等级、工具菜单、设置入口和 MCP 覆盖清单
@@ -321,6 +352,11 @@ gemini-mcp-server/
 
 ## 🔬 开发与调试
 
+安装开发依赖:
+```bash
+pip install -e ".[all,dev]"
+```
+
 测试导入:
 ```bash
 python -c "import sys; sys.path.insert(0, '.'); from src import client_wrapper, constants; print('✓ OK')"
@@ -331,8 +367,13 @@ python -c "import sys; sys.path.insert(0, '.'); from src import client_wrapper, 
 pytest -q
 ```
 
-`evaluations/gemini_web_mcp_contract.xml` 提供 13 个只读、稳定答案的 MCP 评估问题，
+`evaluations/gemini_web_mcp_contract.xml` 提供 17 个只读、稳定答案的 MCP 评估问题，
 覆盖工具安全清单、历史记录工作流、Web 能力映射和分页/隐私元数据。
+
+构建发布包:
+```bash
+python -m build
+```
 
 使用 MCP Inspector 调试:
 ```bash

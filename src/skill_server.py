@@ -46,6 +46,7 @@ from .tools.manage import (
     _chat_export_payload,
     _chat_to_dict,
     _execute_observed_rpc,
+    _fetch_native_notebooks,
     _extract_rpc_bodies,
     _fetch_scheduled_registry,
     _fetch_scheduled_task_by_id,
@@ -106,7 +107,7 @@ mcp = FastMCP(
 - **edit**: modify images
 - **session**: conversation history
 - **history**: remote Gemini chat history
-- **account**: account, models, tool manifest, web capabilities, feature probes, links, usage, library, scheduled actions, modes
+- **account**: account, models, tool manifest, web capabilities, feature probes, links, usage, library, native notebooks, scheduled actions, modes
 - **scheduled**: list, get by id, create daily, or delete scheduled actions
 - **cookie**: authentication helper
 - **doctor**: local preflight diagnostics
@@ -411,7 +412,7 @@ async def history(
 
 @mcp.tool(annotations=READS_PRIVATE_REMOTE)
 async def account(
-    action: Literal["status", "models", "manifest", "capabilities", "features", "links", "usage", "library", "scheduled", "modes"] = "status",
+    action: Literal["status", "models", "manifest", "capabilities", "features", "links", "usage", "library", "notebooks", "scheduled", "modes"] = "status",
 ) -> list[TextContent]:
     """Inspect Gemini account status and available models."""
     try:
@@ -510,6 +511,16 @@ async def account(
             lines = [
                 f"{item.get('name') or ', '.join(item.get('aliases', []))}: {item.get('description', '')}".strip()
                 for item in entries
+            ]
+            return [TextContent(type="text", text="\n".join(lines))]
+
+        if action == "notebooks":
+            notebooks, _diagnostic = await _fetch_native_notebooks(client)
+            if not notebooks:
+                return [TextContent(type="text", text="No native Gemini notebooks")]
+            lines = [
+                f"{item.get('title') or '(untitled)'} ({item.get('id', '')}) sources={item.get('source_count', 0)}".strip()
+                for item in notebooks[:30]
             ]
             return [TextContent(type="text", text="\n".join(lines))]
 
