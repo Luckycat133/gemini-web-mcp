@@ -1,6 +1,6 @@
 # 快速开始指南
 
-本指南将帮助您在 5 分钟内开始使用 Gemini MCP Server v2.0。
+本指南将帮助您在 5 分钟内开始使用 Gemini MCP Server v2.1。
 
 ---
 

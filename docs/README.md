@@ -1,6 +1,6 @@
 # Gemini MCP Server 文档中心
 
-欢迎使用 Gemini MCP Server v2.0 文档！
+欢迎使用 Gemini MCP Server v2.1 文档！
 
 ---
 
@@ -23,6 +23,7 @@
 - [Claude Desktop 部署](./claude-desktop.md)
 - [MCP Inspector 测试](./testing.md)
 - [生产部署](./production.md)
+- [Launch Kit](./launch-kit.md) - 分发链接、安装文案和社交媒体发布素材
 
 ### 技术文档
 - [技术架构](./architecture.md) - 系统设计
@@ -61,6 +62,7 @@
 | Gem 管理 | ✅ 自定义助手管理 |
 | MCP 评估 | ✅ 13 个只读 contract-level QA |
 | Codex Skill | ✅ 公开 `.agents/skills/gemini-web-mcp` + 本地 `.codex/skills/gemini-web-mcp` |
+| 分发资料 | ✅ `docs/launch-kit.md` |
 
 ---
 

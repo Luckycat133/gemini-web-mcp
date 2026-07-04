@@ -1,0 +1,7 @@
+include README.md
+include pyproject.toml
+recursive-include docs *.md
+recursive-include evaluations *.xml
+recursive-include .agents/skills/gemini-web-mcp *
+recursive-include .codex/skills/gemini-web-mcp *
+global-exclude __pycache__ *.py[cod] .DS_Store

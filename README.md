@@ -1,4 +1,8 @@
-# Gemini Web MCP Server (v2.0)
+# Gemini Web MCP Server (v2.1.2)
+
+[![Release](https://img.shields.io/github/v/release/Luckycat133/gemini-web-mcp?label=release)](https://github.com/Luckycat133/gemini-web-mcp/releases/latest)
+[![Codex Skill](https://img.shields.io/badge/Codex%20Skill-installable-0B6BFF)](https://github.com/Luckycat133/gemini-web-mcp/tree/main/.agents/skills/gemini-web-mcp)
+[![License](https://img.shields.io/badge/License-AGPL--3.0--only-blue.svg)](https://www.gnu.org/licenses/agpl-3.0.html)
 
 > ⚠️ 免责声明: 本项目仅供技术研究与教育用途。使用逆向工程方式访问 Gemini Web 可能违反 Google 服务条款，并存在账户被限制的风险。
 
@@ -6,7 +10,7 @@
 
 ---
 
-## ✨ 主要功能 (v2.0)
+## ✨ 主要功能 (v2.1)
 
 ### 🤖 模型支持
 - **flash-lite** → Web UI `3.1 Flash-Lite`
@@ -37,6 +41,12 @@
 - Cookie 自动刷新
 - Cookie 浏览器自动获取
 - 智能错误处理
+
+### 📦 Skill 分发
+- 公开 Codex skill: `.agents/skills/gemini-web-mcp`
+- 直接从 GitHub 安装 skill
+- Release 附带 standalone skill zip、wheel 和源码包
+- `docs/launch-kit.md` 提供社交媒体发布文案和分发清单
 
 ---
 
