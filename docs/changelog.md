@@ -11,6 +11,13 @@ Gemini MCP Server 版本更新历史记录。
 ## [0.2.0] - 2026-07-04
 
 ### 发布与分发
+- 新增 `scripts/package_release.py`，一键构建 wheel、sdist 和 standalone Codex skill zip
+- 新增 `MANIFEST.in`，确保源码包包含 docs、evaluations 和公开 `.agents/skills/gemini-web-mcp`
+- 新增 `docs/launch-kit.md`，提供安装链接、分发清单和中英文社交媒体发布文案
+- 更新 README 顶部版本、Release/Skill/License badges 和公开分发说明
+
+
+### 发布与分发
 - 新增公开 repo skill 路径 `.agents/skills/gemini-web-mcp`，让 Codex 和 skill 聚合站可直接从 GitHub 发现/安装
 - 补充 README 中的 GitHub skill 安装命令、手动安装步骤，并明确 skill 与 MCP server runtime 的分层关系
 - 扩展 skill packaging 测试，校验 `.codex/skills` 本地副本和 `.agents/skills` 公开副本保持一致
