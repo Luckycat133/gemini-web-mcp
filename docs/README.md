@@ -29,7 +29,7 @@
 - [API 参考](./api-reference.md) - 内部 API 文档
 - [常量与配置](./constants-reference.md) - 配置说明
 - [MCP Contract Evaluation](../evaluations/gemini_web_mcp_contract.xml) - 只读工具选择与安全元数据评估
-- [Codex Skill](../.codex/skills/gemini-web-mcp/SKILL.md) - 项目内 agent 使用流程
+- [Codex Skill](../.agents/skills/gemini-web-mcp/SKILL.md) - 可公开安装的 agent 使用流程
 
 ### 参考资料
 - [常见问题 FAQ](./faq.md)
@@ -60,7 +60,7 @@
 | Deep Research | ✅ AI Plus 支持 |
 | Gem 管理 | ✅ 自定义助手管理 |
 | MCP 评估 | ✅ 13 个只读 contract-level QA |
-| Codex Skill | ✅ 项目内 `.codex/skills/gemini-web-mcp` |
+| Codex Skill | ✅ 公开 `.agents/skills/gemini-web-mcp` + 本地 `.codex/skills/gemini-web-mcp` |
 
 ---
 
