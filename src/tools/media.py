@@ -26,7 +26,7 @@ from ..client_wrapper import (
 )
 from ..constants import resolve_media_request
 from .annotations import MUTATES_REMOTE
-from .utils import extract_remote_chat_id, parse_response
+from .utils import extract_remote_chat_id, parse_response, validate_optional_image_path
 
 logger = logging.getLogger(__name__)
 
@@ -212,6 +212,10 @@ def register_media_tools(mcp: FastMCP):
         filename: Optional[str] = None,
     ) -> list[TextContent]:
         """媒体生成"""
+        valid_image, safe_image_path, image_error = validate_optional_image_path(image_path)
+        if not valid_image:
+            return [TextContent(type="text", text=f"❌ {image_error}")]
+
         client = get_gemini_client()
         await initialize_client()
         await cleanup_due_remote_chats(client)
@@ -236,7 +240,7 @@ def register_media_tools(mcp: FastMCP):
             media_request["effective_alias"],
             media_request["backend_label"],
         )
-        files = [image_path] if image_path else None
+        files = [safe_image_path] if safe_image_path else None
         previous_timeout, previous_watchdog_timeout = _set_client_timeouts(
             client,
             effective_timeout,

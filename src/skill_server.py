@@ -20,12 +20,15 @@ except ImportError:
     exit(1)
 
 from .client_wrapper import (
+    cleanup_due_remote_chats,
     get_gemini_client,
     initialize_client,
     reset_client,
     get_cookie_status,
     get_cookie_from_browser,
     list_browser_cookie_profiles,
+    schedule_remote_chat_cleanup,
+    schedule_remote_chat_cleanup_from_response,
 )
 from .constants import resolve_media_request, resolve_model_name
 from .tools.annotations import (
@@ -36,7 +39,7 @@ from .tools.annotations import (
     READ_ONLY_LOCAL,
     READS_PRIVATE_REMOTE,
 )
-from .tools.utils import extract_remote_chat_id
+from .tools.utils import extract_remote_chat_id, validate_optional_image_path
 from .tools.manage import (
     WEB_FEATURE_PROBES,
     _RawRPCData,
@@ -235,6 +238,13 @@ def _truncate_text(text: Any, max_chars: int = 2000) -> str:
     return value[:max_chars].rstrip() + "\n...[truncated]"
 
 
+def _schedule_skill_response_cleanup(response: Any, source: str, session: Any = None) -> None:
+    """Mirror the primary MCP server's default remote-chat cleanup behavior."""
+    cid = schedule_remote_chat_cleanup_from_response(response, source=source)
+    if not cid and session is not None:
+        schedule_remote_chat_cleanup(getattr(session, "cid", None), source=source)
+
+
 @mcp.tool(annotations=MUTATES_REMOTE)
 async def chat(
     message: str,
@@ -246,12 +256,17 @@ async def chat(
 ) -> list[TextContent]:
     """Chat with Gemini - supports images and sessions."""
     try:
+        valid_image, safe_image_path, image_error = validate_optional_image_path(image_path)
+        if not valid_image:
+            return [TextContent(type="text", text=f"Error: {image_error}")]
+
         client = get_gemini_client()
         await initialize_client()
+        await cleanup_due_remote_chats(client)
 
         model = _normalize_model(model)
         model_name = resolve_model_name(model)
-        files = [image_path] if image_path else None
+        files = [safe_image_path] if safe_image_path else None
 
         if session_id:
             with _sessions_lock:
@@ -269,6 +284,7 @@ async def chat(
             if use_learning_mode:
                 request_kwargs["learning_mode"] = use_learning_mode
             response = await session_entry["session"].send_message(**request_kwargs)
+            _schedule_skill_response_cleanup(response, "skill_chat:session", session_entry["session"])
         else:
             request_kwargs = {
                 "prompt": message,
@@ -279,6 +295,7 @@ async def chat(
             if learning_mode:
                 request_kwargs["learning_mode"] = learning_mode
             response = await client.generate_content(**request_kwargs)
+            _schedule_skill_response_cleanup(response, "skill_chat")
 
         return _format_response(response)
 
@@ -681,8 +698,13 @@ async def create(
 ) -> list[TextContent]:
     """Generate image/video/music."""
     try:
+        valid_image, safe_image_path, image_error = validate_optional_image_path(image_path)
+        if not valid_image:
+            return [TextContent(type="text", text=f"Error: {image_error}")]
+
         client = get_gemini_client()
         await initialize_client()
+        await cleanup_due_remote_chats(client)
 
         model = _normalize_model(model)
         media_type = _normalize_media_type(type)
@@ -695,7 +717,7 @@ async def create(
             "music": "Create music: ",
         }
         media_prompt = prefixes.get(media_type, "") + prompt
-        files = [image_path] if image_path else None
+        files = [safe_image_path] if safe_image_path else None
 
         response = await client.generate_content(
             prompt=media_prompt,
@@ -703,6 +725,7 @@ async def create(
             model=model_name,
             thinking_level=thinking_level,
         )
+        _schedule_skill_response_cleanup(response, f"skill_create:{media_type}")
 
         return _format_response(
             response,
@@ -725,18 +748,24 @@ async def edit(
 ) -> list[TextContent]:
     """Edit existing image."""
     try:
+        valid_image, safe_image_path, image_error = validate_optional_image_path(image_path)
+        if not valid_image:
+            return [TextContent(type="text", text=f"Error: {image_error}")]
+
         client = get_gemini_client()
         await initialize_client()
+        await cleanup_due_remote_chats(client)
 
         model = _normalize_model(model)
         model_name = resolve_model_name(model)
 
         response = await client.generate_content(
             prompt=f"Edit this image: {prompt}",
-            files=[image_path],
+            files=[safe_image_path],
             model=model_name,
             thinking_level=thinking_level,
         )
+        _schedule_skill_response_cleanup(response, "skill_edit")
 
         return _format_response(response, "image")
 
@@ -757,8 +786,13 @@ async def session(
 ) -> list[TextContent]:
     """Manage conversation sessions."""
     try:
+        valid_image, safe_image_path, image_error = validate_optional_image_path(image_path)
+        if not valid_image:
+            return [TextContent(type="text", text=f"Error: {image_error}")]
+
         client = get_gemini_client()
         await initialize_client()
+        await cleanup_due_remote_chats(client)
 
         model = _normalize_model(model)
 
@@ -784,7 +818,7 @@ async def session(
 
             request_kwargs = {
                 "prompt": message or "",
-                "files": [image_path] if image_path else None,
+                "files": [safe_image_path] if safe_image_path else None,
                 "thinking_level": session_entry.get(
                     "thinking_level",
                     thinking_level,
@@ -794,6 +828,7 @@ async def session(
             if use_learning_mode:
                 request_kwargs["learning_mode"] = use_learning_mode
             response = await session_entry["session"].send_message(**request_kwargs)
+            _schedule_skill_response_cleanup(response, "skill_session:send", session_entry["session"])
             return _format_response(response)
 
         elif action == "list":
