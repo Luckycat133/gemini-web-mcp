@@ -19,6 +19,26 @@ The server always exposes authentication helpers and `gemini_reset`.
 
 ---
 
+## Tool Profiles
+
+Use narrow `GEMINI_TOOLS` profiles for agent-facing deployments:
+
+| Profile | Use case |
+|---------|----------|
+| `model` / `chat` | Call Gemini models only; no history, media, file, research, or account tools |
+| `history` | One read-only `gemini_history` facade for list/scan/search/read/export, without delete, scheduled actions, or Gems |
+| `history-organize` | `gemini_history`, read-only `gemini_notebooks`, and the explicit Notebook move operation |
+| `account-read` | One read-only `gemini_account_inventory` facade for links, usage, library, notebooks, scheduled entries, modes, and models |
+| `scheduled-read` | Scheduled-action list/get only |
+| `scheduled-admin` | Scheduled-action list/get/create/delete after explicit authorization |
+| `core` | Broad content work: chat, media, file/URL analysis, and Deep Research |
+| `all` | Full maintenance/verification surface; avoid as a default for general agents |
+
+`gemini_get_tool_manifest` reports these profiles in JSON and Markdown output,
+with `availability` and `current_enabled` per tool.
+
+---
+
 ## Default Tools (`GEMINI_TOOLS=core`)
 
 ### Chat
@@ -110,9 +130,13 @@ Adds these management tools to `core`:
 
 | Tool | Purpose |
 |------|---------|
+| `gemini_history` | Read-only facade for chat-history list/scan/search/read/export workflows |
+| `gemini_account_inventory` | Read-only facade for account and Gemini Web surface inventory |
+| `gemini_notebooks` | Read-only facade for native Gemini Web Notebook list/chats inventory |
 | `gemini_inspect_account` | Inspect current account feature/RPC status without exposing raw RPC previews |
 | `gemini_get_web_capabilities` | Return the observed Pro Web model/menu/settings capability manifest and MCP coverage map |
 | `gemini_list_chats` | List Gemini Web chat history metadata with pagination |
+| `gemini_scan_chat_history_sources` | Deep-scan Gemini Web chat-history metadata sources across observed RPC filters |
 | `gemini_search_chats` | Search chat history metadata, optionally scanning turns when explicitly requested |
 | `gemini_read_chat` | Read turns from a specific Gemini Web chat |
 | `gemini_export_chat` | Export one Gemini Web chat as Markdown or JSON |
@@ -122,6 +146,9 @@ Adds these management tools to `core`:
 | `gemini_list_public_links` | List public links returned by Gemini Web sharing surface |
 | `gemini_get_usage_limits` | Read usage/quota structures from Gemini Web usage surface |
 | `gemini_list_library_capabilities` | List localized Library capability/template entries |
+| `gemini_list_notebooks` | List native Gemini Web Notebooks with ids and metadata |
+| `gemini_list_notebook_chats` | List recent chats assigned to a native Gemini Web Notebook |
+| `gemini_move_chat_to_notebook` | Move an existing Gemini Web chat into a native Gemini Web Notebook |
 | `gemini_list_scheduled_actions` | Read scheduled-action entries returned by Gemini Web scheduled actions surface |
 | `gemini_get_scheduled_action` | Read one scheduled action by id using the observed Web GetTask RPC |
 | `gemini_create_scheduled_action` | Create a daily Gemini Web scheduled action |

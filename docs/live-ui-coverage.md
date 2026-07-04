@@ -46,11 +46,13 @@ NotebookLM, help/feedback, and location entries.
 | Dynamic model discovery | Covered | `gemini_list_models` reports the account model registry after init |
 | Observed Web Pro capability manifest | Covered | `gemini_get_web_capabilities` returns observed models, thinking levels, menu entries, and MCP coverage |
 | Account feature/RPC status | Covered | `gemini_inspect_account` summarizes account probes without raw previews |
-| Chat history listing | Covered | `gemini_list_chats` supports pagination and JSON output |
-| Chat history search | Covered | `gemini_search_chats` searches titles/IDs by default and only scans turn text when `scan_turns=true` |
-| Chat history reading | Covered | `gemini_read_chat` reads a specific chat by ID |
-| Chat history export | Covered | `gemini_export_chat` exports one selected chat as Markdown or JSON |
+| Chat history listing | Covered | `gemini_history(action="list")` is the recommended facade; `gemini_list_chats` remains available in `all/manage` and supports pagination/JSON |
+| Chat history deep source scan | Covered | `gemini_history(action="scan")` is the recommended facade; the granular scan merges observed `MaZiqc` history filters, native notebook chat lists, and `GS7W1` Remy goal conversation references without reading turn text |
+| Chat history search | Covered | `gemini_history(action="search")` searches titles/IDs by default and only scans turn text when `scan_turns=true` |
+| Chat history reading | Covered | `gemini_history(action="read")` reads a specific chat by ID |
+| Chat history export | Covered | `gemini_history(action="export")` exports one selected chat as Markdown or JSON |
 | Chat deletion | Covered | `gemini_delete_chat` maps to the installed client's `delete_chat` |
+| Native Gemini Notebooks | Covered in part | `gemini_notebooks(action="list|chats")` is the recommended read-only facade; granular tools remain available in `all/manage`, and `gemini_move_chat_to_notebook` moves existing chats with verification; notebook create/delete/source mutation remains disabled except for observed source helpers |
 | Library capability/templates | Covered in part | `gemini_list_library_capabilities` parses observed `cYRIkd` capability entries |
 | Library assets | Probe covered | `gemini_probe_web_features(surface="library")` checks observed `sJBwce` and `VxUbXb`; no stable asset list wrapper yet |
 | Add from Google Drive | UI observed | Drive picker is visible in the tools menu and opens Google Picker; no Drive attachment RPC wrapper yet |
@@ -76,6 +78,7 @@ returning raw response bodies:
 | Usage limits | `qpEbW` |
 | Personalization settings | `GPRiHf`, `maGuAc`, `Te6DCf` |
 | Memory import | `Te6DCf` |
+| Chat history / Remy references | `MaZiqc`, `GS7W1` |
 | Scheduled actions | `otAQ7b`, `XPSWpd`, `MaZiqc`, `kwDCne`, `Jba3ib`, `Q4Gw3c` |
 | Tool/mode status | `MyzX6c` |
 

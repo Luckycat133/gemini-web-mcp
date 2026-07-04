@@ -92,8 +92,8 @@ cp .env.example .env
 编辑 `.env` 文件，填入您的 Cookie 值：
 
 ```env
-GEMINI_PSID=your___Secure-1PSID_value
-GEMINI_PSIDTS=your___Secure-1PSIDTS_value
+GEMINI_PSID=<your-psid-cookie-value>
+GEMINI_PSIDTS=<your-psidts-cookie-value>
 GEMINI_PROXY=  # 可选：代理地址
 GEMINI_AUTO_REFRESH=true
 ```

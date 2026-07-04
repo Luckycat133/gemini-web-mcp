@@ -11,7 +11,7 @@ import json
 from mcp.server.fastmcp import FastMCP
 from mcp.types import TextContent
 
-from .tools import register_tools
+from .tools import groups_enable_manage, register_tools
 from .tools.annotations import MUTATES_LOCAL, READ_ONLY_LOCAL
 from .tools.manage import (
     ManifestScope,
@@ -49,8 +49,13 @@ mcp = FastMCP(
 - thinking 保留为旧兼容别名
 
 ## 工具组（可配置）
-- core: 推荐默认工具面，适合大多数 AI 客户端
-- manage: 历史对话 / Gems / 运行时模型
+- model/chat: 只调用 Gemini 模型
+- history: 只读历史 list/search/read/export
+- history-organize: 历史整理 + native Notebook 移动
+- account-read: 账号 Web surface 只读盘点
+- scheduled-admin: 明确授权后管理定时操作
+- core: 通用内容工作流，包含聊天、媒体、文件/URL、Deep Research
+- manage/all: 完整维护/验证工具面，不建议普通 agent 默认使用
 - prompts: 本地提示词库存取
 
 Cookie 辅助工具始终可用，不依赖额外工具组。
@@ -74,7 +79,7 @@ register_tools(mcp, TOOL_GROUPS)
 
 
 def _tool_groups_include_manage() -> bool:
-    return any(group.strip() in {"all", "manage"} for group in TOOL_GROUPS)
+    return groups_enable_manage(TOOL_GROUPS)
 
 
 if not _tool_groups_include_manage():

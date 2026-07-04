@@ -123,8 +123,8 @@ sidts-CjEB...your-cookie-value...
 ### .env 文件配置
 
 ```env
-GEMINI_PSID=g.a000...
-GEMINI_PSIDTS=sidts-CjEB...
+GEMINI_PSID=<your-psid-cookie-value>
+GEMINI_PSIDTS=<your-psidts-cookie-value>
 GEMINI_PROXY=http://127.0.0.1:7890
 GEMINI_AUTO_REFRESH=true
 ```
