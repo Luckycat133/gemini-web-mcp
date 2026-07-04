@@ -8,6 +8,13 @@ Gemini MCP Server 版本更新历史记录。
 
 - 暂无。
 
+## v2.1.1 (2026-07-04)
+
+### 发布与分发
+- 新增公开 repo skill 路径 `.agents/skills/gemini-web-mcp`，让 Codex 和 skill 聚合站可直接从 GitHub 发现/安装
+- 补充 README 中的 GitHub skill 安装命令、手动安装步骤，并明确 skill 与 MCP server runtime 的分层关系
+- 扩展 skill packaging 测试，校验 `.codex/skills` 本地副本和 `.agents/skills` 公开副本保持一致
+
 ## v2.1.0 (2026-07-04)
 
 ### Web UI 对齐

@@ -299,9 +299,30 @@ Gemini Web `学习辅导` 输入模式。
 - `cookie`: Cookie 状态和浏览器获取
 
 ### Codex Skill
-`.codex/skills/gemini-web-mcp` 提供项目内 Codex skill，指导 agent 先读取
-`gemini_get_tool_manifest`，按隐私/destructive 边界选择工具，并使用
-`evaluations/gemini_web_mcp_contract.xml` 验证 MCP contract。
+`.agents/skills/gemini-web-mcp` 是公开分发用 Codex skill，符合 Codex repo skill
+发现约定；`.codex/skills/gemini-web-mcp` 保留为本仓库本地开发副本。这个 skill
+指导 agent 先读取 `gemini_get_tool_manifest`，按隐私/destructive 边界选择工具，
+并使用 `evaluations/gemini_web_mcp_contract.xml` 验证 MCP contract。
+
+从 GitHub 直接安装 skill：
+
+```bash
+python3 ~/.codex/skills/.system/skill-installer/scripts/install-skill-from-github.py \
+  --repo Luckycat133/gemini-web-mcp \
+  --path .agents/skills/gemini-web-mcp \
+  --name gemini-web-mcp
+```
+
+手动安装：
+
+```bash
+git clone https://github.com/Luckycat133/gemini-web-mcp.git
+mkdir -p ~/.codex/skills
+cp -R gemini-web-mcp/.agents/skills/gemini-web-mcp ~/.codex/skills/gemini-web-mcp
+```
+
+Skill 只负责告诉 agent 如何安全、分层地使用 Gemini Web MCP；MCP server 本体仍按上面的
+安装和客户端配置步骤运行。
 
 ---
 
