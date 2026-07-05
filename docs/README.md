@@ -6,6 +6,10 @@
 
 ## 📚 文档目录
 
+### 语言入口
+- [English README](../README.md)
+- [简体中文 README](../README.zh-CN.md)
+
 ### 快速入门
 - [快速开始](./quickstart.md) - 5分钟上手指南
 - [Cookie 获取指南](./cookie-setup.md) - 获取认证 Cookie

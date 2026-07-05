@@ -6,7 +6,10 @@ Gemini MCP Server 版本更新历史记录。
 
 ## Unreleased
 
-- 暂无。
+### 文档与分发
+- 将默认 `README.md` 改为英文公开首页，并新增 `README.zh-CN.md` 保留完整中文入口
+- 新增 `docs/assets/gemini-web-mcp-banner.svg`，改善 GitHub 仓库首屏视觉呈现
+- 更新打包清单，确保源码包包含中文 README 和 README banner 资产
 
 ## v2.1.2 (2026-07-04)
 

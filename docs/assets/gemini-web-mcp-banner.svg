@@ -1,0 +1,29 @@
+<svg width="1280" height="420" viewBox="0 0 1280 420" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc">
+  <title id="title">Gemini Web MCP</title>
+  <desc id="desc">Layered MCP server and Codex skill for Gemini Web workflows.</desc>
+  <rect width="1280" height="420" rx="28" fill="#0E1116"/>
+  <path d="M0 310C145 244 234 270 361 224C503 173 550 65 714 70C876 74 918 187 1068 178C1162 172 1225 122 1280 76V420H0V310Z" fill="#123D3A"/>
+  <path d="M0 338C135 286 267 326 386 278C526 222 572 132 728 132C877 132 932 226 1076 220C1165 216 1230 174 1280 137V420H0V338Z" fill="#1F6B5E"/>
+  <path d="M0 365C142 331 260 360 401 322C548 282 617 208 746 210C884 212 962 285 1091 280C1171 277 1232 247 1280 221V420H0V365Z" fill="#F2C14E"/>
+  <g opacity="0.92">
+    <rect x="80" y="74" width="520" height="248" rx="24" fill="#161B22" stroke="#30363D"/>
+    <rect x="114" y="111" width="124" height="20" rx="10" fill="#2F81F7"/>
+    <rect x="114" y="154" width="408" height="16" rx="8" fill="#C9D1D9"/>
+    <rect x="114" y="187" width="350" height="16" rx="8" fill="#8B949E"/>
+    <rect x="114" y="233" width="114" height="34" rx="17" fill="#1F6B5E"/>
+    <rect x="242" y="233" width="132" height="34" rx="17" fill="#2F81F7"/>
+    <rect x="388" y="233" width="92" height="34" rx="17" fill="#30363D"/>
+  </g>
+  <g>
+    <circle cx="775" cy="132" r="42" fill="#2F81F7"/>
+    <circle cx="868" cy="218" r="42" fill="#1F6B5E"/>
+    <circle cx="775" cy="304" r="42" fill="#F2C14E"/>
+    <circle cx="1006" cy="218" r="54" fill="#E5534B"/>
+    <path d="M817 132H940C976 132 1006 161 1006 197V218" stroke="#C9D1D9" stroke-width="14" stroke-linecap="round"/>
+    <path d="M910 218H952" stroke="#C9D1D9" stroke-width="14" stroke-linecap="round"/>
+    <path d="M817 304H940C976 304 1006 275 1006 239V218" stroke="#C9D1D9" stroke-width="14" stroke-linecap="round"/>
+  </g>
+  <rect x="64" y="313" width="900" height="82" rx="20" fill="#0E1116" opacity="0.86"/>
+  <text x="88" y="360" fill="#F0F6FC" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="44" font-weight="700">Gemini Web MCP</text>
+  <text x="90" y="386" fill="#C9D1D9" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="19">Layered tools for model calls, history, notebooks, account inventory, media, and scheduled actions.</text>
+</svg>
