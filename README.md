@@ -42,6 +42,36 @@ The skill lives at [.agents/skills/gemini-web-mcp](.agents/skills/gemini-web-mcp
 
 ## Install The MCP Server
 
+Fastest verified path (requires [uv](https://docs.astral.sh/uv/)):
+
+```bash
+GEMINI_TOOLS=model uvx \
+  --from https://github.com/Luckycat133/gemini-web-mcp/releases/download/v2.1.2/gemini_mcp_server-2.1.2-py3-none-any.whl \
+  gemini-mcp-server
+```
+
+Minimal MCP client configuration:
+
+```json
+{
+  "mcpServers": {
+    "gemini": {
+      "command": "uvx",
+      "args": [
+        "--from",
+        "https://github.com/Luckycat133/gemini-web-mcp/releases/download/v2.1.2/gemini_mcp_server-2.1.2-py3-none-any.whl",
+        "gemini-mcp-server"
+      ],
+      "env": {
+        "GEMINI_TOOLS": "core"
+      }
+    }
+  }
+}
+```
+
+For local development from source:
+
 ```bash
 git clone https://github.com/Luckycat133/gemini-web-mcp.git
 cd gemini-web-mcp
@@ -54,24 +84,6 @@ Run the default content workflow surface:
 
 ```bash
 GEMINI_TOOLS=core python -m src.server
-```
-
-Minimal Claude Desktop-style configuration:
-
-```json
-{
-  "mcpServers": {
-    "gemini": {
-      "command": "python",
-      "args": ["-m", "src.server"],
-      "env": {
-        "GEMINI_PSID": "your-__Secure-1PSID-value-here",
-        "GEMINI_PSIDTS": "your-__Secure-1PSIDTS-value-here",
-        "GEMINI_TOOLS": "core"
-      }
-    }
-  }
-}
 ```
 
 ## Tool Profiles

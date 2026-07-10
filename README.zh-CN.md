@@ -88,11 +88,13 @@ pip install browser-cookie3
 {
   "mcpServers": {
     "gemini": {
-      "command": "python",
-      "args": ["-m", "src.server"],
+      "command": "uvx",
+      "args": [
+        "--from",
+        "https://github.com/Luckycat133/gemini-web-mcp/releases/download/v2.1.2/gemini_mcp_server-2.1.2-py3-none-any.whl",
+        "gemini-mcp-server"
+      ],
       "env": {
-        "GEMINI_PSID": "your-__Secure-1PSID-value-here",
-        "GEMINI_PSIDTS": "your-__Secure-1PSIDTS-value-here",
         "GEMINI_TOOLS": "core"
       }
     }
@@ -100,20 +102,22 @@ pip install browser-cookie3
 }
 ```
 
-### 3. 安装依赖
+需要先安装 [uv](https://docs.astral.sh/uv/)。也可以直接验证最小模型调用层：
 
 ```bash
-cd /workspace
-pip install "gemini-webapi>=2.0.0" mcp fastmcp
+GEMINI_TOOLS=model uvx \
+  --from https://github.com/Luckycat133/gemini-web-mcp/releases/download/v2.1.2/gemini_mcp_server-2.1.2-py3-none-any.whl \
+  gemini-mcp-server
 ```
 
-可选功能:
-```bash
-# 浏览器 Cookie 自动获取
-pip install browser-cookie3
+### 3. 从源码开发（可选）
 
-# 图像处理
-pip install pillow
+```bash
+git clone https://github.com/Luckycat133/gemini-web-mcp.git
+cd gemini-web-mcp
+python -m venv .venv
+. .venv/bin/activate
+pip install -e ".[all]"
 ```
 
 ### 4. 启动服务器
