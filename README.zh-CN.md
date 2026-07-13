@@ -329,14 +329,13 @@ Gemini Web `学习辅导` 输入模式。
 指导 agent 先读取 `gemini_get_tool_manifest`，按隐私/destructive 边界选择工具，
 并使用 `evaluations/gemini_web_mcp_contract.xml` 验证 MCP contract。
 
-从 GitHub 直接安装 skill：
+使用跨 agent 的 `skills` CLI 从 GitHub 一行安装：
 
 ```bash
-python3 ~/.codex/skills/.system/skill-installer/scripts/install-skill-from-github.py \
-  --repo Luckycat133/gemini-web-mcp \
-  --path .agents/skills/gemini-web-mcp \
-  --name gemini-web-mcp
+npx skills add https://github.com/Luckycat133/gemini-web-mcp/tree/main/.agents/skills/gemini-web-mcp
 ```
+
+安装器支持 Codex、Claude Code、Gemini CLI、Cline 等多种 agent；按提示选择目标即可。
 
 手动安装：
 
