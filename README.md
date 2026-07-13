@@ -29,16 +29,13 @@ The main design choice is controlled tool layering. Agents should not see every 
 
 ## Install The Codex Skill
 
-Use the public repo skill when you want Codex to understand this project's safe workflows before it touches the MCP server:
+Install the public skill with the cross-agent `skills` CLI:
 
 ```bash
-python3 ~/.codex/skills/.system/skill-installer/scripts/install-skill-from-github.py \
-  --repo Luckycat133/gemini-web-mcp \
-  --path .agents/skills/gemini-web-mcp \
-  --name gemini-web-mcp
+npx skills add https://github.com/Luckycat133/gemini-web-mcp/tree/main/.agents/skills/gemini-web-mcp
 ```
 
-The skill lives at [.agents/skills/gemini-web-mcp](.agents/skills/gemini-web-mcp). The local development copy at [.codex/skills/gemini-web-mcp](.codex/skills/gemini-web-mcp) is kept byte-for-byte identical by tests.
+The CLI can install the skill for Codex, Claude Code, Gemini CLI, Cline, and other supported agents. The skill lives at [.agents/skills/gemini-web-mcp](.agents/skills/gemini-web-mcp); the local development copy at [.codex/skills/gemini-web-mcp](.codex/skills/gemini-web-mcp) is kept byte-for-byte identical by tests.
 
 ## Install The MCP Server
 
