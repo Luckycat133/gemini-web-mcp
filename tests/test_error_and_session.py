@@ -16,7 +16,7 @@ from src.error_handler import (
     handle_error,
     wrap_tool_error,
 )
-from src.session_manager import SessionData, SessionManager
+from src.session_manager import SessionManager
 from src.remote_chat_cleanup_manager import extract_remote_chat_id as _extract_from_cleanup
 from src.tools.utils import extract_remote_chat_id as _extract_from_utils
 

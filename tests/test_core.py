@@ -56,7 +56,7 @@ def test_tools_structure():
     import src.tools.research
     print("✓ src.tools.research imported")
     
-    import src.tools.manage
+    import src.tools.manage  # noqa: F401  (import for side effect test)
     print("✓ src.tools.manage imported")
 
 
