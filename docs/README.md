@@ -1,6 +1,6 @@
 # Gemini MCP Server 文档中心
 
-欢迎使用 Gemini MCP Server v2.1 文档！
+欢迎使用 Gemini MCP Server v2.2.0 文档！
 
 ---
 
@@ -16,23 +16,17 @@
 - [环境变量配置](./configuration.md) - 环境变量详解
 
 ### 使用指南
-- [工具使用手册](./tools.md) - 所有 MCP 工具详细说明
+- [工具使用手册](./tools.md) - 所有 MCP 工具详细说明（含媒体生成、Deep Research、会话管理）
 - [模型选择指南](./models.md) - 选择合适的模型
 - [现网 UI 覆盖表](./live-ui-coverage.md) - 已登录 Gemini Web UI 与 MCP 覆盖关系
-- [媒体生成教程](./media-generation.md) - 图像/视频/音乐生成
-- [Deep Research 指南](./deep-research.md) - 深度研究功能
-- [会话管理](./session-management.md) - 多轮对话使用
 
 ### 部署与配置
-- [Claude Desktop 部署](./claude-desktop.md)
-- [MCP Inspector 测试](./testing.md)
-- [生产部署](./production.md)
 - [Launch Kit](./launch-kit.md) - 分发链接、安装文案和社交媒体发布素材
 
 ### 技术文档
 - [技术架构](./architecture.md) - 系统设计
 - [API 参考](./api-reference.md) - 内部 API 文档
-- [常量与配置](./constants-reference.md) - 配置说明
+- [环境变量配置](./configuration.md) - 环境变量与常量说明
 - [MCP Contract Evaluation](../evaluations/gemini_web_mcp_contract.xml) - 只读工具选择与安全元数据评估
 - [Codex Skill](../.agents/skills/gemini-web-mcp/SKILL.md) - 可公开安装的 agent 使用流程
 
@@ -64,7 +58,7 @@
 | 推荐工具面 | `core` 默认，`manage` / `prompts` 按需附加 |
 | Deep Research | ✅ AI Plus 支持 |
 | Gem 管理 | ✅ 自定义助手管理 |
-| MCP 评估 | ✅ 13 个只读 contract-level QA |
+| MCP 评估 | ✅ 17 个只读 contract-level QA |
 | Codex Skill | ✅ 公开 `.agents/skills/gemini-web-mcp` + 本地 `.codex/skills/gemini-web-mcp` |
 | 分发资料 | ✅ `docs/launch-kit.md` |
 
