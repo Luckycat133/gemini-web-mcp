@@ -1,6 +1,8 @@
 ---
 name: python-mcp-server-generator
-description: 'Generate a complete MCP server project in Python with tools, resources, and proper configuration'
+description: 'Generate a complete, production-ready MCP server project in Python (FastMCP) with typed tools, resources, prompts, and proper configuration. Use when scaffolding a new MCP server from scratch, bootstrapping an MCP project with uv, or generating tool/resource/prompt boilerplate that follows MCP best practices.'
+license: Proprietary
+compatibility: Requires Python 3.10+ and uv
 ---
 
 # Generate Python MCP Server
