@@ -6,10 +6,41 @@ Gemini MCP Server 版本更新历史记录。
 
 ## Unreleased
 
+### Skill 最佳实践对齐
+- 对齐 agentskills.io 规范：`mcp-builder` 的 `reference/` 目录重命名为 `references/`（规约规定的复数形式），SKILL.md 内 9 处链接同步更新
+- `gemini-web-mcp` SKILL.md 移除不可移植的硬编码路径 `/Users/jack/...`，改用规约标准的 `skills-ref validate` 校验命令
+- `python-mcp-server-generator` 的 `description` 补充"何时使用"触发词（对齐规约反面示例要求）；新增 `license` 与 `compatibility` 字段
+- `gemini-web-mcp` 新增 `compatibility` 字段（Python 3.10+ / .venv / Chrome cookies / 启动命令）
+- 新增 `gemini-web-mcp/references/tool_surface.md`：按安全分层（破坏性/读取私密文本/只读发现/聊天媒体/历史元数据）紧凑记录工具表面，SKILL.md 按需引用，符合渐进式披露
+- `.agents` 与 `.codex` 两份 skill 副本保持同步
+
+### 代码质量
+- 删除死代码 `src/auth.py`（5 个公共函数全仓零引用）
+- 删除未使用的 `load_images` 函数及未用导入
+- 修复 `tools/__init__.py:register_tools` 公共 API 类型标注（`mcp: FastMCP`、`list[str] | None`、`-> None`）
+- 清理 `error_handler.py` 未使用导入，`Dict` → `dict` 现代化类型
+- 修复 `cookie_manager.py` 3 处静默吞导入错误（`except Exception: return {}`）→ 具体异常 + `logger.warning`
+- `manage.py` 新增 `_json_response()` helper，替换 23 处重复的 `json.dumps(payload, ensure_ascii=False, indent=2)` 模式
+
+### 重构
+- `skill_server.py` 的 `account` god function（157 行 / 11 action）拆分为 11 个独立 async handler + 2 个分发表（auth-free / client-based），dispatcher 仅 12 行，保留原语义
+
+### 性能优化
+- 上提 `gemini_webapi.utils` 导入到模块级，消除 `_extract_rpc_bodies`/`_summarize_probe_response` 在分页循环内的函数级 import
+- `research.py` 3 处循环内 `re.match` → 模块级 `re.compile`
+- `_merge_conversation_source_items` 的 `sources_by_id` 从 `list`（O(k) 成员测试）→ `set`（O(1)），输出时 `sorted()` 物化
+- `WEB_UI_CAPABILITIES` 深拷贝从 `json.loads(json.dumps())` → `copy.deepcopy`
+- `_account_features`（8 probe）与 `_account_usage`（2 probe）串行 RPC → `asyncio.gather` 并发，保持输出顺序，N×RTT → 1×RTT
+
+### 仓库结构
+- 抽取 676 行纯数据到新模块 `src/tools/manifest_data.py`（`WEB_UI_CAPABILITIES` / `WEB_FEATURE_PROBES` / `TOOL_MANIFEST`），`manage.py` 从 4591 → 3924 行，通过 re-export 保持向后兼容
+- `.gitignore` 新增 `*.egg-info/`、`build/`、`dist/` 规则
+
 ### 文档与分发
 - 将默认 `README.md` 改为英文公开首页，并新增 `README.zh-CN.md` 保留完整中文入口
 - 新增 `docs/assets/gemini-web-mcp-banner.svg`，改善 GitHub 仓库首屏视觉呈现
 - 更新打包清单，确保源码包包含中文 README 和 README banner 资产
+- 更新 `docs/architecture.md` 项目结构，补充 `manifest_data.py`、`skill_server.py` 等模块
 
 ## v2.1.2 (2026-07-04)
 

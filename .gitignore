@@ -10,3 +10,6 @@ prompts.json
 .DS_Store
 artifacts/
 generated_media/
+*.egg-info/
+build/
+dist/
