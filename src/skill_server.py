@@ -10,7 +10,7 @@ import shutil
 import logging
 import threading
 from pathlib import Path
-from typing import Optional, Literal, Any
+from typing import Optional, Literal, Any, Callable, Awaitable
 
 try:
     from mcp.server.fastmcp import FastMCP
@@ -410,158 +410,195 @@ async def history(
         return [TextContent(type="text", text=f"Error: {e}")]
 
 
+async def _account_capabilities() -> list[TextContent]:
+    return [
+        TextContent(
+            type="text",
+            text=_format_web_capabilities_markdown(_web_capabilities_payload()),
+        )
+    ]
+
+
+async def _account_manifest() -> list[TextContent]:
+    return [
+        TextContent(
+            type="text",
+            text=_format_tool_manifest_markdown(_tool_manifest_payload("all")),
+        )
+    ]
+
+
+async def _account_models(client: Any) -> list[TextContent]:
+    models = client.list_models() if hasattr(client, "list_models") else []
+    if not models:
+        return [TextContent(type="text", text="No models")]
+    lines = []
+    for model in models:
+        display = getattr(model, "display_name", "") or "Unnamed"
+        name = getattr(model, "model_name", "") or "unknown"
+        available = "available" if getattr(model, "is_available", True) else "unavailable"
+        lines.append(f"{display}: {name} ({available})")
+    return [TextContent(type="text", text="\n".join(lines))]
+
+
+async def _account_features(client: Any) -> list[TextContent]:
+    if not hasattr(client, "_batch_execute"):
+        return [TextContent(type="text", text="feature probes unavailable")]
+    lines = []
+    for probe in WEB_FEATURE_PROBES:
+        try:
+            response = await client._batch_execute(
+                [_RawRPCData(probe["rpcid"], probe["payload"])],
+                source_path=probe["source_path"],
+                close_on_error=False,
+            )
+            summary = _summarize_probe_response(response.text, probe["rpcid"])
+            ok = response.status_code == 200 and summary.get("reject_code") is None
+            status = "ok" if ok else f"reject={summary.get('reject_code')}"
+            lines.append(f"{probe['surface']}.{probe['name']}: {status}")
+        except Exception as e:
+            lines.append(f"{probe['surface']}.{probe['name']}: {type(e).__name__}")
+    return [TextContent(type="text", text="\n".join(lines))]
+
+
+async def _account_links(client: Any) -> list[TextContent]:
+    probe = _get_probe("sharing", "public_links_index")
+    response = await _execute_observed_rpc(client, probe)
+    bodies = _extract_rpc_bodies(response.text, probe["rpcid"])
+    entries = bodies[0] if bodies and isinstance(bodies[0], list) else []
+    links = [_parse_public_link_entry(item) for item in entries[:20]]
+    if not links:
+        return [TextContent(type="text", text="No public links")]
+    lines = [
+        f"{item.get('title') or '(untitled)'} ({item.get('id', '')}) {item.get('url', '')}".strip()
+        for item in links
+    ]
+    return [TextContent(type="text", text="\n".join(lines))]
+
+
+async def _account_usage(client: Any) -> list[TextContent]:
+    lines = []
+    for probe_name in ("usage_quota", "usage_model_state"):
+        probe = _get_probe("usage", probe_name)
+        response = await _execute_observed_rpc(client, probe)
+        bodies = _extract_rpc_bodies(response.text, probe["rpcid"])
+        entries = []
+        if bodies and isinstance(bodies[0], list) and bodies[0]:
+            first = bodies[0][0]
+            if isinstance(first, list):
+                entries = [_parse_usage_entry(item) for item in first]
+        for item in entries:
+            lines.append(
+                f"{probe_name}: key={item.get('key')} limit={item.get('limit_value')} remaining={item.get('remaining_value')}"
+            )
+    return [TextContent(type="text", text="\n".join(lines) or "No usage entries")]
+
+
+async def _account_library(client: Any) -> list[TextContent]:
+    probe = _get_probe("library", "library_locale_capabilities")
+    response = await _execute_observed_rpc(client, probe)
+    bodies = _extract_rpc_bodies(response.text, probe["rpcid"])
+    entries = []
+    if bodies and isinstance(bodies[0], list) and bodies[0]:
+        first = bodies[0][0]
+        if isinstance(first, list):
+            entries = [_parse_library_capability(item) for item in first]
+    if not entries:
+        return [TextContent(type="text", text="No library capabilities")]
+    lines = [
+        f"{item.get('name') or ', '.join(item.get('aliases', []))}: {item.get('description', '')}".strip()
+        for item in entries
+    ]
+    return [TextContent(type="text", text="\n".join(lines))]
+
+
+async def _account_notebooks(client: Any) -> list[TextContent]:
+    notebooks, _diagnostic = await _fetch_native_notebooks(client)
+    if not notebooks:
+        return [TextContent(type="text", text="No native Gemini notebooks")]
+    lines = [
+        f"{item.get('title') or '(untitled)'} ({item.get('id', '')}) sources={item.get('source_count', 0)}".strip()
+        for item in notebooks[:30]
+    ]
+    return [TextContent(type="text", text="\n".join(lines))]
+
+
+async def _account_scheduled(client: Any) -> list[TextContent]:
+    probe = _get_probe("scheduled", "scheduled_actions_registry")
+    response = await _execute_observed_rpc(client, probe)
+    bodies = _extract_rpc_bodies(response.text, probe["rpcid"])
+    body = bodies[0] if bodies else []
+    raw_entries = body[0] if isinstance(body, list) and body and isinstance(body[0], list) else []
+    entries = [_parse_scheduled_action_task_entry(item, 500) for item in raw_entries[:20]]
+    lines = []
+    for item in entries:
+        label = f" {item.get('schedule_label')}" if item.get("schedule_label") else ""
+        lines.append(f"{item.get('title') or '(untitled)'} ({item.get('id', '')}){label}".strip())
+    return [TextContent(type="text", text="\n".join(lines) or "No scheduled actions")]
+
+
+async def _account_modes(client: Any) -> list[TextContent]:
+    probe = _get_probe("tool_modes", "tool_mode_status")
+    response = await _execute_observed_rpc(client, probe)
+    bodies = _extract_rpc_bodies(response.text, probe["rpcid"])
+    body = bodies[0] if bodies else []
+    entries = []
+    if isinstance(body, list) and len(body) > 1 and isinstance(body[1], list):
+        entries = [_parse_tool_mode_entry(item) for item in body[1]]
+    if not entries:
+        return [TextContent(type="text", text="No mode status entries")]
+    lines = [
+        f"mode_id={item.get('mode_id')} available={item.get('available')} quota={item.get('quota_value')} state={item.get('state')}"
+        for item in entries
+    ]
+    return [TextContent(type="text", text="\n".join(lines))]
+
+
+async def _account_status(client: Any) -> list[TextContent]:
+    if not hasattr(client, "inspect_account_status"):
+        return [TextContent(type="text", text="account inspection unavailable")]
+    status = await client.inspect_account_status()
+    summary = status.get("summary", {}) if isinstance(status, dict) else {}
+    if not summary:
+        return [TextContent(type="text", text="Account status loaded")]
+    lines = [f"{key}: {value}" for key, value in summary.items()]
+    return [TextContent(type="text", text="\n".join(lines))]
+
+
+# Auth-free actions (no client initialization needed).
+_ACCOUNT_AUTH_FREE_ACTIONS: dict[str, Callable[[], Awaitable[list[TextContent]]]] = {
+    "capabilities": _account_capabilities,
+    "manifest": _account_manifest,
+}
+
+# Client-based actions; unknown action falls back to status.
+_ACCOUNT_CLIENT_ACTIONS: dict[str, Callable[[Any], Awaitable[list[TextContent]]]] = {
+    "models": _account_models,
+    "features": _account_features,
+    "links": _account_links,
+    "usage": _account_usage,
+    "library": _account_library,
+    "notebooks": _account_notebooks,
+    "scheduled": _account_scheduled,
+    "modes": _account_modes,
+    "status": _account_status,
+}
+
+
 @mcp.tool(annotations=READS_PRIVATE_REMOTE)
 async def account(
     action: Literal["status", "models", "manifest", "capabilities", "features", "links", "usage", "library", "notebooks", "scheduled", "modes"] = "status",
 ) -> list[TextContent]:
     """Inspect Gemini account status and available models."""
     try:
-        if action == "capabilities":
-            return [
-                TextContent(
-                    type="text",
-                    text=_format_web_capabilities_markdown(_web_capabilities_payload()),
-                )
-            ]
-
-        if action == "manifest":
-            return [
-                TextContent(
-                    type="text",
-                    text=_format_tool_manifest_markdown(_tool_manifest_payload("all")),
-                )
-            ]
+        auth_free_handler = _ACCOUNT_AUTH_FREE_ACTIONS.get(action)
+        if auth_free_handler is not None:
+            return await auth_free_handler()
 
         client = get_gemini_client()
         await initialize_client()
-
-        if action == "models":
-            models = client.list_models() if hasattr(client, "list_models") else []
-            if not models:
-                return [TextContent(type="text", text="No models")]
-            lines = []
-            for model in models:
-                display = getattr(model, "display_name", "") or "Unnamed"
-                name = getattr(model, "model_name", "") or "unknown"
-                available = "available" if getattr(model, "is_available", True) else "unavailable"
-                lines.append(f"{display}: {name} ({available})")
-            return [TextContent(type="text", text="\n".join(lines))]
-
-        if action == "features":
-            if not hasattr(client, "_batch_execute"):
-                return [TextContent(type="text", text="feature probes unavailable")]
-            lines = []
-            for probe in WEB_FEATURE_PROBES:
-                try:
-                    response = await client._batch_execute(
-                        [_RawRPCData(probe["rpcid"], probe["payload"])],
-                        source_path=probe["source_path"],
-                        close_on_error=False,
-                    )
-                    summary = _summarize_probe_response(response.text, probe["rpcid"])
-                    ok = response.status_code == 200 and summary.get("reject_code") is None
-                    status = "ok" if ok else f"reject={summary.get('reject_code')}"
-                    lines.append(f"{probe['surface']}.{probe['name']}: {status}")
-                except Exception as e:
-                    lines.append(f"{probe['surface']}.{probe['name']}: {type(e).__name__}")
-            return [TextContent(type="text", text="\n".join(lines))]
-
-        if action == "links":
-            probe = _get_probe("sharing", "public_links_index")
-            response = await _execute_observed_rpc(client, probe)
-            bodies = _extract_rpc_bodies(response.text, probe["rpcid"])
-            entries = bodies[0] if bodies and isinstance(bodies[0], list) else []
-            links = [_parse_public_link_entry(item) for item in entries[:20]]
-            if not links:
-                return [TextContent(type="text", text="No public links")]
-            lines = [
-                f"{item.get('title') or '(untitled)'} ({item.get('id', '')}) {item.get('url', '')}".strip()
-                for item in links
-            ]
-            return [TextContent(type="text", text="\n".join(lines))]
-
-        if action == "usage":
-            lines = []
-            for probe_name in ("usage_quota", "usage_model_state"):
-                probe = _get_probe("usage", probe_name)
-                response = await _execute_observed_rpc(client, probe)
-                bodies = _extract_rpc_bodies(response.text, probe["rpcid"])
-                entries = []
-                if bodies and isinstance(bodies[0], list) and bodies[0]:
-                    first = bodies[0][0]
-                    if isinstance(first, list):
-                        entries = [_parse_usage_entry(item) for item in first]
-                for item in entries:
-                    lines.append(
-                        f"{probe_name}: key={item.get('key')} limit={item.get('limit_value')} remaining={item.get('remaining_value')}"
-                    )
-            return [TextContent(type="text", text="\n".join(lines) or "No usage entries")]
-
-        if action == "library":
-            probe = _get_probe("library", "library_locale_capabilities")
-            response = await _execute_observed_rpc(client, probe)
-            bodies = _extract_rpc_bodies(response.text, probe["rpcid"])
-            entries = []
-            if bodies and isinstance(bodies[0], list) and bodies[0]:
-                first = bodies[0][0]
-                if isinstance(first, list):
-                    entries = [_parse_library_capability(item) for item in first]
-            if not entries:
-                return [TextContent(type="text", text="No library capabilities")]
-            lines = [
-                f"{item.get('name') or ', '.join(item.get('aliases', []))}: {item.get('description', '')}".strip()
-                for item in entries
-            ]
-            return [TextContent(type="text", text="\n".join(lines))]
-
-        if action == "notebooks":
-            notebooks, _diagnostic = await _fetch_native_notebooks(client)
-            if not notebooks:
-                return [TextContent(type="text", text="No native Gemini notebooks")]
-            lines = [
-                f"{item.get('title') or '(untitled)'} ({item.get('id', '')}) sources={item.get('source_count', 0)}".strip()
-                for item in notebooks[:30]
-            ]
-            return [TextContent(type="text", text="\n".join(lines))]
-
-        if action == "scheduled":
-            probe = _get_probe("scheduled", "scheduled_actions_registry")
-            response = await _execute_observed_rpc(client, probe)
-            bodies = _extract_rpc_bodies(response.text, probe["rpcid"])
-            body = bodies[0] if bodies else []
-            raw_entries = body[0] if isinstance(body, list) and body and isinstance(body[0], list) else []
-            entries = [_parse_scheduled_action_task_entry(item, 500) for item in raw_entries[:20]]
-            lines = []
-            for item in entries:
-                label = f" {item.get('schedule_label')}" if item.get("schedule_label") else ""
-                lines.append(f"{item.get('title') or '(untitled)'} ({item.get('id', '')}){label}".strip())
-            return [TextContent(type="text", text="\n".join(lines) or "No scheduled actions")]
-
-        if action == "modes":
-            probe = _get_probe("tool_modes", "tool_mode_status")
-            response = await _execute_observed_rpc(client, probe)
-            bodies = _extract_rpc_bodies(response.text, probe["rpcid"])
-            body = bodies[0] if bodies else []
-            entries = []
-            if isinstance(body, list) and len(body) > 1 and isinstance(body[1], list):
-                entries = [_parse_tool_mode_entry(item) for item in body[1]]
-            if not entries:
-                return [TextContent(type="text", text="No mode status entries")]
-            lines = [
-                f"mode_id={item.get('mode_id')} available={item.get('available')} quota={item.get('quota_value')} state={item.get('state')}"
-                for item in entries
-            ]
-            return [TextContent(type="text", text="\n".join(lines))]
-
-        if not hasattr(client, "inspect_account_status"):
-            return [TextContent(type="text", text="account inspection unavailable")]
-        status = await client.inspect_account_status()
-        summary = status.get("summary", {}) if isinstance(status, dict) else {}
-        if not summary:
-            return [TextContent(type="text", text="Account status loaded")]
-        lines = [f"{key}: {value}" for key, value in summary.items()]
-        return [TextContent(type="text", text="\n".join(lines))]
-
+        handler = _ACCOUNT_CLIENT_ACTIONS.get(action, _account_status)
+        return await handler(client)
     except Exception as e:
         logger.error(f"Account error: {e}")
         return [TextContent(type="text", text=f"Error: {e}")]

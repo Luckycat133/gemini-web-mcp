@@ -2,6 +2,8 @@
 工具模块初始化 - 支持分层加载
 """
 
+from mcp.server.fastmcp import FastMCP
+
 from .chat import register_chat_tools
 from .media import register_media_tools
 from .image import register_image_tools
@@ -60,10 +62,10 @@ def groups_enable_manage(groups: list | None = None) -> bool:
     selected, _manage_layers = _resolve_tool_selection(groups)
     return "manage" in selected
 
-def register_tools(mcp, groups: list = None):
+def register_tools(mcp: FastMCP, groups: list[str] | None = None) -> None:
     """
     选择性注册工具组
-    
+
     Args:
         mcp: FastMCP 实例
         groups: 要加载的工具组列表
