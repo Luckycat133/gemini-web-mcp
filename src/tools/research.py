@@ -600,7 +600,8 @@ def _walk_nested_json(obj: Any, path: tuple[Any, ...] = ()):
         if value and value[0] in "[{":
             try:
                 parsed = json.loads(value)
-            except Exception:
+            except Exception as e:
+                logger.debug("Skipping non-JSON string at %s: %s", path, e)
                 return
             yield from _walk_nested_json(parsed, path + ("json",))
     elif isinstance(obj, list):

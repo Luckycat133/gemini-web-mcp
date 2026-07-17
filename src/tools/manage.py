@@ -322,7 +322,8 @@ def _summarize_probe_response(response_text: str, rpcid: str) -> dict[str, Any]:
 
     try:
         parts = _extract_json_from_response(response_text)
-    except Exception:
+    except Exception as e:
+        logger.debug("Probe response parse failed for rpcid=%s: %s", rpcid, e)
         return {"parsed": False, "response_parts": 0}
 
     body_count = 0
