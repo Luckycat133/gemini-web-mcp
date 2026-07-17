@@ -17,10 +17,13 @@ import threading
 
 import pytest
 
+import src.cookie_manager as cm_module
 from src.cookie_manager import (
     CookieData,
     CookieManager,
     CookieStatus,
+    get_cookie_manager,
+    init_cookie_manager,
 )
 
 
@@ -328,3 +331,99 @@ def test_concurrent_update_cookie_is_safe(manager):
     cookie = manager.get_cookie()
     assert cookie is not None
     assert cookie.psid.startswith("psid-")
+
+
+# ---------------------------------------------------------------------------
+# 模块级单例：get_cookie_manager / init_cookie_manager
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def reset_singleton():
+    """每个测试前后清空模块级 _cookie_manager，避免跨测试泄漏。"""
+    cm_module._cookie_manager = None
+    yield
+    cm_module._cookie_manager = None
+
+
+def test_get_cookie_manager_creates_singleton_lazy(reset_singleton, clean_env):
+    """首次调用 get_cookie_manager 创建实例（lines 700-703）。"""
+    assert cm_module._cookie_manager is None
+    mgr = get_cookie_manager()
+    assert isinstance(mgr, CookieManager)
+    assert cm_module._cookie_manager is mgr
+
+
+def test_get_cookie_manager_returns_same_instance(reset_singleton, clean_env):
+    """二次调用返回同一实例（单例）。"""
+    mgr1 = get_cookie_manager()
+    mgr2 = get_cookie_manager()
+    assert mgr1 is mgr2
+
+
+def test_init_cookie_manager_replaces_singleton(reset_singleton, clean_env):
+    """init_cookie_manager 覆盖现有单例（lines 722-727）。"""
+    old = init_cookie_manager(auto_refresh=False)
+    assert cm_module._cookie_manager is old
+    new = init_cookie_manager(auto_refresh=True)
+    assert cm_module._cookie_manager is new
+    assert old is not new
+    assert new.auto_refresh is True
+
+
+# ---------------------------------------------------------------------------
+# _monitor_loop：过期 + auto_refresh 触发 refresh_cookie
+# ---------------------------------------------------------------------------
+
+
+def test_monitor_loop_triggers_refresh_on_expired(manager, monkeypatch):
+    """cookie 过期 + auto_refresh=True → _monitor_loop 调用 refresh_cookie（lines 622-627）。"""
+    manager.auto_refresh = True
+    manager.update_cookie("psid")
+    # 让 cookie 过期
+    manager.get_cookie().acquired_at = time.time() - 25 * 3600
+
+    refreshed: list[bool] = []
+    monkeypatch.setattr(manager, "refresh_cookie", lambda: refreshed.append(True) or True)
+
+    # 手动跑一轮循环逻辑（不启动线程），然后立即停止
+    manager._monitor_running = True
+    # 让 get_cookie_status 返回 EXPIRED 后立即设 False 退出循环
+    original_status = manager.get_cookie_status
+
+    call_count = {"n": 0}
+
+    def stop_after_one():
+        call_count["n"] += 1
+        status, info = original_status()
+        if call_count["n"] >= 1:
+            manager._monitor_running = False
+        return status, info
+
+    monkeypatch.setattr(manager, "get_cookie_status", stop_after_one)
+    # 缩短 sleep 避免阻塞
+    monkeypatch.setattr(time, "sleep", lambda *_: None)
+    manager._monitor_loop()
+    assert refreshed == [True]
+
+
+def test_monitor_loop_swallows_exception_and_continues(manager, monkeypatch):
+    """_monitor_loop 内部抛异常 → 记录错误并 sleep(60) 不崩溃（lines 631-633）。"""
+    manager.update_cookie("psid")
+    manager._monitor_running = True
+
+    call_count = {"n": 0}
+
+    def raising_status():
+        call_count["n"] += 1
+        if call_count["n"] >= 2:
+            manager._monitor_running = False
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(manager, "get_cookie_status", raising_status)
+    slept: list[int] = []
+    monkeypatch.setattr(time, "sleep", lambda secs: slept.append(secs))
+    manager._monitor_loop()
+    # 异常分支 sleep(60)
+    assert 60 in slept
+    assert manager._monitor_running is False
