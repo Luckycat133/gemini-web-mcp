@@ -49,7 +49,9 @@ Gemini MCP Server 版本更新历史记录。
 - 修复 `tools/research.py` `_walk_nested_json` 和 `tools/manage.py` `_summarize_probe_response` 的 2 处静默吞错（`except Exception: return` → 加 `logger.debug` 记录路径/rpcid 便于排障）
 - 修复 `src/` 全部 ruff 错误（9 → 0）：删除未使用 import、移除无占位符 f-string 前缀、为 `client_wrapper.py` 的 facade re-export 加 `# noqa: F401`、为 `client_manager.py` try/except 后的 import 加 `# noqa: E402`
 - 修复 4 个文件的 mypy 类型错误（57 → 51）：`cookie_manager.py` 的 `psidts` 可空回退、`thinking_client.py` 的 `int(learning_config[...])` 加 `# type: ignore[call-overload]` 并重构 if/return 流让 mypy 正确收窄、`client_wrapper.py` 的 `list_sessions` 过滤 None、`tools/prompts.py` 重命名循环变量 `prompt` → `item` 避免与同函数内 `Optional[dict]` 赋值的类型冲突
-- 测试套件 70 → 172 passed
+- 新增 `tests/test_cleanup_test_artifacts.py`（34 个测试）：`gemini_cleanup_test_artifacts`（destructiveHint=True）此前仅有注解形状测试，**dry_run=False 会真实删除远端聊天与定时任务却零行为覆盖**——本文件补充 `_split_cleanup_markers`（空串/空白过滤/多值/保留大小写）、`_marker_hits`（大小写不敏感/None/多 marker）、`_format_cleanup_markdown`（空 payload/chats 三态 deleted-matched-error/scheduled verification_status 优先/errors 段/dry_run 提示）、`_cleanup_test_artifacts_payload`（chats dry_run 命中 id/title、dry_run=False 成功删除/删除抛异常/缺 delete_chat 能力、scan_turns 命中 turn/抛异常不中断、缺 list_chats 能力、target=chats 跳过 scheduled、target=scheduled 跳过 chats、scheduled dry_run/dry_run=False 删除/dry_run=False RPC 抛异常、空 markers 回退 codex-、max_chats 夹紧到 [1,100] 与切片窗口、缺 _batch_execute 能力）；工具层注册 + DESTRUCTIVE_REMOTE 注解 + call_tool markdown/json 双格式
+- 清理 3 个测试文件中前几轮引入的未使用 import（`test_cleanup_test_artifacts.py` 的 `pytest`、`test_chat_session_lifecycle.py` 的 `pytest`、`test_client_manager.py` 的 `pathlib.Path`）
+- 测试套件 70 → 206 passed
 
 ### 性能优化
 - 上提 `gemini_webapi.utils` 导入到模块级，消除 `_extract_rpc_bodies`/`_summarize_probe_response` 在分页循环内的函数级 import

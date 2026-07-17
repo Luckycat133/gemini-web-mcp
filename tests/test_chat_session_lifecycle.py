@@ -15,7 +15,6 @@
 """
 
 import asyncio
-import pytest
 
 from mcp.server.fastmcp import FastMCP
 
