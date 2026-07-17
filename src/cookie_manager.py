@@ -311,7 +311,8 @@ class CookieManager:
         local_state = base / "Local State"
         try:
             data = json.loads(local_state.read_text())
-        except Exception:
+        except (OSError, json.JSONDecodeError) as e:
+            logger.debug("无法读取 Chrome Local State %s: %s", local_state, e)
             return ""
         profile_info = data.get("profile") if isinstance(data, dict) else {}
         if not isinstance(profile_info, dict):
@@ -370,7 +371,8 @@ class CookieManager:
         try:
             from gemini_webapi import GeminiClient
             from gemini_webapi.constants import AccountStatus
-        except Exception:
+        except ImportError as e:
+            logger.warning("gemini_webapi 不可用，跳过 Chrome profile Cookie 验证: %s", e)
             return {}
 
         first_available: Dict[str, str] = {}
@@ -441,7 +443,8 @@ class CookieManager:
         try:
             from gemini_webapi.types import RPCData
             from gemini_webapi.utils import extract_json_from_response, get_nested_value
-        except Exception:
+        except ImportError as e:
+            logger.warning("gemini_webapi 不可用，无法探测定时操作 registry: %s", e)
             return 0
 
         previous_language = getattr(client, "language", None)

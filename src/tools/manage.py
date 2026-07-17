@@ -446,6 +446,11 @@ def _paginate_items(items: list[Any], limit: int, offset: int, max_limit: int = 
     }
 
 
+def _json_response(payload: Any) -> list[TextContent]:
+    """Serialize payload as a single JSON TextContent (for response_format='json')."""
+    return [TextContent(type="text", text=json.dumps(payload, ensure_ascii=False, indent=2))]
+
+
 def _get_attr(item: object, name: str, default: object = "") -> object:
     if isinstance(item, dict):
         return item.get(name, default)
@@ -2878,7 +2883,7 @@ def register_manage_tools(mcp: FastMCP, layers: list[str] | set[str] | tuple[str
             scan_turns=scan_turns,
         )
         if response_format == "json":
-            return [TextContent(type="text", text=json.dumps(payload, ensure_ascii=False, indent=2))]
+            return _json_response(payload)
         return [TextContent(type="text", text=_format_cleanup_markdown(payload))]
 
     @_tool("gemini_list_chats", READS_PRIVATE_REMOTE)
@@ -2915,7 +2920,7 @@ def register_manage_tools(mcp: FastMCP, layers: list[str] | set[str] | tuple[str
             }
 
             if response_format == "json":
-                return [TextContent(type="text", text=json.dumps(payload, ensure_ascii=False, indent=2))]
+                return _json_response(payload)
 
             chat_list = [
                 "## 📜 历史对话",
@@ -3081,7 +3086,7 @@ def register_manage_tools(mcp: FastMCP, layers: list[str] | set[str] | tuple[str
                 "note": "This is metadata-only and does not read chat turns. Use read/export tools only for selected chat IDs.",
             }
             if response_format == "json":
-                return [TextContent(type="text", text=json.dumps(payload, ensure_ascii=False, indent=2))]
+                return _json_response(payload)
 
             lines = [
                 "## Gemini 历史对话深度扫描",
@@ -3144,7 +3149,7 @@ def register_manage_tools(mcp: FastMCP, layers: list[str] | set[str] | tuple[str
             }
 
             if response_format == "json":
-                return [TextContent(type="text", text=json.dumps(payload, ensure_ascii=False, indent=2))]
+                return _json_response(payload)
 
             lines = [f"## 💬 聊天记录: {payload['chat_id']}", f"返回 {payload['count']} 条 turn"]
             for idx, turn in enumerate(items, 1):
@@ -3247,7 +3252,7 @@ def register_manage_tools(mcp: FastMCP, layers: list[str] | set[str] | tuple[str
             }
 
             if response_format == "json":
-                return [TextContent(type="text", text=json.dumps(payload, ensure_ascii=False, indent=2))]
+                return _json_response(payload)
 
             lines = [
                 "## Gemini 历史搜索",
@@ -3317,7 +3322,7 @@ def register_manage_tools(mcp: FastMCP, layers: list[str] | set[str] | tuple[str
 
             payload = _chat_export_payload(chat_id, history, turns, metadata, safe_limit, safe_chars)
             if response_format == "json":
-                return [TextContent(type="text", text=json.dumps(payload, ensure_ascii=False, indent=2))]
+                return _json_response(payload)
             return [TextContent(type="text", text=_format_chat_export_markdown(payload))]
         except Exception as e:
             logger.error(f"导出聊天失败: {e}")
@@ -3419,7 +3424,7 @@ def register_manage_tools(mcp: FastMCP, layers: list[str] | set[str] | tuple[str
             status = await client.inspect_account_status()
             sanitized = _sanitize_account_status(status)
             if response_format == "json":
-                return [TextContent(type="text", text=json.dumps(sanitized, ensure_ascii=False, indent=2))]
+                return _json_response(sanitized)
 
             summary = sanitized.get("summary", {})
             lines = ["## Gemini 账号能力状态"]
@@ -3508,7 +3513,7 @@ def register_manage_tools(mcp: FastMCP, layers: list[str] | set[str] | tuple[str
         }
 
         if response_format == "json":
-            return [TextContent(type="text", text=json.dumps(payload, ensure_ascii=False, indent=2))]
+            return _json_response(payload)
 
         lines = [
             "## Gemini Web 功能探测",
@@ -3541,7 +3546,7 @@ def register_manage_tools(mcp: FastMCP, layers: list[str] | set[str] | tuple[str
         """
         payload = _web_capabilities_payload()
         if response_format == "json":
-            return [TextContent(type="text", text=json.dumps(payload, ensure_ascii=False, indent=2))]
+            return _json_response(payload)
         return [TextContent(type="text", text=_format_web_capabilities_markdown(payload))]
 
     @_tool("gemini_get_tool_manifest", READ_ONLY_LOCAL)
@@ -3556,7 +3561,7 @@ def register_manage_tools(mcp: FastMCP, layers: list[str] | set[str] | tuple[str
         """
         payload = _tool_manifest_payload(scope)
         if response_format == "json":
-            return [TextContent(type="text", text=json.dumps(payload, ensure_ascii=False, indent=2))]
+            return _json_response(payload)
         return [TextContent(type="text", text=_format_tool_manifest_markdown(payload))]
 
     @_tool("gemini_account_inventory", READS_PRIVATE_REMOTE)
@@ -3650,7 +3655,7 @@ def register_manage_tools(mcp: FastMCP, layers: list[str] | set[str] | tuple[str
                 "observed": probe["observed"],
             }
             if response_format == "json":
-                return [TextContent(type="text", text=json.dumps(payload, ensure_ascii=False, indent=2))]
+                return _json_response(payload)
 
             if not links:
                 return [TextContent(type="text", text="暂无公开链接。")]
@@ -3709,7 +3714,7 @@ def register_manage_tools(mcp: FastMCP, layers: list[str] | set[str] | tuple[str
 
             payload = {"scope": scope, "count": len(results), "results": results}
             if response_format == "json":
-                return [TextContent(type="text", text=json.dumps(payload, ensure_ascii=False, indent=2))]
+                return _json_response(payload)
 
             lines = ["## Gemini 用量限额", f"范围: {scope}"]
             for result in results:
@@ -3763,7 +3768,7 @@ def register_manage_tools(mcp: FastMCP, layers: list[str] | set[str] | tuple[str
                 "observed": probe["observed"],
             }
             if response_format == "json":
-                return [TextContent(type="text", text=json.dumps(payload, ensure_ascii=False, indent=2))]
+                return _json_response(payload)
 
             if not page:
                 return [TextContent(type="text", text="暂无 Library 能力条目。")]
@@ -3808,7 +3813,7 @@ def register_manage_tools(mcp: FastMCP, layers: list[str] | set[str] | tuple[str
                 "note": "These are native Gemini Web Notebooks, not NotebookLM notebooks.",
             }
             if response_format == "json":
-                return [TextContent(type="text", text=json.dumps(payload, ensure_ascii=False, indent=2))]
+                return _json_response(payload)
 
             if not page:
                 return [TextContent(type="text", text="暂无 Gemini 原生笔记本。")]
@@ -3855,7 +3860,7 @@ def register_manage_tools(mcp: FastMCP, layers: list[str] | set[str] | tuple[str
                     "diagnostic": diagnostic,
                 }
                 if response_format == "json":
-                    return [TextContent(type="text", text=json.dumps(payload, ensure_ascii=False, indent=2))]
+                    return _json_response(payload)
                 return [TextContent(type="text", text=f"未找到匹配的 Gemini 原生笔记本。可用标题: {', '.join(available)}")]
 
             items, page_payload = await _fetch_notebook_chats(client, notebook["id"], limit, offset)
@@ -3868,7 +3873,7 @@ def register_manage_tools(mcp: FastMCP, layers: list[str] | set[str] | tuple[str
                 "observed": "2026-07-04 Pro UI / Native Gemini Notebook recent chats",
             }
             if response_format == "json":
-                return [TextContent(type="text", text=json.dumps(payload, ensure_ascii=False, indent=2))]
+                return _json_response(payload)
 
             lines = [
                 f"## Notebook Chats: {notebook.get('title') or notebook['id']}",
@@ -3953,7 +3958,7 @@ def register_manage_tools(mcp: FastMCP, layers: list[str] | set[str] | tuple[str
                     "diagnostic": list_diagnostic,
                 }
                 if response_format == "json":
-                    return [TextContent(type="text", text=json.dumps(payload, ensure_ascii=False, indent=2))]
+                    return _json_response(payload)
                 return [TextContent(type="text", text=f"未找到匹配的 Gemini 原生笔记本。可用标题: {', '.join(available)}")]
 
             project_type = notebook.get("project_type") if isinstance(notebook.get("project_type"), int) else 2
@@ -3984,7 +3989,7 @@ def register_manage_tools(mcp: FastMCP, layers: list[str] | set[str] | tuple[str
                 "verification": verify_payload,
             }
             if response_format == "json":
-                return [TextContent(type="text", text=json.dumps(payload, ensure_ascii=False, indent=2))]
+                return _json_response(payload)
 
             if payload["ok"] and verified:
                 return [
@@ -4041,7 +4046,7 @@ def register_manage_tools(mcp: FastMCP, layers: list[str] | set[str] | tuple[str
             }
             payload = {"scope": scope, "count": 1, "results": [result]}
             if response_format == "json":
-                return [TextContent(type="text", text=json.dumps(payload, ensure_ascii=False, indent=2))]
+                return _json_response(payload)
 
             lines = ["## Gemini 定时操作", f"范围: {scope}"]
             lines.extend(["", f"### {result['name']}"])
@@ -4093,7 +4098,7 @@ def register_manage_tools(mcp: FastMCP, layers: list[str] | set[str] | tuple[str
                 "item": item,
             }
             if response_format == "json":
-                return [TextContent(type="text", text=json.dumps(payload, ensure_ascii=False, indent=2))]
+                return _json_response(payload)
 
             if not item:
                 hint = f" {diagnostic['empty_hint']}" if diagnostic.get("empty_hint") else ""
@@ -4223,7 +4228,7 @@ def register_manage_tools(mcp: FastMCP, layers: list[str] | set[str] | tuple[str
                 "get_task_diagnostic": get_task_diagnostic,
             }
             if response_format == "json":
-                return [TextContent(type="text", text=json.dumps(payload, ensure_ascii=False, indent=2))]
+                return _json_response(payload)
 
             if payload["ok"]:
                 label = f" ({payload['schedule_label']})" if payload.get("schedule_label") else ""
@@ -4329,7 +4334,7 @@ def register_manage_tools(mcp: FastMCP, layers: list[str] | set[str] | tuple[str
                 "get_task_diagnostic": get_task_diagnostic,
             }
             if response_format == "json":
-                return [TextContent(type="text", text=json.dumps(payload, ensure_ascii=False, indent=2))]
+                return _json_response(payload)
 
             if payload["ok"]:
                 if deleted_by_id_after_delete is True:
@@ -4393,7 +4398,7 @@ def register_manage_tools(mcp: FastMCP, layers: list[str] | set[str] | tuple[str
                 "note": "mode_id semantics are Web-internal and may drift; use this as a read-only availability/status surface.",
             }
             if response_format == "json":
-                return [TextContent(type="text", text=json.dumps(payload, ensure_ascii=False, indent=2))]
+                return _json_response(payload)
 
             if not page:
                 return [TextContent(type="text", text="暂无工具模式状态条目。")]

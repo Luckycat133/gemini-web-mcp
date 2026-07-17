@@ -18,7 +18,6 @@ def test_client_wrapper():
     assert hasattr(client_wrapper, 'cleanup_expired_sessions')
     assert hasattr(client_wrapper, 'reset_client')
     assert hasattr(client_wrapper, 'list_sessions')
-    assert hasattr(client_wrapper, 'load_images')
     print("✓ All expected functions exist")
 
 

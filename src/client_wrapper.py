@@ -5,7 +5,7 @@ Gemini 客户端封装 - 门面模式
 
 import os
 import logging
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any
 
 from .client_manager import (
     ClientManager,
@@ -253,25 +253,3 @@ def get_cookie_status() -> Dict[str, Any]:
         return {"available": False, "message": "Cookie Manager 不可用"}
     status, info = get_cookie_manager().get_cookie_status()
     return {"available": True, "status": status.value, **info}
-
-
-# ============ 工具函数接口 ============
-
-def load_images(image_paths: List[str]) -> List[Any]:
-    """安全加载图片"""
-    images = []
-    if not image_paths:
-        return images
-    try:
-        from PIL import Image
-        for path in image_paths:
-            if path and path.strip():
-                try:
-                    images.append(Image.open(path))
-                except Exception as e:
-                    logger.warning(f"加载图片失败: {path}, 错误: {e}")
-    except ImportError:
-        logger.warning("未安装 PIL/Pillow")
-    except Exception as e:
-        logger.error(f"加载图片出错: {e}")
-    return images
