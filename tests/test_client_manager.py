@@ -15,9 +15,12 @@
 """
 
 import asyncio
+import logging
 import os
+import socket
 import tempfile
 import threading
+from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
@@ -345,3 +348,133 @@ def test_client_manager_initialize_concurrent_safe(monkeypatch):
     asyncio.run(run_all())
     assert init_call_count["n"] == 1
     assert mgr._initialized is True
+
+
+def test_client_manager_create_client_loads_extra_cookies(clean_psid_env, monkeypatch):
+    """_create_client 在 extra_cookies 非空时加载 cookies 并调 prepare_browser_cookie_cache（lines 156-158）。"""
+    fake_client = MagicMock()
+    monkeypatch.setattr(
+        "src.thinking_client.ThinkingLevelGeminiClient", lambda *a, **k: fake_client, raising=False
+    )
+    monkeypatch.setattr(client_manager, "COOKIE_MANAGER_AVAILABLE", True)
+    monkeypatch.setattr(client_manager, "get_extra_cookies", lambda: {"__Secure-1PSID": "x"})
+    prepare_calls = []
+    monkeypatch.setattr(client_manager, "prepare_browser_cookie_cache", lambda: prepare_calls.append(1))
+
+    mgr = ClientManager()
+    client = mgr.get_client()
+    assert client is fake_client
+    assert client.cookies == {"__Secure-1PSID": "x"}
+    assert prepare_calls == [1]
+
+
+# ---------------------------------------------------------------------------
+# get_configured_proxy — 本地端口可达 happy path（line 46）
+# ---------------------------------------------------------------------------
+
+
+def test_get_configured_proxy_returns_proxy_when_local_reachable(monkeypatch):
+    """本地 proxy 端口可达时返回 proxy 值（line 46 happy path）。"""
+    server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    server.bind(("127.0.0.1", 0))
+    server.listen(1)
+    port = server.getsockname()[1]
+    try:
+        monkeypatch.setenv("GEMINI_PROXY", f"http://127.0.0.1:{port}")
+        assert get_configured_proxy() == f"http://127.0.0.1:{port}"
+    finally:
+        server.close()
+
+
+# ---------------------------------------------------------------------------
+# get_extra_cookies — 直接覆盖（lines 72, 75, 76）
+# ---------------------------------------------------------------------------
+
+
+def test_get_extra_cookies_returns_empty_when_unavailable(monkeypatch):
+    """COOKIE_MANAGER_AVAILABLE=False 时返回空 dict（line 72 直接覆盖）。"""
+    monkeypatch.setattr(client_manager, "COOKIE_MANAGER_AVAILABLE", False)
+    assert client_manager.get_extra_cookies() == {}
+
+
+def test_get_extra_cookies_returns_empty_when_no_cookie_data(monkeypatch):
+    """cookie_data 为 None 时返回空 dict（line 75）。"""
+    monkeypatch.setattr(client_manager, "COOKIE_MANAGER_AVAILABLE", True)
+    monkeypatch.setattr(
+        client_manager, "get_cookie_manager",
+        lambda: MagicMock(get_cookie=lambda: None),
+    )
+    assert client_manager.get_extra_cookies() == {}
+
+
+def test_get_extra_cookies_returns_extra_cookies(monkeypatch):
+    """cookie_data 存在时返回 extra_cookies（line 76 直接覆盖）。"""
+    monkeypatch.setattr(client_manager, "COOKIE_MANAGER_AVAILABLE", True)
+    cookie_data = _make_cookie_data(source="manual")
+    cookie_data.extra_cookies = {"__Secure-1PSID": "x", "__Secure-1PSIDTS": "y"}
+    monkeypatch.setattr(
+        client_manager, "get_cookie_manager",
+        lambda: MagicMock(get_cookie=lambda: cookie_data),
+    )
+    result = client_manager.get_extra_cookies()
+    assert result == {"__Secure-1PSID": "x", "__Secure-1PSIDTS": "y"}
+
+
+# ---------------------------------------------------------------------------
+# prepare_browser_cookie_cache — 异常吞咽与 unavailable 早退（lines 82, 95-96, 101-102）
+# ---------------------------------------------------------------------------
+
+
+def test_prepare_cache_noop_when_cookie_manager_unavailable(monkeypatch, isolated_tempdir):
+    """COOKIE_MANAGER_AVAILABLE=False 时直接早退，不创建 cache 目录（line 82）。"""
+    monkeypatch.setattr(client_manager, "COOKIE_MANAGER_AVAILABLE", False)
+    prepare_browser_cookie_cache(force=True)
+    cache_dir = isolated_tempdir / "gemini_web_mcp_webapi_cookie_cache"
+    assert not cache_dir.exists()
+
+
+def test_prepare_cache_chmod_error_swallowed(isolated_tempdir, monkeypatch):
+    """cache_dir.chmod 抛 OSError 时静默吞咽，cache 目录仍创建（lines 95-96）。"""
+    if not client_manager.COOKIE_MANAGER_AVAILABLE:
+        pytest.skip("cookie_manager not available")
+    cookie_data = _make_cookie_data(source="browser_chrome")
+    monkeypatch.setattr(
+        client_manager, "get_cookie_manager",
+        lambda: MagicMock(get_cookie=lambda: cookie_data),
+    )
+
+    def raising_chmod(self, mode):
+        raise OSError("permission denied")
+
+    monkeypatch.setattr(Path, "chmod", raising_chmod)
+    prepare_browser_cookie_cache(force=False)
+    cache_dir = isolated_tempdir / "gemini_web_mcp_webapi_cookie_cache"
+    assert cache_dir.exists()  # 目录创建成功，chmod 错误被吞咽
+    assert os.environ["GEMINI_COOKIE_PATH"] == str(cache_dir)
+
+
+def test_prepare_cache_unlink_error_logged(isolated_tempdir, monkeypatch, caplog):
+    """stale cache 文件 unlink 抛 OSError 时记录 debug 日志但不中断（lines 101-102）。"""
+    if not client_manager.COOKIE_MANAGER_AVAILABLE:
+        pytest.skip("cookie_manager not available")
+    cache_dir = isolated_tempdir / "gemini_web_mcp_webapi_cookie_cache"
+    cache_dir.mkdir()
+    stale_file = cache_dir / ".cached_cookies_old.json"
+    stale_file.write_text("{}")
+
+    cookie_data = _make_cookie_data(source="browser_chrome")
+    monkeypatch.setattr(
+        client_manager, "get_cookie_manager",
+        lambda: MagicMock(get_cookie=lambda: cookie_data),
+    )
+
+    def raising_unlink(self):
+        raise OSError("locked")
+
+    monkeypatch.setattr(Path, "unlink", raising_unlink)
+
+    with caplog.at_level(logging.DEBUG, logger="src.client_manager"):
+        prepare_browser_cookie_cache(force=False)
+    # unlink 失败，文件仍存在
+    assert stale_file.exists()
+    assert any("无法删除" in r.message for r in caplog.records)
