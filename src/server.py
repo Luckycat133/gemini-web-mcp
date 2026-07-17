@@ -187,7 +187,7 @@ async def gemini_get_cookie_from_browser(browser: str = "chrome", profile: str =
             suffix = f" profile={profile}" if profile else ""
             return [TextContent(type="text", text=f"✅ 已从 {browser}{suffix} 获取 Cookie")]
         else:
-            return [TextContent(type="text", text=f"❌ 获取失败，请确保已登录 gemini.google.com")]
+            return [TextContent(type="text", text="❌ 获取失败，请确保已登录 gemini.google.com")]
     except Exception as e:
         error_info = handle_error(e)
         return [format_error_response(error_info)]
@@ -195,7 +195,7 @@ async def gemini_get_cookie_from_browser(browser: str = "chrome", profile: str =
 
 def main():
     """启动服务器"""
-    logger.info(f"🚀 启动 Gemini Web MCP Server (v2.2.0)")
+    logger.info("🚀 启动 Gemini Web MCP Server (v2.2.0)")
     logger.info(f"🔧 加载工具组: {', '.join(TOOL_GROUPS)}")
     init_cookie_manager_integration()
     mcp.run()

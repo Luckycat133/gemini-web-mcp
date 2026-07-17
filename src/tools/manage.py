@@ -19,7 +19,6 @@ from ..client_wrapper import (
     initialize_client,
     list_browser_cookie_profiles,
 )
-from ..constants import MODEL_CONFIG
 from .annotations import (
     DESTRUCTIVE_REMOTE,
     MUTATES_REMOTE,

@@ -9,8 +9,8 @@ from typing import Optional, Dict, Any
 
 from .client_manager import (
     ClientManager,
-    validate_config,
-    get_configured_proxy,
+    validate_config,  # noqa: F401  (re-exported as public facade API)
+    get_configured_proxy,  # noqa: F401  (re-exported as public facade API)
     get_default_chat_retention_seconds,
     prepare_browser_cookie_cache as _prepare_browser_cookie_cache,
 )

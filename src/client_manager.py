@@ -14,13 +14,13 @@ from urllib.parse import urlparse
 logger = logging.getLogger(__name__)
 
 try:
-    from .cookie_manager import get_cookie_manager, CookieData
+    from .cookie_manager import get_cookie_manager
     COOKIE_MANAGER_AVAILABLE = True
 except ImportError:
     COOKIE_MANAGER_AVAILABLE = False
     logger.warning("cookie_manager 模块不可用")
 
-from .constants import DEFAULT_CHAT_RETENTION_SECONDS
+from .constants import DEFAULT_CHAT_RETENTION_SECONDS  # noqa: E402  (follows optional try/except import)
 
 
 def validate_config() -> None:
