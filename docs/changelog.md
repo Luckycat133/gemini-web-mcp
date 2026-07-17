@@ -4,7 +4,7 @@ Gemini MCP Server 版本更新历史记录。
 
 ---
 
-## Unreleased
+## v2.2.0 (2026-07-17)
 
 ### Skill 最佳实践对齐
 - 对齐 agentskills.io 规范：`mcp-builder` 的 `reference/` 目录重命名为 `references/`（规约规定的复数形式），SKILL.md 内 9 处链接同步更新
@@ -24,6 +24,14 @@ Gemini MCP Server 版本更新历史记录。
 
 ### 重构
 - `skill_server.py` 的 `account` god function（157 行 / 11 action）拆分为 11 个独立 async handler + 2 个分发表（auth-free / client-based），dispatcher 仅 12 行，保留原语义
+- `skill_server.py` 的 `scheduled` god function（4 action：list/get/create/delete）拆为 4 个独立 async handler + dispatcher，dispatcher 仅保留 try/except + action 分发
+- `skill_server.py` 的 `session` god function（4 action：create/send/list/reset）拆为 4 个独立 handler；`list`/`reset` 不需 client，下放为 sync handler，client 初始化只保留在 `create`/`send` 内
+- `research.py` 的 `gemini_deep_research`（204 行）拆为 35 行主函数 + 4 个辅助函数：`_run_native_deep_research`（client 原生 plan/start/wait 路径）、`_run_fallback_deep_research`（`generate_content(deep_research=True)` 回退路径）、`_deep_research_timeout_error`、`_deep_research_generic_error`
+
+### 测试
+- 新增 `test_skill_server_session_lifecycle_and_dispatch`：覆盖 session 4 个 action + invalid action 短路；用 FakeSession/FakeClient 验证 single-session reset 不触发 client reset、reset_all 触发
+- 新增 `test_skill_server_session_invalid_image_path_short_circuits`：验证无效 image_path 在 client 初始化前失败
+- 测试套件 70 → 72 passed
 
 ### 性能优化
 - 上提 `gemini_webapi.utils` 导入到模块级，消除 `_extract_rpc_bodies`/`_summarize_probe_response` 在分页循环内的函数级 import
