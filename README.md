@@ -12,7 +12,7 @@
   <a href="https://github.com/Luckycat133/gemini-web-mcp/releases/latest"><img alt="Release" src="https://img.shields.io/github/v/release/Luckycat133/gemini-web-mcp?label=release"></a>
   <a href="https://github.com/Luckycat133/gemini-web-mcp/tree/main/.agents/skills/gemini-web-mcp"><img alt="Codex Skill" src="https://img.shields.io/badge/Codex%20Skill-installable-0B6BFF"></a>
   <a href="https://www.gnu.org/licenses/agpl-3.0.html"><img alt="License" src="https://img.shields.io/badge/License-AGPL--3.0--only-blue.svg"></a>
-  <a href="docs/changelog.md"><img alt="Verified" src="https://img.shields.io/badge/tests-70%20passing-1F8A70"></a>
+  <a href="docs/changelog.md"><img alt="Verified" src="https://img.shields.io/badge/tests-118%20passing-1F8A70"></a>
 </p>
 
 <p align="center">
@@ -43,7 +43,7 @@ Fastest verified path (requires [uv](https://docs.astral.sh/uv/)):
 
 ```bash
 GEMINI_TOOLS=model uvx \
-  --from https://github.com/Luckycat133/gemini-web-mcp/releases/download/v2.1.2/gemini_mcp_server-2.1.2-py3-none-any.whl \
+  --from https://github.com/Luckycat133/gemini-web-mcp/releases/download/v2.2.0/gemini_mcp_server-2.2.0-py3-none-any.whl \
   gemini-mcp-server
 ```
 
@@ -56,7 +56,7 @@ Minimal MCP client configuration:
       "command": "uvx",
       "args": [
         "--from",
-        "https://github.com/Luckycat133/gemini-web-mcp/releases/download/v2.1.2/gemini_mcp_server-2.1.2-py3-none-any.whl",
+        "https://github.com/Luckycat133/gemini-web-mcp/releases/download/v2.2.0/gemini_mcp_server-2.2.0-py3-none-any.whl",
         "gemini-mcp-server"
       ],
       "env": {
@@ -149,7 +149,7 @@ Skill packaging check:
 
 ```bash
 for path in .codex/skills/gemini-web-mcp .agents/skills/gemini-web-mcp; do
-  ./.venv/bin/python /Users/jack/.codex/skills/.system/skill-creator/scripts/quick_validate.py "$path"
+  skills-ref validate "$path"
 done
 ```
 

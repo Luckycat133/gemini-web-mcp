@@ -396,8 +396,8 @@ class CookieManager:
             finally:
                 try:
                     await client.close()
-                except Exception:
-                    pass
+                except Exception as close_err:
+                    logger.debug("关闭验证用 client 失败: %s", close_err)
         if first_available:
             logger.info("✅ Chrome profile Cookie 验证通过，但未发现定时操作 registry，使用首个可用账号")
         return first_available
@@ -433,8 +433,8 @@ class CookieManager:
             finally:
                 try:
                     await client.close()
-                except Exception:
-                    pass
+                except Exception as close_err:
+                    logger.debug("关闭 profile 验证 client 失败: %s", close_err)
             profiles.append(info)
         return profiles
 

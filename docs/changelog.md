@@ -14,24 +14,36 @@ Gemini MCP Server 版本更新历史记录。
 - 新增 `gemini-web-mcp/references/tool_surface.md`：按安全分层（破坏性/读取私密文本/只读发现/聊天媒体/历史元数据）紧凑记录工具表面，SKILL.md 按需引用，符合渐进式披露
 - `.agents` 与 `.codex` 两份 skill 副本保持同步
 
+### 依赖与配置
+- `gemini-webapi` 依赖下限从 `>=1.20.0` 升至 `>=2.0.0`（v2.1.x 期间静默升级，此条补登 changelog）：代码深度使用 `types.RPCData`、`constants.GRPC`、`constants.Model`、`constants.Endpoint`、`constants.AccountStatus`、`types.video.GeneratedMedia`、`types.ModelOutput`、`utils.extract_json_from_response`、`utils.get_nested_value` 等 2.x 才稳定的 API
+- 同步修正 `src/server.py` 自报版本号 `v2.0` → `v2.2.0`（docstring / FastMCP instructions / 启动日志 3 处），与 `pyproject.toml` 保持一致
+- 修正 `AGENTS.md` 模块清单：删除已移除的 `auth.py`，补全 `remote_chat_cleanup_manager.py`、`thinking_client.py`、`error_handler.py` 及 `tools/` 下的 `annotations.py`、`manifest_data.py`、`utils.py`
+- 修正 `README.md` / `README.zh-CN.md` / `docs/launch-kit.md` 中所有 `v2.1.2` wheel URL → `v2.2.0`；修正 README 徽章 `tests-70` → `tests-118`；清理 `README.md` 残留的 `/Users/jack/...` 硬编码路径，改用 `skills-ref validate`
+
 ### 代码质量
 - 删除死代码 `src/auth.py`（5 个公共函数全仓零引用）
 - 删除未使用的 `load_images` 函数及未用导入
 - 修复 `tools/__init__.py:register_tools` 公共 API 类型标注（`mcp: FastMCP`、`list[str] | None`、`-> None`）
 - 清理 `error_handler.py` 未使用导入，`Dict` → `dict` 现代化类型
 - 修复 `cookie_manager.py` 3 处静默吞导入错误（`except Exception: return {}`）→ 具体异常 + `logger.warning`
+- 修复 `cookie_manager.py` 2 处 `client.close()` 的 `except Exception: pass` 静默吞错 → `logger.debug` 记录关闭异常
 - `manage.py` 新增 `_json_response()` helper，替换 23 处重复的 `json.dumps(payload, ensure_ascii=False, indent=2)` 模式
+- `skill_server.py` 抽取 `_error_text(e, tool_name)` helper，替换 11 处重复的 `logger.error + return [TextContent(text=f"Error: {e}")]` 模板
+- 修复 `ClientManager.initialize` 的 TOCTOU 竞态：`if not self._initialized` 检查移入 `_init_lock`，防止并发协程重复调用 `client.init()`
 
 ### 重构
 - `skill_server.py` 的 `account` god function（157 行 / 11 action）拆分为 11 个独立 async handler + 2 个分发表（auth-free / client-based），dispatcher 仅 12 行，保留原语义
 - `skill_server.py` 的 `scheduled` god function（4 action：list/get/create/delete）拆为 4 个独立 async handler + dispatcher，dispatcher 仅保留 try/except + action 分发
 - `skill_server.py` 的 `session` god function（4 action：create/send/list/reset）拆为 4 个独立 handler；`list`/`reset` 不需 client，下放为 sync handler，client 初始化只保留在 `create`/`send` 内
 - `research.py` 的 `gemini_deep_research`（204 行）拆为 35 行主函数 + 4 个辅助函数：`_run_native_deep_research`（client 原生 plan/start/wait 路径）、`_run_fallback_deep_research`（`generate_content(deep_research=True)` 回退路径）、`_deep_research_timeout_error`、`_deep_research_generic_error`
+- `tools/prompts.py` 和 `skill_server.py` 的 `_prompt_manager` 单例加锁（`_prompt_manager_lock`），防止并发 MCP 工具调用创建多实例并覆盖 JSON 文件
 
 ### 测试
 - 新增 `test_skill_server_session_lifecycle_and_dispatch`：覆盖 session 4 个 action + invalid action 短路；用 FakeSession/FakeClient 验证 single-session reset 不触发 client reset、reset_all 触发
 - 新增 `test_skill_server_session_invalid_image_path_short_circuits`：验证无效 image_path 在 client 初始化前失败
-- 测试套件 70 → 72 passed
+- 新增 `tests/test_error_and_session.py`（38 个测试）：`error_handler.py` 全模块覆盖（7 个 ERROR_CODES 分支 + handle_error 字符串匹配的边界误判 + format_error_response + GeminiError + wrap_tool_error）；`session_manager.py` 全模块覆盖（store/get/remove/pop/list/clear + `_clean_expired_sessions` 过期逻辑 + get/pop 触发清理）；`extract_remote_chat_id` 两份实现的漂移守护（5 个场景）
+- 新增 `tests/test_skill_server_prompts_cookie.py`（8 个测试）：skill_server 的 `prompts`（4 action + invalid + 缺参数早退）和 `cookie`（3 action + invalid + profiles 列表 + 空 profiles）此前零功能测试
+- 测试套件 70 → 118 passed
 
 ### 性能优化
 - 上提 `gemini_webapi.utils` 导入到模块级，消除 `_extract_rpc_bodies`/`_summarize_probe_response` 在分页循环内的函数级 import

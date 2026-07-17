@@ -1,6 +1,6 @@
 # 技术架构
 
-深入了解 Gemini MCP Server v2.1 的设计与实现。
+深入了解 Gemini MCP Server v2.2.0 的设计与实现。
 
 ---
 
@@ -63,20 +63,33 @@ gemini-mcp-server/
 │       ├── __init__.py    # 分层工具注册入口
 │       ├── annotations.py # MCP 工具安全/隐私注解常量
 │       ├── manifest_data.py # 静态 manifest 数据（UI 能力/RPC probe/工具清单）
+│       ├── utils.py       # 跨工具共享 helper（extract_remote_chat_id 等）
 │       ├── chat.py        # 对话工具
 │       ├── research.py    # Deep Research
 │       ├── media.py       # 媒体生成
-│       ├── image.py       # 图像工具
+│       ├── image.py       # media.py 向后兼容别名
 │       ├── file.py        # 文件工具
 │       ├── prompts.py     # 本地 prompt 管理
 │       └── manage.py      # 账号/历史/Gem/cookie 管理工具
+├── tests/                 # pytest 测试套件（test_*.py）
+├── evaluations/           # MCP contract evaluation prompts（gemini_web_mcp_contract.xml）
+├── scripts/               # 打包/发布脚本（package_release.py）
+├── .agents/skills/        # 公开分发用 Codex skill 副本
+├── .codex/skills/         # 本地开发用 Codex skill 副本
 └── docs/                  # 完整文档系统
     ├── README.md          # 文档中心
     ├── quickstart.md      # 快速开始
     ├── tools.md           # 工具使用
     ├── models.md          # 模型选择
     ├── configuration.md   # 配置说明
-    └── faq.md             # 常见问题
+    ├── faq.md             # 常见问题
+    ├── architecture.md    # 技术架构
+    ├── changelog.md       # 更新历史
+    ├── troubleshooting.md # 故障排查
+    ├── contributing.md    # 贡献指南
+    ├── manual-testing.md  # 实机测试清单
+    ├── live-ui-coverage.md # 网页端能力对照
+    └── launch-kit.md      # 发布分发套件
 ```
 
 ---
@@ -321,9 +334,9 @@ client = GeminiClient(psid, psidts, ...)
 
 | 技术 | 版本 | 用途 |
 |------|------|------|
-| Python | 3.10+ | 开发语言 |
-| FastMCP | latest | MCP 服务器框架 |
-| gemini-webapi | latest | Gemini Web API 封装 |
+| Python | >= 3.10 | 开发语言（受 `pyproject.toml` 约束） |
+| FastMCP | mcp >= 1.0 | MCP 服务器框架（`@mcp.tool(annotations=...)` 注册工具） |
+| gemini-webapi | >= 2.0.0 | Gemini Web API 封装（依赖 `types.RPCData`、`constants.GRPC` 等 2.x API） |
 
 ---
 

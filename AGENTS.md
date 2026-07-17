@@ -2,7 +2,7 @@
 
 ## Project Structure & Module Organization
 
-This is a Python 3.10+ FastMCP server for Gemini Web workflows. Core runtime code lives in `src/`: `server.py` is the primary MCP entrypoint, `skill_server.py` exposes the low-token skill surface, and shared client/session/auth logic is split across `client_wrapper.py`, `client_manager.py`, `cookie_manager.py`, `session_manager.py`, and `auth.py`. Tool implementations live in `src/tools/`, grouped by capability (`chat.py`, `media.py`, `file.py`, `research.py`, `manage.py`, `prompts.py`). Tests are in `tests/`, documentation is in `docs/`, and contract evaluation prompts live in `evaluations/gemini_web_mcp_contract.xml`. Local outputs such as `artifacts/`, `generated_media/`, cookies, and `.env` files must remain untracked.
+This is a Python 3.10+ FastMCP server for Gemini Web workflows. Core runtime code lives in `src/`: `server.py` is the primary MCP entrypoint, `skill_server.py` exposes the low-token skill surface, and shared client/session/cookie/cleanup logic is split across `client_wrapper.py`, `client_manager.py`, `cookie_manager.py`, `session_manager.py`, `remote_chat_cleanup_manager.py`, `thinking_client.py`, and `error_handler.py`. Tool implementations live in `src/tools/`, grouped by capability (`chat.py`, `media.py`, `file.py`, `research.py`, `manage.py`, `prompts.py`, plus shared `annotations.py`, `manifest_data.py`, `utils.py`). Tests are in `tests/`, documentation is in `docs/`, and contract evaluation prompts live in `evaluations/gemini_web_mcp_contract.xml`. Local outputs such as `artifacts/`, `generated_media/`, cookies, and `.env` files must remain untracked.
 
 ## Build, Test, and Development Commands
 

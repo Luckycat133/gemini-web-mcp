@@ -219,14 +219,16 @@ class PromptManager:
 
 
 _prompt_manager: Optional[PromptManager] = None
+_prompt_manager_lock = threading.Lock()
 
 
 def get_prompts() -> PromptManager:
     """Get singleton prompt manager."""
     global _prompt_manager
-    if _prompt_manager is None:
-        _prompt_manager = PromptManager(PROMPTS_FILE)
-    return _prompt_manager
+    with _prompt_manager_lock:
+        if _prompt_manager is None:
+            _prompt_manager = PromptManager(PROMPTS_FILE)
+        return _prompt_manager
 
 
 _sessions: dict[str, dict[str, Any]] = {}
@@ -238,6 +240,12 @@ def _truncate_text(text: Any, max_chars: int = 2000) -> str:
     if len(value) <= max_chars:
         return value
     return value[:max_chars].rstrip() + "\n...[truncated]"
+
+
+def _error_text(e: Exception, tool_name: str) -> list[TextContent]:
+    """统一的工具错误返回：记录日志并返回给 agent 简短错误文本。"""
+    logger.error(f"{tool_name} error: {e}")
+    return [TextContent(type="text", text=f"Error: {e}")]
 
 
 def _schedule_skill_response_cleanup(response: Any, source: str, session: Any = None) -> None:
@@ -302,8 +310,7 @@ async def chat(
         return _format_response(response)
 
     except Exception as e:
-        logger.error(f"Chat error: {e}")
-        return [TextContent(type="text", text=f"Error: {e}")]
+        return _error_text(e, "Chat")
 
 
 @mcp.tool(annotations=DESTRUCTIVE_REMOTE)
@@ -407,8 +414,7 @@ async def history(
         return [TextContent(type="text", text="Invalid action")]
 
     except Exception as e:
-        logger.error(f"History error: {e}")
-        return [TextContent(type="text", text=f"Error: {e}")]
+        return _error_text(e, "History")
 
 
 async def _account_capabilities() -> list[TextContent]:
@@ -611,8 +617,7 @@ async def account(
         handler = _ACCOUNT_CLIENT_ACTIONS.get(action, _account_status)
         return await handler(client)
     except Exception as e:
-        logger.error(f"Account error: {e}")
-        return [TextContent(type="text", text=f"Error: {e}")]
+        return _error_text(e, "Account")
 
 
 async def _scheduled_list(client: Any) -> list[TextContent]:
@@ -761,8 +766,7 @@ async def scheduled(
             return await _scheduled_delete(client, action_id)
         return [TextContent(type="text", text="Invalid action")]
     except Exception as e:
-        logger.error(f"Scheduled action error: {e}")
-        return [TextContent(type="text", text=f"Error: {e}")]
+        return _error_text(e, "Scheduled action")
 
 
 @mcp.tool(annotations=MUTATES_REMOTE)
@@ -812,8 +816,7 @@ async def create(
         )
 
     except Exception as e:
-        logger.error(f"Create error: {e}")
-        return [TextContent(type="text", text=f"Error: {e}")]
+        return _error_text(e, "Create")
 
 
 @mcp.tool(annotations=MUTATES_REMOTE)
@@ -847,8 +850,7 @@ async def edit(
         return _format_response(response, "image")
 
     except Exception as e:
-        logger.error(f"Edit error: {e}")
-        return [TextContent(type="text", text=f"Error: {e}")]
+        return _error_text(e, "Edit")
 
 
 async def _session_create(
@@ -955,8 +957,7 @@ async def session(
         return [TextContent(type="text", text="Invalid action")]
 
     except Exception as e:
-        logger.error(f"Session error: {e}")
-        return [TextContent(type="text", text=f"Error: {e}")]
+        return _error_text(e, "Session")
 
 
 @mcp.tool(annotations=DESTRUCTIVE_LOCAL)
@@ -1008,8 +1009,7 @@ async def prompts(
         return [TextContent(type="text", text="Invalid action")]
 
     except Exception as e:
-        logger.error(f"Prompts error: {e}")
-        return [TextContent(type="text", text=f"Error: {e}")]
+        return _error_text(e, "Prompts")
 
 
 @mcp.tool(annotations=MUTATES_LOCAL)
@@ -1060,8 +1060,7 @@ async def cookie(
         return [TextContent(type="text", text="Invalid action")]
 
     except Exception as e:
-        logger.error(f"Cookie error: {e}")
-        return [TextContent(type="text", text=f"Error: {e}")]
+        return _error_text(e, "Cookie")
 
 
 @mcp.tool(annotations=READ_ONLY_LOCAL)
@@ -1074,8 +1073,7 @@ async def doctor(
         payload = _doctor_payload(browser=browser, validate_browser=validate_browser)
         return [TextContent(type="text", text=_format_doctor_markdown(payload))]
     except Exception as e:
-        logger.error(f"Doctor error: {e}")
-        return [TextContent(type="text", text=f"Error: {e}")]
+        return _error_text(e, "Doctor")
 
 
 @mcp.tool(annotations=DESTRUCTIVE_REMOTE)
@@ -1100,8 +1098,7 @@ async def cleanup(
         )
         return [TextContent(type="text", text=_format_cleanup_markdown(payload))]
     except Exception as e:
-        logger.error(f"Cleanup error: {e}")
-        return [TextContent(type="text", text=f"Error: {e}")]
+        return _error_text(e, "Cleanup")
 
 
 def _format_response(

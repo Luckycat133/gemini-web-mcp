@@ -10,10 +10,13 @@
 |--------|------|------|--------|
 | GEMINI_PSID | ✅ | Cookie __Secure-1PSID | - |
 | GEMINI_PSIDTS | ❌ | Cookie __Secure-1PSIDTS | - |
+| GEMINI_PSIDCC | ❌ | Cookie __Secure-1PSIDCC，附加到客户端的 extra cookies | - |
 | GEMINI_PROXY | ❌ | 代理地址 | - |
 | GEMINI_AUTO_REFRESH | ❌ | 自动刷新 Cookie | true |
 | GEMINI_TOOLS | ❌ | 加载的工具组 | core |
 | GEMINI_CHAT_RETENTION_SECONDS | ❌ | 默认远端对话保留时间，0 表示尽快删除 | 1800 |
+| GEMINI_CONFIG_DIR | ❌ | skill_server 读取的本地 prompt 库目录（`prompts.json` 所在） | `.gemini` |
+| GEMINI_COOKIE_PATH | ❌ | gemini_webapi cookie cache 目录；浏览器刷新 Cookie 时由 `client_manager` 写入临时目录隔离 | 系统临时目录下的 `gemini_web_mcp_webapi_cookie_cache` |
 
 ---
 

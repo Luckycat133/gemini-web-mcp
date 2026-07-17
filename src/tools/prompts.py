@@ -9,6 +9,7 @@ from typing import Literal, Optional, Dict, List
 import json
 import os
 import logging
+import threading
 import uuid
 from datetime import datetime
 
@@ -114,13 +115,15 @@ class PromptManager:
 
 
 _prompt_manager: Optional[PromptManager] = None
+_prompt_manager_lock = threading.Lock()
 
 
 def get_prompt_manager() -> PromptManager:
     global _prompt_manager
-    if _prompt_manager is None:
-        _prompt_manager = PromptManager()
-    return _prompt_manager
+    with _prompt_manager_lock:
+        if _prompt_manager is None:
+            _prompt_manager = PromptManager()
+        return _prompt_manager
 
 
 def register_prompts_tools(mcp: FastMCP):
