@@ -601,7 +601,7 @@ class CookieManager:
             if browser:
                 psid, psidts = self.get_cookie_from_browser(browser)
                 if psid:
-                    return self.update_cookie(psid, psidts, source=f"browser_{browser}")
+                    return self.update_cookie(psid, psidts or "", source=f"browser_{browser}")
             
             logger.warning("⚠️ 自动刷新需要用户交互，请手动更新 Cookie")
             return False

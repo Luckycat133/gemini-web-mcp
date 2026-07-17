@@ -123,8 +123,9 @@ def list_sessions() -> Dict[str, Dict[str, Any]]:
     """获取所有会话"""
     sessions = _session_manager.list_sessions()
     return {
-        sid: _session_data_to_dict(data)
+        sid: _session_data_to_dict(data)  # type: ignore[misc]  # data 非 None 时返回 Dict
         for sid, data in sessions.items()
+        if data is not None
     }
 
 

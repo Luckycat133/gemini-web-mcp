@@ -48,6 +48,7 @@ Gemini MCP Server 版本更新历史记录。
 - 新增 `tests/test_chat_session_lifecycle.py`（6 个测试）：`gemini_reset_session`（destructiveHint=True）4 条 delete_remote_chat 决策路径覆盖（session 不存在 / retain_chat=False 触发删除 / retain_chat=True 跳过 / session 无 cid 时 delete None）；`gemini_list_sessions` 空列表与非空列表渲染 —— 此前仅有注解形状测试
 - 修复 `tools/research.py` `_walk_nested_json` 和 `tools/manage.py` `_summarize_probe_response` 的 2 处静默吞错（`except Exception: return` → 加 `logger.debug` 记录路径/rpcid 便于排障）
 - 修复 `src/` 全部 ruff 错误（9 → 0）：删除未使用 import、移除无占位符 f-string 前缀、为 `client_wrapper.py` 的 facade re-export 加 `# noqa: F401`、为 `client_manager.py` try/except 后的 import 加 `# noqa: E402`
+- 修复 4 个文件的 mypy 类型错误（57 → 51）：`cookie_manager.py` 的 `psidts` 可空回退、`thinking_client.py` 的 `int(learning_config[...])` 加 `# type: ignore[call-overload]` 并重构 if/return 流让 mypy 正确收窄、`client_wrapper.py` 的 `list_sessions` 过滤 None、`tools/prompts.py` 重命名循环变量 `prompt` → `item` 避免与同函数内 `Optional[dict]` 赋值的类型冲突
 - 测试套件 70 → 172 passed
 
 ### 性能优化
