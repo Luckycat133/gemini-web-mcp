@@ -1,6 +1,7 @@
 ---
 name: gemini-web-mcp
 description: "Use when working in the gemini-web-mcp repository or using its Gemini Web MCP/skill servers: inspect the tool manifest, choose safe Gemini Web tools, manage chat history and native notebooks, validate Pro Web capability coverage, generate and verify media deliverables, update docs/tests/evaluations, or avoid unsafe destructive/private-account operations."
+compatibility: "Requires Python 3.10+, a local .venv with this package installed (pip install -e \".[all]\"), Chrome cookies for Gemini, and optional browser/image extras for media and cookie-from-browser flows. Primary server run via GEMINI_TOOLS=core python -m src.server; low-token server via python -m src.skill_server."
 ---
 
 # Gemini Web MCP
@@ -15,6 +16,8 @@ Use this skill for this repository's Gemini Web MCP server and low-token skill s
 4. Prefer read-only discovery first: `gemini_doctor`, manifest/capabilities, `gemini_probe_web_features`, metadata-only history search, profile diagnostics, and inventory/list tools.
 5. Treat `privacy=reads_private_chat_text` and other private text tools as explicit-user-intent tools: `gemini_read_chat`, `gemini_export_chat`, `gemini_search_chats(scan_turns=true)`, and research-report create actions that read chat text.
 6. Treat destructive tools as requiring explicit user intent: `gemini_delete_chat`, `gemini_cleanup_test_artifacts(dry_run=false)`, `gemini_delete_scheduled_action`, `gemini_reset_session`, `gemini_manage_gems(action="delete")`, and prompt deletion.
+
+> Need the full tool/group/privacy/destructive map? See [references/tool_surface.md](references/tool_surface.md). Load it on demand — the live `gemini_get_tool_manifest` remains the source of truth.
 
 ## Tool Surfaces
 
@@ -102,12 +105,13 @@ asyncio.run(main())
 PY
 ```
 
-For skill-only changes, at minimum run the skill validator for both the local
-project copy and the public repo skill copy:
+For skill-only changes, validate each skill copy with the standard Agent Skills
+validator (`skills-ref`, see https://agentskills.io/specification#validation):
 
 ```bash
+# Install once if needed: pip install skills-ref
 for path in .codex/skills/gemini-web-mcp .agents/skills/gemini-web-mcp; do
-  ./.venv/bin/python /Users/jack/.codex/skills/.system/skill-creator/scripts/quick_validate.py "$path"
+  skills-ref validate "$path"
 done
 ```
 
