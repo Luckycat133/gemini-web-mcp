@@ -4,6 +4,7 @@
 .playwright-cli/
 __pycache__/
 *.pyc
+.coverage
 cookies.json
 prompts.json
 *.log
