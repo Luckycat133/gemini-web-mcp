@@ -31,6 +31,9 @@ _INLINE_CODE_RE = re.compile(r"`([^`]+)`")
 _MARKDOWN_LINK_RE = re.compile(r"\[([^\]]+)\]\([^)]+\)")
 _MARKDOWN_HEADING_RE = re.compile(r"^#{1,6}\s+", flags=re.MULTILINE)
 _WHITESPACE_RE = re.compile(r"\s+")
+_MD_SECTION_HEADING_RE = re.compile(r"^(#{1,3})\s+(.+)$")
+_MD_TITLE_HEADING_RE = re.compile(r"^#\s+(.+)$")
+_SAFE_FILENAME_RE = re.compile(r"[^A-Za-z0-9._-]+")
 
 
 def register_research_tools(mcp: FastMCP):
@@ -939,7 +942,7 @@ def _markdown_sections(report: str) -> list[dict[str, str]]:
     current_heading = ""
     current_body: list[str] = []
     for line in report.splitlines():
-        match = re.match(r"^(#{1,3})\s+(.+)$", line.strip())
+        match = _MD_SECTION_HEADING_RE.match(line.strip())
         if match:
             if current_heading and current_body:
                 sections.append({"heading": current_heading, "body": "\n".join(current_body).strip()})
@@ -983,14 +986,14 @@ def _plain_excerpt(markdown: str, max_chars: int) -> str:
 
 def _title_from_markdown(markdown: str) -> str:
     for line in markdown.splitlines():
-        match = re.match(r"^#\s+(.+)$", line.strip())
+        match = _MD_TITLE_HEADING_RE.match(line.strip())
         if match:
             return match.group(1).strip()
     return ""
 
 
 def _safe_filename(value: str) -> str:
-    value = re.sub(r"[^A-Za-z0-9._-]+", "-", value.strip())
+    value = _SAFE_FILENAME_RE.sub("-", value.strip())
     return value.strip("-._")
 
 
