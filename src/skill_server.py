@@ -6,6 +6,7 @@ Low-token, production-ready.
 
 import os
 import json
+import asyncio
 import shutil
 import logging
 import threading
@@ -444,8 +445,8 @@ async def _account_models(client: Any) -> list[TextContent]:
 async def _account_features(client: Any) -> list[TextContent]:
     if not hasattr(client, "_batch_execute"):
         return [TextContent(type="text", text="feature probes unavailable")]
-    lines = []
-    for probe in WEB_FEATURE_PROBES:
+
+    async def _probe_one(probe: dict[str, str]) -> str:
         try:
             response = await client._batch_execute(
                 [_RawRPCData(probe["rpcid"], probe["payload"])],
@@ -455,9 +456,12 @@ async def _account_features(client: Any) -> list[TextContent]:
             summary = _summarize_probe_response(response.text, probe["rpcid"])
             ok = response.status_code == 200 and summary.get("reject_code") is None
             status = "ok" if ok else f"reject={summary.get('reject_code')}"
-            lines.append(f"{probe['surface']}.{probe['name']}: {status}")
+            return f"{probe['surface']}.{probe['name']}: {status}"
         except Exception as e:
-            lines.append(f"{probe['surface']}.{probe['name']}: {type(e).__name__}")
+            return f"{probe['surface']}.{probe['name']}: {type(e).__name__}"
+
+    # Probe concurrently; gather preserves the WEB_FEATURE_PROBES order.
+    lines = await asyncio.gather(*(_probe_one(probe) for probe in WEB_FEATURE_PROBES))
     return [TextContent(type="text", text="\n".join(lines))]
 
 
@@ -477,20 +481,27 @@ async def _account_links(client: Any) -> list[TextContent]:
 
 
 async def _account_usage(client: Any) -> list[TextContent]:
-    lines = []
-    for probe_name in ("usage_quota", "usage_model_state"):
+    async def _probe_one(probe_name: str) -> list[str]:
         probe = _get_probe("usage", probe_name)
         response = await _execute_observed_rpc(client, probe)
         bodies = _extract_rpc_bodies(response.text, probe["rpcid"])
-        entries = []
+        entries: list[dict[str, Any]] = []
         if bodies and isinstance(bodies[0], list) and bodies[0]:
             first = bodies[0][0]
             if isinstance(first, list):
                 entries = [_parse_usage_entry(item) for item in first]
-        for item in entries:
-            lines.append(
-                f"{probe_name}: key={item.get('key')} limit={item.get('limit_value')} remaining={item.get('remaining_value')}"
-            )
+        return [
+            f"{probe_name}: key={item.get('key')} limit={item.get('limit_value')} remaining={item.get('remaining_value')}"
+            for item in entries
+        ]
+
+    # Probe concurrently; gather preserves the ("usage_quota", "usage_model_state") order.
+    per_probe_lines = await asyncio.gather(
+        *(_probe_one(name) for name in ("usage_quota", "usage_model_state"))
+    )
+    lines: list[str] = []
+    for chunk in per_probe_lines:
+        lines.extend(chunk)
     return [TextContent(type="text", text="\n".join(lines) or "No usage entries")]
 
 
