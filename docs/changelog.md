@@ -43,7 +43,10 @@ Gemini MCP Server 版本更新历史记录。
 - 新增 `test_skill_server_session_invalid_image_path_short_circuits`：验证无效 image_path 在 client 初始化前失败
 - 新增 `tests/test_error_and_session.py`（38 个测试）：`error_handler.py` 全模块覆盖（7 个 ERROR_CODES 分支 + handle_error 字符串匹配的边界误判 + format_error_response + GeminiError + wrap_tool_error）；`session_manager.py` 全模块覆盖（store/get/remove/pop/list/clear + `_clean_expired_sessions` 过期逻辑 + get/pop 触发清理）；`extract_remote_chat_id` 两份实现的漂移守护（5 个场景）
 - 新增 `tests/test_skill_server_prompts_cookie.py`（8 个测试）：skill_server 的 `prompts`（4 action + invalid + 缺参数早退）和 `cookie`（3 action + invalid + profiles 列表 + 空 profiles）此前零功能测试
-- 测试套件 70 → 118 passed
+- 新增 `tests/test_cookie_manager.py`（25 个测试）：`CookieManager` 核心生命周期行为覆盖（`__init__` + `_load_initial_cookie` + `_load_extra_cookies_from_env`、`update_cookie` + `on_cookie_update` 回调链含异常吞并、`get_cookie_status` VALID/EXPIRED/UNKNOWN 状态机、`needs_refresh`、`refresh_cookie` 无 browser / browser 成功 / browser 失败三条路径、`to_env_vars`、`start_monitor`/`stop_monitor` 启停幂等 + 短间隔循环不崩、`CookieData` 默认值、`CookieStatus` 枚举值稳定、4 线程并发 `update_cookie` 安全性）—— 此前仅浏览器候选探测覆盖，回调链/状态机/刷新路径零行为测试
+- 修复 `tools/research.py` `_walk_nested_json` 和 `tools/manage.py` `_summarize_probe_response` 的 2 处静默吞错（`except Exception: return` → 加 `logger.debug` 记录路径/rpcid 便于排障）
+- 修复 `src/` 全部 ruff 错误（9 → 0）：删除未使用 import、移除无占位符 f-string 前缀、为 `client_wrapper.py` 的 facade re-export 加 `# noqa: F401`、为 `client_manager.py` try/except 后的 import 加 `# noqa: E402`
+- 测试套件 70 → 143 passed
 
 ### 性能优化
 - 上提 `gemini_webapi.utils` 导入到模块级，消除 `_extract_rpc_bodies`/`_summarize_probe_response` 在分页循环内的函数级 import
