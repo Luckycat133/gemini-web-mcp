@@ -53,7 +53,8 @@ Gemini MCP Server 版本更新历史记录。
 - 清理 3 个测试文件中前几轮引入的未使用 import（`test_cleanup_test_artifacts.py` 的 `pytest`、`test_chat_session_lifecycle.py` 的 `pytest`、`test_client_manager.py` 的 `pathlib.Path`）
 - 清理 tests/ 历史遗留 ruff 错误（4 → 0）：`test_error_and_session.py` 删未用的 `SessionData`、`test_imports.py` 删重复的 `src.tools.media` import（typo）、`test_core.py`/`test_imports.py` 的 side-effect import 加 `# noqa: F401`
 - 新增 `tests/test_server_cookie_tools.py`（13 个测试）：`src/server.py` 的 `gemini_get_cookie_status`（Manager 不可用 / 可用+已设置 / 可用+未设置+需刷新）、`gemini_list_browser_cookie_profiles`（空 profiles / 含 error 条目 / 正常多字段渲染 / account_available=None 渲染 unknown / response_format=json / 抛异常 handle_error 兜底）、`gemini_get_cookie_from_browser`（成功无 profile / 成功带 profile / 失败 / 抛异常 handle_error 兜底）—— 此前仅有注解形状测试
-- 测试套件 70 → 219 passed
+- 新增 `tests/test_doctor_helpers.py`（26 个测试）：`gemini_doctor` 此前仅有注解形状测试，`_doctor_check` / `_doctor_overall_status` / `_format_doctor_markdown` / `_doctor_payload` 四个 helper 零直接覆盖——本文件补充 `_doctor_check`（None 值过滤 / 空 details）、`_doctor_overall_status`（空/全 ok/全 skip/混合/warn 优先/error 优先 6 种组合）、`_format_doctor_markdown`（browser=disabled / error profile / account=None / 空 recommendations / detail 白名单 4 key）、`_doctor_payload`（cookie_status 3 分支 / browser_profiles 3 分支 / alignment ok / ffprobe warn + recommendations / generated_media warn / validate_browser 推荐 / overall_status warn & ok / cookie 值不泄露）
+- 测试套件 70 → 245 passed
 
 ### 性能优化
 - 上提 `gemini_webapi.utils` 导入到模块级，消除 `_extract_rpc_bodies`/`_summarize_probe_response` 在分页循环内的函数级 import
