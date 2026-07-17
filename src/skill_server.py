@@ -392,14 +392,14 @@ async def history(
             if not hasattr(client, "read_chat"):
                 return [TextContent(type="text", text="read_chat unavailable")]
             safe_export_limit = min(max(limit, 1), 200)
-            chat, turns = await _read_chat_turns(client, chat_id, safe_export_limit, 20000)
+            history, turns = await _read_chat_turns(client, chat_id, safe_export_limit, 20000)
             metadata = {"id": chat_id}
             if hasattr(client, "list_chats"):
                 for item in client.list_chats() or []:
                     if _get_chat_id(item) == chat_id:
                         metadata = _chat_to_dict(item)
                         break
-            payload = _chat_export_payload(chat_id, chat, turns, metadata, safe_export_limit, 20000)
+            payload = _chat_export_payload(chat_id, history, turns, metadata, safe_export_limit, 20000)
             return [TextContent(type="text", text=_format_chat_export_markdown(payload))]
 
         if action == "delete":

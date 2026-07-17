@@ -10,7 +10,7 @@ import sys
 from datetime import datetime, timezone
 from mcp.server.fastmcp import FastMCP
 from mcp.types import TextContent
-from typing import Any, Literal, Optional
+from typing import Any, Callable, Literal, Optional, TypeVar
 import logging
 
 from ..client_wrapper import (
@@ -38,6 +38,10 @@ try:
     _GEMINI_WEBAPI_UTILS_AVAILABLE = True
 except ImportError:
     _GEMINI_WEBAPI_UTILS_AVAILABLE = False
+
+# TypeVar for the @_tool decorator: preserves the wrapped function's declared
+# signature so in-process callers retain the annotated return type.
+_F = TypeVar("_F", bound=Callable[..., Any])
 
 logger = logging.getLogger(__name__)
 
@@ -182,7 +186,7 @@ def _truncate(text: object, max_chars: int) -> str:
 def _clamp_int(value: object, default: int, minimum: int, maximum: int) -> int:
     """Normalize user-provided numeric tool arguments into a safe inclusive range."""
     try:
-        number = int(value)
+        number: int = int(value)  # type: ignore[call-overload]
     except (TypeError, ValueError):
         number = default
     return min(max(number, minimum), maximum)
@@ -238,9 +242,11 @@ def _sanitize_account_status(status: object) -> dict:
     if not isinstance(status, dict):
         return {"status": str(status)}
 
-    summary = status.get("summary") if isinstance(status.get("summary"), dict) else {}
-    rpc = status.get("rpc") if isinstance(status.get("rpc"), dict) else {}
-    rpc_status = {}
+    summary_raw = status.get("summary")
+    summary = summary_raw if isinstance(summary_raw, dict) else {}
+    rpc_raw = status.get("rpc")
+    rpc = rpc_raw if isinstance(rpc_raw, dict) else {}
+    rpc_status: dict[str, dict[str, Any]] = {}
     for name, payload in rpc.items():
         if not isinstance(payload, dict):
             rpc_status[name] = {"ok": bool(payload)}
@@ -270,8 +276,9 @@ async def _read_chat_turns(client: object, chat_id: str, limit: int, max_chars: 
     if not hasattr(client, "read_chat"):
         raise RuntimeError("当前 gemini-webapi 不支持 read_chat。")
     history = await client.read_chat(chat_id, limit=limit)
-    turns = _get_attr(history, "turns", []) if history else []
-    return history, [_turn_to_dict(turn, max_chars) for turn in (turns or [])[:limit]]
+    turns_raw = _get_attr(history, "turns", []) if history else []
+    turns: list[Any] = turns_raw if isinstance(turns_raw, list) else []
+    return history, [_turn_to_dict(turn, max_chars) for turn in turns[:limit]]
 
 
 def _turn_matches_query(turn: dict[str, str], query: str) -> bool:
@@ -302,7 +309,8 @@ def _chat_export_payload(
 
 
 def _format_chat_export_markdown(payload: dict[str, Any]) -> str:
-    metadata = payload.get("metadata") if isinstance(payload.get("metadata"), dict) else {}
+    metadata_raw = payload.get("metadata")
+    metadata = metadata_raw if isinstance(metadata_raw, dict) else {}
     title = metadata.get("title") or payload["chat_id"]
     lines = [
         f"## Gemini Chat Export: {title}",
@@ -964,7 +972,7 @@ def _find_notebook(
 
 
 def _move_chat_to_notebook_payload(chat_id: str, notebook_id: str, project_type: int = 2) -> str:
-    conversation = [None] * 14
+    conversation: list[Any] = [None] * 14
     conversation[0] = chat_id
     conversation[7] = notebook_id
     conversation[13] = [project_type]
@@ -1024,8 +1032,8 @@ async def _fetch_recent_conversation_metadata(
         max_pages_per_source=100,
     )
     combined, _sources_by_id = _merge_conversation_source_items(sources)
-    pinned_diag = next((source["diagnostic"] for source in sources if source["name"] == "ui_pinned"), {})
-    recent_diag = next((source["diagnostic"] for source in sources if source["name"] == "ui_recent"), {})
+    pinned_diag: dict[str, Any] = next((source["diagnostic"] for source in sources if source["name"] == "ui_pinned"), {})
+    recent_diag: dict[str, Any] = next((source["diagnostic"] for source in sources if source["name"] == "ui_recent"), {})
     return combined, {
         "source_rpc": "MaZiqc",
         "observed": "2026-07-04 Pro UI / paginated conversation metadata",
@@ -1225,7 +1233,7 @@ def _parse_tool_mode_entry(entry: Any) -> dict[str, Any]:
 
 
 def _web_capabilities_payload() -> dict[str, Any]:
-    payload = copy.deepcopy(WEB_UI_CAPABILITIES)
+    payload: dict[str, Any] = copy.deepcopy(WEB_UI_CAPABILITIES)
     payload["feature_probes"] = [
         {
             "surface": probe["surface"],
@@ -2182,10 +2190,13 @@ def _gem_field(gem: Any, *names: str) -> tuple[bool, str]:
 def register_manage_tools(mcp: FastMCP, layers: list[str] | set[str] | tuple[str, ...] | None = None):
     enabled_tool_names = resolve_manage_tool_names(layers)
 
-    def _tool(tool_name: str, annotations):
-        def decorator(func):
+    def _tool(tool_name: str, annotations) -> Callable[[_F], _F]:
+        def decorator(func: _F) -> _F:
             if tool_name in enabled_tool_names:
-                return mcp.tool(annotations=annotations)(func)
+                # Register with FastMCP for external MCP dispatch, but keep the
+                # original typed function for in-process calls so callers retain
+                # the declared return type (avoids cascading Any returns).
+                mcp.tool(annotations=annotations)(func)
             return func
 
         return decorator
@@ -2530,13 +2541,13 @@ def register_manage_tools(mcp: FastMCP, layers: list[str] | set[str] | tuple[str
                 pagination["next_offset"] = pagination["offset"] + pagination["count"]
             safe_turn_limit = _clamp_int(turns_per_chat, default=20, minimum=1, maximum=50)
             safe_chars = _clamp_int(max_chars_per_turn, default=1000, minimum=100, maximum=4000)
-            matches = []
+            matches: list[dict[str, Any]] = []
             lowered = needle.lower()
 
             for chat in page:
                 item = chat if isinstance(chat, dict) else _chat_to_dict(chat)
-                fields = []
-                snippets = []
+                fields: list[str] = []
+                snippets: list[dict[str, Any]] = []
                 if lowered in item["title"].lower():
                     fields.append("title")
                 if item["id"] and lowered in item["id"].lower():
@@ -2595,9 +2606,9 @@ def register_manage_tools(mcp: FastMCP, layers: list[str] | set[str] | tuple[str
             if not matches:
                 lines.append("未在当前页找到匹配项。")
             for idx, match in enumerate(matches, 1):
-                fields = ", ".join(match["matched_fields"])
+                fields_str = ", ".join(match["matched_fields"])
                 time_text = f" · {match['time']}" if match.get("time") else ""
-                lines.append(f"{idx}. {match['title']} (ID: {match['id']}) · fields={fields}{time_text}")
+                lines.append(f"{idx}. {match['title']} (ID: {match['id']}) · fields={fields_str}{time_text}")
                 for snippet in match.get("snippets", []):
                     if snippet.get("error"):
                         lines.append(f"   - read error: {snippet['error']}")
@@ -3025,13 +3036,13 @@ def register_manage_tools(mcp: FastMCP, layers: list[str] | set[str] | tuple[str
         if scope in {"model_state", "all"}:
             probe_names.append("usage_model_state")
 
-        results = []
+        results: list[dict[str, Any]] = []
         try:
             for name in probe_names:
                 probe = _get_probe("usage", name)
                 response = await _execute_observed_rpc(client, probe)
                 bodies = _extract_rpc_bodies(response.text, probe["rpcid"])
-                entries = []
+                entries: list[dict[str, Any]] = []
                 if bodies and isinstance(bodies[0], list) and bodies[0]:
                     first = bodies[0][0]
                     if isinstance(first, list):
@@ -3185,7 +3196,7 @@ def register_manage_tools(mcp: FastMCP, layers: list[str] | set[str] | tuple[str
             notebook = _find_notebook(notebooks, notebook_id, notebook_title)
             if not notebook:
                 available = [item.get("title", "") for item in notebooks if item.get("title")]
-                payload = {
+                payload: dict[str, Any] = {
                     "ok": False,
                     "notebook_id": notebook_id,
                     "notebook_title": notebook_title,
@@ -3294,7 +3305,8 @@ def register_manage_tools(mcp: FastMCP, layers: list[str] | set[str] | tuple[str
                     return _json_response(payload)
                 return [TextContent(type="text", text=f"未找到匹配的 Gemini 原生笔记本。可用标题: {', '.join(available)}")]
 
-            project_type = notebook.get("project_type") if isinstance(notebook.get("project_type"), int) else 2
+            project_type_raw = notebook.get("project_type")
+            project_type = project_type_raw if isinstance(project_type_raw, int) else 2
             request_payload = _move_chat_to_notebook_payload(clean_chat_id, notebook["id"], project_type)
             response = await client._batch_execute(
                 [_RawRPCData("MUAZcd", request_payload)],

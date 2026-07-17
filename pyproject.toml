@@ -48,3 +48,8 @@ testpaths = ["tests"]
 python_version = "3.10"
 warn_return_any = true
 warn_unused_configs = true
+
+[[tool.mypy.overrides]]
+# Third-party dependencies that ship no py.typed marker nor PEP 561 stubs.
+module = ["gemini_webapi.*", "browser_cookie3"]
+ignore_missing_imports = true
