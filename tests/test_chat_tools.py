@@ -359,3 +359,316 @@ def test_start_chat_does_not_schedule_remote_chat_cleanup(monkeypatch):
 
     asyncio.run(run())
     assert schedule_calls == []
+
+
+# ---------------------------------------------------------------------------
+# gemini_chat_stream — 流式对话
+# ---------------------------------------------------------------------------
+
+
+class _FakeStreamClient(_FakeChatClient):
+    """扩展 _FakeChatClient 支持流式生成（async iter）。"""
+
+    def __init__(self, *, chunks=None, response_text="model reply", response_cid="c_chat1"):
+        super().__init__(response_text=response_text, response_cid=response_cid)
+        self._chunks = chunks if chunks is not None else []
+
+    async def generate_content_stream(self, **kwargs):
+        self.captured_generate_kwargs = dict(kwargs)
+        for chunk in self._chunks:
+            yield chunk
+
+
+def _stream_chunk(text_delta="", text=""):
+    """构造流式 chunk：优先用 text_delta，缺失时 get_stream_text_piece 回退到 text。"""
+    from types import SimpleNamespace
+    if text_delta:
+        return SimpleNamespace(text_delta=text_delta, text=text)
+    return SimpleNamespace(text=text)
+
+
+def test_chat_stream_invalid_images_returns_error_before_client(monkeypatch):
+    """image_paths 无效 → 在 get_gemini_client 调用前早退。"""
+    def explode():
+        raise AssertionError("get_gemini_client should not be called on invalid images")
+    monkeypatch.setattr(chat_tools, "get_gemini_client", explode)
+    monkeypatch.setattr(chat_tools, "schedule_remote_chat_cleanup_from_response",
+                        lambda *a, **kw: None)
+
+    mcp = _make_mcp()
+
+    async def run():
+        return await _call_tool(mcp, "gemini_chat_stream",
+                                message="hi", image_paths=["/nonexistent/x.png"])
+
+    result = asyncio.run(run())
+    assert result[0].text.startswith("❌")
+
+
+def test_chat_stream_empty_stream_returns_empty_text_and_skips_cleanup(monkeypatch):
+    """空流（无 chunk）→ final_response=None → 不调 cleanup，返回空文本。"""
+    client = _FakeStreamClient(chunks=[])
+    schedule_calls = []
+    _patch_chat_client_env(monkeypatch, client, captured_schedule=schedule_calls)
+
+    mcp = _make_mcp()
+
+    async def run():
+        return await _call_tool(mcp, "gemini_chat_stream", message="hi")
+
+    result = asyncio.run(run())
+    assert len(result) == 1
+    assert result[0].text == ""  # full_text 为空
+    assert schedule_calls == []  # final_response is None → 跳过 cleanup
+
+
+def test_chat_stream_accumulates_text_delta_across_chunks(monkeypatch):
+    """多 chunk → full_text 累加 text_delta，返回拼合文本。"""
+    client = _FakeStreamClient(chunks=[
+        _stream_chunk(text_delta="Hello"),
+        _stream_chunk(text_delta=", "),
+        _stream_chunk(text_delta="world!"),
+    ])
+    _patch_chat_client_env(monkeypatch, client)
+
+    mcp = _make_mcp()
+
+    async def run():
+        return await _call_tool(mcp, "gemini_chat_stream", message="hi")
+
+    result = asyncio.run(run())
+    assert result[0].text == "Hello, world!"
+
+
+def test_chat_stream_schedules_cleanup_with_final_response(monkeypatch):
+    """有 chunk → schedule cleanup 用最后一个 response + retain/delete/source。"""
+    final_chunk = _stream_chunk(text_delta="last")
+    client = _FakeStreamClient(chunks=[_stream_chunk(text_delta="first"), final_chunk])
+    schedule_calls = []
+    _patch_chat_client_env(monkeypatch, client, captured_schedule=schedule_calls)
+
+    mcp = _make_mcp()
+
+    async def run():
+        return await _call_tool(mcp, "gemini_chat_stream", message="hi",
+                                retain_chat=True, delete_after_seconds=120)
+
+    asyncio.run(run())
+    assert len(schedule_calls) == 1
+    call = schedule_calls[0]
+    assert call["response"] is final_chunk
+    assert call["retain_chat"] is True
+    assert call["delete_after_seconds"] == 120
+    assert call["source"] == "gemini_chat_stream"
+
+
+def test_chat_stream_passes_all_fields_to_generate_content_stream(monkeypatch):
+    """request_kwargs 含 prompt/files/model/thinking_level/gem/temporary。"""
+    client = _FakeStreamClient(chunks=[_stream_chunk(text_delta="x")])
+    _patch_chat_client_env(monkeypatch, client)
+
+    mcp = _make_mcp()
+
+    async def run():
+        return await _call_tool(mcp, "gemini_chat_stream",
+                                message="hi", model="pro", thinking_level="extended",
+                                gem_id="g_1", temporary=True)
+
+    asyncio.run(run())
+    kwargs = client.captured_generate_kwargs
+    assert kwargs["prompt"] == "hi"
+    assert kwargs["model"] == "gemini-3-pro"
+    assert kwargs["thinking_level"] == "extended"
+    assert kwargs["gem"] == "g_1"
+    assert kwargs["temporary"] is True
+    assert kwargs["files"] is None
+
+
+def test_chat_stream_omits_learning_mode_when_none(monkeypatch):
+    """learning_mode=None → request_kwargs 不含 learning_mode 键。"""
+    client = _FakeStreamClient(chunks=[_stream_chunk(text_delta="x")])
+    _patch_chat_client_env(monkeypatch, client)
+
+    mcp = _make_mcp()
+
+    async def run():
+        return await _call_tool(mcp, "gemini_chat_stream", message="hi")
+
+    asyncio.run(run())
+    assert "learning_mode" not in client.captured_generate_kwargs
+
+
+# ---------------------------------------------------------------------------
+# gemini_send_message_stream — 会话流式消息
+# ---------------------------------------------------------------------------
+
+
+class _FakeStreamSession:
+    """模拟 chat session 的流式 send_message_stream（async iter）。"""
+
+    def __init__(self, *, cid="c_stream1", chunks=None):
+        self.cid = cid
+        self._chunks = chunks if chunks is not None else []
+        self.captured_kwargs = None
+
+    async def send_message_stream(self, **kwargs):
+        self.captured_kwargs = dict(kwargs)
+        for chunk in self._chunks:
+            yield chunk
+
+
+def _patch_stream_session_env(monkeypatch, session_data, *, captured_schedule=None):
+    """patch gemini_send_message_stream 的 2 个接缝（与 send_message 同构）。"""
+    monkeypatch.setattr(chat_tools, "get_session", lambda sid: session_data)
+
+    def fake_schedule(response, *, retain_chat, delete_after_seconds, source):
+        if captured_schedule is not None:
+            captured_schedule.append({
+                "response": response,
+                "retain_chat": retain_chat,
+                "delete_after_seconds": delete_after_seconds,
+                "source": source,
+            })
+    monkeypatch.setattr(chat_tools, "schedule_remote_chat_cleanup_from_response", fake_schedule)
+
+
+def test_send_message_stream_unknown_session_returns_early(monkeypatch):
+    """session 不存在 → 早退，不调 send_message_stream / schedule。"""
+    fake_session = _FakeStreamSession()
+    schedule_calls = []
+    _patch_stream_session_env(monkeypatch, None, captured_schedule=schedule_calls)
+
+    mcp = _make_mcp()
+
+    async def run():
+        return await _call_tool(mcp, "gemini_send_message_stream",
+                                session_id="nope", message="hi")
+
+    result = asyncio.run(run())
+    assert "会话 nope 不存在" in result[0].text
+    assert fake_session.captured_kwargs is None
+    assert schedule_calls == []
+
+
+def test_send_message_stream_invalid_images_short_circuits_before_session(monkeypatch):
+    """image_paths 无效 → 在 get_session 调用前早退。"""
+    def explode(sid):
+        raise AssertionError("get_session should not be called on invalid images")
+    monkeypatch.setattr(chat_tools, "get_session", explode)
+    monkeypatch.setattr(chat_tools, "schedule_remote_chat_cleanup_from_response",
+                        lambda *a, **kw: None)
+
+    mcp = _make_mcp()
+
+    async def run():
+        return await _call_tool(mcp, "gemini_send_message_stream",
+                                session_id="x", message="hi",
+                                image_paths=["/nonexistent/missing.png"])
+
+    result = asyncio.run(run())
+    assert result[0].text.startswith("❌")
+
+
+def test_send_message_stream_accumulates_text_delta(monkeypatch):
+    """多 chunk → full_text 累加 text_delta，返回拼合文本。"""
+    fake_session = _FakeStreamSession(chunks=[
+        _stream_chunk(text_delta="partial "),
+        _stream_chunk(text_delta="reply"),
+    ])
+    _patch_stream_session_env(monkeypatch, {"session": fake_session, "thinking_level": "standard"})
+
+    mcp = _make_mcp()
+
+    async def run():
+        return await _call_tool(mcp, "gemini_send_message_stream",
+                                session_id="s1", message="hi")
+
+    result = asyncio.run(run())
+    assert result[0].text == "partial reply"
+
+
+def test_send_message_stream_empty_stream_still_schedules_cleanup_with_none(monkeypatch):
+    """空流（无 chunk）→ final_response=None → 仍调 cleanup（传 None，文档化当前行为）。
+
+    注意：这与 gemini_chat_stream 不同——chat_stream 用 `if final_response:` 守卫，
+    send_message_stream 无守卫，总是调用。这是一个潜在的不一致，本测试锁定当前行为。
+    """
+    fake_session = _FakeStreamSession(chunks=[])
+    schedule_calls = []
+    _patch_stream_session_env(
+        monkeypatch,
+        {"session": fake_session, "thinking_level": "standard"},
+        captured_schedule=schedule_calls,
+    )
+
+    mcp = _make_mcp()
+
+    async def run():
+        return await _call_tool(mcp, "gemini_send_message_stream",
+                                session_id="s1", message="hi")
+
+    result = asyncio.run(run())
+    assert result[0].text == ""  # full_text 为空
+    assert len(schedule_calls) == 1
+    assert schedule_calls[0]["response"] is None  # 文档化：空流传 None
+    assert schedule_calls[0]["source"] == "gemini_send_message_stream"
+
+
+def test_send_message_stream_schedules_cleanup_with_final_response(monkeypatch):
+    """有 chunk → schedule cleanup 用最后一个 response。"""
+    final_chunk = _stream_chunk(text_delta="end")
+    fake_session = _FakeStreamSession(chunks=[_stream_chunk(text_delta="start"), final_chunk])
+    schedule_calls = []
+    _patch_stream_session_env(
+        monkeypatch,
+        {"session": fake_session, "thinking_level": "standard"},
+        captured_schedule=schedule_calls,
+    )
+
+    mcp = _make_mcp()
+
+    async def run():
+        return await _call_tool(mcp, "gemini_send_message_stream",
+                                session_id="s1", message="hi",
+                                retain_chat=True, delete_after_seconds=60)
+
+    asyncio.run(run())
+    assert schedule_calls[0]["response"] is final_chunk
+    assert schedule_calls[0]["retain_chat"] is True
+    assert schedule_calls[0]["delete_after_seconds"] == 60
+
+
+def test_send_message_stream_temporary_falls_back_to_session(monkeypatch):
+    """temporary=None + session temporary=True → kwargs['temporary']=True。"""
+    fake_session = _FakeStreamSession(chunks=[_stream_chunk(text_delta="x")])
+    _patch_stream_session_env(
+        monkeypatch,
+        {"session": fake_session, "temporary": True, "thinking_level": "standard"},
+    )
+
+    mcp = _make_mcp()
+
+    async def run():
+        return await _call_tool(mcp, "gemini_send_message_stream",
+                                session_id="s1", message="hi")
+
+    asyncio.run(run())
+    assert fake_session.captured_kwargs["temporary"] is True
+
+
+def test_send_message_stream_learning_mode_double_none_omits(monkeypatch):
+    """learning_mode=None + session 无 → kwargs 不含 learning_mode。"""
+    fake_session = _FakeStreamSession(chunks=[_stream_chunk(text_delta="x")])
+    _patch_stream_session_env(
+        monkeypatch,
+        {"session": fake_session, "thinking_level": "standard"},
+    )
+
+    mcp = _make_mcp()
+
+    async def run():
+        return await _call_tool(mcp, "gemini_send_message_stream",
+                                session_id="s1", message="hi")
+
+    asyncio.run(run())
+    assert "learning_mode" not in fake_session.captured_kwargs
