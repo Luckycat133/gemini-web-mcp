@@ -615,6 +615,126 @@ async def account(
         return [TextContent(type="text", text=f"Error: {e}")]
 
 
+async def _scheduled_list(client: Any) -> list[TextContent]:
+    entries, diagnostic = await _fetch_scheduled_registry(client, 500)
+    lines: list[str] = []
+    for item in entries[:20]:
+        label = f" {item.get('schedule_label')}" if item.get("schedule_label") else ""
+        lines.append(f"{item.get('title') or '(untitled)'} ({item.get('id', '')}){label}".strip())
+    if not lines and diagnostic.get("empty_hint"):
+        lines.append("No scheduled actions")
+        lines.append(f"Diagnostic: {diagnostic['empty_hint']}")
+    return [TextContent(type="text", text="\n".join(lines) or "No scheduled actions")]
+
+
+async def _scheduled_get(client: Any, action_id: str) -> list[TextContent]:
+    clean_id = action_id.strip()
+    if not clean_id:
+        return [TextContent(type="text", text="action_id required")]
+    item, diagnostic = await _fetch_scheduled_task_by_id(client, clean_id, 500)
+    if not item:
+        status = "not_found_or_wrong_account"
+        if diagnostic.get("matched_task") is False:
+            status = "not_readable_by_id"
+        return [TextContent(type="text", text=f"Get: {clean_id} ({status})")]
+    enabled = item.get("enabled")
+    enabled_text = "enabled" if enabled is True else "disabled" if enabled is False else "unknown"
+    state = f" state={item.get('task_state')}" if item.get("task_state") else ""
+    title = item.get("title") or "(untitled)"
+    label = f" {item.get('schedule_label')}" if item.get("schedule_label") else ""
+    return [TextContent(type="text", text=f"Get: {title} ({item.get('id', clean_id)}) [{enabled_text}{state}]{label}")]
+
+
+async def _scheduled_create(
+    client: Any,
+    title: str,
+    instructions: str,
+    hour: int,
+    timezone_name: str,
+) -> list[TextContent]:
+    clean_title = title.strip()
+    clean_instructions = instructions.strip()
+    clean_timezone = timezone_name.strip()
+    if not clean_title:
+        return [TextContent(type="text", text="title required")]
+    if not clean_instructions:
+        return [TextContent(type="text", text="instructions required")]
+    if hour < 0 or hour > 23:
+        return [TextContent(type="text", text="hour must be 0..23")]
+    payload = _scheduled_daily_payload(clean_title, clean_instructions, hour, clean_timezone or "Asia/Shanghai", "zh-CN")
+    response = await client._batch_execute(
+        [_RawRPCData("Jba3ib", payload)],
+        source_path="/scheduled",
+        close_on_error=False,
+    )
+    bodies = _extract_rpc_bodies(response.text, "Jba3ib")
+    body = bodies[0] if bodies else []
+    if isinstance(body, list) and body and isinstance(body[0], list):
+        body = body[0]
+    created = _parse_scheduled_action_create_body(body)
+    created_id = created.get("id", "")
+    visible = False
+    readable_by_id = None
+    verification_status = "not_attempted"
+    if created_id:
+        registry_entries, _ = await _fetch_scheduled_registry(client, 200)
+        visible = any(item.get("id") == created_id for item in registry_entries)
+        if visible:
+            verification_status = "visible_in_registry"
+        elif registry_entries:
+            verification_status = "not_visible_in_nonempty_registry"
+        else:
+            verification_status = "registry_empty_unverified"
+        task_by_id, _ = await _fetch_scheduled_task_by_id(client, created_id, 200)
+        readable_by_id = task_by_id is not None
+        if readable_by_id and verification_status == "registry_empty_unverified":
+            verification_status = "readable_by_id_registry_empty"
+        elif readable_by_id and verification_status == "not_visible_in_nonempty_registry":
+            verification_status = "readable_by_id_not_visible_in_registry"
+    suffix = "" if visible else f" ({verification_status}; verify account context)"
+    return [TextContent(type="text", text=f"Created: {created_id or clean_title}{suffix}")]
+
+
+async def _scheduled_delete(client: Any, action_id: str) -> list[TextContent]:
+    clean_id = action_id.strip()
+    if not clean_id:
+        return [TextContent(type="text", text="action_id required")]
+    payload = json.dumps([None, [clean_id]], ensure_ascii=False, separators=(",", ":"))
+    response = await client._batch_execute(
+        [_RawRPCData("Q4Gw3c", payload)],
+        source_path="/scheduled",
+        close_on_error=False,
+    )
+    bodies = _extract_rpc_bodies(response.text, "Q4Gw3c")
+    verification_status = "rpc_accepted" if bodies else "rpc_unconfirmed"
+    readable_by_id = None
+    deleted_by_id = None
+    if bodies:
+        registry_entries, _ = await _fetch_scheduled_registry(client, 200)
+        visible = any(item.get("id") == clean_id for item in registry_entries)
+        if visible:
+            verification_status = "still_visible_in_registry"
+        elif registry_entries:
+            verification_status = "not_visible_in_nonempty_registry"
+        else:
+            verification_status = "registry_empty_unverified"
+        task_after_delete, _ = await _fetch_scheduled_task_by_id(client, clean_id, 200)
+        readable_by_id = task_after_delete is not None
+        deleted_by_id = bool(task_after_delete and task_after_delete.get("task_state_id") == 6)
+        if deleted_by_id:
+            verification_status = "deleted_state_by_id"
+        elif readable_by_id:
+            if verification_status == "registry_empty_unverified":
+                verification_status = "registry_empty_active_or_unknown_by_id"
+            elif verification_status == "not_visible_in_nonempty_registry":
+                verification_status = "not_visible_active_or_unknown_by_id"
+        elif verification_status == "registry_empty_unverified":
+            verification_status = "registry_empty_not_readable_by_id"
+        elif verification_status == "not_visible_in_nonempty_registry":
+            verification_status = "not_visible_not_readable_by_id"
+    return [TextContent(type="text", text=f"Delete requested: {clean_id} ({verification_status})")]
+
+
 @mcp.tool(annotations=DESTRUCTIVE_REMOTE)
 async def scheduled(
     action: Literal["list", "get", "create", "delete"] = "list",
@@ -632,115 +752,13 @@ async def scheduled(
             return [TextContent(type="text", text="scheduled actions unavailable")]
 
         if action == "list":
-            entries, diagnostic = await _fetch_scheduled_registry(client, 500)
-            lines = []
-            for item in entries[:20]:
-                label = f" {item.get('schedule_label')}" if item.get("schedule_label") else ""
-                lines.append(f"{item.get('title') or '(untitled)'} ({item.get('id', '')}){label}".strip())
-            if not lines and diagnostic.get("empty_hint"):
-                lines.append("No scheduled actions")
-                lines.append(f"Diagnostic: {diagnostic['empty_hint']}")
-            return [TextContent(type="text", text="\n".join(lines) or "No scheduled actions")]
-
+            return await _scheduled_list(client)
         if action == "get":
-            clean_id = action_id.strip()
-            if not clean_id:
-                return [TextContent(type="text", text="action_id required")]
-            item, diagnostic = await _fetch_scheduled_task_by_id(client, clean_id, 500)
-            if not item:
-                status = "not_found_or_wrong_account"
-                if diagnostic.get("matched_task") is False:
-                    status = "not_readable_by_id"
-                return [TextContent(type="text", text=f"Get: {clean_id} ({status})")]
-            enabled = item.get("enabled")
-            enabled_text = "enabled" if enabled is True else "disabled" if enabled is False else "unknown"
-            state = f" state={item.get('task_state')}" if item.get("task_state") else ""
-            title = item.get("title") or "(untitled)"
-            label = f" {item.get('schedule_label')}" if item.get("schedule_label") else ""
-            return [TextContent(type="text", text=f"Get: {title} ({item.get('id', clean_id)}) [{enabled_text}{state}]{label}")]
-
+            return await _scheduled_get(client, action_id)
         if action == "create":
-            clean_title = title.strip()
-            clean_instructions = instructions.strip()
-            clean_timezone = timezone_name.strip()
-            if not clean_title:
-                return [TextContent(type="text", text="title required")]
-            if not clean_instructions:
-                return [TextContent(type="text", text="instructions required")]
-            if hour < 0 or hour > 23:
-                return [TextContent(type="text", text="hour must be 0..23")]
-            payload = _scheduled_daily_payload(clean_title, clean_instructions, hour, clean_timezone or "Asia/Shanghai", "zh-CN")
-            response = await client._batch_execute(
-                [_RawRPCData("Jba3ib", payload)],
-                source_path="/scheduled",
-                close_on_error=False,
-            )
-            bodies = _extract_rpc_bodies(response.text, "Jba3ib")
-            body = bodies[0] if bodies else []
-            if isinstance(body, list) and body and isinstance(body[0], list):
-                body = body[0]
-            created = _parse_scheduled_action_create_body(body)
-            created_id = created.get("id", "")
-            visible = False
-            readable_by_id = None
-            verification_status = "not_attempted"
-            if created_id:
-                registry_entries, _ = await _fetch_scheduled_registry(client, 200)
-                visible = any(item.get("id") == created_id for item in registry_entries)
-                if visible:
-                    verification_status = "visible_in_registry"
-                elif registry_entries:
-                    verification_status = "not_visible_in_nonempty_registry"
-                else:
-                    verification_status = "registry_empty_unverified"
-                task_by_id, _ = await _fetch_scheduled_task_by_id(client, created_id, 200)
-                readable_by_id = task_by_id is not None
-                if readable_by_id and verification_status == "registry_empty_unverified":
-                    verification_status = "readable_by_id_registry_empty"
-                elif readable_by_id and verification_status == "not_visible_in_nonempty_registry":
-                    verification_status = "readable_by_id_not_visible_in_registry"
-            suffix = "" if visible else f" ({verification_status}; verify account context)"
-            return [TextContent(type="text", text=f"Created: {created_id or clean_title}{suffix}")]
-
+            return await _scheduled_create(client, title, instructions, hour, timezone_name)
         if action == "delete":
-            clean_id = action_id.strip()
-            if not clean_id:
-                return [TextContent(type="text", text="action_id required")]
-            payload = json.dumps([None, [clean_id]], ensure_ascii=False, separators=(",", ":"))
-            response = await client._batch_execute(
-                [_RawRPCData("Q4Gw3c", payload)],
-                source_path="/scheduled",
-                close_on_error=False,
-            )
-            bodies = _extract_rpc_bodies(response.text, "Q4Gw3c")
-            verification_status = "rpc_accepted" if bodies else "rpc_unconfirmed"
-            readable_by_id = None
-            deleted_by_id = None
-            if bodies:
-                registry_entries, _ = await _fetch_scheduled_registry(client, 200)
-                visible = any(item.get("id") == clean_id for item in registry_entries)
-                if visible:
-                    verification_status = "still_visible_in_registry"
-                elif registry_entries:
-                    verification_status = "not_visible_in_nonempty_registry"
-                else:
-                    verification_status = "registry_empty_unverified"
-                task_after_delete, _ = await _fetch_scheduled_task_by_id(client, clean_id, 200)
-                readable_by_id = task_after_delete is not None
-                deleted_by_id = bool(task_after_delete and task_after_delete.get("task_state_id") == 6)
-                if deleted_by_id:
-                    verification_status = "deleted_state_by_id"
-                elif readable_by_id:
-                    if verification_status == "registry_empty_unverified":
-                        verification_status = "registry_empty_active_or_unknown_by_id"
-                    elif verification_status == "not_visible_in_nonempty_registry":
-                        verification_status = "not_visible_active_or_unknown_by_id"
-                elif verification_status == "registry_empty_unverified":
-                    verification_status = "registry_empty_not_readable_by_id"
-                elif verification_status == "not_visible_in_nonempty_registry":
-                    verification_status = "not_visible_not_readable_by_id"
-            return [TextContent(type="text", text=f"Delete requested: {clean_id} ({verification_status})")]
-
+            return await _scheduled_delete(client, action_id)
         return [TextContent(type="text", text="Invalid action")]
     except Exception as e:
         logger.error(f"Scheduled action error: {e}")
@@ -833,6 +851,83 @@ async def edit(
         return [TextContent(type="text", text=f"Error: {e}")]
 
 
+async def _session_create(
+    model: str,
+    thinking_level: str,
+    learning_mode: Optional[str],
+) -> list[TextContent]:
+    client = get_gemini_client()
+    await initialize_client()
+    await cleanup_due_remote_chats(client)
+    normalized = _normalize_model(model)
+    sess = client.start_chat(model=resolve_model_name(normalized))
+    with _sessions_lock:
+        sid = f"sess_{len(_sessions) + 1}"
+        _sessions[sid] = {
+            "session": sess,
+            "model": normalized,
+            "thinking_level": thinking_level,
+            "learning_mode": learning_mode,
+        }
+    return [TextContent(type="text", text=f"Session created: {sid}")]
+
+
+async def _session_send(
+    session_id: Optional[str],
+    message: Optional[str],
+    thinking_level: str,
+    learning_mode: Optional[str],
+    safe_image_path: Optional[str],
+    model: str,
+) -> list[TextContent]:
+    with _sessions_lock:
+        session_entry = _sessions.get(session_id) if session_id else None
+    if not session_id or not session_entry:
+        return [TextContent(type="text", text=f"Invalid session: {session_id}")]
+
+    client = get_gemini_client()
+    await initialize_client()
+    await cleanup_due_remote_chats(client)
+    _normalize_model(model)  # normalize for side-effect consistency
+
+    request_kwargs = {
+        "prompt": message or "",
+        "files": [safe_image_path] if safe_image_path else None,
+        "thinking_level": session_entry.get("thinking_level", thinking_level),
+    }
+    use_learning_mode = learning_mode or session_entry.get("learning_mode")
+    if use_learning_mode:
+        request_kwargs["learning_mode"] = use_learning_mode
+    response = await session_entry["session"].send_message(**request_kwargs)
+    _schedule_skill_response_cleanup(response, "skill_session:send", session_entry["session"])
+    return _format_response(response)
+
+
+def _session_list() -> list[TextContent]:
+    with _sessions_lock:
+        items = [
+            f"{i}. {sid} ({data['model']})"
+            for i, (sid, data) in enumerate(_sessions.items(), 1)
+        ]
+    if not items:
+        return [TextContent(type="text", text="No active sessions")]
+    return [TextContent(type="text", text="\n".join(items))]
+
+
+def _session_reset(session_id: Optional[str]) -> list[TextContent]:
+    with _sessions_lock:
+        if session_id and session_id in _sessions:
+            del _sessions[session_id]
+            cleared_all = False
+        else:
+            _sessions.clear()
+            cleared_all = True
+    if cleared_all:
+        reset_client()
+        return [TextContent(type="text", text="All sessions reset")]
+    return [TextContent(type="text", text=f"Session deleted: {session_id}")]
+
+
 @mcp.tool(annotations=DESTRUCTIVE_REMOTE)
 async def session(
     action: Literal["create", "send", "list", "reset"],
@@ -849,72 +944,14 @@ async def session(
         if not valid_image:
             return [TextContent(type="text", text=f"Error: {image_error}")]
 
-        client = get_gemini_client()
-        await initialize_client()
-        await cleanup_due_remote_chats(client)
-
-        model = _normalize_model(model)
-
         if action == "create":
-            sess = client.start_chat(model=resolve_model_name(model))
-            with _sessions_lock:
-                sid = f"sess_{len(_sessions) + 1}"
-                _sessions[sid] = {
-                    "session": sess,
-                    "model": model,
-                    "thinking_level": thinking_level,
-                    "learning_mode": learning_mode,
-                }
-            return [TextContent(type="text", text=f"Session created: {sid}")]
-
-        elif action == "send":
-            with _sessions_lock:
-                session_entry = _sessions.get(session_id) if session_id else None
-            if not session_id or not session_entry:
-                return [
-                    TextContent(type="text", text=f"Invalid session: {session_id}")
-                ]
-
-            request_kwargs = {
-                "prompt": message or "",
-                "files": [safe_image_path] if safe_image_path else None,
-                "thinking_level": session_entry.get(
-                    "thinking_level",
-                    thinking_level,
-                ),
-            }
-            use_learning_mode = learning_mode or session_entry.get("learning_mode")
-            if use_learning_mode:
-                request_kwargs["learning_mode"] = use_learning_mode
-            response = await session_entry["session"].send_message(**request_kwargs)
-            _schedule_skill_response_cleanup(response, "skill_session:send", session_entry["session"])
-            return _format_response(response)
-
-        elif action == "list":
-            with _sessions_lock:
-                items = [
-                    f"{i}. {sid} ({data['model']})"
-                    for i, (sid, data) in enumerate(_sessions.items(), 1)
-                ]
-            if not items:
-                return [TextContent(type="text", text="No active sessions")]
-            return [TextContent(type="text", text="\n".join(items))]
-
-        elif action == "reset":
-            with _sessions_lock:
-                if session_id and session_id in _sessions:
-                    del _sessions[session_id]
-                    cleared_all = False
-                else:
-                    _sessions.clear()
-                    cleared_all = True
-            if cleared_all:
-                reset_client()
-                return [TextContent(type="text", text="All sessions reset")]
-            return [
-                TextContent(type="text", text=f"Session deleted: {session_id}")
-            ]
-
+            return await _session_create(model, thinking_level, learning_mode)
+        if action == "send":
+            return await _session_send(session_id, message, thinking_level, learning_mode, safe_image_path, model)
+        if action == "list":
+            return _session_list()
+        if action == "reset":
+            return _session_reset(session_id)
         return [TextContent(type="text", text="Invalid action")]
 
     except Exception as e:
