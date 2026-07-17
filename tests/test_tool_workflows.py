@@ -1393,6 +1393,99 @@ def test_skill_server_static_account_actions_do_not_require_auth(monkeypatch):
     asyncio.run(run())
 
 
+def test_skill_server_session_lifecycle_and_dispatch(monkeypatch):
+    """Cover the session god-function split: create/send/list/reset + invalid action."""
+    import src.skill_server as skill_server
+
+    # Reset shared session state to isolate the test.
+    with skill_server._sessions_lock:
+        skill_server._sessions.clear()
+
+    sent_messages: list[str] = []
+    reset_calls: list[bool] = []
+
+    class FakeSession:
+        async def send_message(self, prompt, files=None, thinking_level=None, learning_mode=None):
+            sent_messages.append(prompt)
+            return SimpleNamespace(text=f"reply:{prompt}", images=[], videos=[], media=[], metadata=[])
+
+    class FakeClient:
+        def start_chat(self, model):
+            return FakeSession()
+
+    def fake_reset_client():
+        reset_calls.append(True)
+
+    async def noop_initialize():
+        return None
+
+    async def noop_cleanup(client):
+        return None
+
+    monkeypatch.setattr(skill_server, "get_gemini_client", lambda: FakeClient())
+    monkeypatch.setattr(skill_server, "initialize_client", noop_initialize)
+    monkeypatch.setattr(skill_server, "cleanup_due_remote_chats", noop_cleanup)
+    monkeypatch.setattr(skill_server, "reset_client", fake_reset_client)
+
+    async def run():
+        # list with no sessions -> empty hint
+        empty_list = await skill_server.session("list")
+        assert "No active sessions" in empty_list[0].text
+
+        # create
+        created = await skill_server.session("create", model="flash")
+        assert "Session created: sess_1" in created[0].text
+
+        # list with one session
+        one_list = await skill_server.session("list")
+        assert "sess_1" in one_list[0].text
+        assert "flash" in one_list[0].text
+
+        # send to invalid session
+        invalid = await skill_server.session("send", session_id="nope", message="hi")
+        assert "Invalid session: nope" in invalid[0].text
+
+        # send to valid session
+        sent = await skill_server.session("send", session_id="sess_1", message="hello")
+        assert "reply:hello" in sent[0].text
+        assert sent_messages == ["hello"]
+
+        # reset a single session (no client reset)
+        deleted = await skill_server.session("reset", session_id="sess_1")
+        assert "Session deleted: sess_1" in deleted[0].text
+        assert reset_calls == []  # single-session reset must not call reset_client
+
+        # reset all (calls reset_client)
+        await skill_server.session("create", model="pro")
+        reset_all = await skill_server.session("reset")
+        assert "All sessions reset" in reset_all[0].text
+        assert reset_calls == [True]
+
+        # invalid action fallback
+        invalid_action = await skill_server.session("bogus")
+        assert "Invalid action" in invalid_action[0].text
+
+    asyncio.run(run())
+    with skill_server._sessions_lock:
+        skill_server._sessions.clear()
+
+
+def test_skill_server_session_invalid_image_path_short_circuits(monkeypatch):
+    """Image validation must fail fast before any client initialization."""
+    import src.skill_server as skill_server
+
+    def fail_get_client():
+        raise AssertionError("invalid image must not initialize Gemini client")
+
+    monkeypatch.setattr(skill_server, "get_gemini_client", fail_get_client)
+
+    async def run():
+        result = await skill_server.session("create", image_path="/nonexistent/img.png")
+        assert "Error:" in result[0].text
+
+    asyncio.run(run())
+
+
 def test_model_listing_prefers_runtime_registry(monkeypatch):
     import src.tools.manage as manage_tools
 

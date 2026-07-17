@@ -38,6 +38,131 @@ _SAFE_FILENAME_RE = re.compile(r"[^A-Za-z0-9._-]+")
 
 def register_research_tools(mcp: FastMCP):
 
+    async def _run_native_deep_research(
+        client: Any,
+        query: str,
+        model: str,
+        model_name: str,
+        research_model: Any,
+        thinking_level: str,
+        model_note: str,
+        timeout_seconds: int,
+        poll_interval: int,
+        retain_chat: bool,
+        delete_after_seconds: int | None,
+    ) -> list[TextContent]:
+        """Run Deep Research via the client's native plan/start/wait API."""
+        chat = _start_fresh_research_chat(client, research_model)
+        scope = _null_scope()
+        if not _is_default_deep_research_transport(research_model):
+            thinking_scope = getattr(client, "thinking_scope", None)
+            scope = (
+                thinking_scope(model_name, thinking_level)
+                if thinking_scope
+                else _null_scope()
+            )
+        with scope:
+            plan = await asyncio.wait_for(
+                _create_deep_research_plan(
+                    client,
+                    _format_research_query(query, model, model_note),
+                    chat=chat,
+                    model=research_model,
+                ),
+                timeout=_phase_timeout(timeout_seconds),
+            )
+            start_output = await _start_deep_research_with_recovery(
+                client,
+                plan,
+                chat,
+                timeout=min(_phase_timeout(timeout_seconds), 120),
+            )
+        if getattr(plan, "research_id", None):
+            result = await asyncio.wait_for(
+                client.wait_for_deep_research(
+                    plan,
+                    poll_interval=poll_interval,
+                    timeout=timeout_seconds,
+                ),
+                timeout=timeout_seconds + poll_interval + 10,
+            )
+        else:
+            result = await _wait_for_deep_research_by_chat(
+                client=client,
+                plan=plan,
+                chat=chat,
+                start_output=start_output,
+                poll_interval=poll_interval,
+                timeout=timeout_seconds,
+            )
+        result.start_output = start_output
+        schedule_remote_chat_cleanup(
+            getattr(chat, "cid", None) or getattr(plan, "cid", None),
+            retain_chat=retain_chat,
+            delete_after_seconds=delete_after_seconds,
+            source="gemini_deep_research",
+        )
+        return [_format_deep_research_result(query, result, model, research_model, model_note)]
+
+    async def _run_fallback_deep_research(
+        client: Any,
+        query: str,
+        model: str,
+        model_name: str,
+        thinking_level: str,
+        model_note: str,
+        timeout_seconds: int,
+        retain_chat: bool,
+        delete_after_seconds: int | None,
+    ) -> list[TextContent]:
+        """Fallback when the client lacks the native plan/start/wait API."""
+        response = await asyncio.wait_for(
+            client.generate_content(
+                _format_research_query(query, model, model_note),
+                model=model_name,
+                deep_research=True,
+                thinking_level=thinking_level,
+                timeout=timeout_seconds,
+            ),
+            timeout=timeout_seconds,
+        )
+        schedule_remote_chat_cleanup_from_response(
+            response,
+            retain_chat=retain_chat,
+            delete_after_seconds=delete_after_seconds,
+            source="gemini_deep_research:fallback",
+        )
+        return [
+            TextContent(
+                type="text",
+                text=(
+                    f"# 📚 Deep Research 计划: {query}\n\n"
+                    f"- 请求模型: {model}\n"
+                    f"- 实际研究传输: {model_note}\n\n"
+                    f"{response.text}\n\n"
+                    "⚠️ 当前 gemini-webapi 客户端没有暴露完整研究轮询 API，"
+                    "这里只能返回研究计划。"
+                ),
+            )
+        ]
+
+    def _deep_research_timeout_error(timeout_seconds: int) -> TextContent:
+        return TextContent(
+            type="text",
+            text=f"❌ Deep Research 超时（{timeout_seconds}秒）。\n\n"
+            "请确认：\n1. 您的账户是否有 AI Plus 订阅？\n"
+            "2. 网络和认证状态是否正常？\n"
+            "3. 研究主题是否适合在较短超时时间内完成？"
+        )
+
+    def _deep_research_generic_error(e: Exception) -> TextContent:
+        return TextContent(
+            type="text",
+            text=f"❌ Deep Research 失败: {str(e)}\n\n"
+            "请确认：\n1. 您的账户是否有 AI Plus 订阅？\n"
+            "2. 该功能在您所在的区域是否可用？"
+        )
+
     @mcp.tool(annotations=MUTATES_REMOTE)
     async def gemini_deep_research(
         query: str,
@@ -50,15 +175,15 @@ def register_research_tools(mcp: FastMCP):
     ) -> list[TextContent]:
         """
         启动 Deep Research 深度研究。
-        
+
         需要 AI Plus 订阅！
-        
+
         参数:
         - query: 研究主题或问题
         - model: 模型选择 (thinking/pro)
         - timeout_seconds: 超时时间（默认10分钟）
         - poll_interval_seconds: 研究状态轮询间隔（默认10秒）
-        
+
         工作流程:
         1. 创建研究计划
         2. 多轮搜索和分析
@@ -72,115 +197,33 @@ def register_research_tools(mcp: FastMCP):
 
         try:
             logger.info(f"正在启动 Deep Research: {query[:50]}...")
-
             poll_interval = max(3, poll_interval_seconds)
-            if all(
+
+            has_native_api = all(
                 hasattr(client, attr)
                 for attr in (
                     "create_deep_research_plan",
                     "start_deep_research",
                     "wait_for_deep_research",
                 )
-            ):
-                chat = _start_fresh_research_chat(client, research_model)
-                scope = _null_scope()
-                if not _is_default_deep_research_transport(research_model):
-                    thinking_scope = getattr(client, "thinking_scope", None)
-                    scope = (
-                        thinking_scope(model_name, thinking_level)
-                        if thinking_scope
-                        else _null_scope()
-                    )
-                with scope:
-                    plan = await asyncio.wait_for(
-                        _create_deep_research_plan(
-                            client,
-                            _format_research_query(query, model, model_note),
-                            chat=chat,
-                            model=research_model,
-                        ),
-                        timeout=_phase_timeout(timeout_seconds),
-                    )
-                    start_output = await _start_deep_research_with_recovery(
-                        client,
-                        plan,
-                        chat,
-                        timeout=min(_phase_timeout(timeout_seconds), 120),
-                    )
-                if getattr(plan, "research_id", None):
-                    result = await asyncio.wait_for(
-                        client.wait_for_deep_research(
-                            plan,
-                            poll_interval=poll_interval,
-                            timeout=timeout_seconds,
-                        ),
-                        timeout=timeout_seconds + poll_interval + 10,
-                    )
-                else:
-                    result = await _wait_for_deep_research_by_chat(
-                        client=client,
-                        plan=plan,
-                        chat=chat,
-                        start_output=start_output,
-                        poll_interval=poll_interval,
-                        timeout=timeout_seconds,
-                    )
-                result.start_output = start_output
-                schedule_remote_chat_cleanup(
-                    getattr(chat, "cid", None) or getattr(plan, "cid", None),
-                    retain_chat=retain_chat,
-                    delete_after_seconds=delete_after_seconds,
-                    source="gemini_deep_research",
-                )
-                return [_format_deep_research_result(query, result, model, research_model, model_note)]
-
-            response = await asyncio.wait_for(
-                client.generate_content(
-                    _format_research_query(query, model, model_note),
-                    model=model_name,
-                    deep_research=True,
-                    thinking_level=thinking_level,
-                    timeout=timeout_seconds,
-                ),
-                timeout=timeout_seconds,
             )
-            schedule_remote_chat_cleanup_from_response(
-                response,
-                retain_chat=retain_chat,
-                delete_after_seconds=delete_after_seconds,
-                source="gemini_deep_research:fallback",
-            )
-            return [
-                TextContent(
-                    type="text",
-                    text=(
-                        f"# 📚 Deep Research 计划: {query}\n\n"
-                        f"- 请求模型: {model}\n"
-                        f"- 实际研究传输: {model_note}\n\n"
-                        f"{response.text}\n\n"
-                        "⚠️ 当前 gemini-webapi 客户端没有暴露完整研究轮询 API，"
-                        "这里只能返回研究计划。"
-                    ),
+            if has_native_api:
+                return await _run_native_deep_research(
+                    client, query, model, model_name, research_model,
+                    thinking_level, model_note, timeout_seconds, poll_interval,
+                    retain_chat, delete_after_seconds,
                 )
-            ]
+            return await _run_fallback_deep_research(
+                client, query, model, model_name, thinking_level,
+                model_note, timeout_seconds, retain_chat, delete_after_seconds,
+            )
 
         except asyncio.TimeoutError:
             logger.error("Deep Research 失败: request timed out")
-            return [TextContent(
-                type="text",
-                text=f"❌ Deep Research 超时（{timeout_seconds}秒）。\n\n"
-                "请确认：\n1. 您的账户是否有 AI Plus 订阅？\n"
-                "2. 网络和认证状态是否正常？\n"
-                "3. 研究主题是否适合在较短超时时间内完成？"
-            )]
+            return [_deep_research_timeout_error(timeout_seconds)]
         except Exception as e:
             logger.error(f"Deep Research 失败: {e}")
-            return [TextContent(
-                type="text",
-                text=f"❌ Deep Research 失败: {str(e)}\n\n"
-                "请确认：\n1. 您的账户是否有 AI Plus 订阅？\n"
-                "2. 该功能在您所在的区域是否可用？"
-            )]
+            return [_deep_research_generic_error(e)]
 
     @mcp.tool(annotations=READS_PRIVATE_REMOTE)
     async def gemini_list_research_report_actions(
