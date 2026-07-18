@@ -2,7 +2,7 @@
 name = "gemini-mcp-server"
 version = "2.2.0"
 description = "MCP server for Gemini Web API reverse engineering"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 readme = "README.md"
 license = "AGPL-3.0-only"
 authors = [
@@ -11,8 +11,8 @@ authors = [
 classifiers = [
     "Development Status :: 4 - Beta",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
 ]
 dependencies = [
     "gemini-webapi>=2.0.0",
@@ -39,13 +39,13 @@ include = ["src*"]
 
 [tool.ruff]
 line-length = 120
-target-version = "py310"
+target-version = "py311"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 
 [tool.mypy]
-python_version = "3.10"
+python_version = "3.11"
 warn_return_any = true
 warn_unused_configs = true
 
