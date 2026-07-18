@@ -250,7 +250,7 @@ def test_get_cookie_from_browser_failure(monkeypatch):
     result = asyncio.run(run())
     assert "❌" in result[0].text
     assert "获取失败" in result[0].text
-    assert "gemini.google.com" in result[0].text
+    assert "Gemini 网页版" in result[0].text
 
 
 def test_get_cookie_from_browser_handles_exception(monkeypatch):
