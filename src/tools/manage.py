@@ -2,6 +2,7 @@
 会话和 Gem 管理 MCP 工具
 """
 
+import copy
 import json
 import os
 import shutil
@@ -9,7 +10,7 @@ import sys
 from datetime import datetime, timezone
 from mcp.server.fastmcp import FastMCP
 from mcp.types import TextContent
-from typing import Any, Literal, Optional
+from typing import Any, Callable, Literal, Optional, TypeVar
 import logging
 
 from ..client_wrapper import (
@@ -18,7 +19,6 @@ from ..client_wrapper import (
     initialize_client,
     list_browser_cookie_profiles,
 )
-from ..constants import MODEL_CONFIG
 from .annotations import (
     DESTRUCTIVE_REMOTE,
     MUTATES_REMOTE,
@@ -26,6 +26,22 @@ from .annotations import (
     READ_ONLY_REMOTE,
     READS_PRIVATE_REMOTE,
 )
+from .manifest_data import (
+    TOOL_MANIFEST,
+    WEB_FEATURE_PROBES,
+    WEB_UI_CAPABILITIES,
+)
+
+# Hoist optional gemini_webapi utils to module level (used in hot RPC parsing paths).
+try:
+    from gemini_webapi.utils import extract_json_from_response as _extract_json_from_response, get_nested_value as _get_nested_value
+    _GEMINI_WEBAPI_UTILS_AVAILABLE = True
+except ImportError:
+    _GEMINI_WEBAPI_UTILS_AVAILABLE = False
+
+# TypeVar for the @_tool decorator: preserves the wrapped function's declared
+# signature so in-process callers retain the annotated return type.
+_F = TypeVar("_F", bound=Callable[..., Any])
 
 logger = logging.getLogger(__name__)
 
@@ -102,260 +118,6 @@ TOOL_GROUP_MODULES = {
 }
 
 
-WEB_UI_CAPABILITIES = {
-    "observed_at": "2026-06-18",
-    "account_tier": "Gemini Web Pro",
-    "locale": "zh-CN",
-    "models": [
-        {
-            "alias": "flash-lite",
-            "display_name": "3.1 Flash-Lite",
-            "description": "极速回答",
-            "thinking_mode_id": 6,
-            "advanced_only": False,
-        },
-        {
-            "alias": "flash",
-            "display_name": "3.5 Flash",
-            "description": "全方位帮助",
-            "thinking_mode_id": 1,
-            "advanced_only": False,
-        },
-        {
-            "alias": "pro",
-            "display_name": "3.1 Pro",
-            "description": "高等数学与代码",
-            "thinking_mode_id": 3,
-            "advanced_only": True,
-        },
-    ],
-    "thinking_levels": [
-        {
-            "id": "standard",
-            "display_name": "标准",
-            "description": "最适合回答大多数问题",
-            "level_id": 1,
-        },
-        {
-            "id": "extended",
-            "display_name": "扩展",
-            "description": "擅长解决复杂问题",
-            "level_id": 2,
-        },
-    ],
-    "tool_menu": [
-        {"name": "upload_file", "label": "上传文件", "coverage": "gemini_upload_file"},
-        {"name": "google_drive", "label": "从云端硬盘添加", "coverage": "ui_only"},
-        {"name": "import_code", "label": "导入代码", "coverage": "gemini_upload_file"},
-        {"name": "create_image", "label": "图片", "coverage": "gemini_generate_media"},
-        {"name": "create_video", "label": "视频", "coverage": "gemini_generate_media"},
-        {"name": "canvas", "label": "Canvas", "coverage": "library_capability"},
-        {"name": "deep_research", "label": "Deep Research", "coverage": "gemini_deep_research"},
-        {"name": "create_music", "label": "音乐", "coverage": "gemini_generate_music"},
-        {"name": "guided_learning", "label": "学习辅导", "coverage": "library_capability"},
-        {"name": "personalization_labs", "label": "个性化 / Labs", "coverage": "probe_only"},
-    ],
-    "settings_menu": [
-        {"name": "activity", "label": "活动记录", "coverage": "external_google_activity"},
-        {"name": "personalization", "label": "个性化智能服务", "coverage": "probe_only"},
-        {"name": "memory_import", "label": "将记忆导入 Gemini", "coverage": "probe_only"},
-        {"name": "usage_limits", "label": "用量限额", "coverage": "gemini_get_usage_limits"},
-        {
-            "name": "scheduled_actions",
-            "label": "定时操作",
-            "coverage": "gemini_list_scheduled_actions / gemini_get_scheduled_action / gemini_create_scheduled_action / gemini_delete_scheduled_action",
-        },
-        {"name": "gems", "label": "Gem", "coverage": "gemini_manage_gems"},
-        {"name": "public_links", "label": "你的公开链接", "coverage": "gemini_list_public_links"},
-        {"name": "theme", "label": "主题", "coverage": "ui_only"},
-        {"name": "subscription", "label": "管理订阅", "coverage": "external_google_one"},
-        {"name": "ultra_upsell", "label": "升级到 Google AI Ultra", "coverage": "external_google_one"},
-        {"name": "notebooklm", "label": "NotebookLM", "coverage": "external_notebooklm"},
-        {"name": "feedback", "label": "发送反馈", "coverage": "ui_only"},
-        {"name": "help", "label": "帮助", "coverage": "ui_only"},
-        {"name": "location", "label": "位置", "coverage": "ui_only"},
-    ],
-    "notes": [
-        "Runtime model registry is still preferred when available.",
-        "Drive picker, link mutation, settings mutation, and memory import mutation are not automated without a safer confirmed RPC contract.",
-        "Scheduled actions support daily create and explicit delete through observed Web RPCs; edit/toggle remain disabled until stable RPC contracts are confirmed.",
-        "Native Gemini Web Notebooks are covered for list, recent-chat list, and chat move operations; this is distinct from external NotebookLM.",
-        "Probe tools intentionally omit raw response bodies and private account content.",
-    ],
-}
-
-
-WEB_FEATURE_PROBES = [
-    {
-        "surface": "remy",
-        "name": "conversation_history_recent",
-        "rpcid": "MaZiqc",
-        "payload": "[13,null,[false,null,true]]",
-        "source_path": "/app",
-        "observed": "2026-07-04 Pro UI / Conversation history recent bucket",
-    },
-    {
-        "surface": "history",
-        "name": "conversation_history_pinned",
-        "rpcid": "MaZiqc",
-        "payload": "[13,null,[true,null,true]]",
-        "source_path": "/app",
-        "observed": "2026-07-04 Pro UI / Conversation history pinned bucket",
-    },
-    {
-        "surface": "history",
-        "name": "remy_goals",
-        "rpcid": "GS7W1",
-        "payload": "[13]",
-        "source_path": "/app",
-        "observed": "2026-07-04 Pro UI / Remy goals with conversation references",
-    },
-    {
-        "surface": "library",
-        "name": "library_index",
-        "rpcid": "sJBwce",
-        "payload": "[[1,2]]",
-        "source_path": "/app/library",
-        "observed": "2026-06-18 Pro UI / Library",
-    },
-    {
-        "surface": "library",
-        "name": "library_assets",
-        "rpcid": "VxUbXb",
-        "payload": "[]",
-        "source_path": "/app/library",
-        "observed": "2026-06-18 Pro UI / Library",
-    },
-    {
-        "surface": "library",
-        "name": "library_locale_capabilities",
-        "rpcid": "cYRIkd",
-        "payload": '["zh-CN"]',
-        "source_path": "/app/library",
-        "observed": "2026-06-18 Pro UI / Library",
-    },
-    {
-        "surface": "notebooks",
-        "name": "native_notebooks_list",
-        "rpcid": "CNgdBe",
-        "payload": '[2,["zh-CN"],false,null,[2]]',
-        "source_path": "/notebooks/view",
-        "observed": "2026-07-04 Pro UI / Native Gemini Notebooks",
-    },
-    {
-        "surface": "sharing",
-        "name": "public_links_index",
-        "rpcid": "K4WWud",
-        "payload": '[[1],["zh-CN"]]',
-        "source_path": "/app/sharing",
-        "observed": "2026-06-18 Pro UI / Your public links",
-    },
-    {
-        "surface": "sharing",
-        "name": "sharing_state",
-        "rpcid": "GPRiHf",
-        "payload": "[]",
-        "source_path": "/app/sharing",
-        "observed": "2026-06-18 Pro UI / Your public links",
-    },
-    {
-        "surface": "sharing",
-        "name": "sharing_preferences",
-        "rpcid": "maGuAc",
-        "payload": "[1]",
-        "source_path": "/app/sharing",
-        "observed": "2026-06-18 Pro UI / Your public links",
-    },
-    {
-        "surface": "usage",
-        "name": "usage_quota",
-        "rpcid": "qpEbW",
-        "payload": "[[[1,11],[2,11],[6,11]]]",
-        "source_path": "/app/usage",
-        "observed": "2026-06-18 Pro UI / Usage limits",
-    },
-    {
-        "surface": "usage",
-        "name": "usage_model_state",
-        "rpcid": "qpEbW",
-        "payload": "[[[1,4],[6,6],[1,15]]]",
-        "source_path": "/app/usage",
-        "observed": "2026-06-18 Pro UI / Usage limits",
-    },
-    {
-        "surface": "personalization",
-        "name": "personalization_state",
-        "rpcid": "GPRiHf",
-        "payload": "[]",
-        "source_path": "/app/personalization-settings",
-        "observed": "2026-06-18 Pro UI / Personalization settings",
-    },
-    {
-        "surface": "personalization",
-        "name": "personalization_preferences",
-        "rpcid": "maGuAc",
-        "payload": "[1]",
-        "source_path": "/app/personalization-settings",
-        "observed": "2026-06-18 Pro UI / Personalization settings",
-    },
-    {
-        "surface": "personalization",
-        "name": "personalization_labels",
-        "rpcid": "Te6DCf",
-        "payload": '[["zh-CN"],[1]]',
-        "source_path": "/app/personalization-settings",
-        "observed": "2026-06-18 Pro UI / Personalization settings",
-    },
-    {
-        "surface": "import",
-        "name": "memory_import_state",
-        "rpcid": "Te6DCf",
-        "payload": '[["zh-CN"],[1]]',
-        "source_path": "/app/import",
-        "observed": "2026-06-18 Pro UI / Memory import",
-    },
-    {
-        "surface": "scheduled",
-        "name": "scheduled_actions_registry",
-        "rpcid": "XPSWpd",
-        "payload": "[]",
-        "source_path": "/scheduled",
-        "observed": "2026-06-19 Pro UI / Scheduled actions registry",
-    },
-    {
-        "surface": "scheduled",
-        "name": "scheduled_actions_state",
-        "rpcid": "otAQ7b",
-        "payload": "[]",
-        "source_path": "/scheduled",
-        "observed": "2026-06-18 Pro UI / Scheduled actions",
-    },
-    {
-        "surface": "scheduled",
-        "name": "scheduled_actions_active",
-        "rpcid": "MaZiqc",
-        "payload": "[13,null,[1,null,1]]",
-        "source_path": "/scheduled",
-        "observed": "2026-06-18 Pro UI / Scheduled actions",
-    },
-    {
-        "surface": "scheduled",
-        "name": "scheduled_actions_inactive",
-        "rpcid": "MaZiqc",
-        "payload": "[13,null,[0,null,1]]",
-        "source_path": "/scheduled",
-        "observed": "2026-06-18 Pro UI / Scheduled actions",
-    },
-    {
-        "surface": "tool_modes",
-        "name": "tool_mode_status",
-        "rpcid": "MyzX6c",
-        "payload": "[]",
-        "source_path": "/app",
-        "observed": "2026-06-19 Pro UI / Canvas and Guided Learning tool mode toggles",
-    },
-]
-
 
 class _RawRPCData:
     """Small compatible RPC payload for observed Gemini Web RPC ids not yet in gemini-webapi."""
@@ -424,7 +186,7 @@ def _truncate(text: object, max_chars: int) -> str:
 def _clamp_int(value: object, default: int, minimum: int, maximum: int) -> int:
     """Normalize user-provided numeric tool arguments into a safe inclusive range."""
     try:
-        number = int(value)
+        number: int = int(value)  # type: ignore[call-overload]
     except (TypeError, ValueError):
         number = default
     return min(max(number, minimum), maximum)
@@ -444,6 +206,11 @@ def _paginate_items(items: list[Any], limit: int, offset: int, max_limit: int = 
         "has_more": has_more,
         "next_offset": next_offset if has_more else None,
     }
+
+
+def _json_response(payload: Any) -> list[TextContent]:
+    """Serialize payload as a single JSON TextContent (for response_format='json')."""
+    return [TextContent(type="text", text=json.dumps(payload, ensure_ascii=False, indent=2))]
 
 
 def _get_attr(item: object, name: str, default: object = "") -> object:
@@ -475,9 +242,11 @@ def _sanitize_account_status(status: object) -> dict:
     if not isinstance(status, dict):
         return {"status": str(status)}
 
-    summary = status.get("summary") if isinstance(status.get("summary"), dict) else {}
-    rpc = status.get("rpc") if isinstance(status.get("rpc"), dict) else {}
-    rpc_status = {}
+    summary_raw = status.get("summary")
+    summary = summary_raw if isinstance(summary_raw, dict) else {}
+    rpc_raw = status.get("rpc")
+    rpc = rpc_raw if isinstance(rpc_raw, dict) else {}
+    rpc_status: dict[str, dict[str, Any]] = {}
     for name, payload in rpc.items():
         if not isinstance(payload, dict):
             rpc_status[name] = {"ok": bool(payload)}
@@ -507,8 +276,9 @@ async def _read_chat_turns(client: object, chat_id: str, limit: int, max_chars: 
     if not hasattr(client, "read_chat"):
         raise RuntimeError("当前 gemini-webapi 不支持 read_chat。")
     history = await client.read_chat(chat_id, limit=limit)
-    turns = _get_attr(history, "turns", []) if history else []
-    return history, [_turn_to_dict(turn, max_chars) for turn in (turns or [])[:limit]]
+    turns_raw = _get_attr(history, "turns", []) if history else []
+    turns: list[Any] = turns_raw if isinstance(turns_raw, list) else []
+    return history, [_turn_to_dict(turn, max_chars) for turn in turns[:limit]]
 
 
 def _turn_matches_query(turn: dict[str, str], query: str) -> bool:
@@ -539,7 +309,8 @@ def _chat_export_payload(
 
 
 def _format_chat_export_markdown(payload: dict[str, Any]) -> str:
-    metadata = payload.get("metadata") if isinstance(payload.get("metadata"), dict) else {}
+    metadata_raw = payload.get("metadata")
+    metadata = metadata_raw if isinstance(metadata_raw, dict) else {}
     title = metadata.get("title") or payload["chat_id"]
     lines = [
         f"## Gemini Chat Export: {title}",
@@ -554,27 +325,26 @@ def _format_chat_export_markdown(payload: dict[str, Any]) -> str:
 
 
 def _summarize_probe_response(response_text: str, rpcid: str) -> dict[str, Any]:
-    try:
-        from gemini_webapi.utils import extract_json_from_response, get_nested_value
-    except ImportError:
+    if not _GEMINI_WEBAPI_UTILS_AVAILABLE:
         return {"parsed": False, "response_parts": 0}
 
     try:
-        parts = extract_json_from_response(response_text)
-    except Exception:
+        parts = _extract_json_from_response(response_text)
+    except Exception as e:
+        logger.debug("Probe response parse failed for rpcid=%s: %s", rpcid, e)
         return {"parsed": False, "response_parts": 0}
 
     body_count = 0
     reject_code = None
     for part in parts:
-        if get_nested_value(part, [0]) != "wrb.fr":
+        if _get_nested_value(part, [0]) != "wrb.fr":
             continue
-        if get_nested_value(part, [1]) != rpcid:
+        if _get_nested_value(part, [1]) != rpcid:
             continue
-        code = get_nested_value(part, [5, 0])
+        code = _get_nested_value(part, [5, 0])
         if isinstance(code, int):
             reject_code = code
-        body = get_nested_value(part, [2])
+        body = _get_nested_value(part, [2])
         if body is not None:
             body_count += 1
 
@@ -602,15 +372,13 @@ async def _execute_observed_rpc(client, probe: dict[str, str]):
 
 
 def _extract_rpc_bodies(response_text: str, rpcid: str) -> list[Any]:
-    from gemini_webapi.utils import extract_json_from_response, get_nested_value
-
     bodies = []
-    for part in extract_json_from_response(response_text):
-        if get_nested_value(part, [0]) != "wrb.fr":
+    for part in _extract_json_from_response(response_text):
+        if _get_nested_value(part, [0]) != "wrb.fr":
             continue
-        if get_nested_value(part, [1]) != rpcid:
+        if _get_nested_value(part, [1]) != rpcid:
             continue
-        body = get_nested_value(part, [2])
+        body = _get_nested_value(part, [2])
         if isinstance(body, str):
             try:
                 bodies.append(json.loads(body))
@@ -972,19 +740,17 @@ async def _fetch_conversation_metadata_sources(
 
 def _merge_conversation_source_items(source_blocks: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], dict[str, list[str]]]:
     by_id: dict[str, dict[str, Any]] = {}
-    sources_by_id: dict[str, list[str]] = {}
+    sources_by_id: dict[str, set[str]] = {}
     for block in source_blocks:
         source_name = str(block.get("name") or block.get("notebook_title") or block.get("source") or "unknown")
         for item in block.get("items", []):
             item_id = item.get("id")
             if not item_id:
                 continue
-            sources_by_id.setdefault(item_id, [])
-            if source_name not in sources_by_id[item_id]:
-                sources_by_id[item_id].append(source_name)
+            sources_set = sources_by_id.setdefault(item_id, set())
+            sources_set.add(source_name)
             if item_id not in by_id:
                 merged_item = dict(item)
-                merged_item["sources"] = sources_by_id[item_id]
                 by_id[item_id] = merged_item
                 continue
 
@@ -996,13 +762,19 @@ def _merge_conversation_source_items(source_blocks: list[dict[str, Any]]) -> tup
             if not existing.get("time") and item.get("time"):
                 existing["time"] = item["time"]
                 existing["timestamp"] = item.get("timestamp")
-            existing["sources"] = sources_by_id[item_id]
+
+    # Materialize ordered source lists for the public output shape.
+    sources_output: dict[str, list[str]] = {
+        item_id: sorted(sources) for item_id, sources in sources_by_id.items()
+    }
+    for item_id, merged in by_id.items():
+        merged["sources"] = sources_output[item_id]
 
     return sorted(
         by_id.values(),
         key=lambda item: (float(item.get("timestamp") or 0), str(item.get("id") or "")),
         reverse=True,
-    ), sources_by_id
+    ), sources_output
 
 
 def _parse_remy_goal_entry(entry: Any) -> dict[str, Any]:
@@ -1200,7 +972,7 @@ def _find_notebook(
 
 
 def _move_chat_to_notebook_payload(chat_id: str, notebook_id: str, project_type: int = 2) -> str:
-    conversation = [None] * 14
+    conversation: list[Any] = [None] * 14
     conversation[0] = chat_id
     conversation[7] = notebook_id
     conversation[13] = [project_type]
@@ -1260,8 +1032,8 @@ async def _fetch_recent_conversation_metadata(
         max_pages_per_source=100,
     )
     combined, _sources_by_id = _merge_conversation_source_items(sources)
-    pinned_diag = next((source["diagnostic"] for source in sources if source["name"] == "ui_pinned"), {})
-    recent_diag = next((source["diagnostic"] for source in sources if source["name"] == "ui_recent"), {})
+    pinned_diag: dict[str, Any] = next((source["diagnostic"] for source in sources if source["name"] == "ui_pinned"), {})
+    recent_diag: dict[str, Any] = next((source["diagnostic"] for source in sources if source["name"] == "ui_recent"), {})
     return combined, {
         "source_rpc": "MaZiqc",
         "observed": "2026-07-04 Pro UI / paginated conversation metadata",
@@ -1461,7 +1233,7 @@ def _parse_tool_mode_entry(entry: Any) -> dict[str, Any]:
 
 
 def _web_capabilities_payload() -> dict[str, Any]:
-    payload = json.loads(json.dumps(WEB_UI_CAPABILITIES, ensure_ascii=False))
+    payload: dict[str, Any] = copy.deepcopy(WEB_UI_CAPABILITIES)
     payload["feature_probes"] = [
         {
             "surface": probe["surface"],
@@ -1516,432 +1288,6 @@ def _web_capabilities_payload() -> dict[str, Any]:
     }
     return payload
 
-
-TOOL_MANIFEST: list[dict[str, Any]] = [
-    {
-        "name": "gemini_chat",
-        "group": "core",
-        "purpose": "One-shot Gemini Web chat with model, thinking_level, Gem, image, temporary chat, and learning_mode options.",
-        "read_only": False,
-        "destructive": False,
-        "privacy": "sends_user_prompt_and_optional_files",
-        "pagination": False,
-    },
-    {
-        "name": "gemini_chat_stream",
-        "group": "core",
-        "purpose": "Streaming one-shot Gemini Web chat with the same request controls as gemini_chat.",
-        "read_only": False,
-        "destructive": False,
-        "privacy": "sends_user_prompt_and_optional_files",
-        "pagination": False,
-    },
-    {
-        "name": "gemini_start_chat",
-        "group": "core",
-        "purpose": "Create a local multi-turn session backed by Gemini Web; can retain or schedule cleanup of the remote chat.",
-        "read_only": False,
-        "destructive": False,
-        "privacy": "sends_user_prompt_when_initial_message_is_provided",
-        "pagination": False,
-    },
-    {
-        "name": "gemini_send_message",
-        "group": "core",
-        "purpose": "Send a message to an existing local session.",
-        "read_only": False,
-        "destructive": False,
-        "privacy": "sends_user_prompt_and_optional_files",
-        "pagination": False,
-    },
-    {
-        "name": "gemini_send_message_stream",
-        "group": "core",
-        "purpose": "Stream a response from an existing local session.",
-        "read_only": False,
-        "destructive": False,
-        "privacy": "sends_user_prompt_and_optional_files",
-        "pagination": False,
-    },
-    {
-        "name": "gemini_list_sessions",
-        "group": "core",
-        "purpose": "List local in-process sessions only.",
-        "read_only": True,
-        "destructive": False,
-        "privacy": "local_session_metadata",
-        "pagination": False,
-    },
-    {
-        "name": "gemini_reset_session",
-        "group": "core",
-        "purpose": "Reset a local session and optionally delete its remote Gemini Web chat.",
-        "read_only": False,
-        "destructive": True,
-        "privacy": "local_session_metadata",
-        "pagination": False,
-    },
-    {
-        "name": "gemini_generate_media",
-        "group": "media",
-        "purpose": "Generate image, video, or music through Gemini Web generation surfaces.",
-        "read_only": False,
-        "destructive": False,
-        "privacy": "sends_user_prompt_and_optional_reference_files",
-        "pagination": False,
-    },
-    {
-        "name": "gemini_generate_music",
-        "group": "media",
-        "purpose": "Convenience music-generation wrapper using the observed Flash/Pro backend split.",
-        "read_only": False,
-        "destructive": False,
-        "privacy": "sends_user_prompt",
-        "pagination": False,
-    },
-    {
-        "name": "gemini_upload_file",
-        "group": "files",
-        "purpose": "Upload and analyze a local file through Gemini Web.",
-        "read_only": False,
-        "destructive": False,
-        "privacy": "sends_local_file_content",
-        "pagination": False,
-    },
-    {
-        "name": "gemini_analyze_url",
-        "group": "files",
-        "purpose": "Ask Gemini Web to analyze a URL.",
-        "read_only": False,
-        "destructive": False,
-        "privacy": "sends_url_to_gemini",
-        "pagination": False,
-    },
-    {
-        "name": "gemini_deep_research",
-        "group": "research",
-        "purpose": "Run the Gemini Web Deep Research planning and report workflow.",
-        "read_only": False,
-        "destructive": False,
-        "privacy": "sends_research_query",
-        "pagination": False,
-    },
-    {
-        "name": "gemini_list_research_report_actions",
-        "group": "research",
-        "purpose": "List MCP-supported create actions for a completed Gemini Web Deep Research immersive report.",
-        "read_only": True,
-        "destructive": False,
-        "privacy": "reads_private_chat_text",
-        "pagination": False,
-    },
-    {
-        "name": "gemini_create_from_research_report",
-        "group": "research",
-        "purpose": "Create a local artifact matching observed Gemini Web report create-menu items: webpage, infographic, quiz, flashcards, audio overview, or custom app spec.",
-        "read_only": False,
-        "destructive": False,
-        "privacy": "reads_private_chat_text_and_writes_local_file",
-        "pagination": False,
-    },
-    {
-        "name": "gemini_history",
-        "group": "history",
-        "purpose": "Read-only facade for Gemini chat history list, deep metadata scan, search, read, and export actions.",
-        "read_only": True,
-        "destructive": False,
-        "privacy": "reads_private_chat_metadata_and_optional_turn_text",
-        "pagination": True,
-    },
-    {
-        "name": "gemini_cleanup_test_artifacts",
-        "group": "history",
-        "purpose": "Find and optionally delete test chats and scheduled actions whose metadata matches explicit test markers.",
-        "read_only": False,
-        "destructive": True,
-        "privacy": "reads_private_chat_and_scheduled_metadata",
-        "pagination": False,
-    },
-    {
-        "name": "gemini_list_chats",
-        "group": "history",
-        "purpose": "List Gemini Web chat-history metadata.",
-        "read_only": True,
-        "destructive": False,
-        "privacy": "reads_private_chat_metadata",
-        "pagination": True,
-    },
-    {
-        "name": "gemini_scan_chat_history_sources",
-        "group": "history",
-        "purpose": "Deep-scan Gemini Web chat-history metadata sources and report coverage across observed RPC filters.",
-        "read_only": True,
-        "destructive": False,
-        "privacy": "reads_private_chat_metadata",
-        "pagination": True,
-    },
-    {
-        "name": "gemini_search_chats",
-        "group": "history",
-        "purpose": "Search chat titles/IDs by default; scan turn text only when scan_turns=true.",
-        "read_only": True,
-        "destructive": False,
-        "privacy": "reads_private_chat_metadata_and_optional_turn_text",
-        "pagination": True,
-    },
-    {
-        "name": "gemini_read_chat",
-        "group": "history",
-        "purpose": "Read turns from a selected Gemini Web chat.",
-        "read_only": True,
-        "destructive": False,
-        "privacy": "reads_private_chat_text",
-        "pagination": True,
-    },
-    {
-        "name": "gemini_export_chat",
-        "group": "history",
-        "purpose": "Export one selected Gemini Web chat as Markdown or JSON.",
-        "read_only": True,
-        "destructive": False,
-        "privacy": "reads_private_chat_text",
-        "pagination": True,
-    },
-    {
-        "name": "gemini_delete_chat",
-        "group": "history",
-        "purpose": "Delete a selected remote Gemini Web chat.",
-        "read_only": False,
-        "destructive": True,
-        "privacy": "uses_private_chat_id",
-        "pagination": False,
-    },
-    {
-        "name": "gemini_inspect_account",
-        "group": "account",
-        "purpose": "Inspect account feature/RPC status without raw RPC previews.",
-        "read_only": True,
-        "destructive": False,
-        "privacy": "reads_sanitized_account_status",
-        "pagination": False,
-    },
-    {
-        "name": "gemini_get_web_capabilities",
-        "group": "account",
-        "purpose": "Return the observed Gemini Web Pro capability map and MCP coverage.",
-        "read_only": True,
-        "destructive": False,
-        "privacy": "static_no_account_content",
-        "pagination": False,
-    },
-    {
-        "name": "gemini_get_tool_manifest",
-        "group": "account",
-        "purpose": "Return this agent-facing tool manifest with safety, privacy, and workflow metadata.",
-        "read_only": True,
-        "destructive": False,
-        "privacy": "static_no_account_content",
-        "pagination": False,
-    },
-    {
-        "name": "gemini_probe_web_features",
-        "group": "account",
-        "purpose": "Probe observed read-only Gemini Web RPC reachability without returning raw bodies.",
-        "read_only": True,
-        "destructive": False,
-        "privacy": "reads_rpc_status_only",
-        "pagination": False,
-    },
-    {
-        "name": "gemini_account_inventory",
-        "group": "account",
-        "purpose": "Read-only facade for account inventory surfaces such as capabilities, links, usage, library, notebooks, scheduled entries, modes, and models.",
-        "read_only": True,
-        "destructive": False,
-        "privacy": "reads_private_account_inventory",
-        "pagination": True,
-    },
-    {
-        "name": "gemini_list_public_links",
-        "group": "account",
-        "purpose": "List Gemini Web public-link entries.",
-        "read_only": True,
-        "destructive": False,
-        "privacy": "reads_private_public_link_index",
-        "pagination": True,
-    },
-    {
-        "name": "gemini_get_usage_limits",
-        "group": "account",
-        "purpose": "Read Gemini Web usage/quota structures.",
-        "read_only": True,
-        "destructive": False,
-        "privacy": "reads_private_usage_state",
-        "pagination": False,
-    },
-    {
-        "name": "gemini_list_library_capabilities",
-        "group": "account",
-        "purpose": "List localized Library capability/template entries, not private Library assets.",
-        "read_only": True,
-        "destructive": False,
-        "privacy": "reads_template_capabilities",
-        "pagination": True,
-    },
-    {
-        "name": "gemini_notebooks",
-        "group": "account",
-        "purpose": "Read-only facade for native Gemini Web Notebook list and notebook-chat metadata.",
-        "read_only": True,
-        "destructive": False,
-        "privacy": "reads_private_notebook_metadata",
-        "pagination": True,
-    },
-    {
-        "name": "gemini_list_notebooks",
-        "group": "account",
-        "purpose": "List native Gemini Web Notebooks with ids, titles, emoji, source counts, and subtype metadata.",
-        "read_only": True,
-        "destructive": False,
-        "privacy": "reads_private_notebook_metadata",
-        "pagination": True,
-    },
-    {
-        "name": "gemini_list_notebook_chats",
-        "group": "account",
-        "purpose": "List recent Gemini Web chats already assigned to a native notebook.",
-        "read_only": True,
-        "destructive": False,
-        "privacy": "reads_private_notebook_chat_metadata",
-        "pagination": True,
-    },
-    {
-        "name": "gemini_move_chat_to_notebook",
-        "group": "account",
-        "purpose": "Move an existing Gemini Web chat into a native Gemini Web Notebook using the observed UpdateConversation RPC.",
-        "read_only": False,
-        "destructive": False,
-        "privacy": "moves_private_chat_metadata",
-        "pagination": False,
-    },
-    {
-        "name": "gemini_list_scheduled_actions",
-        "group": "account",
-        "purpose": "Read active/inactive scheduled-action entries.",
-        "read_only": True,
-        "destructive": False,
-        "privacy": "reads_private_scheduled_action_titles",
-        "pagination": True,
-    },
-    {
-        "name": "gemini_get_scheduled_action",
-        "group": "account",
-        "purpose": "Read one scheduled action by id using the observed Web GetTask RPC.",
-        "read_only": True,
-        "destructive": False,
-        "privacy": "reads_private_scheduled_action_details",
-        "pagination": False,
-    },
-    {
-        "name": "gemini_create_scheduled_action",
-        "group": "account",
-        "purpose": "Create a daily Gemini Web scheduled action through the observed scheduled-actions RPC.",
-        "read_only": False,
-        "destructive": False,
-        "privacy": "creates_private_scheduled_action",
-        "pagination": False,
-    },
-    {
-        "name": "gemini_delete_scheduled_action",
-        "group": "account",
-        "purpose": "Delete a Gemini Web scheduled action by id through the observed scheduled-actions RPC.",
-        "read_only": False,
-        "destructive": True,
-        "privacy": "deletes_private_scheduled_action",
-        "pagination": False,
-    },
-    {
-        "name": "gemini_get_tool_mode_status",
-        "group": "account",
-        "purpose": "Read Web-internal Canvas/Guided Learning mode status rows.",
-        "read_only": True,
-        "destructive": False,
-        "privacy": "reads_mode_status_only",
-        "pagination": True,
-    },
-    {
-        "name": "gemini_list_models",
-        "group": "account",
-        "purpose": "List MCP model aliases and runtime model registry.",
-        "read_only": True,
-        "destructive": False,
-        "privacy": "reads_account_model_registry",
-        "pagination": False,
-    },
-    {
-        "name": "gemini_manage_gems",
-        "group": "gems",
-        "purpose": "List, create, update, or delete Gems depending on action.",
-        "read_only": False,
-        "destructive": True,
-        "privacy": "reads_or_modifies_private_gems",
-        "pagination": False,
-    },
-    {
-        "name": "gemini_doctor",
-        "group": "cookie",
-        "purpose": "Run a safe local preflight over tool groups, cookie status, browser profile alignment, and media verification dependencies.",
-        "read_only": True,
-        "destructive": False,
-        "privacy": "local_runtime_and_browser_profile_diagnostics",
-        "pagination": False,
-    },
-    {
-        "name": "gemini_get_cookie_status",
-        "group": "cookie",
-        "purpose": "Report local cookie availability without printing cookie values.",
-        "read_only": True,
-        "destructive": False,
-        "privacy": "local_auth_status_only",
-        "pagination": False,
-    },
-    {
-        "name": "gemini_list_browser_cookie_profiles",
-        "group": "cookie",
-        "purpose": "List local browser cookie profiles and validation diagnostics without printing cookie values.",
-        "read_only": True,
-        "destructive": False,
-        "privacy": "local_browser_profile_auth_diagnostics",
-        "pagination": False,
-    },
-    {
-        "name": "gemini_get_cookie_from_browser",
-        "group": "cookie",
-        "purpose": "Load Gemini cookies from a local browser/profile into the server runtime.",
-        "read_only": False,
-        "destructive": False,
-        "privacy": "reads_local_browser_auth_secret",
-        "pagination": False,
-    },
-    {
-        "name": "gemini_reset",
-        "group": "cookie",
-        "purpose": "Reset the local Gemini client instance.",
-        "read_only": False,
-        "destructive": False,
-        "privacy": "local_runtime_state",
-        "pagination": False,
-    },
-    {
-        "name": "gemini_manage_prompts",
-        "group": "prompts",
-        "purpose": "Manage local prompt snippets when GEMINI_TOOLS=prompts is enabled.",
-        "read_only": False,
-        "destructive": True,
-        "privacy": "local_prompt_library",
-        "pagination": False,
-    },
-]
 
 
 COOKIE_TOOL_NAMES = {
@@ -2844,10 +2190,13 @@ def _gem_field(gem: Any, *names: str) -> tuple[bool, str]:
 def register_manage_tools(mcp: FastMCP, layers: list[str] | set[str] | tuple[str, ...] | None = None):
     enabled_tool_names = resolve_manage_tool_names(layers)
 
-    def _tool(tool_name: str, annotations):
-        def decorator(func):
+    def _tool(tool_name: str, annotations) -> Callable[[_F], _F]:
+        def decorator(func: _F) -> _F:
             if tool_name in enabled_tool_names:
-                return mcp.tool(annotations=annotations)(func)
+                # Register with FastMCP for external MCP dispatch, but keep the
+                # original typed function for in-process calls so callers retain
+                # the declared return type (avoids cascading Any returns).
+                mcp.tool(annotations=annotations)(func)
             return func
 
         return decorator
@@ -2878,7 +2227,7 @@ def register_manage_tools(mcp: FastMCP, layers: list[str] | set[str] | tuple[str
             scan_turns=scan_turns,
         )
         if response_format == "json":
-            return [TextContent(type="text", text=json.dumps(payload, ensure_ascii=False, indent=2))]
+            return _json_response(payload)
         return [TextContent(type="text", text=_format_cleanup_markdown(payload))]
 
     @_tool("gemini_list_chats", READS_PRIVATE_REMOTE)
@@ -2915,7 +2264,7 @@ def register_manage_tools(mcp: FastMCP, layers: list[str] | set[str] | tuple[str
             }
 
             if response_format == "json":
-                return [TextContent(type="text", text=json.dumps(payload, ensure_ascii=False, indent=2))]
+                return _json_response(payload)
 
             chat_list = [
                 "## 📜 历史对话",
@@ -3081,7 +2430,7 @@ def register_manage_tools(mcp: FastMCP, layers: list[str] | set[str] | tuple[str
                 "note": "This is metadata-only and does not read chat turns. Use read/export tools only for selected chat IDs.",
             }
             if response_format == "json":
-                return [TextContent(type="text", text=json.dumps(payload, ensure_ascii=False, indent=2))]
+                return _json_response(payload)
 
             lines = [
                 "## Gemini 历史对话深度扫描",
@@ -3144,7 +2493,7 @@ def register_manage_tools(mcp: FastMCP, layers: list[str] | set[str] | tuple[str
             }
 
             if response_format == "json":
-                return [TextContent(type="text", text=json.dumps(payload, ensure_ascii=False, indent=2))]
+                return _json_response(payload)
 
             lines = [f"## 💬 聊天记录: {payload['chat_id']}", f"返回 {payload['count']} 条 turn"]
             for idx, turn in enumerate(items, 1):
@@ -3192,13 +2541,13 @@ def register_manage_tools(mcp: FastMCP, layers: list[str] | set[str] | tuple[str
                 pagination["next_offset"] = pagination["offset"] + pagination["count"]
             safe_turn_limit = _clamp_int(turns_per_chat, default=20, minimum=1, maximum=50)
             safe_chars = _clamp_int(max_chars_per_turn, default=1000, minimum=100, maximum=4000)
-            matches = []
+            matches: list[dict[str, Any]] = []
             lowered = needle.lower()
 
             for chat in page:
                 item = chat if isinstance(chat, dict) else _chat_to_dict(chat)
-                fields = []
-                snippets = []
+                fields: list[str] = []
+                snippets: list[dict[str, Any]] = []
                 if lowered in item["title"].lower():
                     fields.append("title")
                 if item["id"] and lowered in item["id"].lower():
@@ -3247,7 +2596,7 @@ def register_manage_tools(mcp: FastMCP, layers: list[str] | set[str] | tuple[str
             }
 
             if response_format == "json":
-                return [TextContent(type="text", text=json.dumps(payload, ensure_ascii=False, indent=2))]
+                return _json_response(payload)
 
             lines = [
                 "## Gemini 历史搜索",
@@ -3257,9 +2606,9 @@ def register_manage_tools(mcp: FastMCP, layers: list[str] | set[str] | tuple[str
             if not matches:
                 lines.append("未在当前页找到匹配项。")
             for idx, match in enumerate(matches, 1):
-                fields = ", ".join(match["matched_fields"])
+                fields_str = ", ".join(match["matched_fields"])
                 time_text = f" · {match['time']}" if match.get("time") else ""
-                lines.append(f"{idx}. {match['title']} (ID: {match['id']}) · fields={fields}{time_text}")
+                lines.append(f"{idx}. {match['title']} (ID: {match['id']}) · fields={fields_str}{time_text}")
                 for snippet in match.get("snippets", []):
                     if snippet.get("error"):
                         lines.append(f"   - read error: {snippet['error']}")
@@ -3317,7 +2666,7 @@ def register_manage_tools(mcp: FastMCP, layers: list[str] | set[str] | tuple[str
 
             payload = _chat_export_payload(chat_id, history, turns, metadata, safe_limit, safe_chars)
             if response_format == "json":
-                return [TextContent(type="text", text=json.dumps(payload, ensure_ascii=False, indent=2))]
+                return _json_response(payload)
             return [TextContent(type="text", text=_format_chat_export_markdown(payload))]
         except Exception as e:
             logger.error(f"导出聊天失败: {e}")
@@ -3419,7 +2768,7 @@ def register_manage_tools(mcp: FastMCP, layers: list[str] | set[str] | tuple[str
             status = await client.inspect_account_status()
             sanitized = _sanitize_account_status(status)
             if response_format == "json":
-                return [TextContent(type="text", text=json.dumps(sanitized, ensure_ascii=False, indent=2))]
+                return _json_response(sanitized)
 
             summary = sanitized.get("summary", {})
             lines = ["## Gemini 账号能力状态"]
@@ -3508,7 +2857,7 @@ def register_manage_tools(mcp: FastMCP, layers: list[str] | set[str] | tuple[str
         }
 
         if response_format == "json":
-            return [TextContent(type="text", text=json.dumps(payload, ensure_ascii=False, indent=2))]
+            return _json_response(payload)
 
         lines = [
             "## Gemini Web 功能探测",
@@ -3541,7 +2890,7 @@ def register_manage_tools(mcp: FastMCP, layers: list[str] | set[str] | tuple[str
         """
         payload = _web_capabilities_payload()
         if response_format == "json":
-            return [TextContent(type="text", text=json.dumps(payload, ensure_ascii=False, indent=2))]
+            return _json_response(payload)
         return [TextContent(type="text", text=_format_web_capabilities_markdown(payload))]
 
     @_tool("gemini_get_tool_manifest", READ_ONLY_LOCAL)
@@ -3556,7 +2905,7 @@ def register_manage_tools(mcp: FastMCP, layers: list[str] | set[str] | tuple[str
         """
         payload = _tool_manifest_payload(scope)
         if response_format == "json":
-            return [TextContent(type="text", text=json.dumps(payload, ensure_ascii=False, indent=2))]
+            return _json_response(payload)
         return [TextContent(type="text", text=_format_tool_manifest_markdown(payload))]
 
     @_tool("gemini_account_inventory", READS_PRIVATE_REMOTE)
@@ -3650,7 +2999,7 @@ def register_manage_tools(mcp: FastMCP, layers: list[str] | set[str] | tuple[str
                 "observed": probe["observed"],
             }
             if response_format == "json":
-                return [TextContent(type="text", text=json.dumps(payload, ensure_ascii=False, indent=2))]
+                return _json_response(payload)
 
             if not links:
                 return [TextContent(type="text", text="暂无公开链接。")]
@@ -3687,13 +3036,13 @@ def register_manage_tools(mcp: FastMCP, layers: list[str] | set[str] | tuple[str
         if scope in {"model_state", "all"}:
             probe_names.append("usage_model_state")
 
-        results = []
+        results: list[dict[str, Any]] = []
         try:
             for name in probe_names:
                 probe = _get_probe("usage", name)
                 response = await _execute_observed_rpc(client, probe)
                 bodies = _extract_rpc_bodies(response.text, probe["rpcid"])
-                entries = []
+                entries: list[dict[str, Any]] = []
                 if bodies and isinstance(bodies[0], list) and bodies[0]:
                     first = bodies[0][0]
                     if isinstance(first, list):
@@ -3709,7 +3058,7 @@ def register_manage_tools(mcp: FastMCP, layers: list[str] | set[str] | tuple[str
 
             payload = {"scope": scope, "count": len(results), "results": results}
             if response_format == "json":
-                return [TextContent(type="text", text=json.dumps(payload, ensure_ascii=False, indent=2))]
+                return _json_response(payload)
 
             lines = ["## Gemini 用量限额", f"范围: {scope}"]
             for result in results:
@@ -3763,7 +3112,7 @@ def register_manage_tools(mcp: FastMCP, layers: list[str] | set[str] | tuple[str
                 "observed": probe["observed"],
             }
             if response_format == "json":
-                return [TextContent(type="text", text=json.dumps(payload, ensure_ascii=False, indent=2))]
+                return _json_response(payload)
 
             if not page:
                 return [TextContent(type="text", text="暂无 Library 能力条目。")]
@@ -3808,7 +3157,7 @@ def register_manage_tools(mcp: FastMCP, layers: list[str] | set[str] | tuple[str
                 "note": "These are native Gemini Web Notebooks, not NotebookLM notebooks.",
             }
             if response_format == "json":
-                return [TextContent(type="text", text=json.dumps(payload, ensure_ascii=False, indent=2))]
+                return _json_response(payload)
 
             if not page:
                 return [TextContent(type="text", text="暂无 Gemini 原生笔记本。")]
@@ -3847,7 +3196,7 @@ def register_manage_tools(mcp: FastMCP, layers: list[str] | set[str] | tuple[str
             notebook = _find_notebook(notebooks, notebook_id, notebook_title)
             if not notebook:
                 available = [item.get("title", "") for item in notebooks if item.get("title")]
-                payload = {
+                payload: dict[str, Any] = {
                     "ok": False,
                     "notebook_id": notebook_id,
                     "notebook_title": notebook_title,
@@ -3855,7 +3204,7 @@ def register_manage_tools(mcp: FastMCP, layers: list[str] | set[str] | tuple[str
                     "diagnostic": diagnostic,
                 }
                 if response_format == "json":
-                    return [TextContent(type="text", text=json.dumps(payload, ensure_ascii=False, indent=2))]
+                    return _json_response(payload)
                 return [TextContent(type="text", text=f"未找到匹配的 Gemini 原生笔记本。可用标题: {', '.join(available)}")]
 
             items, page_payload = await _fetch_notebook_chats(client, notebook["id"], limit, offset)
@@ -3868,7 +3217,7 @@ def register_manage_tools(mcp: FastMCP, layers: list[str] | set[str] | tuple[str
                 "observed": "2026-07-04 Pro UI / Native Gemini Notebook recent chats",
             }
             if response_format == "json":
-                return [TextContent(type="text", text=json.dumps(payload, ensure_ascii=False, indent=2))]
+                return _json_response(payload)
 
             lines = [
                 f"## Notebook Chats: {notebook.get('title') or notebook['id']}",
@@ -3953,10 +3302,11 @@ def register_manage_tools(mcp: FastMCP, layers: list[str] | set[str] | tuple[str
                     "diagnostic": list_diagnostic,
                 }
                 if response_format == "json":
-                    return [TextContent(type="text", text=json.dumps(payload, ensure_ascii=False, indent=2))]
+                    return _json_response(payload)
                 return [TextContent(type="text", text=f"未找到匹配的 Gemini 原生笔记本。可用标题: {', '.join(available)}")]
 
-            project_type = notebook.get("project_type") if isinstance(notebook.get("project_type"), int) else 2
+            project_type_raw = notebook.get("project_type")
+            project_type = project_type_raw if isinstance(project_type_raw, int) else 2
             request_payload = _move_chat_to_notebook_payload(clean_chat_id, notebook["id"], project_type)
             response = await client._batch_execute(
                 [_RawRPCData("MUAZcd", request_payload)],
@@ -3984,7 +3334,7 @@ def register_manage_tools(mcp: FastMCP, layers: list[str] | set[str] | tuple[str
                 "verification": verify_payload,
             }
             if response_format == "json":
-                return [TextContent(type="text", text=json.dumps(payload, ensure_ascii=False, indent=2))]
+                return _json_response(payload)
 
             if payload["ok"] and verified:
                 return [
@@ -4041,7 +3391,7 @@ def register_manage_tools(mcp: FastMCP, layers: list[str] | set[str] | tuple[str
             }
             payload = {"scope": scope, "count": 1, "results": [result]}
             if response_format == "json":
-                return [TextContent(type="text", text=json.dumps(payload, ensure_ascii=False, indent=2))]
+                return _json_response(payload)
 
             lines = ["## Gemini 定时操作", f"范围: {scope}"]
             lines.extend(["", f"### {result['name']}"])
@@ -4093,7 +3443,7 @@ def register_manage_tools(mcp: FastMCP, layers: list[str] | set[str] | tuple[str
                 "item": item,
             }
             if response_format == "json":
-                return [TextContent(type="text", text=json.dumps(payload, ensure_ascii=False, indent=2))]
+                return _json_response(payload)
 
             if not item:
                 hint = f" {diagnostic['empty_hint']}" if diagnostic.get("empty_hint") else ""
@@ -4223,7 +3573,7 @@ def register_manage_tools(mcp: FastMCP, layers: list[str] | set[str] | tuple[str
                 "get_task_diagnostic": get_task_diagnostic,
             }
             if response_format == "json":
-                return [TextContent(type="text", text=json.dumps(payload, ensure_ascii=False, indent=2))]
+                return _json_response(payload)
 
             if payload["ok"]:
                 label = f" ({payload['schedule_label']})" if payload.get("schedule_label") else ""
@@ -4329,7 +3679,7 @@ def register_manage_tools(mcp: FastMCP, layers: list[str] | set[str] | tuple[str
                 "get_task_diagnostic": get_task_diagnostic,
             }
             if response_format == "json":
-                return [TextContent(type="text", text=json.dumps(payload, ensure_ascii=False, indent=2))]
+                return _json_response(payload)
 
             if payload["ok"]:
                 if deleted_by_id_after_delete is True:
@@ -4393,7 +3743,7 @@ def register_manage_tools(mcp: FastMCP, layers: list[str] | set[str] | tuple[str
                 "note": "mode_id semantics are Web-internal and may drift; use this as a read-only availability/status surface.",
             }
             if response_format == "json":
-                return [TextContent(type="text", text=json.dumps(payload, ensure_ascii=False, indent=2))]
+                return _json_response(payload)
 
             if not page:
                 return [TextContent(type="text", text="暂无工具模式状态条目。")]

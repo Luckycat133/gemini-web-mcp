@@ -6,11 +6,12 @@ Low-token, production-ready.
 
 import os
 import json
+import asyncio
 import shutil
 import logging
 import threading
 from pathlib import Path
-from typing import Optional, Literal, Any
+from typing import Optional, Literal, Any, Callable, Awaitable
 
 try:
     from mcp.server.fastmcp import FastMCP
@@ -62,7 +63,6 @@ from .tools.manage import (
     _turn_matches_query,
     _parse_library_capability,
     _parse_public_link_entry,
-    _parse_scheduled_action_entry,
     _parse_scheduled_action_create_body,
     _parse_scheduled_action_task_entry,
     _parse_tool_mode_entry,
@@ -218,14 +218,16 @@ class PromptManager:
 
 
 _prompt_manager: Optional[PromptManager] = None
+_prompt_manager_lock = threading.Lock()
 
 
 def get_prompts() -> PromptManager:
     """Get singleton prompt manager."""
     global _prompt_manager
-    if _prompt_manager is None:
-        _prompt_manager = PromptManager(PROMPTS_FILE)
-    return _prompt_manager
+    with _prompt_manager_lock:
+        if _prompt_manager is None:
+            _prompt_manager = PromptManager(PROMPTS_FILE)
+        return _prompt_manager
 
 
 _sessions: dict[str, dict[str, Any]] = {}
@@ -237,6 +239,12 @@ def _truncate_text(text: Any, max_chars: int = 2000) -> str:
     if len(value) <= max_chars:
         return value
     return value[:max_chars].rstrip() + "\n...[truncated]"
+
+
+def _error_text(e: Exception, tool_name: str) -> list[TextContent]:
+    """统一的工具错误返回：记录日志并返回给 agent 简短错误文本。"""
+    logger.error(f"{tool_name} error: {e}")
+    return [TextContent(type="text", text=f"Error: {e}")]
 
 
 def _schedule_skill_response_cleanup(response: Any, source: str, session: Any = None) -> None:
@@ -301,8 +309,7 @@ async def chat(
         return _format_response(response)
 
     except Exception as e:
-        logger.error(f"Chat error: {e}")
-        return [TextContent(type="text", text=f"Error: {e}")]
+        return _error_text(e, "Chat")
 
 
 @mcp.tool(annotations=DESTRUCTIVE_REMOTE)
@@ -385,14 +392,14 @@ async def history(
             if not hasattr(client, "read_chat"):
                 return [TextContent(type="text", text="read_chat unavailable")]
             safe_export_limit = min(max(limit, 1), 200)
-            chat, turns = await _read_chat_turns(client, chat_id, safe_export_limit, 20000)
+            history, turns = await _read_chat_turns(client, chat_id, safe_export_limit, 20000)
             metadata = {"id": chat_id}
             if hasattr(client, "list_chats"):
                 for item in client.list_chats() or []:
                     if _get_chat_id(item) == chat_id:
                         metadata = _chat_to_dict(item)
                         break
-            payload = _chat_export_payload(chat_id, chat, turns, metadata, safe_export_limit, 20000)
+            payload = _chat_export_payload(chat_id, history, turns, metadata, safe_export_limit, 20000)
             return [TextContent(type="text", text=_format_chat_export_markdown(payload))]
 
         if action == "delete":
@@ -406,8 +413,192 @@ async def history(
         return [TextContent(type="text", text="Invalid action")]
 
     except Exception as e:
-        logger.error(f"History error: {e}")
-        return [TextContent(type="text", text=f"Error: {e}")]
+        return _error_text(e, "History")
+
+
+async def _account_capabilities() -> list[TextContent]:
+    return [
+        TextContent(
+            type="text",
+            text=_format_web_capabilities_markdown(_web_capabilities_payload()),
+        )
+    ]
+
+
+async def _account_manifest() -> list[TextContent]:
+    return [
+        TextContent(
+            type="text",
+            text=_format_tool_manifest_markdown(_tool_manifest_payload("all")),
+        )
+    ]
+
+
+async def _account_models(client: Any) -> list[TextContent]:
+    models = client.list_models() if hasattr(client, "list_models") else []
+    if not models:
+        return [TextContent(type="text", text="No models")]
+    lines = []
+    for model in models:
+        display = getattr(model, "display_name", "") or "Unnamed"
+        name = getattr(model, "model_name", "") or "unknown"
+        available = "available" if getattr(model, "is_available", True) else "unavailable"
+        lines.append(f"{display}: {name} ({available})")
+    return [TextContent(type="text", text="\n".join(lines))]
+
+
+async def _account_features(client: Any) -> list[TextContent]:
+    if not hasattr(client, "_batch_execute"):
+        return [TextContent(type="text", text="feature probes unavailable")]
+
+    async def _probe_one(probe: dict[str, str]) -> str:
+        try:
+            response = await client._batch_execute(
+                [_RawRPCData(probe["rpcid"], probe["payload"])],
+                source_path=probe["source_path"],
+                close_on_error=False,
+            )
+            summary = _summarize_probe_response(response.text, probe["rpcid"])
+            ok = response.status_code == 200 and summary.get("reject_code") is None
+            status = "ok" if ok else f"reject={summary.get('reject_code')}"
+            return f"{probe['surface']}.{probe['name']}: {status}"
+        except Exception as e:
+            return f"{probe['surface']}.{probe['name']}: {type(e).__name__}"
+
+    # Probe concurrently; gather preserves the WEB_FEATURE_PROBES order.
+    lines = await asyncio.gather(*(_probe_one(probe) for probe in WEB_FEATURE_PROBES))
+    return [TextContent(type="text", text="\n".join(lines))]
+
+
+async def _account_links(client: Any) -> list[TextContent]:
+    probe = _get_probe("sharing", "public_links_index")
+    response = await _execute_observed_rpc(client, probe)
+    bodies = _extract_rpc_bodies(response.text, probe["rpcid"])
+    entries = bodies[0] if bodies and isinstance(bodies[0], list) else []
+    links = [_parse_public_link_entry(item) for item in entries[:20]]
+    if not links:
+        return [TextContent(type="text", text="No public links")]
+    lines = [
+        f"{item.get('title') or '(untitled)'} ({item.get('id', '')}) {item.get('url', '')}".strip()
+        for item in links
+    ]
+    return [TextContent(type="text", text="\n".join(lines))]
+
+
+async def _account_usage(client: Any) -> list[TextContent]:
+    async def _probe_one(probe_name: str) -> list[str]:
+        probe = _get_probe("usage", probe_name)
+        response = await _execute_observed_rpc(client, probe)
+        bodies = _extract_rpc_bodies(response.text, probe["rpcid"])
+        entries: list[dict[str, Any]] = []
+        if bodies and isinstance(bodies[0], list) and bodies[0]:
+            first = bodies[0][0]
+            if isinstance(first, list):
+                entries = [_parse_usage_entry(item) for item in first]
+        return [
+            f"{probe_name}: key={item.get('key')} limit={item.get('limit_value')} remaining={item.get('remaining_value')}"
+            for item in entries
+        ]
+
+    # Probe concurrently; gather preserves the ("usage_quota", "usage_model_state") order.
+    per_probe_lines = await asyncio.gather(
+        *(_probe_one(name) for name in ("usage_quota", "usage_model_state"))
+    )
+    lines: list[str] = []
+    for chunk in per_probe_lines:
+        lines.extend(chunk)
+    return [TextContent(type="text", text="\n".join(lines) or "No usage entries")]
+
+
+async def _account_library(client: Any) -> list[TextContent]:
+    probe = _get_probe("library", "library_locale_capabilities")
+    response = await _execute_observed_rpc(client, probe)
+    bodies = _extract_rpc_bodies(response.text, probe["rpcid"])
+    entries = []
+    if bodies and isinstance(bodies[0], list) and bodies[0]:
+        first = bodies[0][0]
+        if isinstance(first, list):
+            entries = [_parse_library_capability(item) for item in first]
+    if not entries:
+        return [TextContent(type="text", text="No library capabilities")]
+    lines = [
+        f"{item.get('name') or ', '.join(item.get('aliases', []))}: {item.get('description', '')}".strip()
+        for item in entries
+    ]
+    return [TextContent(type="text", text="\n".join(lines))]
+
+
+async def _account_notebooks(client: Any) -> list[TextContent]:
+    notebooks, _diagnostic = await _fetch_native_notebooks(client)
+    if not notebooks:
+        return [TextContent(type="text", text="No native Gemini notebooks")]
+    lines = [
+        f"{item.get('title') or '(untitled)'} ({item.get('id', '')}) sources={item.get('source_count', 0)}".strip()
+        for item in notebooks[:30]
+    ]
+    return [TextContent(type="text", text="\n".join(lines))]
+
+
+async def _account_scheduled(client: Any) -> list[TextContent]:
+    probe = _get_probe("scheduled", "scheduled_actions_registry")
+    response = await _execute_observed_rpc(client, probe)
+    bodies = _extract_rpc_bodies(response.text, probe["rpcid"])
+    body = bodies[0] if bodies else []
+    raw_entries = body[0] if isinstance(body, list) and body and isinstance(body[0], list) else []
+    entries = [_parse_scheduled_action_task_entry(item, 500) for item in raw_entries[:20]]
+    lines = []
+    for item in entries:
+        label = f" {item.get('schedule_label')}" if item.get("schedule_label") else ""
+        lines.append(f"{item.get('title') or '(untitled)'} ({item.get('id', '')}){label}".strip())
+    return [TextContent(type="text", text="\n".join(lines) or "No scheduled actions")]
+
+
+async def _account_modes(client: Any) -> list[TextContent]:
+    probe = _get_probe("tool_modes", "tool_mode_status")
+    response = await _execute_observed_rpc(client, probe)
+    bodies = _extract_rpc_bodies(response.text, probe["rpcid"])
+    body = bodies[0] if bodies else []
+    entries = []
+    if isinstance(body, list) and len(body) > 1 and isinstance(body[1], list):
+        entries = [_parse_tool_mode_entry(item) for item in body[1]]
+    if not entries:
+        return [TextContent(type="text", text="No mode status entries")]
+    lines = [
+        f"mode_id={item.get('mode_id')} available={item.get('available')} quota={item.get('quota_value')} state={item.get('state')}"
+        for item in entries
+    ]
+    return [TextContent(type="text", text="\n".join(lines))]
+
+
+async def _account_status(client: Any) -> list[TextContent]:
+    if not hasattr(client, "inspect_account_status"):
+        return [TextContent(type="text", text="account inspection unavailable")]
+    status = await client.inspect_account_status()
+    summary = status.get("summary", {}) if isinstance(status, dict) else {}
+    if not summary:
+        return [TextContent(type="text", text="Account status loaded")]
+    lines = [f"{key}: {value}" for key, value in summary.items()]
+    return [TextContent(type="text", text="\n".join(lines))]
+
+
+# Auth-free actions (no client initialization needed).
+_ACCOUNT_AUTH_FREE_ACTIONS: dict[str, Callable[[], Awaitable[list[TextContent]]]] = {
+    "capabilities": _account_capabilities,
+    "manifest": _account_manifest,
+}
+
+# Client-based actions; unknown action falls back to status.
+_ACCOUNT_CLIENT_ACTIONS: dict[str, Callable[[Any], Awaitable[list[TextContent]]]] = {
+    "models": _account_models,
+    "features": _account_features,
+    "links": _account_links,
+    "usage": _account_usage,
+    "library": _account_library,
+    "notebooks": _account_notebooks,
+    "scheduled": _account_scheduled,
+    "modes": _account_modes,
+    "status": _account_status,
+}
 
 
 @mcp.tool(annotations=READS_PRIVATE_REMOTE)
@@ -416,155 +607,136 @@ async def account(
 ) -> list[TextContent]:
     """Inspect Gemini account status and available models."""
     try:
-        if action == "capabilities":
-            return [
-                TextContent(
-                    type="text",
-                    text=_format_web_capabilities_markdown(_web_capabilities_payload()),
-                )
-            ]
-
-        if action == "manifest":
-            return [
-                TextContent(
-                    type="text",
-                    text=_format_tool_manifest_markdown(_tool_manifest_payload("all")),
-                )
-            ]
+        auth_free_handler = _ACCOUNT_AUTH_FREE_ACTIONS.get(action)
+        if auth_free_handler is not None:
+            return await auth_free_handler()
 
         client = get_gemini_client()
         await initialize_client()
-
-        if action == "models":
-            models = client.list_models() if hasattr(client, "list_models") else []
-            if not models:
-                return [TextContent(type="text", text="No models")]
-            lines = []
-            for model in models:
-                display = getattr(model, "display_name", "") or "Unnamed"
-                name = getattr(model, "model_name", "") or "unknown"
-                available = "available" if getattr(model, "is_available", True) else "unavailable"
-                lines.append(f"{display}: {name} ({available})")
-            return [TextContent(type="text", text="\n".join(lines))]
-
-        if action == "features":
-            if not hasattr(client, "_batch_execute"):
-                return [TextContent(type="text", text="feature probes unavailable")]
-            lines = []
-            for probe in WEB_FEATURE_PROBES:
-                try:
-                    response = await client._batch_execute(
-                        [_RawRPCData(probe["rpcid"], probe["payload"])],
-                        source_path=probe["source_path"],
-                        close_on_error=False,
-                    )
-                    summary = _summarize_probe_response(response.text, probe["rpcid"])
-                    ok = response.status_code == 200 and summary.get("reject_code") is None
-                    status = "ok" if ok else f"reject={summary.get('reject_code')}"
-                    lines.append(f"{probe['surface']}.{probe['name']}: {status}")
-                except Exception as e:
-                    lines.append(f"{probe['surface']}.{probe['name']}: {type(e).__name__}")
-            return [TextContent(type="text", text="\n".join(lines))]
-
-        if action == "links":
-            probe = _get_probe("sharing", "public_links_index")
-            response = await _execute_observed_rpc(client, probe)
-            bodies = _extract_rpc_bodies(response.text, probe["rpcid"])
-            entries = bodies[0] if bodies and isinstance(bodies[0], list) else []
-            links = [_parse_public_link_entry(item) for item in entries[:20]]
-            if not links:
-                return [TextContent(type="text", text="No public links")]
-            lines = [
-                f"{item.get('title') or '(untitled)'} ({item.get('id', '')}) {item.get('url', '')}".strip()
-                for item in links
-            ]
-            return [TextContent(type="text", text="\n".join(lines))]
-
-        if action == "usage":
-            lines = []
-            for probe_name in ("usage_quota", "usage_model_state"):
-                probe = _get_probe("usage", probe_name)
-                response = await _execute_observed_rpc(client, probe)
-                bodies = _extract_rpc_bodies(response.text, probe["rpcid"])
-                entries = []
-                if bodies and isinstance(bodies[0], list) and bodies[0]:
-                    first = bodies[0][0]
-                    if isinstance(first, list):
-                        entries = [_parse_usage_entry(item) for item in first]
-                for item in entries:
-                    lines.append(
-                        f"{probe_name}: key={item.get('key')} limit={item.get('limit_value')} remaining={item.get('remaining_value')}"
-                    )
-            return [TextContent(type="text", text="\n".join(lines) or "No usage entries")]
-
-        if action == "library":
-            probe = _get_probe("library", "library_locale_capabilities")
-            response = await _execute_observed_rpc(client, probe)
-            bodies = _extract_rpc_bodies(response.text, probe["rpcid"])
-            entries = []
-            if bodies and isinstance(bodies[0], list) and bodies[0]:
-                first = bodies[0][0]
-                if isinstance(first, list):
-                    entries = [_parse_library_capability(item) for item in first]
-            if not entries:
-                return [TextContent(type="text", text="No library capabilities")]
-            lines = [
-                f"{item.get('name') or ', '.join(item.get('aliases', []))}: {item.get('description', '')}".strip()
-                for item in entries
-            ]
-            return [TextContent(type="text", text="\n".join(lines))]
-
-        if action == "notebooks":
-            notebooks, _diagnostic = await _fetch_native_notebooks(client)
-            if not notebooks:
-                return [TextContent(type="text", text="No native Gemini notebooks")]
-            lines = [
-                f"{item.get('title') or '(untitled)'} ({item.get('id', '')}) sources={item.get('source_count', 0)}".strip()
-                for item in notebooks[:30]
-            ]
-            return [TextContent(type="text", text="\n".join(lines))]
-
-        if action == "scheduled":
-            probe = _get_probe("scheduled", "scheduled_actions_registry")
-            response = await _execute_observed_rpc(client, probe)
-            bodies = _extract_rpc_bodies(response.text, probe["rpcid"])
-            body = bodies[0] if bodies else []
-            raw_entries = body[0] if isinstance(body, list) and body and isinstance(body[0], list) else []
-            entries = [_parse_scheduled_action_task_entry(item, 500) for item in raw_entries[:20]]
-            lines = []
-            for item in entries:
-                label = f" {item.get('schedule_label')}" if item.get("schedule_label") else ""
-                lines.append(f"{item.get('title') or '(untitled)'} ({item.get('id', '')}){label}".strip())
-            return [TextContent(type="text", text="\n".join(lines) or "No scheduled actions")]
-
-        if action == "modes":
-            probe = _get_probe("tool_modes", "tool_mode_status")
-            response = await _execute_observed_rpc(client, probe)
-            bodies = _extract_rpc_bodies(response.text, probe["rpcid"])
-            body = bodies[0] if bodies else []
-            entries = []
-            if isinstance(body, list) and len(body) > 1 and isinstance(body[1], list):
-                entries = [_parse_tool_mode_entry(item) for item in body[1]]
-            if not entries:
-                return [TextContent(type="text", text="No mode status entries")]
-            lines = [
-                f"mode_id={item.get('mode_id')} available={item.get('available')} quota={item.get('quota_value')} state={item.get('state')}"
-                for item in entries
-            ]
-            return [TextContent(type="text", text="\n".join(lines))]
-
-        if not hasattr(client, "inspect_account_status"):
-            return [TextContent(type="text", text="account inspection unavailable")]
-        status = await client.inspect_account_status()
-        summary = status.get("summary", {}) if isinstance(status, dict) else {}
-        if not summary:
-            return [TextContent(type="text", text="Account status loaded")]
-        lines = [f"{key}: {value}" for key, value in summary.items()]
-        return [TextContent(type="text", text="\n".join(lines))]
-
+        handler = _ACCOUNT_CLIENT_ACTIONS.get(action, _account_status)
+        return await handler(client)
     except Exception as e:
-        logger.error(f"Account error: {e}")
-        return [TextContent(type="text", text=f"Error: {e}")]
+        return _error_text(e, "Account")
+
+
+async def _scheduled_list(client: Any) -> list[TextContent]:
+    entries, diagnostic = await _fetch_scheduled_registry(client, 500)
+    lines: list[str] = []
+    for item in entries[:20]:
+        label = f" {item.get('schedule_label')}" if item.get("schedule_label") else ""
+        lines.append(f"{item.get('title') or '(untitled)'} ({item.get('id', '')}){label}".strip())
+    if not lines and diagnostic.get("empty_hint"):
+        lines.append("No scheduled actions")
+        lines.append(f"Diagnostic: {diagnostic['empty_hint']}")
+    return [TextContent(type="text", text="\n".join(lines) or "No scheduled actions")]
+
+
+async def _scheduled_get(client: Any, action_id: str) -> list[TextContent]:
+    clean_id = action_id.strip()
+    if not clean_id:
+        return [TextContent(type="text", text="action_id required")]
+    item, diagnostic = await _fetch_scheduled_task_by_id(client, clean_id, 500)
+    if not item:
+        status = "not_found_or_wrong_account"
+        if diagnostic.get("matched_task") is False:
+            status = "not_readable_by_id"
+        return [TextContent(type="text", text=f"Get: {clean_id} ({status})")]
+    enabled = item.get("enabled")
+    enabled_text = "enabled" if enabled is True else "disabled" if enabled is False else "unknown"
+    state = f" state={item.get('task_state')}" if item.get("task_state") else ""
+    title = item.get("title") or "(untitled)"
+    label = f" {item.get('schedule_label')}" if item.get("schedule_label") else ""
+    return [TextContent(type="text", text=f"Get: {title} ({item.get('id', clean_id)}) [{enabled_text}{state}]{label}")]
+
+
+async def _scheduled_create(
+    client: Any,
+    title: str,
+    instructions: str,
+    hour: int,
+    timezone_name: str,
+) -> list[TextContent]:
+    clean_title = title.strip()
+    clean_instructions = instructions.strip()
+    clean_timezone = timezone_name.strip()
+    if not clean_title:
+        return [TextContent(type="text", text="title required")]
+    if not clean_instructions:
+        return [TextContent(type="text", text="instructions required")]
+    if hour < 0 or hour > 23:
+        return [TextContent(type="text", text="hour must be 0..23")]
+    payload = _scheduled_daily_payload(clean_title, clean_instructions, hour, clean_timezone or "Asia/Shanghai", "zh-CN")
+    response = await client._batch_execute(
+        [_RawRPCData("Jba3ib", payload)],
+        source_path="/scheduled",
+        close_on_error=False,
+    )
+    bodies = _extract_rpc_bodies(response.text, "Jba3ib")
+    body = bodies[0] if bodies else []
+    if isinstance(body, list) and body and isinstance(body[0], list):
+        body = body[0]
+    created = _parse_scheduled_action_create_body(body)
+    created_id = created.get("id", "")
+    visible = False
+    readable_by_id = None
+    verification_status = "not_attempted"
+    if created_id:
+        registry_entries, _ = await _fetch_scheduled_registry(client, 200)
+        visible = any(item.get("id") == created_id for item in registry_entries)
+        if visible:
+            verification_status = "visible_in_registry"
+        elif registry_entries:
+            verification_status = "not_visible_in_nonempty_registry"
+        else:
+            verification_status = "registry_empty_unverified"
+        task_by_id, _ = await _fetch_scheduled_task_by_id(client, created_id, 200)
+        readable_by_id = task_by_id is not None
+        if readable_by_id and verification_status == "registry_empty_unverified":
+            verification_status = "readable_by_id_registry_empty"
+        elif readable_by_id and verification_status == "not_visible_in_nonempty_registry":
+            verification_status = "readable_by_id_not_visible_in_registry"
+    suffix = "" if visible else f" ({verification_status}; verify account context)"
+    return [TextContent(type="text", text=f"Created: {created_id or clean_title}{suffix}")]
+
+
+async def _scheduled_delete(client: Any, action_id: str) -> list[TextContent]:
+    clean_id = action_id.strip()
+    if not clean_id:
+        return [TextContent(type="text", text="action_id required")]
+    payload = json.dumps([None, [clean_id]], ensure_ascii=False, separators=(",", ":"))
+    response = await client._batch_execute(
+        [_RawRPCData("Q4Gw3c", payload)],
+        source_path="/scheduled",
+        close_on_error=False,
+    )
+    bodies = _extract_rpc_bodies(response.text, "Q4Gw3c")
+    verification_status = "rpc_accepted" if bodies else "rpc_unconfirmed"
+    readable_by_id = None
+    deleted_by_id = None
+    if bodies:
+        registry_entries, _ = await _fetch_scheduled_registry(client, 200)
+        visible = any(item.get("id") == clean_id for item in registry_entries)
+        if visible:
+            verification_status = "still_visible_in_registry"
+        elif registry_entries:
+            verification_status = "not_visible_in_nonempty_registry"
+        else:
+            verification_status = "registry_empty_unverified"
+        task_after_delete, _ = await _fetch_scheduled_task_by_id(client, clean_id, 200)
+        readable_by_id = task_after_delete is not None
+        deleted_by_id = bool(task_after_delete and task_after_delete.get("task_state_id") == 6)
+        if deleted_by_id:
+            verification_status = "deleted_state_by_id"
+        elif readable_by_id:
+            if verification_status == "registry_empty_unverified":
+                verification_status = "registry_empty_active_or_unknown_by_id"
+            elif verification_status == "not_visible_in_nonempty_registry":
+                verification_status = "not_visible_active_or_unknown_by_id"
+        elif verification_status == "registry_empty_unverified":
+            verification_status = "registry_empty_not_readable_by_id"
+        elif verification_status == "not_visible_in_nonempty_registry":
+            verification_status = "not_visible_not_readable_by_id"
+    return [TextContent(type="text", text=f"Delete requested: {clean_id} ({verification_status})")]
 
 
 @mcp.tool(annotations=DESTRUCTIVE_REMOTE)
@@ -584,119 +756,16 @@ async def scheduled(
             return [TextContent(type="text", text="scheduled actions unavailable")]
 
         if action == "list":
-            entries, diagnostic = await _fetch_scheduled_registry(client, 500)
-            lines = []
-            for item in entries[:20]:
-                label = f" {item.get('schedule_label')}" if item.get("schedule_label") else ""
-                lines.append(f"{item.get('title') or '(untitled)'} ({item.get('id', '')}){label}".strip())
-            if not lines and diagnostic.get("empty_hint"):
-                lines.append("No scheduled actions")
-                lines.append(f"Diagnostic: {diagnostic['empty_hint']}")
-            return [TextContent(type="text", text="\n".join(lines) or "No scheduled actions")]
-
+            return await _scheduled_list(client)
         if action == "get":
-            clean_id = action_id.strip()
-            if not clean_id:
-                return [TextContent(type="text", text="action_id required")]
-            item, diagnostic = await _fetch_scheduled_task_by_id(client, clean_id, 500)
-            if not item:
-                status = "not_found_or_wrong_account"
-                if diagnostic.get("matched_task") is False:
-                    status = "not_readable_by_id"
-                return [TextContent(type="text", text=f"Get: {clean_id} ({status})")]
-            enabled = item.get("enabled")
-            enabled_text = "enabled" if enabled is True else "disabled" if enabled is False else "unknown"
-            state = f" state={item.get('task_state')}" if item.get("task_state") else ""
-            title = item.get("title") or "(untitled)"
-            label = f" {item.get('schedule_label')}" if item.get("schedule_label") else ""
-            return [TextContent(type="text", text=f"Get: {title} ({item.get('id', clean_id)}) [{enabled_text}{state}]{label}")]
-
+            return await _scheduled_get(client, action_id)
         if action == "create":
-            clean_title = title.strip()
-            clean_instructions = instructions.strip()
-            clean_timezone = timezone_name.strip()
-            if not clean_title:
-                return [TextContent(type="text", text="title required")]
-            if not clean_instructions:
-                return [TextContent(type="text", text="instructions required")]
-            if hour < 0 or hour > 23:
-                return [TextContent(type="text", text="hour must be 0..23")]
-            payload = _scheduled_daily_payload(clean_title, clean_instructions, hour, clean_timezone or "Asia/Shanghai", "zh-CN")
-            response = await client._batch_execute(
-                [_RawRPCData("Jba3ib", payload)],
-                source_path="/scheduled",
-                close_on_error=False,
-            )
-            bodies = _extract_rpc_bodies(response.text, "Jba3ib")
-            body = bodies[0] if bodies else []
-            if isinstance(body, list) and body and isinstance(body[0], list):
-                body = body[0]
-            created = _parse_scheduled_action_create_body(body)
-            created_id = created.get("id", "")
-            visible = False
-            readable_by_id = None
-            verification_status = "not_attempted"
-            if created_id:
-                registry_entries, _ = await _fetch_scheduled_registry(client, 200)
-                visible = any(item.get("id") == created_id for item in registry_entries)
-                if visible:
-                    verification_status = "visible_in_registry"
-                elif registry_entries:
-                    verification_status = "not_visible_in_nonempty_registry"
-                else:
-                    verification_status = "registry_empty_unverified"
-                task_by_id, _ = await _fetch_scheduled_task_by_id(client, created_id, 200)
-                readable_by_id = task_by_id is not None
-                if readable_by_id and verification_status == "registry_empty_unverified":
-                    verification_status = "readable_by_id_registry_empty"
-                elif readable_by_id and verification_status == "not_visible_in_nonempty_registry":
-                    verification_status = "readable_by_id_not_visible_in_registry"
-            suffix = "" if visible else f" ({verification_status}; verify account context)"
-            return [TextContent(type="text", text=f"Created: {created_id or clean_title}{suffix}")]
-
+            return await _scheduled_create(client, title, instructions, hour, timezone_name)
         if action == "delete":
-            clean_id = action_id.strip()
-            if not clean_id:
-                return [TextContent(type="text", text="action_id required")]
-            payload = json.dumps([None, [clean_id]], ensure_ascii=False, separators=(",", ":"))
-            response = await client._batch_execute(
-                [_RawRPCData("Q4Gw3c", payload)],
-                source_path="/scheduled",
-                close_on_error=False,
-            )
-            bodies = _extract_rpc_bodies(response.text, "Q4Gw3c")
-            verification_status = "rpc_accepted" if bodies else "rpc_unconfirmed"
-            readable_by_id = None
-            deleted_by_id = None
-            if bodies:
-                registry_entries, _ = await _fetch_scheduled_registry(client, 200)
-                visible = any(item.get("id") == clean_id for item in registry_entries)
-                if visible:
-                    verification_status = "still_visible_in_registry"
-                elif registry_entries:
-                    verification_status = "not_visible_in_nonempty_registry"
-                else:
-                    verification_status = "registry_empty_unverified"
-                task_after_delete, _ = await _fetch_scheduled_task_by_id(client, clean_id, 200)
-                readable_by_id = task_after_delete is not None
-                deleted_by_id = bool(task_after_delete and task_after_delete.get("task_state_id") == 6)
-                if deleted_by_id:
-                    verification_status = "deleted_state_by_id"
-                elif readable_by_id:
-                    if verification_status == "registry_empty_unverified":
-                        verification_status = "registry_empty_active_or_unknown_by_id"
-                    elif verification_status == "not_visible_in_nonempty_registry":
-                        verification_status = "not_visible_active_or_unknown_by_id"
-                elif verification_status == "registry_empty_unverified":
-                    verification_status = "registry_empty_not_readable_by_id"
-                elif verification_status == "not_visible_in_nonempty_registry":
-                    verification_status = "not_visible_not_readable_by_id"
-            return [TextContent(type="text", text=f"Delete requested: {clean_id} ({verification_status})")]
-
+            return await _scheduled_delete(client, action_id)
         return [TextContent(type="text", text="Invalid action")]
     except Exception as e:
-        logger.error(f"Scheduled action error: {e}")
-        return [TextContent(type="text", text=f"Error: {e}")]
+        return _error_text(e, "Scheduled action")
 
 
 @mcp.tool(annotations=MUTATES_REMOTE)
@@ -746,8 +815,7 @@ async def create(
         )
 
     except Exception as e:
-        logger.error(f"Create error: {e}")
-        return [TextContent(type="text", text=f"Error: {e}")]
+        return _error_text(e, "Create")
 
 
 @mcp.tool(annotations=MUTATES_REMOTE)
@@ -781,8 +849,84 @@ async def edit(
         return _format_response(response, "image")
 
     except Exception as e:
-        logger.error(f"Edit error: {e}")
-        return [TextContent(type="text", text=f"Error: {e}")]
+        return _error_text(e, "Edit")
+
+
+async def _session_create(
+    model: str,
+    thinking_level: str,
+    learning_mode: Optional[str],
+) -> list[TextContent]:
+    client = get_gemini_client()
+    await initialize_client()
+    await cleanup_due_remote_chats(client)
+    normalized = _normalize_model(model)
+    sess = client.start_chat(model=resolve_model_name(normalized))
+    with _sessions_lock:
+        sid = f"sess_{len(_sessions) + 1}"
+        _sessions[sid] = {
+            "session": sess,
+            "model": normalized,
+            "thinking_level": thinking_level,
+            "learning_mode": learning_mode,
+        }
+    return [TextContent(type="text", text=f"Session created: {sid}")]
+
+
+async def _session_send(
+    session_id: Optional[str],
+    message: Optional[str],
+    thinking_level: str,
+    learning_mode: Optional[str],
+    safe_image_path: Optional[str],
+    model: str,
+) -> list[TextContent]:
+    with _sessions_lock:
+        session_entry = _sessions.get(session_id) if session_id else None
+    if not session_id or not session_entry:
+        return [TextContent(type="text", text=f"Invalid session: {session_id}")]
+
+    client = get_gemini_client()
+    await initialize_client()
+    await cleanup_due_remote_chats(client)
+    _normalize_model(model)  # normalize for side-effect consistency
+
+    request_kwargs = {
+        "prompt": message or "",
+        "files": [safe_image_path] if safe_image_path else None,
+        "thinking_level": session_entry.get("thinking_level", thinking_level),
+    }
+    use_learning_mode = learning_mode or session_entry.get("learning_mode")
+    if use_learning_mode:
+        request_kwargs["learning_mode"] = use_learning_mode
+    response = await session_entry["session"].send_message(**request_kwargs)
+    _schedule_skill_response_cleanup(response, "skill_session:send", session_entry["session"])
+    return _format_response(response)
+
+
+def _session_list() -> list[TextContent]:
+    with _sessions_lock:
+        items = [
+            f"{i}. {sid} ({data['model']})"
+            for i, (sid, data) in enumerate(_sessions.items(), 1)
+        ]
+    if not items:
+        return [TextContent(type="text", text="No active sessions")]
+    return [TextContent(type="text", text="\n".join(items))]
+
+
+def _session_reset(session_id: Optional[str]) -> list[TextContent]:
+    with _sessions_lock:
+        if session_id and session_id in _sessions:
+            del _sessions[session_id]
+            cleared_all = False
+        else:
+            _sessions.clear()
+            cleared_all = True
+    if cleared_all:
+        reset_client()
+        return [TextContent(type="text", text="All sessions reset")]
+    return [TextContent(type="text", text=f"Session deleted: {session_id}")]
 
 
 @mcp.tool(annotations=DESTRUCTIVE_REMOTE)
@@ -801,77 +945,18 @@ async def session(
         if not valid_image:
             return [TextContent(type="text", text=f"Error: {image_error}")]
 
-        client = get_gemini_client()
-        await initialize_client()
-        await cleanup_due_remote_chats(client)
-
-        model = _normalize_model(model)
-
         if action == "create":
-            sess = client.start_chat(model=resolve_model_name(model))
-            with _sessions_lock:
-                sid = f"sess_{len(_sessions) + 1}"
-                _sessions[sid] = {
-                    "session": sess,
-                    "model": model,
-                    "thinking_level": thinking_level,
-                    "learning_mode": learning_mode,
-                }
-            return [TextContent(type="text", text=f"Session created: {sid}")]
-
-        elif action == "send":
-            with _sessions_lock:
-                session_entry = _sessions.get(session_id) if session_id else None
-            if not session_id or not session_entry:
-                return [
-                    TextContent(type="text", text=f"Invalid session: {session_id}")
-                ]
-
-            request_kwargs = {
-                "prompt": message or "",
-                "files": [safe_image_path] if safe_image_path else None,
-                "thinking_level": session_entry.get(
-                    "thinking_level",
-                    thinking_level,
-                ),
-            }
-            use_learning_mode = learning_mode or session_entry.get("learning_mode")
-            if use_learning_mode:
-                request_kwargs["learning_mode"] = use_learning_mode
-            response = await session_entry["session"].send_message(**request_kwargs)
-            _schedule_skill_response_cleanup(response, "skill_session:send", session_entry["session"])
-            return _format_response(response)
-
-        elif action == "list":
-            with _sessions_lock:
-                items = [
-                    f"{i}. {sid} ({data['model']})"
-                    for i, (sid, data) in enumerate(_sessions.items(), 1)
-                ]
-            if not items:
-                return [TextContent(type="text", text="No active sessions")]
-            return [TextContent(type="text", text="\n".join(items))]
-
-        elif action == "reset":
-            with _sessions_lock:
-                if session_id and session_id in _sessions:
-                    del _sessions[session_id]
-                    cleared_all = False
-                else:
-                    _sessions.clear()
-                    cleared_all = True
-            if cleared_all:
-                reset_client()
-                return [TextContent(type="text", text="All sessions reset")]
-            return [
-                TextContent(type="text", text=f"Session deleted: {session_id}")
-            ]
-
+            return await _session_create(model, thinking_level, learning_mode)
+        if action == "send":
+            return await _session_send(session_id, message, thinking_level, learning_mode, safe_image_path, model)
+        if action == "list":
+            return _session_list()
+        if action == "reset":
+            return _session_reset(session_id)
         return [TextContent(type="text", text="Invalid action")]
 
     except Exception as e:
-        logger.error(f"Session error: {e}")
-        return [TextContent(type="text", text=f"Error: {e}")]
+        return _error_text(e, "Session")
 
 
 @mcp.tool(annotations=DESTRUCTIVE_LOCAL)
@@ -923,8 +1008,7 @@ async def prompts(
         return [TextContent(type="text", text="Invalid action")]
 
     except Exception as e:
-        logger.error(f"Prompts error: {e}")
-        return [TextContent(type="text", text=f"Error: {e}")]
+        return _error_text(e, "Prompts")
 
 
 @mcp.tool(annotations=MUTATES_LOCAL)
@@ -975,8 +1059,7 @@ async def cookie(
         return [TextContent(type="text", text="Invalid action")]
 
     except Exception as e:
-        logger.error(f"Cookie error: {e}")
-        return [TextContent(type="text", text=f"Error: {e}")]
+        return _error_text(e, "Cookie")
 
 
 @mcp.tool(annotations=READ_ONLY_LOCAL)
@@ -989,8 +1072,7 @@ async def doctor(
         payload = _doctor_payload(browser=browser, validate_browser=validate_browser)
         return [TextContent(type="text", text=_format_doctor_markdown(payload))]
     except Exception as e:
-        logger.error(f"Doctor error: {e}")
-        return [TextContent(type="text", text=f"Error: {e}")]
+        return _error_text(e, "Doctor")
 
 
 @mcp.tool(annotations=DESTRUCTIVE_REMOTE)
@@ -1015,8 +1097,7 @@ async def cleanup(
         )
         return [TextContent(type="text", text=_format_cleanup_markdown(payload))]
     except Exception as e:
-        logger.error(f"Cleanup error: {e}")
-        return [TextContent(type="text", text=f"Error: {e}")]
+        return _error_text(e, "Cleanup")
 
 
 def _format_response(

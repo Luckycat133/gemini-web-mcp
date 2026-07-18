@@ -180,13 +180,13 @@ class ThinkingLevelGeminiClient(GeminiClient):
             thinking_mode_id=mode_id,
             thinking_level_id=level_id,
             learning_mode_id=(
-                int(learning_config["id"]) if learning_config is not None else None
+                int(learning_config["id"]) if learning_config is not None else None  # type: ignore[call-overload]
             ),
             learning_x9b_field=(
                 str(learning_config["x9b_field"]) if learning_config is not None else None
             ),
             learning_x9b_value=(
-                int(learning_config["x9b_value"]) if learning_config is not None else None
+                int(learning_config["x9b_value"]) if learning_config is not None else None  # type: ignore[call-overload]
             ),
         )
         if not any(
@@ -195,7 +195,7 @@ class ThinkingLevelGeminiClient(GeminiClient):
                 options.learning_mode_id,
             )
         ):
-            options = None
+            return _web_request.set(None)
         return _web_request.set(options)
 
     @contextmanager

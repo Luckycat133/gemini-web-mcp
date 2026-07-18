@@ -25,16 +25,13 @@ def test_imports():
     import src.tools.media
     print("✓ src.tools.media imported")
 
-    import src.tools.media
-    print("✓ src.tools.media imported")
-
     import src.tools.file
     print("✓ src.tools.file imported")
 
     import src.tools.research
     print("✓ src.tools.research imported")
 
-    import src.tools.manage
+    import src.tools.manage  # noqa: F401  (import for side effect test)
     print("✓ src.tools.manage imported")
 
     print("\n✅ All imports successful!")

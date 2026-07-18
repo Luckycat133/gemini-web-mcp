@@ -78,6 +78,7 @@ returning raw response bodies:
 | Usage limits | `qpEbW` |
 | Personalization settings | `GPRiHf`, `maGuAc`, `Te6DCf` |
 | Memory import | `Te6DCf` |
+| Native notebooks | `CNgdBe` |
 | Chat history / Remy references | `MaZiqc`, `GS7W1` |
 | Scheduled actions | `otAQ7b`, `XPSWpd`, `MaZiqc`, `kwDCne`, `Jba3ib`, `Q4Gw3c` |
 | Tool/mode status | `MyzX6c` |
