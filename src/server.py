@@ -187,7 +187,7 @@ async def gemini_get_cookie_from_browser(browser: str = "chrome", profile: str =
             suffix = f" profile={profile}" if profile else ""
             return [TextContent(type="text", text=f"✅ 已从 {browser}{suffix} 获取 Cookie")]
         else:
-            return [TextContent(type="text", text="❌ 获取失败，请确保已登录 gemini.google.com")]
+            return [TextContent(type="text", text="❌ 获取失败，请确保浏览器已登录 Gemini 网页版")]
     except Exception as e:
         error_info = handle_error(e)
         return [format_error_response(error_info)]
