@@ -1,6 +1,6 @@
 # 技术架构
 
-深入了解 Gemini MCP Server v2.1 的设计与实现。
+深入了解 Gemini MCP Server v2.2.0 的设计与实现。
 
 ---
 
@@ -42,28 +42,54 @@
 ```
 gemini-mcp-server/
 ├── pyproject.toml          # 项目配置
-├── README.md               # 项目文档
+├── README.md               # 项目文档（英文公开首页）
+├── README.zh-CN.md         # 中文 README
+├── AGENTS.md               # 仓库协作规范
 ├── .env.example            # 环境变量示例
 ├── .gitignore             # Git 忽略规则
 ├── src/
 │   ├── __init__.py        # 包初始化（版本号）
-│   ├── server.py          # MCP 服务器主入口
+│   ├── server.py          # MCP 服务器主入口（primary surface）
+│   ├── skill_server.py    # 低 token skill 服务器（facade surface）
 │   ├── client_wrapper.py  # Gemini 客户端封装
+│   ├── client_manager.py  # 客户端生命周期管理
+│   ├── cookie_manager.py  # Cookie 加载/验证/刷新
+│   ├── session_manager.py # 本地会话管理
+│   ├── thinking_client.py # Thinking/Learning 模式传输层
+│   ├── error_handler.py   # 错误处理装饰器
 │   ├── constants.py       # 模型常量与配置
+│   ├── remote_chat_cleanup_manager.py  # 远程聊天清理
 │   └── tools/             # 工具模块
-│       ├── __init__.py
+│       ├── __init__.py    # 分层工具注册入口
+│       ├── annotations.py # MCP 工具安全/隐私注解常量
+│       ├── manifest_data.py # 静态 manifest 数据（UI 能力/RPC probe/工具清单）
+│       ├── utils.py       # 跨工具共享 helper（extract_remote_chat_id 等）
 │       ├── chat.py        # 对话工具
 │       ├── research.py    # Deep Research
 │       ├── media.py       # 媒体生成
+│       ├── image.py       # media.py 向后兼容别名
 │       ├── file.py        # 文件工具
-│       └── manage.py      # 管理工具
+│       ├── prompts.py     # 本地 prompt 管理
+│       └── manage.py      # 账号/历史/Gem/cookie 管理工具
+├── tests/                 # pytest 测试套件（test_*.py）
+├── evaluations/           # MCP contract evaluation prompts（gemini_web_mcp_contract.xml）
+├── scripts/               # 打包/发布脚本（package_release.py）
+├── .agents/skills/        # 公开分发用 Codex skill 副本
+├── .codex/skills/         # 本地开发用 Codex skill 副本
 └── docs/                  # 完整文档系统
     ├── README.md          # 文档中心
     ├── quickstart.md      # 快速开始
     ├── tools.md           # 工具使用
     ├── models.md          # 模型选择
     ├── configuration.md   # 配置说明
-    └── faq.md             # 常见问题
+    ├── faq.md             # 常见问题
+    ├── architecture.md    # 技术架构
+    ├── changelog.md       # 更新历史
+    ├── troubleshooting.md # 故障排查
+    ├── contributing.md    # 贡献指南
+    ├── manual-testing.md  # 实机测试清单
+    ├── live-ui-coverage.md # 网页端能力对照
+    └── launch-kit.md      # 发布分发套件
 ```
 
 ---
@@ -308,9 +334,9 @@ client = GeminiClient(psid, psidts, ...)
 
 | 技术 | 版本 | 用途 |
 |------|------|------|
-| Python | 3.10+ | 开发语言 |
-| FastMCP | latest | MCP 服务器框架 |
-| gemini-webapi | latest | Gemini Web API 封装 |
+| Python | >= 3.10 | 开发语言（受 `pyproject.toml` 约束） |
+| FastMCP | mcp >= 1.0 | MCP 服务器框架（`@mcp.tool(annotations=...)` 注册工具） |
+| gemini-webapi | >= 2.0.0 | Gemini Web API 封装（依赖 `types.RPCData`、`constants.GRPC` 等 2.x API） |
 
 ---
 

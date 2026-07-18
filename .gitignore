@@ -4,9 +4,13 @@
 .playwright-cli/
 __pycache__/
 *.pyc
+.coverage
 cookies.json
 prompts.json
 *.log
 .DS_Store
 artifacts/
 generated_media/
+*.egg-info/
+build/
+dist/

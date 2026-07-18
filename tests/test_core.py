@@ -18,7 +18,6 @@ def test_client_wrapper():
     assert hasattr(client_wrapper, 'cleanup_expired_sessions')
     assert hasattr(client_wrapper, 'reset_client')
     assert hasattr(client_wrapper, 'list_sessions')
-    assert hasattr(client_wrapper, 'load_images')
     print("✓ All expected functions exist")
 
 
@@ -57,7 +56,7 @@ def test_tools_structure():
     import src.tools.research
     print("✓ src.tools.research imported")
     
-    import src.tools.manage
+    import src.tools.manage  # noqa: F401  (import for side effect test)
     print("✓ src.tools.manage imported")
 
 

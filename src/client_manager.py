@@ -14,13 +14,13 @@ from urllib.parse import urlparse
 logger = logging.getLogger(__name__)
 
 try:
-    from .cookie_manager import get_cookie_manager, CookieData
+    from .cookie_manager import get_cookie_manager
     COOKIE_MANAGER_AVAILABLE = True
 except ImportError:
     COOKIE_MANAGER_AVAILABLE = False
     logger.warning("cookie_manager 模块不可用")
 
-from .constants import DEFAULT_CHAT_RETENTION_SECONDS
+from .constants import DEFAULT_CHAT_RETENTION_SECONDS  # noqa: E402  (follows optional try/except import)
 
 
 def validate_config() -> None:
@@ -111,6 +111,7 @@ class ClientManager:
         self._client: Optional[Any] = None
         self._initialized: bool = False
         self._lock = threading.Lock()
+        self._init_lock = threading.Lock()
 
     def get_client(self) -> Any:
         """获取或初始化 GeminiClient 实例"""
@@ -118,6 +119,22 @@ class ClientManager:
             if self._client is None:
                 self._create_client()
         return self._client
+
+    async def initialize(self) -> Any:
+        """完成客户端初始化（线程安全：防止并发重复 init）"""
+        client = self.get_client()
+        with self._init_lock:
+            if self._initialized:
+                return client
+            logger.info("正在调用 client.init()...")
+            await client.init(
+                timeout=30,
+                auto_close=False,
+                auto_refresh=os.environ.get("GEMINI_AUTO_REFRESH", "true").lower() == "true"
+            )
+            with self._lock:
+                self._initialized = True
+        return client
 
     def _create_client(self) -> None:
         """创建新的客户端实例"""
@@ -140,20 +157,7 @@ class ClientManager:
             self._client.cookies = extra_cookies
             logger.info(f"已加载 {len(extra_cookies)} 个完整认证 Cookie")
 
-    async def initialize(self) -> Any:
-        """完成客户端初始化"""
-        client = self.get_client()
-        if not self._initialized:
-            logger.info("正在调用 client.init()...")
-            await client.init(
-                timeout=30,
-                auto_close=False,
-                auto_refresh=os.environ.get("GEMINI_AUTO_REFRESH", "true").lower() == "true"
-            )
-            with self._lock:
-                self._initialized = True
-            logger.info("✅ GeminiClient 初始化完成！")
-        return client
+    # initialize 方法定义在上方（带 _init_lock 的线程安全版本）
 
     def reset(self) -> None:
         """重置客户端"""

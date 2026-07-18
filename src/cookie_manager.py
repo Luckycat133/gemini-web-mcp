@@ -311,7 +311,8 @@ class CookieManager:
         local_state = base / "Local State"
         try:
             data = json.loads(local_state.read_text())
-        except Exception:
+        except (OSError, json.JSONDecodeError) as e:
+            logger.debug("无法读取 Chrome Local State %s: %s", local_state, e)
             return ""
         profile_info = data.get("profile") if isinstance(data, dict) else {}
         if not isinstance(profile_info, dict):
@@ -370,7 +371,8 @@ class CookieManager:
         try:
             from gemini_webapi import GeminiClient
             from gemini_webapi.constants import AccountStatus
-        except Exception:
+        except ImportError as e:
+            logger.warning("gemini_webapi 不可用，跳过 Chrome profile Cookie 验证: %s", e)
             return {}
 
         first_available: Dict[str, str] = {}
@@ -394,8 +396,8 @@ class CookieManager:
             finally:
                 try:
                     await client.close()
-                except Exception:
-                    pass
+                except Exception as close_err:
+                    logger.debug("关闭验证用 client 失败: %s", close_err)
         if first_available:
             logger.info("✅ Chrome profile Cookie 验证通过，但未发现定时操作 registry，使用首个可用账号")
         return first_available
@@ -431,8 +433,8 @@ class CookieManager:
             finally:
                 try:
                     await client.close()
-                except Exception:
-                    pass
+                except Exception as close_err:
+                    logger.debug("关闭 profile 验证 client 失败: %s", close_err)
             profiles.append(info)
         return profiles
 
@@ -441,7 +443,8 @@ class CookieManager:
         try:
             from gemini_webapi.types import RPCData
             from gemini_webapi.utils import extract_json_from_response, get_nested_value
-        except Exception:
+        except ImportError as e:
+            logger.warning("gemini_webapi 不可用，无法探测定时操作 registry: %s", e)
             return 0
 
         previous_language = getattr(client, "language", None)
@@ -598,7 +601,7 @@ class CookieManager:
             if browser:
                 psid, psidts = self.get_cookie_from_browser(browser)
                 if psid:
-                    return self.update_cookie(psid, psidts, source=f"browser_{browser}")
+                    return self.update_cookie(psid, psidts or "", source=f"browser_{browser}")
             
             logger.warning("⚠️ 自动刷新需要用户交互，请手动更新 Cookie")
             return False

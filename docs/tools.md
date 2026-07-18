@@ -646,10 +646,12 @@ JSON 输出包含 `verification_status`、`visible_after_delete`、`readable_by_
 | `edit` | 基于参考图片编辑 |
 | `session` | 创建、发送、列出、重置本地多轮会话 |
 | `history` | 远端 Gemini Web 历史对话 list/search/read/export/delete 和测试产物清理 |
+| `cleanup` | dry-run 或删除匹配显式 marker 的测试聊天/定时任务 |
 | `account` | 账号状态、工具清单、可用模型、功能探测、公开链接、用量、Library 能力和定时操作只读列表 |
 | `scheduled` | 定时操作 list/get/create/delete，create 仅支持每日固定小时 |
 | `prompts` | 本地提示词库 |
 | `cookie` | Cookie 状态、浏览器 profile 诊断和浏览器获取 |
+| `doctor` | 只读预检工具组、Cookie 状态、浏览器 profile 对齐和媒体校验依赖，不输出 Cookie 值 |
 
 ---
 

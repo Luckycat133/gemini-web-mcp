@@ -43,7 +43,7 @@ python scripts/package_release.py --outdir dist
 
 ### English
 
-I just released Gemini Web MCP v2.1.2.
+I just released Gemini Web MCP v2.2.0.
 
 It gives Codex, Claude Desktop, VS Code, and other MCP-capable agents a layered Gemini Web interface:
 
@@ -57,7 +57,7 @@ Repo: https://github.com/Luckycat133/gemini-web-mcp
 
 ### Chinese
 
-我发布了 Gemini Web MCP v2.1.2。
+我发布了 Gemini Web MCP v2.2.0。
 
 它把 Gemini Web 封装成更适合 AI agent 使用的 MCP/Skill 工具层：模型调用、媒体生成、历史对话整理、Notebook、定时任务、账号只读盘点都做了分层。
 
@@ -72,7 +72,7 @@ Repo: https://github.com/Luckycat133/gemini-web-mcp
 
 ## LinkedIn / Longform Post
 
-I released Gemini Web MCP v2.1.2, an MCP server and Codex skill for using Gemini Web from AI coding agents.
+I released Gemini Web MCP v2.2.0, an MCP server and Codex skill for using Gemini Web from AI coding agents.
 
 The main design goal is not just "more tools." It is safer tool layering:
 
@@ -115,7 +115,7 @@ Install the agent skill:
 npx skills add https://github.com/Luckycat133/gemini-web-mcp/tree/main/.agents/skills/gemini-web-mcp
 
 Run the smallest MCP profile:
-GEMINI_TOOLS=model uvx --from https://github.com/Luckycat133/gemini-web-mcp/releases/download/v2.1.2/gemini_mcp_server-2.1.2-py3-none-any.whl gemini-mcp-server
+GEMINI_TOOLS=model uvx --from https://github.com/Luckycat133/gemini-web-mcp/releases/download/v2.2.0/gemini_mcp_server-2.2.0-py3-none-any.whl gemini-mcp-server
 
 The project uses reverse-engineered Gemini Web behavior, so it includes an explicit account-risk disclaimer and keeps private/destructive tools outside the default narrow profiles.
 

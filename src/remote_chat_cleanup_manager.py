@@ -22,7 +22,12 @@ class CleanupTask:
 
 
 def extract_remote_chat_id(obj: Any) -> Optional[str]:
-    """从 Gemini response/chat/session 对象中提取远端 chat id。"""
+    """从 Gemini response/chat/session 对象中提取远端 chat id。
+
+    注意：src/tools/utils.py 有同名函数，两者实现必须保持一致。
+    此处保留本地副本是为了避免 remote_chat_cleanup_manager → tools.utils →
+    tools.__init__ → client_wrapper 的循环导入。详见 P1-dedup 决策记录。
+    """
     cid = getattr(obj, "cid", None)
     if isinstance(cid, str) and cid.startswith("c_"):
         return cid

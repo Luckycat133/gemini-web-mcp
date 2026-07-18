@@ -11,7 +11,7 @@ import orjson
 from mcp.server.fastmcp import FastMCP
 from pathlib import Path
 from mcp.types import TextContent
-from typing import Literal, Optional
+from typing import Literal, Optional, cast
 
 from gemini_webapi.constants import GRPC
 from gemini_webapi.types import RPCData
@@ -343,7 +343,7 @@ def register_media_tools(mcp: FastMCP):
         filename: Optional[str] = None,
     ) -> list[TextContent]:
         """音乐生成"""
-        return await gemini_generate_media(
+        result = await gemini_generate_media(
             prompt=prompt,
             media_type="music",
             model=model,
@@ -354,3 +354,4 @@ def register_media_tools(mcp: FastMCP):
             output_dir=output_dir,
             filename=filename,
         )
+        return cast(list[TextContent], result)

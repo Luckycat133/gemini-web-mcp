@@ -2,13 +2,13 @@
   <img src="docs/assets/gemini-web-mcp-banner.svg" alt="Gemini Web MCP" width="100%">
 </p>
 
-<h1 align="center">Gemini Web MCP Server (v2.1.2)</h1>
+<h1 align="center">Gemini Web MCP Server (v2.2.0)</h1>
 
 <p align="center">
   <a href="https://github.com/Luckycat133/gemini-web-mcp/releases/latest"><img alt="Release" src="https://img.shields.io/github/v/release/Luckycat133/gemini-web-mcp?label=release"></a>
   <a href="https://github.com/Luckycat133/gemini-web-mcp/tree/main/.agents/skills/gemini-web-mcp"><img alt="Codex Skill" src="https://img.shields.io/badge/Codex%20Skill-installable-0B6BFF"></a>
   <a href="https://www.gnu.org/licenses/agpl-3.0.html"><img alt="License" src="https://img.shields.io/badge/License-AGPL--3.0--only-blue.svg"></a>
-  <a href="docs/changelog.md"><img alt="Verified" src="https://img.shields.io/badge/tests-70%20passing-1F8A70"></a>
+  <a href="docs/changelog.md"><img alt="Verified" src="https://img.shields.io/badge/tests-1108%20passing-1F8A70"></a>
 </p>
 
 <p align="center">
@@ -21,7 +21,7 @@
 
 ---
 
-## ✨ 主要功能 (v2.1)
+## ✨ 主要功能 (v2.2)
 
 ### 🤖 模型支持
 - **flash-lite** → Web UI `3.1 Flash-Lite`
@@ -91,7 +91,7 @@ pip install browser-cookie3
       "command": "uvx",
       "args": [
         "--from",
-        "https://github.com/Luckycat133/gemini-web-mcp/releases/download/v2.1.2/gemini_mcp_server-2.1.2-py3-none-any.whl",
+        "https://github.com/Luckycat133/gemini-web-mcp/releases/download/v2.2.0/gemini_mcp_server-2.2.0-py3-none-any.whl",
         "gemini-mcp-server"
       ],
       "env": {
@@ -106,7 +106,7 @@ pip install browser-cookie3
 
 ```bash
 GEMINI_TOOLS=model uvx \
-  --from https://github.com/Luckycat133/gemini-web-mcp/releases/download/v2.1.2/gemini_mcp_server-2.1.2-py3-none-any.whl \
+  --from https://github.com/Luckycat133/gemini-web-mcp/releases/download/v2.2.0/gemini_mcp_server-2.2.0-py3-none-any.whl \
   gemini-mcp-server
 ```
 
@@ -375,13 +375,20 @@ gemini-mcp-server/
 ├── .env.example            # 环境变量示例
 ├── src/
 │   ├── __init__.py
-│   ├── server.py           # MCP 服务器主入口
+│   ├── server.py           # MCP 服务器主入口（primary surface）
+│   ├── skill_server.py     # 低 token skill 服务器（facade surface）
 │   ├── client_wrapper.py   # Gemini 客户端封装
+│   ├── client_manager.py   # 客户端生命周期管理
 │   ├── cookie_manager.py   # Cookie 管理模块
-│   ├── constants.py        # 模型常量、配置
+│   ├── session_manager.py  # 本地会话管理
+│   ├── thinking_client.py  # Thinking/Learning 模式传输层
 │   ├── error_handler.py    # 智能错误处理 (v2.0 新增)
+│   ├── constants.py        # 模型常量、配置
+│   ├── remote_chat_cleanup_manager.py  # 远程聊天清理
 │   └── tools/              # 工具集
 │       ├── __init__.py     # 分层加载入口 (v2.0 新增)
+│       ├── annotations.py  # MCP 工具安全/隐私注解常量
+│       ├── manifest_data.py # 静态 manifest 数据（UI 能力/RPC probe/工具清单）
 │       ├── utils.py        # 共享工具函数 (v2.0 新增)
 │       ├── chat.py         # 对话工具
 │       ├── media.py        # 媒体生成

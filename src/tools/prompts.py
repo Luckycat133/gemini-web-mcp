@@ -9,6 +9,7 @@ from typing import Literal, Optional, Dict, List
 import json
 import os
 import logging
+import threading
 import uuid
 from datetime import datetime
 
@@ -114,13 +115,15 @@ class PromptManager:
 
 
 _prompt_manager: Optional[PromptManager] = None
+_prompt_manager_lock = threading.Lock()
 
 
 def get_prompt_manager() -> PromptManager:
     global _prompt_manager
-    if _prompt_manager is None:
-        _prompt_manager = PromptManager()
-    return _prompt_manager
+    with _prompt_manager_lock:
+        if _prompt_manager is None:
+            _prompt_manager = PromptManager()
+        return _prompt_manager
 
 
 def register_prompts_tools(mcp: FastMCP):
@@ -159,11 +162,11 @@ def register_prompts_tools(mcp: FastMCP):
                     prompt_list.append(f"**分类**: {category}")
                 prompt_list.append("")
                 
-                for i, prompt in enumerate(prompts, 1):
-                    prompt_list.append(f"{i}. {prompt['name']} (ID: {prompt['id']})")
-                    prompt_list.append(f"   分类: {prompt['category']}")
-                    if prompt.get('description'):
-                        prompt_list.append(f"   描述: {prompt['description']}")
+                for i, item in enumerate(prompts, 1):
+                    prompt_list.append(f"{i}. {item['name']} (ID: {item['id']})")
+                    prompt_list.append(f"   分类: {item['category']}")
+                    if item.get('description'):
+                        prompt_list.append(f"   描述: {item['description']}")
                     prompt_list.append("")
                 
                 return [TextContent(type="text", text="\n".join(prompt_list))]

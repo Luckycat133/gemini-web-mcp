@@ -4,7 +4,7 @@
 
 import logging
 import functools
-from typing import Optional, Dict, Any
+from typing import Any
 from mcp.types import TextContent
 
 logger = logging.getLogger(__name__)
@@ -61,7 +61,7 @@ ERROR_CODES = {
     },
 }
 
-def handle_error(exception: Exception) -> Dict[str, Any]:
+def handle_error(exception: Exception) -> dict[str, Any]:
     """
     智能错误处理 - 分析异常并提供解决方案
     
@@ -100,7 +100,7 @@ def handle_error(exception: Exception) -> Dict[str, Any]:
         "tool": None
     }
 
-def format_error_response(error_info: Dict[str, Any]) -> TextContent:
+def format_error_response(error_info: dict[str, Any]) -> TextContent:
     """
     格式化错误响应，便于 AI 理解和处理
     

@@ -3,6 +3,7 @@ Gemini 常量配置
 """
 
 from enum import Enum
+from typing import TypedDict
 
 
 class RPC(str, Enum):
@@ -23,7 +24,15 @@ ENDPOINTS = {
 DEFAULT_CHAT_RETENTION_SECONDS = 1800
 
 
-MODEL_CONFIG = {
+class ModelConfig(TypedDict):
+    name: str
+    hex_id: str
+    capacity_tail: int
+    advanced_only: bool
+    thinking_mode_id: int
+
+
+MODEL_CONFIG: dict[str, ModelConfig] = {
     "flash-lite": {
         "name": "3.1 Flash-Lite",
         "hex_id": "8c46e95b1a07cecc",
@@ -97,7 +106,15 @@ THINKING_MODE_IDS = {
     "e6fa609c3fa255c0": 3,
 }
 
-LEARNING_MODE_CONFIG = {
+class LearningModeConfig(TypedDict, total=False):
+    alias_for: str
+    id: int
+    x9b_field: str
+    x9b_value: int
+    prompt_prefix: str
+
+
+LEARNING_MODE_CONFIG: dict[str, LearningModeConfig] = {
     "interactive_quiz": {
         "id": 18,
         "x9b_field": "h5d",
