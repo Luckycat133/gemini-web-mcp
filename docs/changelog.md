@@ -4,6 +4,13 @@ Gemini MCP Server 版本更新历史记录。
 
 ---
 
+## 测试覆盖渐进（2026-07-18）
+
+### manage.py cleanup scheduled 分支 + helper 函数覆盖（Cycle 41）
+- 新增 `tests/test_manage_final_branches.py`（13 个测试）：覆盖 manage.py 剩余可操作 miss——cleanup scheduled 的 `elif bodies: deleted=True` 分支（RPC accepted 但 task_state_id != 6 或 task_after_delete=None）+ scheduled 顶层 except（`_fetch_scheduled_registry` 抛异常）+ 4 个零覆盖 helper 函数（`_conversation_metadata_payload` payload 包装、`resolve_manage_tool_names` 空 configured 回退、`_configured_manage_layers` manage: prefix 分支、`_tool_availability` 兜底 return []）
+
+---
+
 ## v2.2.0 (2026-07-17)
 
 ### Skill 最佳实践对齐
