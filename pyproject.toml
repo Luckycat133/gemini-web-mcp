@@ -16,7 +16,7 @@ classifiers = [
 ]
 dependencies = [
     "gemini-webapi>=2.0.0",
-    "mcp>=1.0.0",
+    "mcp>=1.0.0,<2",
     "fastmcp>=1.0.0",
 ]
 
