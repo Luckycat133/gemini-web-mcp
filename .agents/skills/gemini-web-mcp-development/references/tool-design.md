@@ -14,7 +14,7 @@ Use three layers deliberately:
 2. **Facade/workflow tools** for compact clients, such as `history(action=...)` or account inventory, when one bounded action enum saves substantial context.
 3. **Diagnostic tools** for manifests, capability probes, package/connection checks, and compatibility evidence.
 
-Do not put unrelated safety, authentication, read, mutation, and artifact workflows into one action enum merely to reduce tool count. Compactness is valuable only when the agent can still predict the result.
+Do not put unrelated authentication, read, mutation, and artifact workflows into one action enum merely to reduce tool count. Compactness is valuable only when the agent can still predict the result.
 
 ## Input Schema Rules
 
