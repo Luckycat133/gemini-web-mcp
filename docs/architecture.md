@@ -1,6 +1,6 @@
 # 技术架构
 
-深入了解 Gemini MCP Server v2.2.0 的设计与实现。
+深入了解 Gemini MCP Server v1.3.0 的设计与实现。
 
 ---
 

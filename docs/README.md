@@ -1,6 +1,6 @@
 # Gemini MCP Server 文档中心
 
-欢迎使用 Gemini MCP Server v2.2.0 文档！
+欢迎使用 Gemini MCP Server v1.3.0 文档！
 
 ---
 

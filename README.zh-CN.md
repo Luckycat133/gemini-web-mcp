@@ -2,7 +2,7 @@
   <img src="docs/assets/gemini-web-mcp-banner.svg" alt="Gemini Web MCP" width="100%">
 </p>
 
-<h1 align="center">Gemini Web MCP Server (v2.2.0)</h1>
+<h1 align="center">Gemini Web MCP Server (v1.3.0)</h1>
 
 <p align="center">
   <a href="https://github.com/Luckycat133/gemini-web-mcp/releases/latest"><img alt="Release" src="https://img.shields.io/github/v/release/Luckycat133/gemini-web-mcp?label=release"></a>
@@ -18,6 +18,14 @@
 > ⚠️ 免责声明: 本项目仅供技术研究与教育用途。使用逆向工程方式访问 Gemini Web 可能违反 Google 服务条款，并存在账户被限制的风险。
 
 基于 Gemini Web 网页版逆向工程的 MCP 服务器，支持 Claude Desktop、VS Code 等任何 MCP/Skills 兼容的 AI 应用。
+
+---
+
+## MCP 协议兼容性
+
+本服务器把所有 MCP 协议层行为（版本协商、JSON-RPC 帧、`initialize` 握手、`server/discover`、结构化错误码）全部委托给官方 `mcp` Python SDK（经 `FastMCP`），自身不含任何协议层代码；`error_handler.py` 里的 `NO_COOKIE` / `INVALID_COOKIE` / `SESSION_NOT_FOUND` 等是应用层错误，以 `TextContent` 返回，不是 JSON-RPC 协议错误。
+
+当前锁定的 `mcp` 1.28.x 对外说的是协议 `2025-11-25`。MCP `2026-07-28` 修订（stateless 核心、`server/discover` 强制、`resultType`、保留错误码段 `-32020..-32099`、Roots/Sampling/Logging 弃用）需要 `mcp` SDK v2.0.0+，而 v2 是破坏性大版本（`FastMCP` → `MCPServer`、`mcp.server.fastmcp` 移除、字段 camelCase → snake_case、`httpx` → `httpx2`）。在该迁移完成前，`pyproject.toml` 按 [SDK 迁移指南](https://py.sdk.modelcontextprotocol.io/migration/) 给 `mcp` 加了 `<2` 上界，避免新安装误拉不兼容的 v2。
 
 ---
 
@@ -91,7 +99,7 @@ pip install browser-cookie3
       "command": "uvx",
       "args": [
         "--from",
-        "https://github.com/Luckycat133/gemini-web-mcp/releases/download/v2.2.0/gemini_mcp_server-2.2.0-py3-none-any.whl",
+        "https://github.com/Luckycat133/gemini-web-mcp/releases/download/v1.3.0/gemini_mcp_server-1.3.0-py3-none-any.whl",
         "gemini-mcp-server"
       ],
       "env": {
@@ -106,7 +114,7 @@ pip install browser-cookie3
 
 ```bash
 GEMINI_TOOLS=model uvx \
-  --from https://github.com/Luckycat133/gemini-web-mcp/releases/download/v2.2.0/gemini_mcp_server-2.2.0-py3-none-any.whl \
+  --from https://github.com/Luckycat133/gemini-web-mcp/releases/download/v1.3.0/gemini_mcp_server-1.3.0-py3-none-any.whl \
   gemini-mcp-server
 ```
 
