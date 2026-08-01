@@ -21,6 +21,14 @@
 
 ---
 
+## MCP 协议兼容性
+
+本服务器把所有 MCP 协议层行为（版本协商、JSON-RPC 帧、`initialize` 握手、`server/discover`、结构化错误码）全部委托给官方 `mcp` Python SDK（经 `FastMCP`），自身不含任何协议层代码；`error_handler.py` 里的 `NO_COOKIE` / `INVALID_COOKIE` / `SESSION_NOT_FOUND` 等是应用层错误，以 `TextContent` 返回，不是 JSON-RPC 协议错误。
+
+当前锁定的 `mcp` 1.28.x 对外说的是协议 `2025-11-25`。MCP `2026-07-28` 修订（stateless 核心、`server/discover` 强制、`resultType`、保留错误码段 `-32020..-32099`、Roots/Sampling/Logging 弃用）需要 `mcp` SDK v2.0.0+，而 v2 是破坏性大版本（`FastMCP` → `MCPServer`、`mcp.server.fastmcp` 移除、字段 camelCase → snake_case、`httpx` → `httpx2`）。在该迁移完成前，`pyproject.toml` 按 [SDK 迁移指南](https://py.sdk.modelcontextprotocol.io/migration/) 给 `mcp` 加了 `<2` 上界，避免新安装误拉不兼容的 v2。
+
+---
+
 ## ✨ 主要功能 (v2.2)
 
 ### 🤖 模型支持
