@@ -20,6 +20,7 @@ except ImportError:
     print("Error: mcp package required. Install with: pip install mcp fastmcp")
     exit(1)
 
+from .adapters import attach_domain_result, domain_text, exception_text
 from .client_wrapper import (
     cleanup_due_remote_chats,
     create_session,
@@ -37,6 +38,7 @@ from .client_wrapper import (
     send_session_message,
 )
 from .constants import resolve_media_request, resolve_model_name
+from .domain import DomainErrorCode, DomainResult
 from .tools.annotations import (
     DESTRUCTIVE_LOCAL,
     DESTRUCTIVE_REMOTE,
@@ -248,6 +250,24 @@ def _error_text(e: Exception, tool_name: str) -> list[TextContent]:
     return [TextContent(type="text", text=f"Error: {e}")]
 
 
+def _invalid_argument_result(message: str) -> DomainResult[None]:
+    return DomainResult.failure(
+        DomainErrorCode.INVALID_ARGUMENT,
+        message,
+        suggested_action="Correct the arguments and retry.",
+        verification_status="input_rejected",
+    )
+
+
+def _session_not_found_result() -> DomainResult[None]:
+    return DomainResult.failure(
+        DomainErrorCode.SESSION_NOT_FOUND,
+        "The requested session does not exist.",
+        suggested_action="Create a session and use the returned ID.",
+        verification_status="local_state_absent",
+    )
+
+
 def _schedule_skill_response_cleanup(response: Any, source: str, session: Any = None) -> None:
     """Mirror the primary MCP server's default remote-chat cleanup behavior."""
     cid = schedule_remote_chat_cleanup_from_response(response, source=source)
@@ -268,7 +288,10 @@ async def chat(
     try:
         valid_image, safe_image_path, image_error = validate_optional_image_path(image_path)
         if not valid_image:
-            return [TextContent(type="text", text=f"Error: {image_error}")]
+            return domain_text(
+                _invalid_argument_result(image_error or "Invalid image path."),
+                f"Error: {image_error}",
+            )
 
         model = _normalize_model(model)
         model_name = resolve_model_name(model)
@@ -276,12 +299,20 @@ async def chat(
 
         session_lookup = lookup_session(session_id) if session_id else None
         if session_id and (session_lookup is None or not session_lookup.ok or session_lookup.session is None):
-            return [TextContent(type="text", text=f"SESSION_NOT_FOUND: Invalid session: {session_id}")]
+            missing_result: DomainResult[Any] = (
+                session_lookup if session_lookup is not None else _session_not_found_result()
+            )
+            return domain_text(
+                missing_result,
+                f"SESSION_NOT_FOUND: Invalid session: {session_id}",
+            )
 
         client = get_gemini_client()
         await initialize_client()
         await cleanup_due_remote_chats(client)
 
+        result: DomainResult[Any]
+        result_data: Any
         if session_id and session_lookup is not None and session_lookup.session is not None:
             session_entry = session_lookup.session
             request_kwargs = {
@@ -294,9 +325,17 @@ async def chat(
                 request_kwargs["learning_mode"] = use_learning_mode
             sent = await send_session_message(session_id, **request_kwargs)
             if not sent.ok or sent.session is None:
-                return [TextContent(type="text", text=f"SESSION_NOT_FOUND: Invalid session: {session_id}")]
+                return domain_text(
+                    sent,
+                    f"SESSION_NOT_FOUND: Invalid session: {session_id}",
+                )
             response = sent.response
             _schedule_skill_response_cleanup(response, "skill_chat:session", sent.session.session)
+            result = sent
+            result_data = {
+                "session_id": session_id,
+                "model": sent.session.model,
+            }
         else:
             request_kwargs = {
                 "prompt": message,
@@ -308,11 +347,30 @@ async def chat(
                 request_kwargs["learning_mode"] = learning_mode
             response = await client.generate_content(**request_kwargs)
             _schedule_skill_response_cleanup(response, "skill_chat")
+            result = DomainResult.success(
+                {
+                    "model": model,
+                    "resolved_model": model_name,
+                },
+                requested_backend=model,
+                effective_backend=model_name,
+                verification_status="upstream_response_received",
+            )
+            result_data = result.data
 
-        return _format_response(response)
+        return attach_domain_result(
+            _format_response(response),
+            result,
+            data=result_data,
+        )
 
     except Exception as e:
-        return _error_text(e, "Chat")
+        return exception_text(
+            e,
+            logger=logger,
+            operation="chat",
+            preserve_message=True,
+        )
 
 
 @mcp.tool(annotations=DESTRUCTIVE_REMOTE)
@@ -872,7 +930,15 @@ async def _session_create(
         learning_mode=learning_mode,
     )
     sid = created.session.session_id if created.session is not None else ""
-    return [TextContent(type="text", text=f"Session created: {sid}")]
+    return domain_text(
+        created,
+        f"Session created: {sid}",
+        data={
+            "session_id": sid,
+            "model": normalized,
+            "resolved_model": resolve_model_name(normalized),
+        },
+    )
 
 
 async def _session_send(
@@ -885,7 +951,13 @@ async def _session_send(
 ) -> list[TextContent]:
     lookup = lookup_session(session_id) if session_id else None
     if not session_id or lookup is None or not lookup.ok or lookup.session is None:
-        return [TextContent(type="text", text=f"SESSION_NOT_FOUND: Invalid session: {session_id}")]
+        missing_result: DomainResult[Any] = (
+            lookup if lookup is not None else _session_not_found_result()
+        )
+        return domain_text(
+            missing_result,
+            f"SESSION_NOT_FOUND: Invalid session: {session_id}",
+        )
     session_entry = lookup.session
 
     client = get_gemini_client()
@@ -903,32 +975,66 @@ async def _session_send(
         request_kwargs["learning_mode"] = use_learning_mode
     sent = await send_session_message(session_id, **request_kwargs)
     if not sent.ok or sent.session is None:
-        return [TextContent(type="text", text=f"SESSION_NOT_FOUND: Invalid session: {session_id}")]
+        return domain_text(
+            sent,
+            f"SESSION_NOT_FOUND: Invalid session: {session_id}",
+        )
     response = sent.response
     _schedule_skill_response_cleanup(response, "skill_session:send", sent.session.session)
-    return _format_response(response)
+    return attach_domain_result(
+        _format_response(response),
+        sent,
+        data={"session_id": session_id, "model": sent.session.model},
+    )
 
 
 def _session_list() -> list[TextContent]:
+    sessions = list_sessions()
     items = [
         f"{i}. {sid} ({data['model']})"
-        for i, (sid, data) in enumerate(list_sessions().items(), 1)
+        for i, (sid, data) in enumerate(sessions.items(), 1)
     ]
+    result = DomainResult.success({
+        "count": len(sessions),
+        "sessions": [
+            {
+                "session_id": sid,
+                "model": data["model"],
+                "retain_chat": data.get("retain_chat", False),
+            }
+            for sid, data in sessions.items()
+        ],
+    })
     if not items:
-        return [TextContent(type="text", text="No active sessions")]
-    return [TextContent(type="text", text="\n".join(items))]
+        return domain_text(result, "No active sessions", use_result_data=True)
+    return domain_text(result, "\n".join(items), use_result_data=True)
 
 
 async def _session_reset(session_id: Optional[str], *, reset_all: bool = False) -> list[TextContent]:
     if reset_all:
         await reset_client_async()
-        return [TextContent(type="text", text="All sessions reset")]
+        return domain_text(
+            DomainResult.success({"scope": "all"}),
+            "All sessions reset",
+            use_result_data=True,
+        )
     if not session_id:
-        return [TextContent(type="text", text="INVALID_ARGUMENT: session_id is required; use action='reset_all'")]
+        message = "session_id is required; use action='reset_all'"
+        return domain_text(
+            _invalid_argument_result(message),
+            f"INVALID_ARGUMENT: {message}",
+        )
     result = await reset_session(session_id)
     if not result.ok:
-        return [TextContent(type="text", text=f"SESSION_NOT_FOUND: Invalid session: {session_id}")]
-    return [TextContent(type="text", text=f"Session deleted: {session_id}")]
+        return domain_text(
+            result,
+            f"SESSION_NOT_FOUND: Invalid session: {session_id}",
+        )
+    return domain_text(
+        result,
+        f"Session deleted: {session_id}",
+        data={"session_id": session_id},
+    )
 
 
 @mcp.tool(annotations=DESTRUCTIVE_REMOTE)
@@ -945,7 +1051,10 @@ async def session(
     try:
         valid_image, safe_image_path, image_error = validate_optional_image_path(image_path)
         if not valid_image:
-            return [TextContent(type="text", text=f"Error: {image_error}")]
+            return domain_text(
+                _invalid_argument_result(image_error or "Invalid image path."),
+                f"Error: {image_error}",
+            )
 
         if action == "create":
             return await _session_create(model, thinking_level, learning_mode)
@@ -957,10 +1066,18 @@ async def session(
             return await _session_reset(session_id)
         if action == "reset_all":
             return await _session_reset(None, reset_all=True)
-        return [TextContent(type="text", text="Invalid action")]
+        return domain_text(
+            _invalid_argument_result(f"Unsupported session action: {action}"),
+            "Invalid action",
+        )
 
     except Exception as e:
-        return _error_text(e, "Session")
+        return exception_text(
+            e,
+            logger=logger,
+            operation="session",
+            preserve_message=True,
+        )
 
 
 @mcp.tool(annotations=DESTRUCTIVE_LOCAL)

@@ -11,16 +11,23 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, Optional
 
 from .constants import DEFAULT_CHAT_RETENTION_SECONDS
+from .domain import (
+    DomainError,
+    DomainErrorCode,
+    DomainResult,
+    OperationState,
+    ResultMeta,
+)
 
 logger = logging.getLogger(__name__)
 
-SESSION_NOT_FOUND = "SESSION_NOT_FOUND"
+SESSION_NOT_FOUND = DomainErrorCode.SESSION_NOT_FOUND.value
 
 
 @dataclass
 class SessionState:
     """Typed local handle and mutable lifecycle state for one upstream session."""
-    session: Any
+    session: Any = field(metadata={"domain_exclude": True})
     session_id: str = ""
     model: str = "flash"
     thinking_level: str = "standard"
@@ -31,7 +38,12 @@ class SessionState:
     upstream_chat_id: Optional[str] = None
     retain_chat: bool = False
     delete_after_seconds: Optional[int] = None
-    _send_lock: asyncio.Lock = field(default_factory=asyncio.Lock, repr=False, compare=False)
+    _send_lock: asyncio.Lock = field(
+        default_factory=asyncio.Lock,
+        repr=False,
+        compare=False,
+        metadata={"domain_exclude": True},
+    )
 
 
 # Public target names plus the existing import name used by older callers.
@@ -40,25 +52,69 @@ SessionData = SessionState
 
 
 @dataclass(frozen=True)
-class SessionOperationResult:
-    """Typed result for shared session lifecycle operations."""
+class SessionOperationData:
+    """Public session state plus an adapter-only upstream response."""
 
-    ok: bool
-    session: Optional[SessionData] = None
-    response: Any = None
-    error_code: Optional[str] = None
+    state: Optional[SessionData] = None
+    response: Any = field(default=None, metadata={"domain_exclude": True})
+
+
+class SessionOperationResult(DomainResult[SessionOperationData]):
+    """Domain result specialized for shared session lifecycle operations.
+
+    ``session`` and ``response`` remain as compatibility properties for callers
+    written against the pre-P0.3 contract. New callers can consume the generic
+    ``data``, ``error`` and ``meta`` fields.
+    """
 
     @classmethod
-    def success(
+    def success(  # type: ignore[override]  # compatibility factory predates DomainResult
         cls,
         session: Optional[SessionData] = None,
         response: Any = None,
+        *,
+        verification_status: str = "not_applicable",
     ) -> "SessionOperationResult":
-        return cls(ok=True, session=session, response=response)
+        return cls(
+            ok=True,
+            data=SessionOperationData(state=session, response=response),
+            error=None,
+            warnings=(),
+            meta=ResultMeta.create(
+                OperationState.COMPLETED,
+                requested_backend=session.model if session is not None else None,
+                verification_status=verification_status,
+            ),
+        )
 
     @classmethod
     def not_found(cls) -> "SessionOperationResult":
-        return cls(ok=False, error_code=SESSION_NOT_FOUND)
+        message = "The requested session does not exist."
+        return cls(
+            ok=False,
+            data=None,
+            error=DomainError(
+                code=DomainErrorCode.SESSION_NOT_FOUND,
+                message=message,
+                retryable=False,
+                suggested_action=(
+                    "Create a session with gemini_start_chat and use the returned ID."
+                ),
+            ),
+            warnings=(),
+            meta=ResultMeta.create(
+                OperationState.FAILED,
+                verification_status="local_state_absent",
+            ),
+        )
+
+    @property
+    def session(self) -> Optional[SessionData]:
+        return self.data.state if self.data is not None else None
+
+    @property
+    def response(self) -> Any:
+        return self.data.response if self.data is not None else None
 
 
 class SessionService:
@@ -99,7 +155,10 @@ class SessionService:
                 delete_after_seconds,
             )
             self._sessions[session_id] = data
-        return SessionOperationResult.success(data)
+        return SessionOperationResult.success(
+            data,
+            verification_status="local_state_created",
+        )
 
     def store_session(
         self,
@@ -132,7 +191,10 @@ class SessionService:
         data = self.get_session(session_id)
         if data is None:
             return SessionOperationResult.not_found()
-        return SessionOperationResult.success(data)
+        return SessionOperationResult.success(
+            data,
+            verification_status="local_state_found",
+        )
 
     def get_session(self, session_id: str) -> Optional[SessionData]:
         """获取存储的会话"""
@@ -166,7 +228,11 @@ class SessionService:
                 if self._sessions.get(session_id) is data:
                     data.updated_at = time.time()
                     data.upstream_chat_id = getattr(data.session, "cid", data.upstream_chat_id)
-            return SessionOperationResult.success(data, response)
+            return SessionOperationResult.success(
+                data,
+                response,
+                verification_status="upstream_response_received",
+            )
 
     async def send_message_stream(
         self,
@@ -192,7 +258,11 @@ class SessionService:
                 if self._sessions.get(session_id) is data:
                     data.updated_at = time.time()
                     data.upstream_chat_id = getattr(data.session, "cid", data.upstream_chat_id)
-            return SessionOperationResult.success(data, responses)
+            return SessionOperationResult.success(
+                data,
+                responses,
+                verification_status="upstream_response_received",
+            )
 
     async def reset_one_async(self, session_id: str) -> SessionOperationResult:
         """Wait for an in-flight send before detaching exactly one session."""
@@ -207,7 +277,10 @@ class SessionService:
                 if self._sessions.get(session_id) is not data:
                     return SessionOperationResult.not_found()
                 self._sessions.pop(session_id)
-            return SessionOperationResult.success(data)
+            return SessionOperationResult.success(
+                data,
+                verification_status="local_state_removed",
+            )
 
     def reset_one(self, session_id: str) -> SessionOperationResult:
         """Reset exactly one session; an unknown ID never affects other state."""
@@ -216,7 +289,10 @@ class SessionService:
             data = self._sessions.pop(session_id, None)
         if data is None:
             return SessionOperationResult.not_found()
-        return SessionOperationResult.success(data)
+        return SessionOperationResult.success(
+            data,
+            verification_status="local_state_removed",
+        )
 
     def reset_all(self) -> list[SessionData]:
         """Explicitly reset every local session and return the detached states."""

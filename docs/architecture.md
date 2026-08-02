@@ -55,6 +55,8 @@ gemini-mcp-server/
 │   ├── client_manager.py  # 客户端生命周期管理
 │   ├── cookie_manager.py  # Cookie 加载/验证/刷新
 │   ├── session_manager.py # 本地会话管理
+│   ├── domain/            # 领域结果、错误、告警与操作状态
+│   ├── adapters/          # MCP 文本兼容和结构化结果适配
 │   ├── thinking_client.py # Thinking/Learning 模式传输层
 │   ├── error_handler.py   # 错误处理装饰器
 │   ├── constants.py       # 模型常量与配置
@@ -181,6 +183,29 @@ MODEL_CONFIG = {
 - 聊天记录管理
 - Gem 管理
 - 模型与功能列表
+
+---
+
+### 5. 类型化领域结果
+
+P0.3 在业务服务与 MCP 展示层之间加入统一结果契约：
+
+```text
+client / session / chat operation
+             │
+             ▼
+DomainResult[data, error, warnings, meta]
+             │
+             ▼
+MCP adapter ── TextContent.text（兼容）
+             └─ TextContent._meta.domain_result（机器可读）
+```
+
+`src/domain/results.py` 定义稳定错误码、重试性、建议动作、操作状态和诊断关联 ID。
+`src/adapters/mcp_results.py` 保留既有文本与 FastMCP 返回形状，并只把 JSON 安全的公开数据写入
+`_meta.domain_result`。上游客户端、Cookie、session 实例、异步锁和原始响应对象不会序列化。
+未知异常在适配边界分类；结构化结果通过 request/diagnostic ID 与包含原始证据的服务端日志关联。
+compact 入口原有的 `Error: ...` 正文暂时保留，仅用于文本兼容，不属于稳定领域契约。
 
 ---
 
