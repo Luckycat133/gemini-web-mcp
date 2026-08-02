@@ -36,9 +36,18 @@ from .client_wrapper import (
     schedule_remote_chat_cleanup,
     schedule_remote_chat_cleanup_from_response,
     send_session_message,
+    send_session_message_stream,
 )
 from .constants import resolve_media_request, resolve_model_name
 from .domain import DomainErrorCode, DomainResult
+from .services import (
+    ChatRequest,
+    ChatService,
+    ChatServiceDependencies,
+    CleanupStrategy,
+    SessionMessageRequest,
+    StartSessionRequest,
+)
 from .tools.annotations import (
     DESTRUCTIVE_LOCAL,
     DESTRUCTIVE_REMOTE,
@@ -275,6 +284,58 @@ def _schedule_skill_response_cleanup(response: Any, source: str, session: Any = 
         schedule_remote_chat_cleanup(getattr(session, "cid", None), source=source)
 
 
+def _schedule_compact_response_cleanup(
+    response: Any,
+    *,
+    retain_chat: bool,
+    delete_after_seconds: int | None,
+    source: str,
+) -> str | None:
+    """Preserve the compact adapter's cleanup call shape."""
+    del retain_chat, delete_after_seconds
+    return schedule_remote_chat_cleanup_from_response(response, source=source)
+
+
+def _schedule_compact_chat_cleanup(
+    chat_id: str | None,
+    *,
+    retain_chat: bool,
+    delete_after_seconds: int | None,
+    source: str,
+) -> None:
+    """Preserve the compact adapter's cleanup call shape."""
+    del retain_chat, delete_after_seconds
+    schedule_remote_chat_cleanup(chat_id, source=source)
+
+
+def _build_chat_service() -> ChatService:
+    """Bind compact presentation behavior to the shared chat service."""
+    return ChatService(
+        ChatServiceDependencies(
+            client_provider=lambda: get_gemini_client(),
+            client_initializer=lambda: initialize_client(),
+            cleanup_due_remote_chats=lambda client: cleanup_due_remote_chats(client),
+            create_session=lambda *args, **kwargs: create_session(*args, **kwargs),
+            lookup_session=lambda session_id: lookup_session(session_id),
+            send_session_message=lambda *args, **kwargs: send_session_message(
+                *args,
+                **kwargs,
+            ),
+            send_session_message_stream=lambda *args, **kwargs: send_session_message_stream(
+                *args,
+                **kwargs,
+            ),
+            schedule_response_cleanup=_schedule_compact_response_cleanup,
+            schedule_chat_cleanup=_schedule_compact_chat_cleanup,
+            normalize_model=lambda model: _normalize_model(model),
+            resolve_model=lambda model: resolve_model_name(model),
+        )
+    )
+
+
+_chat_service = _build_chat_service()
+
+
 @mcp.tool(annotations=MUTATES_REMOTE)
 async def chat(
     message: str,
@@ -293,75 +354,58 @@ async def chat(
                 f"Error: {image_error}",
             )
 
-        model = _normalize_model(model)
-        model_name = resolve_model_name(model)
-        files = [safe_image_path] if safe_image_path else None
+        files = (safe_image_path,) if safe_image_path else ()
 
-        session_lookup = lookup_session(session_id) if session_id else None
-        if session_id and (session_lookup is None or not session_lookup.ok or session_lookup.session is None):
-            missing_result: DomainResult[Any] = (
-                session_lookup if session_lookup is not None else _session_not_found_result()
+        if session_id:
+            result = await _chat_service.send_session(
+                SessionMessageRequest(
+                    session_id=session_id,
+                    message=message,
+                    files=files,
+                    learning_mode=learning_mode,
+                    thinking_level=thinking_level,
+                    prepare_client=True,
+                    include_temporary=False,
+                    fallback_empty_thinking_level=True,
+                    cleanup_strategy=CleanupStrategy.RESPONSE_THEN_SESSION,
+                    cleanup_source="skill_chat:session",
+                )
             )
-            return domain_text(
-                missing_result,
-                f"SESSION_NOT_FOUND: Invalid session: {session_id}",
-            )
-
-        client = get_gemini_client()
-        await initialize_client()
-        await cleanup_due_remote_chats(client)
-
-        result: DomainResult[Any]
-        result_data: Any
-        if session_id and session_lookup is not None and session_lookup.session is not None:
-            session_entry = session_lookup.session
-            request_kwargs = {
-                "prompt": message,
-                "files": files,
-                "thinking_level": session_entry.thinking_level or thinking_level,
-            }
-            use_learning_mode = learning_mode or session_entry.learning_mode
-            if use_learning_mode:
-                request_kwargs["learning_mode"] = use_learning_mode
-            sent = await send_session_message(session_id, **request_kwargs)
-            if not sent.ok or sent.session is None:
+            if not result.ok or result.data is None:
                 return domain_text(
-                    sent,
+                    result,
                     f"SESSION_NOT_FOUND: Invalid session: {session_id}",
                 )
-            response = sent.response
-            _schedule_skill_response_cleanup(response, "skill_chat:session", sent.session.session)
-            result = sent
-            result_data = {
-                "session_id": session_id,
-                "model": sent.session.model,
-            }
         else:
-            request_kwargs = {
-                "prompt": message,
-                "files": files,
-                "model": model_name,
-                "thinking_level": thinking_level,
-            }
-            if learning_mode:
-                request_kwargs["learning_mode"] = learning_mode
-            response = await client.generate_content(**request_kwargs)
-            _schedule_skill_response_cleanup(response, "skill_chat")
-            result = DomainResult.success(
-                {
-                    "model": model,
-                    "resolved_model": model_name,
-                },
-                requested_backend=model,
-                effective_backend=model_name,
-                verification_status="upstream_response_received",
+            result = await _chat_service.generate(
+                ChatRequest(
+                    message=message,
+                    model=model,
+                    thinking_level=thinking_level,
+                    learning_mode=learning_mode,
+                    files=files,
+                    cleanup_source="skill_chat",
+                    include_gem_argument=False,
+                    include_temporary_argument=False,
+                )
             )
-            result_data = result.data
+
+        assert result.data is not None
 
         return attach_domain_result(
-            _format_response(response),
+            _format_response(result.data.response),
             result,
-            data=result_data,
+            data=(
+                {
+                    "session_id": session_id,
+                    "model": result.data.requested_model,
+                }
+                if session_id
+                else {
+                    "model": result.data.normalized_model,
+                    "resolved_model": result.data.effective_model,
+                }
+            ),
         )
 
     except Exception as e:
@@ -918,25 +962,26 @@ async def _session_create(
     thinking_level: str,
     learning_mode: Optional[str],
 ) -> list[TextContent]:
-    client = get_gemini_client()
-    await initialize_client()
-    await cleanup_due_remote_chats(client)
-    normalized = _normalize_model(model)
-    sess = client.start_chat(model=resolve_model_name(normalized))
-    created = create_session(
-        sess,
-        normalized,
-        thinking_level=thinking_level,
-        learning_mode=learning_mode,
+    result = await _chat_service.start_session(
+        StartSessionRequest(
+            model=model,
+            thinking_level=thinking_level,
+            learning_mode=learning_mode,
+            include_gem_argument=False,
+        )
     )
-    sid = created.session.session_id if created.session is not None else ""
+    sid = result.data.session_id if result.data is not None else ""
+    normalized_model = result.data.normalized_model if result.data is not None else _normalize_model(model)
+    effective_model = (
+        result.data.effective_model if result.data is not None else resolve_model_name(normalized_model)
+    )
     return domain_text(
-        created,
+        result,
         f"Session created: {sid}",
         data={
             "session_id": sid,
-            "model": normalized,
-            "resolved_model": resolve_model_name(normalized),
+            "model": normalized_model,
+            "resolved_model": effective_model,
         },
     )
 
@@ -949,62 +994,56 @@ async def _session_send(
     safe_image_path: Optional[str],
     model: str,
 ) -> list[TextContent]:
-    lookup = lookup_session(session_id) if session_id else None
-    if not session_id or lookup is None or not lookup.ok or lookup.session is None:
-        missing_result: DomainResult[Any] = (
-            lookup if lookup is not None else _session_not_found_result()
-        )
+    if not session_id:
         return domain_text(
-            missing_result,
+            _session_not_found_result(),
             f"SESSION_NOT_FOUND: Invalid session: {session_id}",
         )
-    session_entry = lookup.session
-
-    client = get_gemini_client()
-    await initialize_client()
-    await cleanup_due_remote_chats(client)
-    _normalize_model(model)  # normalize for side-effect consistency
-
-    request_kwargs = {
-        "prompt": message or "",
-        "files": [safe_image_path] if safe_image_path else None,
-        "thinking_level": session_entry.thinking_level or thinking_level,
-    }
-    use_learning_mode = learning_mode or session_entry.learning_mode
-    if use_learning_mode:
-        request_kwargs["learning_mode"] = use_learning_mode
-    sent = await send_session_message(session_id, **request_kwargs)
-    if not sent.ok or sent.session is None:
+    result = await _chat_service.send_session(
+        SessionMessageRequest(
+            session_id=session_id,
+            message=message or "",
+            files=(safe_image_path,) if safe_image_path else (),
+            learning_mode=learning_mode,
+            thinking_level=thinking_level,
+            prepare_client=True,
+            include_temporary=False,
+            fallback_empty_thinking_level=True,
+            cleanup_strategy=CleanupStrategy.RESPONSE_THEN_SESSION,
+            cleanup_source="skill_session:send",
+        )
+    )
+    if not result.ok or result.data is None:
         return domain_text(
-            sent,
+            result,
             f"SESSION_NOT_FOUND: Invalid session: {session_id}",
         )
-    response = sent.response
-    _schedule_skill_response_cleanup(response, "skill_session:send", sent.session.session)
     return attach_domain_result(
-        _format_response(response),
-        sent,
-        data={"session_id": session_id, "model": sent.session.model},
+        _format_response(result.data.response),
+        result,
+        data={
+            "session_id": session_id,
+            "model": result.data.requested_model,
+        },
     )
 
 
 def _session_list() -> list[TextContent]:
     sessions = list_sessions()
-    items = [
-        f"{i}. {sid} ({data['model']})"
-        for i, (sid, data) in enumerate(sessions.items(), 1)
-    ]
-    result = DomainResult.success({
-        "count": len(sessions),
-        "sessions": [
-            {
-                "session_id": sid,
-                "model": data["model"],
-                "retain_chat": data.get("retain_chat", False),
-            }
-            for sid, data in sessions.items()
-        ],
-    })
+    items = [f"{i}. {sid} ({data['model']})" for i, (sid, data) in enumerate(sessions.items(), 1)]
+    result = DomainResult.success(
+        {
+            "count": len(sessions),
+            "sessions": [
+                {
+                    "session_id": sid,
+                    "model": data["model"],
+                    "retain_chat": data.get("retain_chat", False),
+                }
+                for sid, data in sessions.items()
+            ],
+        }
+    )
     if not items:
         return domain_text(result, "No active sessions", use_result_data=True)
     return domain_text(result, "\n".join(items), use_result_data=True)
