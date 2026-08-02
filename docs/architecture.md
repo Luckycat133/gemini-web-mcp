@@ -57,7 +57,8 @@ gemini-mcp-server/
 │   ├── session_manager.py # 本地会话管理
 │   ├── domain/            # 领域结果、artifact、错误、告警与操作状态
 │   ├── adapters/          # MCP 文本兼容、artifact 展示和结构化结果适配
-│   ├── services/          # primary/compact 共用的应用服务与 artifact 验证
+│   ├── infrastructure/    # Gemini Web RPC registry、payload builder 与纯 parser
+│   ├── services/          # primary/compact 共用的应用服务与读回验证
 │   ├── thinking_client.py # Thinking/Learning 模式传输层
 │   ├── error_handler.py   # 错误处理装饰器
 │   ├── constants.py       # 模型常量与配置
@@ -65,7 +66,7 @@ gemini-mcp-server/
 │   └── tools/             # 工具模块
 │       ├── __init__.py    # 分层工具注册入口
 │       ├── annotations.py # MCP 工具安全/隐私注解常量
-│       ├── manifest_data.py # 静态 manifest 数据（UI 能力/RPC probe/工具清单）
+│       ├── manifest_data.py # 静态 UI 能力/工具清单；RPC probe 来自 registry
 │       ├── utils.py       # 跨工具共享 helper（extract_remote_chat_id 等）
 │       ├── chat.py        # 对话工具
 │       ├── research.py    # Deep Research
@@ -73,7 +74,7 @@ gemini-mcp-server/
 │       ├── image.py       # media.py 向后兼容别名
 │       ├── file.py        # 文件工具
 │       ├── prompts.py     # 本地 prompt 管理
-│       └── manage.py      # 账号/历史/Gem/cookie 管理工具
+│       └── manage.py      # 管理工具兼容注册适配器，不是 compact 依赖
 ├── tests/                 # pytest 测试套件（test_*.py）
 ├── evaluations/           # MCP contract evaluation prompts（gemini_web_mcp_contract.xml）
 ├── scripts/               # 打包/发布脚本（package_release.py）
@@ -180,10 +181,14 @@ MODEL_CONFIG = {
 - 文件上传
 - URL 分析
 
-#### Manage Tools (manage.py)
-- 聊天记录管理
-- Gem 管理
-- 模型与功能列表
+#### Management Services and Adapter
+- `services/history.py`：历史记录的共享分页、读取、导出 helper
+- `services/account.py`：账号 inventory parser 与只读 feature probe
+- `services/notebooks.py`：原生 Notebook 读取及带读回校验的 chat move
+- `services/scheduled.py`：定时操作读取、创建、删除与 registry/GetTask 双读回
+- `services/gems.py`：Gem CRUD 与 mutation 后读回比较
+- `services/manifest.py` / `services/doctor.py`：工具清单、Web 能力和本地预检
+- `tools/manage.py`：保留既有 primary 工具名、参数和展示文本的注册/兼容层
 
 ---
 
@@ -259,6 +264,30 @@ primary `gemini_generate_media` 与 compact `create` 可稳定引用同一产物
 只凭上游返回文本宣称保存成功。请求别名、实际请求模型、声明的有效后端和响应中观测到的后端
 分别保存在 `requested_model`、`request_model`、`effective_backend`、`observed_backend`，避免把
 路由规则和运行时证据混为一谈。
+
+### 8. 管理域与 RPC 合约
+
+P1.2 把管理能力的 upstream contract 从 MCP handler 中提取到
+`src/infrastructure/rpc_contracts.py`。registry 统一保存 RPC ID、source path、payload builder、
+parser 名称、观测日期、稳定性和 mutation 校验策略；`rpc_parsers.py` 只接收已解码 body，返回
+`success`、`empty`、`rejected` 或 `changed_shape`。每个注册 parser 都由
+`tests/fixtures/rpc_management_cases.json` 的四类 fixture 覆盖。
+
+```text
+primary manage adapter ─┐
+                       ├─ history/account/notebook/scheduled/Gem service
+compact skill adapter ─┘          │
+                                  ▼
+                         RPC registry + pure parser
+                                  │
+                                  ▼
+                           gemini-webapi client
+```
+
+`src/tools/__init__.py` 使用按需导入；导入 compact server 不会加载 `src.tools.manage`。Notebook
+移动、scheduled create/delete 和 Gem create/update/delete 均返回 `verification_status`：mutation
+响应只代表上游接受请求，最终状态由目标 Notebook 列表、scheduled registry/GetTask 或 Gem 列表
+读回决定。未观察到目标、读回失败和响应无法确认都是显式状态，不等同于已验证成功。
 
 ---
 

@@ -889,7 +889,7 @@ def test_delete_scheduled_action_json_empty_bodies(monkeypatch):
                         action_id="a_1", response_format="json"))
     payload = json.loads(result[0].text)
     assert payload["ok"] is False
-    assert payload["verification_status"] == "not_attempted"
+    assert payload["verification_status"] == "rpc_unconfirmed"
 
 
 def test_delete_scheduled_action_batch_execute_exception(monkeypatch):

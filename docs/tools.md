@@ -388,6 +388,12 @@ Gemini 私有 mutation RPC。
 
 ## 账户和 Gems
 
+管理类工具的 RPC ID、source path 和 payload builder 统一来自
+`src/infrastructure/rpc_contracts.py`；handler 不再内嵌私有 RPC 常量。history、account、Notebook、
+scheduled、Gem、manifest 和 doctor 分别由 `src/services/` 中的模块承载，primary 与 compact
+只保留参数/文本适配。上游 body parser 会显式区分 `success`、`empty`、`rejected` 和
+`changed_shape`，避免把空响应或网页结构变化误报为正常结果。
+
 ### gemini_history
 
 Gemini Web 历史对话只读聚合入口。推荐给 `GEMINI_TOOLS=history` 和
@@ -614,6 +620,8 @@ JSON 输出包含 `visible_in_registry`、`readable_by_id_after_create` 和
 JSON 输出包含 `verification_status`、`visible_after_delete`、`readable_by_id_after_delete`
 和 `deleted_by_id_after_delete`。Gemini 的 `GetTask` 在删除后可能仍返回 tombstone 对象；
 只有按 ID 读到 `task_state=deleted` 时，工具才把删除标记为已校验。
+如果 mutation 响应没有可解析 body，`verification_status="rpc_unconfirmed"`；调用方不能把它当作
+已删除。
 这个工具是 destructive 远端操作。只删除用户明确指定或当前验证流程刚创建的任务。
 
 ### gemini_get_tool_mode_status
@@ -705,6 +713,10 @@ JSON 输出包含 `verification_status`、`visible_after_delete`、`readable_by_
 
 列出、创建、更新或删除 Gems。
 
+create/update/delete 都会再次读取 Gem 列表。返回文本包含 `读回校验`；可能值包括 `verified`、
+`verified_deleted`、`read_back_not_observed`、`read_back_mismatch`、`still_present` 和
+`read_back_error`。mutation 方法返回不再单独作为“已验证成功”的证据。
+
 ---
 
 ## Cookie 管理
@@ -778,6 +790,9 @@ JSON 输出包含 `verification_status`、`visible_after_delete`、`readable_by_
 | `doctor` | 只读预检工具组、Cookie 状态、浏览器 profile 对齐和媒体校验依赖，不输出 Cookie 值 |
 
 compact `session` 支持 `create` / `send` / `list` / `reset`（或 `reset_one`）/ `reset_all`。`reset` 与 `reset_one` 都必须提供 `session_id`，且只删除该会话；只有显式 `reset_all` 才会清空全部会话并重置客户端。旧的 `action="reset"` 保留为单会话别名，不再把缺少 ID 解释为全量重置。
+
+compact 的 history/account/scheduled/doctor/cleanup 直接导入共享 service 和 RPC parser；加载
+`src.skill_server` 不再初始化 4k 行的 `src.tools.manage` 兼容适配器。
 
 ---
 

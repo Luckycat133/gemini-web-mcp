@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Management Domains and RPC Contracts
+- Added an evidence-backed RPC registry in `src/infrastructure/rpc_contracts.py` for management capability IDs, source paths, payload builders, parser names, observed dates, stability, and mutation verification strategies; active handlers and cookie profile probes no longer duplicate raw RPC IDs
+- Added pure RPC envelope/body parsers with explicit `success`, `empty`, `rejected`, and `changed_shape` outcomes plus fixture coverage for every registered parser
+- Split shared history, account, Notebook, scheduled-action, Gem, manifest, doctor, and cleanup behavior into `src/services/`; primary and compact scheduled mutations now use one implementation
+- Made `src/tools` registration lazy so importing `src.skill_server` does not load the `src.tools.manage` compatibility monolith
+- Added read-back verification to Notebook moves, scheduled create/delete, and Gem create/update/delete; an accepted mutation response is no longer reported as verified without observing the target state
+- Added RPC registry/parser and mutation-service regression tests; the full offline suite now passes 1247 tests
+
 ### Unified Artifact Model
 - Added shared `Artifact` and `ArtifactResultData` contracts for image, video, audio, file, report, webpage, and data artifacts with explicit `remote`, `local`, `queued`, `empty`, and `failed` states
 - Added deterministic artifact identities, common response extraction, remote/local observation merging, backend evidence, and local existence/non-zero/MIME/dimension/duration verification in `src/services/artifacts.py`
