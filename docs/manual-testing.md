@@ -11,6 +11,7 @@
 | 修改 `client_wrapper.py` / `cookie_manager.py` | P0 鉴权 + Cookie profile |
 | 修改 `tools/research.py` | P0 Deep Research 全流程 |
 | 修改 `tools/media.py` | P0 媒体生成 |
+| 修改 `services/chat.py` 或任一聊天适配器 | P0 单轮对话 + 多轮会话，并各抽查一次 primary/compact |
 | 修改 `tools/manage.py` 里的 RPC 形状 | 受影响的 P1 RPC 工具 |
 | 发布新版本前 | 全量 P0 + 抽查 P1 |
 | 日常 PR | 单元测试通过即可，不强制实机 |
@@ -68,6 +69,7 @@
 | 2.6 | `gemini_chat_stream(...)` 同样参数 | 流式返回多个 text delta，最终拼起来和 `gemini_chat` 接近 |
 | 2.7 | `temporary=true` | 返回正常；调用 `gemini_list_chats` 不应看到这条 |
 | 2.8 | `gem_id="<某个 Gem ID>"` | 用指定 Gem 的人格回答 |
+| 2.9 | primary `gemini_chat` 与 compact `chat` 使用同一普通文本/模型调用 | 两者正文均正常，`_meta.domain_result` 的 model/backend/verification 语义一致；允许 request ID 不同 |
 
 **关键校验**：返回里 `Remote chat ID: c_xxx` 必须能解析（用于 cleanup）。`test_parse_response_exposes_remote_chat_id_for_cleanup` 只验了格式，实机要验 ID 真的能在 `gemini_delete_chat` 里删掉。
 
