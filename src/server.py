@@ -5,12 +5,23 @@ Gemini Web 逆向 MCP 服务器
 版本: 0.2.0 (2026.7)
 """
 
+import json
 import logging
 import os
-import json
+
 from mcp.server.fastmcp import FastMCP
 from mcp.types import TextContent
 
+from .adapters import domain_error_boundary, domain_text
+from .client_wrapper import (
+    get_cookie_from_browser,
+    get_cookie_status,
+    init_cookie_manager_integration,
+    list_browser_cookie_profiles,
+    reset_client_async,
+)
+from .domain import DomainResult
+from .error_handler import format_error_response, handle_error
 from .tools import groups_enable_manage, register_tools
 from .tools.annotations import MUTATES_LOCAL, READ_ONLY_LOCAL
 from .tools.manage import (
@@ -21,14 +32,6 @@ from .tools.manage import (
     _format_tool_manifest_markdown,
     _tool_manifest_payload,
 )
-from .client_wrapper import (
-    reset_client_async,
-    get_cookie_from_browser,
-    get_cookie_status,
-    list_browser_cookie_profiles,
-    init_cookie_manager_integration
-)
-from .error_handler import handle_error, format_error_response
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -101,10 +104,18 @@ if not _tool_groups_include_manage():
 
 
 @mcp.tool(annotations=MUTATES_LOCAL)
+@domain_error_boundary("gemini_reset", logger)
 async def gemini_reset() -> list[TextContent]:
     """重置客户端"""
     await reset_client_async()
-    return [TextContent(type="text", text="✅ 客户端已重置")]
+    return domain_text(
+        DomainResult.success(
+            {"client_state": "reset"},
+            verification_status="local_state_reset",
+        ),
+        "✅ 客户端已重置",
+        use_result_data=True,
+    )
 
 
 @mcp.tool(annotations=READ_ONLY_LOCAL)

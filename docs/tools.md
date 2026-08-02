@@ -85,6 +85,56 @@
 
 ---
 
+## 结构化结果元数据（P0.3）
+
+聊天、会话和客户端重置工具会继续返回原有 `TextContent.text`，同时在第一条内容的
+`_meta.domain_result` 中提供稳定、机器可读的结果。旧客户端可继续读取正文；新客户端
+不应再根据 emoji 或自然语言判断成功与失败。
+
+```json
+{
+  "ok": false,
+  "data": null,
+  "error": {
+    "code": "SESSION_NOT_FOUND",
+    "message": "The requested session does not exist.",
+    "retryable": false,
+    "suggested_action": "Create a session and use the returned ID.",
+    "diagnostic_id": null
+  },
+  "warnings": [],
+  "meta": {
+    "request_id": "req_<uuid>",
+    "operation_state": "failed",
+    "observed_at": "2026-08-02T00:00:00+00:00",
+    "requested_backend": null,
+    "effective_backend": null,
+    "verification_status": "local_state_absent",
+    "diagnostic_id": null,
+    "details": {}
+  }
+}
+```
+
+- `ok`：业务操作是否成功。
+- `data`：工具相关的公开数据；不会包含客户端、Cookie、上游 session 对象或锁。
+- `error.code`：稳定错误码。首批分类包括 `INVALID_ARGUMENT`、`AUTH_REQUIRED`、
+  `AUTH_EXPIRED`、`SESSION_NOT_FOUND`、`CAPABILITY_UNAVAILABLE`、`UPSTREAM_REJECTED`、
+  `UPSTREAM_CHANGED`、`NETWORK_ERROR`、`RATE_LIMITED`、`TIMED_OUT`、`CANCELLED`、
+  `ARTIFACT_NOT_RETURNED`、`ARTIFACT_SAVE_FAILED`、`VERIFICATION_FAILED` 和 `INTERNAL_ERROR`。
+- `error.retryable` / `error.suggested_action`：调用方是否应重试，以及建议的下一步。
+- `warnings`：成功或部分成功时的非致命告警。
+- `meta.operation_state`：`accepted`、`queued`、`running`、`completed`、`partial`、
+  `timed_out`、`cancelled`、`failed` 或 `unavailable`。
+- `meta.observed_at`：UTC ISO-8601 观测时间；backend 与 verification 字段记录请求、实际后端和验证状态。
+- `meta.request_id`：每个结构化结果都有；`meta.diagnostic_id` 只在需要关联服务端异常日志时生成。
+
+当前首批覆盖 primary 的 `gemini_chat*`、`gemini_start_chat`、`gemini_send_message*`、
+`gemini_list_sessions`、`gemini_reset_session`、`gemini_reset`，以及 compact 的 `chat` / `session`。
+其余工具会在后续阶段迁移；迁移前仍以现有文本契约为准。
+
+---
+
 ## 对话工具
 
 ### gemini_chat
