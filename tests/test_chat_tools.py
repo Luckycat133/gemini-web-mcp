@@ -6,13 +6,13 @@
 - gemini_chat：request_kwargs 字段注入（prompt/files/model/thinking_level/
   gem/temporary/learning_mode 条件注入）、schedule_remote_chat_cleanup_from_response
   入参（retain_chat/delete_after_seconds/source）、parse_response 用 model 解析
-- gemini_start_chat：store_session 入参（session_id 长度/model/thinking_level/
+- gemini_start_chat：create_session 入参（model/thinking_level/
   learning_mode/temporary/retain_chat/delete_after_seconds）、client.start_chat
   接收 model_name 与 gem、返回文本含 session_id 与 model_name
 
 mock 边界：gemini_chat / gemini_start_chat 都调用 get_gemini_client /
 initialize_client / cleanup_due_remote_chats，需 patch 这 3 个接缝 + 工具特有
-的 schedule_remote_chat_cleanup_from_response / store_session。parse_response
+的 schedule_remote_chat_cleanup_from_response / create_session。parse_response
 走真实实现（不 mock），用 SimpleNamespace 构造 response。
 """
 
@@ -22,7 +22,7 @@ from types import SimpleNamespace
 from mcp.server.fastmcp import FastMCP
 
 import src.tools.chat as chat_tools
-
+from src.session_manager import SessionData, SessionOperationResult
 
 # ---------------------------------------------------------------------------
 # 辅助
@@ -86,7 +86,8 @@ def _patch_chat_client_env(monkeypatch, client, *, captured_schedule=None,
     monkeypatch.setattr(chat_tools, "schedule_remote_chat_cleanup_from_response",
                         fake_schedule_from_response)
 
-    def fake_store(session_id, session, model, **kwargs):
+    def fake_create(session, model, **kwargs):
+        session_id = "sess_0123456789abcdef0123456789abcdef"
         if captured_store is not None:
             captured_store.append({
                 "session_id": session_id,
@@ -94,7 +95,13 @@ def _patch_chat_client_env(monkeypatch, client, *, captured_schedule=None,
                 "model": model,
                 **kwargs,
             })
-    monkeypatch.setattr(chat_tools, "store_session", fake_store)
+        return SessionOperationResult.success(SessionData(
+            session=session,
+            session_id=session_id,
+            model=model,
+            **kwargs,
+        ))
+    monkeypatch.setattr(chat_tools, "create_session", fake_create)
 
 
 def _make_mcp():
@@ -244,7 +251,7 @@ def test_chat_returns_parsed_response_with_model(monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# gemini_start_chat — session 创建与 store_session 入参
+# gemini_start_chat — session 创建与 create_session 入参
 # ---------------------------------------------------------------------------
 
 
@@ -264,7 +271,7 @@ def test_start_chat_passes_model_name_and_gem_to_client(monkeypatch):
 
 
 def test_start_chat_stores_session_with_all_params(monkeypatch):
-    """store_session 接收 session_id / session / model + 所有会话配置参数。"""
+    """create_session 接收 session / model + 所有会话配置参数。"""
     client = _FakeChatClient()
     store_calls = []
     _patch_chat_client_env(monkeypatch, client, captured_store=store_calls)
@@ -280,9 +287,9 @@ def test_start_chat_stores_session_with_all_params(monkeypatch):
     asyncio.run(run())
     assert len(store_calls) == 1
     call = store_calls[0]
-    assert len(call["session_id"]) == 8  # uuid[:8]
+    assert call["session_id"] == "sess_0123456789abcdef0123456789abcdef"
     assert call["session"] is not None  # 由 client.start_chat 返回
-    assert call["model"] == "flash"  # store_session 收到的是原始 alias（不是 model_name）
+    assert call["model"] == "flash"  # create_session 收到的是原始 alias（不是 model_name）
     assert call["thinking_level"] == "extended"
     assert call["learning_mode"] == "quiz"
     assert call["temporary"] is True
@@ -291,7 +298,7 @@ def test_start_chat_stores_session_with_all_params(monkeypatch):
 
 
 def test_start_chat_stores_none_learning_mode_when_omitted(monkeypatch):
-    """learning_mode 默认 None → store_session 收到 learning_mode=None。"""
+    """learning_mode 默认 None → create_session 收到 learning_mode=None。"""
     client = _FakeChatClient()
     store_calls = []
     _patch_chat_client_env(monkeypatch, client, captured_store=store_calls)
@@ -323,12 +330,11 @@ def test_start_chat_returns_text_with_session_id_and_model_name(monkeypatch):
     assert "会话创建成功" in text
     assert "gemini-3-pro" in text
     assert "使用 gemini_send_message 继续对话" in text
-    # session_id 是 8 字符 hex
+    # session_id 使用统一的 sess_<uuid> 形式。
     assert "ID:" in text
     id_line = [line for line in text.split("\n") if line.startswith("ID:")][0]
     session_id = id_line.split(":", 1)[1].strip()
-    assert len(session_id) == 8
-    assert all(c in "0123456789abcdef" for c in session_id)
+    assert session_id == "sess_0123456789abcdef0123456789abcdef"
 
 
 def test_start_chat_calls_cleanup_due_remote_chats_with_client(monkeypatch):
@@ -518,8 +524,34 @@ class _FakeStreamSession:
 
 
 def _patch_stream_session_env(monkeypatch, session_data, *, captured_schedule=None):
-    """patch gemini_send_message_stream 的 2 个接缝（与 send_message 同构）。"""
-    monkeypatch.setattr(chat_tools, "get_session", lambda sid: session_data)
+    """patch gemini_send_message_stream 的共享服务接缝。"""
+    if session_data is None:
+        data = None
+    else:
+        data = SessionData(
+            session=session_data["session"],
+            session_id="s1",
+            model=session_data.get("model", "flash"),
+            thinking_level=session_data.get("thinking_level", "standard"),
+            learning_mode=session_data.get("learning_mode"),
+            temporary=session_data.get("temporary", False),
+            retain_chat=session_data.get("retain_chat", False),
+            delete_after_seconds=session_data.get("delete_after_seconds"),
+        )
+
+    def fake_lookup(_sid):
+        if data is None:
+            return SessionOperationResult.not_found()
+        return SessionOperationResult.success(data)
+
+    async def fake_stream(_sid, **kwargs):
+        if data is None:
+            return SessionOperationResult.not_found()
+        responses = [response async for response in data.session.send_message_stream(**kwargs)]
+        return SessionOperationResult.success(data, responses)
+
+    monkeypatch.setattr(chat_tools, "lookup_session", fake_lookup)
+    monkeypatch.setattr(chat_tools, "send_session_message_stream", fake_stream)
 
     def fake_schedule(response, *, retain_chat, delete_after_seconds, source):
         if captured_schedule is not None:
@@ -551,10 +583,10 @@ def test_send_message_stream_unknown_session_returns_early(monkeypatch):
 
 
 def test_send_message_stream_invalid_images_short_circuits_before_session(monkeypatch):
-    """image_paths 无效 → 在 get_session 调用前早退。"""
+    """image_paths 无效 → 在 lookup_session 调用前早退。"""
     def explode(sid):
-        raise AssertionError("get_session should not be called on invalid images")
-    monkeypatch.setattr(chat_tools, "get_session", explode)
+        raise AssertionError("lookup_session should not be called on invalid images")
+    monkeypatch.setattr(chat_tools, "lookup_session", explode)
     monkeypatch.setattr(chat_tools, "schedule_remote_chat_cleanup_from_response",
                         lambda *a, **kw: None)
 

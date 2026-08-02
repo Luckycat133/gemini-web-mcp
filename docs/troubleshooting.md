@@ -120,8 +120,10 @@ mcp dev src/server.py
 
 ### 会话相关
 
-- `session_id` 是 `gemini_start_chat` 返回的本地 ID（`sess_N`），不是 Gemini 的 `cid`
-- `gemini_reset_session` 只清本地会话状态；要重置底层连接用 `gemini_reset`
+- `session_id` 是 `gemini_start_chat` 返回的不透明本地 ID（`sess_<uuid>`），不是 Gemini 的 `cid`；不要自行拼接或按顺序猜测
+- primary 与 compact 入口共享同一份会话状态；不存在的 ID 会返回 `SESSION_NOT_FOUND`，不会自动创建会话
+- `gemini_reset_session(session_id)` 只重置指定会话；compact 的 `session(action="reset")` 也必须带 ID。只有显式 `session(action="reset_all")` 或 primary 的 `gemini_reset` 才会清空全部状态并重置底层连接
+- 单会话 reset 在 `retain_chat=false` 时会尝试删除对应远端聊天；创建会话时设置 `retain_chat=true` 可保留远端聊天
 - 多轮会话的图片/文件在上传后用 upload 返回的 ID 引用
 
 ---

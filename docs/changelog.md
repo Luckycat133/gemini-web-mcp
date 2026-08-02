@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Session Lifecycle
+- Unified the primary MCP tools and compact `skill_server` adapter on one `SessionService`; sessions created by either surface can be listed, sent to, streamed, and reset from the other
+- Replaced predictable/reusable short IDs (`sess_N` and truncated UUIDs) with opaque `sess_<uuid4 hex>` IDs generated under the shared store lock with active-collision checks
+- Added explicit `SESSION_NOT_FOUND` results for unknown send/reset operations; unknown IDs never fall back to one-shot chat and never clear unrelated state
+- Made compact reset semantics unambiguous: `reset`/`reset_one` require a session ID and affect one session, while only explicit `reset_all` clears all sessions and retires the client
+- Serialized normal and streaming sends per session; asynchronous single-session reset waits for an in-flight send before detaching state and applying the remote-retention policy
+- Added cross-adapter, ID collision, unknown-ID isolation, concurrent-send, stream, reset-race, facade, and workflow tests; full offline suite now passes 1132 tests
+
 ### MCP Protocol Version Compatibility
 - Aligned with MCP `2026-07-28` specification status: this repository contains no custom MCP protocol-layer code (protocol version negotiation, JSON-RPC framing, `initialize` handshake, `server/discover`, `resultType`, `ttlMs`/`cacheScope`, capabilities negotiation are all delegated to the `mcp` Python SDK via `FastMCP`); application-level error codes in `error_handler.py` (`NO_COOKIE`, `INVALID_COOKIE`, `SESSION_NOT_FOUND`, etc.) are returned as `TextContent`, not JSON-RPC protocol errors
 - Confirmed that the current `mcp` SDK 1.28.x exposes `LATEST_PROTOCOL_VERSION = "2025-11-25"`, so this server currently speaks MCP `2025-11-25`
