@@ -133,6 +133,10 @@
 `gemini_list_sessions`、`gemini_reset_session`、`gemini_reset`，以及 compact 的 `chat` / `session`。
 其余工具会在后续阶段迁移；迁移前仍以现有文本契约为准。
 
+从 P0.4 起，primary 与 compact 的聊天、创建会话和会话发送都调用同一个应用服务。
+工具名、参数和原有正文保持兼容；两个入口的差别（例如 compact 不向上游传 `gem` / `temporary`）
+由适配器配置明确表达，不再维护两份聊天业务实现。
+
 ---
 
 ## 对话工具

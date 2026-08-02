@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Shared Chat Service
+- Added `src/services/chat.py` as the application boundary shared by the primary and compact MCP adapters for one-shot chat, streaming, session creation, and session sends
+- Centralized model resolution, upstream request construction, client preparation, session fallback behavior, stream aggregation, cleanup policy, and typed `ChatOperationData` results while preserving each adapter's existing request shape
+- Removed duplicated chat/session execution logic from `src/tools/chat.py` and the migrated compact handlers in `src/skill_server.py`; tool names, arguments, and legacy text remain compatible
+- Added service unit tests and successful cross-adapter parity coverage for request construction, lifecycle state, missing sessions, cleanup fallback, streams, serialized runtime-object exclusion, structured metadata, delegation, and argument-schema compatibility; the full offline suite now passes 1166 tests
+
 ### Typed Domain Results
 - Added generic `DomainResult`, `DomainError`, `DomainWarning`, and `ResultMeta` contracts with explicit operation state, retryability, suggested action, request ID, and diagnostic ID
 - Added a stable error taxonomy for invalid input, authentication, missing sessions, unavailable capabilities, upstream rejection/drift, network/rate-limit/timeout/cancellation, artifact, verification, and internal failures

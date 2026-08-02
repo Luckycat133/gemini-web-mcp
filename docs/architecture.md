@@ -57,6 +57,7 @@ gemini-mcp-server/
 │   ├── session_manager.py # 本地会话管理
 │   ├── domain/            # 领域结果、错误、告警与操作状态
 │   ├── adapters/          # MCP 文本兼容和结构化结果适配
+│   ├── services/          # primary/compact 共用的应用服务（首批为 chat）
 │   ├── thinking_client.py # Thinking/Learning 模式传输层
 │   ├── error_handler.py   # 错误处理装饰器
 │   ├── constants.py       # 模型常量与配置
@@ -207,6 +208,21 @@ MCP adapter ── TextContent.text（兼容）
 未知异常在适配边界分类；结构化结果通过 request/diagnostic ID 与包含原始证据的服务端日志关联。
 compact 入口原有的 `Error: ...` 正文暂时保留，仅用于文本兼容，不属于稳定领域契约。
 
+### 6. 共享应用服务
+
+P0.4 把聊天域的请求构造、模型解析、客户端准备、会话发送、流式聚合与远端清理决策集中到
+`src/services/chat.py`。两个 MCP 表面只负责各自的参数校验和文本格式：
+
+```text
+primary: src/tools/chat.py ─┐
+                            ├─ ChatService ─ client/session/cleanup facades
+compact: src/skill_server.py┘
+```
+
+适配器差异是显式配置：primary 继续传递 `gem` / `temporary`，compact 继续保持原有精简请求形状；
+两边共享同一类型化 `DomainResult[ChatOperationData]`。迁移后的聊天处理器不再复制上游请求与清理逻辑。
+`skill_server.py` 中仍有其他管理域对 `tools.manage` 私有 helper 的历史依赖，将在后续服务迁移阶段处理。
+
 ---
 
 ## 📡 数据流
@@ -218,6 +234,9 @@ compact 入口原有的 `Error: ...` 正文暂时保留，仅用于文本兼容�
    │
    ▼
 FastMCP 工具调用 (gemini_chat)
+   │
+   ▼
+共享 ChatService
    │
    ▼
 获取 GeminiClient
@@ -242,6 +261,9 @@ FastMCP 工具调用 (gemini_chat)
    │
    ▼
 gemini_start_chat
+   │
+   ▼
+共享 ChatService
    │
    ▼
 创建会话 (client.start_chat)
