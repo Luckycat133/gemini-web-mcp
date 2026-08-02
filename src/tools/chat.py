@@ -2,23 +2,24 @@
 对话相关 MCP 工具
 """
 
+import logging
+from typing import Optional
+
 from mcp.server.fastmcp import FastMCP
 from mcp.types import TextContent
-from typing import Optional
-import uuid
-import logging
 
 from ..client_wrapper import (
     cleanup_due_remote_chats,
-    delete_remote_chat,
+    create_session,
     get_gemini_client,
     initialize_client,
-    store_session,
-    get_session,
-    pop_session,
     list_sessions,
+    lookup_session,
+    reset_session,
     schedule_remote_chat_cleanup,
     schedule_remote_chat_cleanup_from_response,
+    send_session_message,
+    send_session_message_stream,
 )
 from ..constants import describe_model_name, resolve_model_name
 from .annotations import DESTRUCTIVE_REMOTE, MUTATES_REMOTE, READ_ONLY_LOCAL
@@ -80,15 +81,13 @@ def register_chat_tools(mcp: FastMCP):
         retain_chat: bool = False,
         delete_after_seconds: Optional[int] = None,
     ) -> list[TextContent]:
-        """创建多轮会话"""
+        """创建共享多轮会话，返回不可预测的 sess_<uuid> 本地 ID。"""
         client = get_gemini_client()
         await initialize_client()
         await cleanup_due_remote_chats(client)
         model_name = resolve_model_name(model)
         session = client.start_chat(model=model_name, gem=gem_id)
-        session_id = str(uuid.uuid4())[:8]
-        store_session(
-            session_id,
+        created = create_session(
             session,
             model,
             thinking_level=thinking_level,
@@ -97,6 +96,7 @@ def register_chat_tools(mcp: FastMCP):
             retain_chat=retain_chat,
             delete_after_seconds=delete_after_seconds,
         )
+        session_id = created.session.session_id if created.session is not None else ""
         return [TextContent(
             type="text",
             text=f"✅ 会话创建成功！\nID: {session_id}\n模型: {model_name}\n使用 gemini_send_message 继续对话"
@@ -112,31 +112,35 @@ def register_chat_tools(mcp: FastMCP):
         retain_chat: Optional[bool] = None,
         delete_after_seconds: Optional[int] = None,
     ) -> list[TextContent]:
-        """会话消息"""
+        """向现有共享会话发送消息；未知 ID 明确返回 SESSION_NOT_FOUND。"""
         valid_images, safe_image_paths, image_error = validate_image_paths(image_paths)
         if not valid_images:
             return [TextContent(type="text", text=f"❌ {image_error}")]
 
-        session_data = get_session(session_id)
-        if not session_data:
-            return [TextContent(type="text", text=f"❌ 会话 {session_id} 不存在")]
-        use_temporary = session_data.get("temporary", False) if temporary is None else temporary
+        lookup = lookup_session(session_id)
+        if not lookup.ok or lookup.session is None:
+            return [TextContent(type="text", text=f"❌ SESSION_NOT_FOUND: 会话 {session_id} 不存在")]
+        session_data = lookup.session
+        use_temporary = session_data.temporary if temporary is None else temporary
         request_kwargs = {
             "prompt": message,
             "files": safe_image_paths or None,
             "temporary": use_temporary,
-            "thinking_level": session_data.get("thinking_level", "standard"),
+            "thinking_level": session_data.thinking_level,
         }
-        use_learning_mode = learning_mode or session_data.get("learning_mode")
+        use_learning_mode = learning_mode or session_data.learning_mode
         if use_learning_mode:
             request_kwargs["learning_mode"] = use_learning_mode
-        response = await session_data["session"].send_message(**request_kwargs)
-        keep_chat = session_data.get("retain_chat", False) if retain_chat is None else retain_chat
+        sent = await send_session_message(session_id, **request_kwargs)
+        if not sent.ok or sent.session is None:
+            return [TextContent(type="text", text=f"❌ SESSION_NOT_FOUND: 会话 {session_id} 不存在")]
+        response = sent.response
+        keep_chat = sent.session.retain_chat if retain_chat is None else retain_chat
         ttl = delete_after_seconds
         if ttl is None:
-            ttl = session_data.get("delete_after_seconds")
+            ttl = sent.session.delete_after_seconds
         schedule_remote_chat_cleanup(
-            getattr(session_data["session"], "cid", None),
+            getattr(sent.session.session, "cid", None) or sent.session.upstream_chat_id,
             retain_chat=keep_chat,
             delete_after_seconds=ttl,
             source="gemini_send_message",
@@ -145,15 +149,15 @@ def register_chat_tools(mcp: FastMCP):
 
     @mcp.tool(annotations=DESTRUCTIVE_REMOTE)
     async def gemini_reset_session(session_id: str) -> list[TextContent]:
-        """重置会话"""
-        session_data = pop_session(session_id)
-        if session_data and not session_data.get("retain_chat", False):
-            await delete_remote_chat(getattr(session_data["session"], "cid", None))
+        """只重置指定会话；未知 ID 不影响其他会话并返回 SESSION_NOT_FOUND。"""
+        result = await reset_session(session_id)
+        if not result.ok:
+            return [TextContent(type="text", text=f"❌ SESSION_NOT_FOUND: 会话 {session_id} 不存在")]
         return [TextContent(type="text", text=f"✅ 会话 {session_id} 已重置")]
 
     @mcp.tool(annotations=READ_ONLY_LOCAL)
     async def gemini_list_sessions() -> list[TextContent]:
-        """列出会话"""
+        """列出 primary 与 compact 入口共享的本地会话。"""
         sessions = list_sessions()
         if not sessions:
             return [TextContent(type="text", text="暂无活跃会话")]
@@ -223,33 +227,37 @@ def register_chat_tools(mcp: FastMCP):
         retain_chat: Optional[bool] = None,
         delete_after_seconds: Optional[int] = None,
     ) -> list[TextContent]:
-        """会话流式消息"""
+        """从现有共享会话流式取回消息；未知 ID 返回 SESSION_NOT_FOUND。"""
         valid_images, safe_image_paths, image_error = validate_image_paths(image_paths)
         if not valid_images:
             return [TextContent(type="text", text=f"❌ {image_error}")]
 
-        session_data = get_session(session_id)
-        if not session_data:
-            return [TextContent(type="text", text=f"❌ 会话 {session_id} 不存在")]
+        lookup = lookup_session(session_id)
+        if not lookup.ok or lookup.session is None:
+            return [TextContent(type="text", text=f"❌ SESSION_NOT_FOUND: 会话 {session_id} 不存在")]
+        session_data = lookup.session
         full_text = ""
         final_response = None
-        use_temporary = session_data.get("temporary", False) if temporary is None else temporary
+        use_temporary = session_data.temporary if temporary is None else temporary
         request_kwargs = {
             "prompt": message,
             "files": safe_image_paths or None,
             "temporary": use_temporary,
-            "thinking_level": session_data.get("thinking_level", "standard"),
+            "thinking_level": session_data.thinking_level,
         }
-        use_learning_mode = learning_mode or session_data.get("learning_mode")
+        use_learning_mode = learning_mode or session_data.learning_mode
         if use_learning_mode:
             request_kwargs["learning_mode"] = use_learning_mode
-        async for response in session_data["session"].send_message_stream(**request_kwargs):
+        streamed = await send_session_message_stream(session_id, **request_kwargs)
+        if not streamed.ok or streamed.session is None:
+            return [TextContent(type="text", text=f"❌ SESSION_NOT_FOUND: 会话 {session_id} 不存在")]
+        for response in streamed.response:
             full_text += get_stream_text_piece(response)
             final_response = response
-        keep_chat = session_data.get("retain_chat", False) if retain_chat is None else retain_chat
+        keep_chat = streamed.session.retain_chat if retain_chat is None else retain_chat
         ttl = delete_after_seconds
         if ttl is None:
-            ttl = session_data.get("delete_after_seconds")
+            ttl = streamed.session.delete_after_seconds
         schedule_remote_chat_cleanup_from_response(
             final_response,
             retain_chat=keep_chat,

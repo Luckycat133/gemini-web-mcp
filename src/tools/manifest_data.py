@@ -285,7 +285,7 @@ TOOL_MANIFEST: list[dict[str, Any]] = [
     {
         "name": "gemini_start_chat",
         "group": "core",
-        "purpose": "Create a local multi-turn session backed by Gemini Web; can retain or schedule cleanup of the remote chat.",
+        "purpose": "Create a shared local multi-turn session with an opaque ID; can retain or schedule cleanup of the remote chat.",
         "read_only": False,
         "destructive": False,
         "privacy": "sends_user_prompt_when_initial_message_is_provided",
@@ -294,7 +294,7 @@ TOOL_MANIFEST: list[dict[str, Any]] = [
     {
         "name": "gemini_send_message",
         "group": "core",
-        "purpose": "Send a message to an existing local session.",
+        "purpose": "Send a message to an existing shared session; unknown IDs return SESSION_NOT_FOUND.",
         "read_only": False,
         "destructive": False,
         "privacy": "sends_user_prompt_and_optional_files",
@@ -303,7 +303,7 @@ TOOL_MANIFEST: list[dict[str, Any]] = [
     {
         "name": "gemini_send_message_stream",
         "group": "core",
-        "purpose": "Stream a response from an existing local session.",
+        "purpose": "Stream a response from an existing shared session; unknown IDs return SESSION_NOT_FOUND.",
         "read_only": False,
         "destructive": False,
         "privacy": "sends_user_prompt_and_optional_files",
@@ -312,7 +312,7 @@ TOOL_MANIFEST: list[dict[str, Any]] = [
     {
         "name": "gemini_list_sessions",
         "group": "core",
-        "purpose": "List local in-process sessions only.",
+        "purpose": "List shared local in-process sessions visible to primary and compact adapters.",
         "read_only": True,
         "destructive": False,
         "privacy": "local_session_metadata",
@@ -321,7 +321,7 @@ TOOL_MANIFEST: list[dict[str, Any]] = [
     {
         "name": "gemini_reset_session",
         "group": "core",
-        "purpose": "Reset a local session and optionally delete its remote Gemini Web chat.",
+        "purpose": "Reset exactly one shared local session; unknown IDs preserve all state; optionally delete its remote Gemini Web chat.",
         "read_only": False,
         "destructive": True,
         "privacy": "local_session_metadata",

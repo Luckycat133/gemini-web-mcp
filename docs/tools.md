@@ -126,11 +126,13 @@
 - `gem_id`: str - 可选 Gem ID
 - `temporary`: bool - 后续会话消息默认沿用的 Temporary chat 状态
 
-**返回：** 会话 ID，用于后续消息
+**返回：** `sess_<uuid>` 形式的不透明本地会话 ID，用于后续消息。primary 与 compact 入口共享同一份会话状态；调用方不应自行构造或按顺序猜测 ID。
 
 ### gemini_send_message
 
 会话消息。
+
+未知 `session_id` 会明确返回 `SESSION_NOT_FOUND`，不会退化为单次对话或创建新会话。
 
 **参数：**
 - `session_id`: str - 会话 ID
@@ -173,6 +175,8 @@
 
 **参数：**
 - `session_id`: str - 会话 ID
+
+只删除指定会话；未知 ID 返回 `SESSION_NOT_FOUND`，不会影响其他会话。会话未设置 `retain_chat=true` 时，还会尝试立即删除对应远端聊天。
 
 ---
 
@@ -652,6 +656,8 @@ JSON 输出包含 `verification_status`、`visible_after_delete`、`readable_by_
 | `prompts` | 本地提示词库 |
 | `cookie` | Cookie 状态、浏览器 profile 诊断和浏览器获取 |
 | `doctor` | 只读预检工具组、Cookie 状态、浏览器 profile 对齐和媒体校验依赖，不输出 Cookie 值 |
+
+compact `session` 支持 `create` / `send` / `list` / `reset`（或 `reset_one`）/ `reset_all`。`reset` 与 `reset_one` 都必须提供 `session_id`，且只删除该会话；只有显式 `reset_all` 才会清空全部会话并重置客户端。旧的 `action="reset"` 保留为单会话别名，不再把缺少 ID 解释为全量重置。
 
 ---
 

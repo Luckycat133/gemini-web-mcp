@@ -75,15 +75,17 @@
 
 | # | 步骤 | 预期 |
 |---|---|---|
-| 3.1 | `gemini_start_chat(model="flash")` → 拿 `session_id`（形如 `sess_1`） | 返回 `Session created: sess_N` |
+| 3.1 | `gemini_start_chat(model="flash")` → 拿 `session_id`（形如 `sess_<32位十六进制 UUID>`） | 返回成功文本和不透明的本地会话 ID |
 | 3.2 | `gemini_send_message(session_id, "我叫张三")` | 正常回复 |
 | 3.3 | `gemini_send_message(session_id, "我叫什么名字？")` | 回复含"张三"，证明上下文保留 |
 | 3.4 | `gemini_send_message_stream(...)` 同上 | 流式正常 |
-| 3.5 | `gemini_list_sessions` | 列出 `sess_1`，含 model 信息 |
-| 3.6 | `gemini_reset_session(session_id)` 后再 `gemini_send_message` | 第二轮不记得"张三" |
-| 3.7 | `session_id="sess_invalid"` | 明确错误，不崩 |
+| 3.5 | `gemini_list_sessions` | 列出 3.1 返回的 ID，含 model 信息 |
+| 3.6 | `gemini_reset_session(session_id)` 后再 `gemini_send_message` | 明确返回 `SESSION_NOT_FOUND`，不会悄悄创建新会话 |
+| 3.7 | 保留一个有效会话，再用 `session_id="sess_invalid"` 发送或重置 | 返回 `SESSION_NOT_FOUND`，有效会话仍可继续使用 |
+| 3.8 | primary 的 `gemini_start_chat` 创建后，从 compact `session(action="list"/"send")` 使用同一 ID；再反向测试 | 两个入口看到并操作同一份状态 |
+| 3.9 | compact `session(action="reset")` 不传 ID，再调用 `session(action="reset_all")` | 前者返回 `INVALID_ARGUMENT` 且不清状态；后者才清空全部并重置客户端 |
 
-**关键校验**：session 是**本地概念**，`sess_N` 不等于 Gemini 的 `cid`。`gemini_reset_session` 只清本地状态，不动远端。要重置底层连接用 `gemini_reset`。
+**关键校验**：session 是**本地概念**，`sess_<uuid>` 不等于 Gemini 的 `cid`。primary 与 compact 共用同一生命周期服务。单会话 reset 只删除指定本地状态；默认 `retain_chat=false` 时还会尝试立即删除对应远端聊天，`retain_chat=true` 时保留远端聊天。要清空全部本地会话并重置底层连接，primary 用 `gemini_reset`，compact 必须显式用 `action="reset_all"`。
 
 ### 4. 媒体生成（`gemini_generate_media` / `gemini_generate_music`）
 
@@ -301,7 +303,7 @@
 ### P0
 - [ ] 1. 鉴权（5 项）
 - [ ] 2. 单轮对话（8 项）
-- [ ] 3. 多轮会话（7 项）
+- [ ] 3. 多轮会话（9 项）
 - [ ] 4. 媒体生成（6 项）
 - [ ] 5. Deep Research（5 项，需 AI Plus）
 - [ ] 6. 文件上传与 URL（5 项）

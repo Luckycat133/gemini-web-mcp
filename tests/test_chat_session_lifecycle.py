@@ -2,7 +2,7 @@
 
 调研发现以下工具此前仅有注解形状测试或仅 happy path 间接覆盖：
 
-- gemini_reset_session（destructiveHint=True）：delete_remote_chat 决策路径零覆盖
+- gemini_reset_session（destructiveHint=True）：共享 reset_session 结果映射零覆盖
 - gemini_list_sessions：空/非空渲染零覆盖
 - gemini_send_message：temporary / learning_mode / retain_chat / delete_after_seconds
   四参的 "None 时从 session_data 回退、传入则覆盖" 逻辑零分支覆盖——这是多轮会话
@@ -11,10 +11,8 @@
 本文件补充行为断言：
 
 - gemini_reset_session:
-  * session_id 不存在 → 不调 delete_remote_chat，返回成功
-  * session 存在 + retain_chat=False → 调用 delete_remote_chat(cid)
-  * session 存在 + retain_chat=True → 不调用 delete_remote_chat
-  * session 存在但 session 对象无 cid → delete_remote_chat(None)
+  * session_id 不存在 → 显式返回 SESSION_NOT_FOUND
+  * session 存在 → 仅委托共享 reset_session 并返回成功
 - gemini_list_sessions:
   * 空会话列表 → 返回"暂无活跃会话"
   * 非空会话列表 → 返回"活跃会话:" + 每个会话的模型/保留状态描述
@@ -35,7 +33,7 @@ import asyncio
 from mcp.server.fastmcp import FastMCP
 
 import src.tools.chat as chat_tools
-
+from src.session_manager import SessionData, SessionOperationResult
 
 # ---------------------------------------------------------------------------
 # 辅助：注册工具并返回可直接 await 的工具函数
@@ -68,14 +66,13 @@ async def _call_tool(mcp, name, **kwargs):
 
 
 def test_reset_session_unknown_id_does_not_delete(monkeypatch):
-    """session_id 不存在时 pop_session 返回 None，不调 delete_remote_chat。"""
-    deleted_cids = []
+    """共享服务报告不存在时，工具返回显式 SESSION_NOT_FOUND。"""
+    reset_ids = []
 
-    monkeypatch.setattr(chat_tools, "pop_session", lambda session_id: None)
-
-    async def fake_delete(cid):
-        deleted_cids.append(cid)
-    monkeypatch.setattr(chat_tools, "delete_remote_chat", fake_delete)
+    async def fake_reset(session_id):
+        reset_ids.append(session_id)
+        return SessionOperationResult.not_found()
+    monkeypatch.setattr(chat_tools, "reset_session", fake_reset)
 
     mcp = _register_chat_tools()
 
@@ -83,85 +80,30 @@ def test_reset_session_unknown_id_does_not_delete(monkeypatch):
         return await _call_tool(mcp, "gemini_reset_session", session_id="sess-unknown")
 
     result = asyncio.run(run())
-    assert deleted_cids == []
+    assert reset_ids == ["sess-unknown"]
     assert len(result) == 1
     assert "sess-unknown" in result[0].text
-    assert "已重置" in result[0].text
+    assert "SESSION_NOT_FOUND" in result[0].text
+    assert "已重置" not in result[0].text
 
 
-def test_reset_session_retain_false_triggers_delete(monkeypatch):
-    """session 存在且 retain_chat=False 时调用 delete_remote_chat(cid)。"""
-    deleted_cids = []
+def test_reset_session_delegates_single_id_to_shared_service(monkeypatch):
+    """工具层不维护第二份状态，只把单个 ID 交给共享服务。"""
+    reset_ids = []
 
-    class FakeSession:
-        cid = "c_abc123"
-
-    monkeypatch.setattr(
-        chat_tools, "pop_session",
-        lambda session_id: {"session": FakeSession(), "retain_chat": False, "model": "fast"},
-    )
-
-    async def fake_delete(cid):
-        deleted_cids.append(cid)
-    monkeypatch.setattr(chat_tools, "delete_remote_chat", fake_delete)
+    async def fake_reset(session_id):
+        reset_ids.append(session_id)
+        return SessionOperationResult.success(SessionData(session=object(), session_id=session_id))
+    monkeypatch.setattr(chat_tools, "reset_session", fake_reset)
 
     mcp = _register_chat_tools()
 
     async def run():
         return await _call_tool(mcp, "gemini_reset_session", session_id="sess-1")
 
-    asyncio.run(run())
-    assert deleted_cids == ["c_abc123"]
-
-
-def test_reset_session_retain_true_skips_delete(monkeypatch):
-    """session 存在且 retain_chat=True 时不调用 delete_remote_chat。"""
-    deleted_cids = []
-
-    class FakeSession:
-        cid = "c_retained"
-
-    monkeypatch.setattr(
-        chat_tools, "pop_session",
-        lambda session_id: {"session": FakeSession(), "retain_chat": True, "model": "fast"},
-    )
-
-    async def fake_delete(cid):
-        deleted_cids.append(cid)
-    monkeypatch.setattr(chat_tools, "delete_remote_chat", fake_delete)
-
-    mcp = _register_chat_tools()
-
-    async def run():
-        return await _call_tool(mcp, "gemini_reset_session", session_id="sess-2")
-
-    asyncio.run(run())
-    assert deleted_cids == []
-
-
-def test_reset_session_without_cid_deletes_none(monkeypatch):
-    """session 对象无 cid 属性时 delete_remote_chat(None)。"""
-    deleted_cids = []
-
-    class FakeSessionNoCid:
-        pass  # 无 cid 属性
-
-    monkeypatch.setattr(
-        chat_tools, "pop_session",
-        lambda session_id: {"session": FakeSessionNoCid(), "retain_chat": False, "model": "fast"},
-    )
-
-    async def fake_delete(cid):
-        deleted_cids.append(cid)
-    monkeypatch.setattr(chat_tools, "delete_remote_chat", fake_delete)
-
-    mcp = _register_chat_tools()
-
-    async def run():
-        return await _call_tool(mcp, "gemini_reset_session", session_id="sess-3")
-
-    asyncio.run(run())
-    assert deleted_cids == [None]
+    result = asyncio.run(run())
+    assert reset_ids == ["sess-1"]
+    assert result[0].text == "✅ 会话 sess-1 已重置"
 
 
 # ---------------------------------------------------------------------------
@@ -226,15 +168,42 @@ class _FakeSession:
 
 
 def _patch_send_message_env(monkeypatch, session_data, *, captured_schedule=None):
-    """统一 patch gemini_send_message 的 2 个外部接缝。
+    """统一 patch gemini_send_message 的共享服务接缝。
 
-    - chat_tools.get_session → 返回构造的 session_data（或 None）
+    - chat_tools.lookup_session → 返回显式查找结果
+    - chat_tools.send_session_message → 通过同一 SessionData 发送并返回结果
     - chat_tools.schedule_remote_chat_cleanup → 捕获入参到 captured_schedule 列表
 
     注意：gemini_send_message 不调 get_gemini_client / initialize_client /
     cleanup_due_remote_chats，故无需 patch。
     """
-    monkeypatch.setattr(chat_tools, "get_session", lambda sid: session_data)
+    if session_data is None:
+        data = None
+    else:
+        data = SessionData(
+            session=session_data["session"],
+            session_id="s1",
+            model=session_data.get("model", "flash"),
+            thinking_level=session_data.get("thinking_level", "standard"),
+            learning_mode=session_data.get("learning_mode"),
+            temporary=session_data.get("temporary", False),
+            retain_chat=session_data.get("retain_chat", False),
+            delete_after_seconds=session_data.get("delete_after_seconds"),
+        )
+
+    def fake_lookup(_sid):
+        if data is None:
+            return SessionOperationResult.not_found()
+        return SessionOperationResult.success(data)
+
+    async def fake_send(_sid, **kwargs):
+        if data is None:
+            return SessionOperationResult.not_found()
+        response = await data.session.send_message(**kwargs)
+        return SessionOperationResult.success(data, response)
+
+    monkeypatch.setattr(chat_tools, "lookup_session", fake_lookup)
+    monkeypatch.setattr(chat_tools, "send_session_message", fake_send)
 
     def fake_schedule(cid, *, retain_chat, delete_after_seconds, source):
         if captured_schedule is not None:
@@ -268,13 +237,13 @@ def test_send_message_unknown_session_returns_early(monkeypatch):
 
 
 def test_send_message_invalid_images_short_circuits_before_session_check(monkeypatch):
-    """image_paths 无效 → 在 get_session 调用前早退。
+    """image_paths 无效 → 在 lookup_session 调用前早退。
 
-    用一个会抛错的 get_session 证明它没被调用。
+    用一个会抛错的 lookup_session 证明它没被调用。
     """
     def explode(sid):
-        raise AssertionError("get_session should not be called on invalid images")
-    monkeypatch.setattr(chat_tools, "get_session", explode)
+        raise AssertionError("lookup_session should not be called on invalid images")
+    monkeypatch.setattr(chat_tools, "lookup_session", explode)
     monkeypatch.setattr(chat_tools, "schedule_remote_chat_cleanup",
                         lambda *a, **kw: None)
 

@@ -4,14 +4,14 @@ Gemini Skill - Optimized MCP Server (v3.0)
 Low-token, production-ready.
 """
 
-import os
-import json
 import asyncio
-import shutil
+import json
 import logging
+import os
+import shutil
 import threading
 from pathlib import Path
-from typing import Optional, Literal, Any, Callable, Awaitable
+from typing import Any, Awaitable, Callable, Literal, Optional
 
 try:
     from mcp.server.fastmcp import FastMCP
@@ -22,14 +22,19 @@ except ImportError:
 
 from .client_wrapper import (
     cleanup_due_remote_chats,
+    create_session,
+    get_cookie_from_browser,
+    get_cookie_status,
     get_gemini_client,
     initialize_client,
-    reset_client_async,
-    get_cookie_status,
-    get_cookie_from_browser,
     list_browser_cookie_profiles,
+    list_sessions,
+    lookup_session,
+    reset_client_async,
+    reset_session,
     schedule_remote_chat_cleanup,
     schedule_remote_chat_cleanup_from_response,
+    send_session_message,
 )
 from .constants import resolve_media_request, resolve_model_name
 from .tools.annotations import (
@@ -40,40 +45,40 @@ from .tools.annotations import (
     READ_ONLY_LOCAL,
     READS_PRIVATE_REMOTE,
 )
-from .tools.utils import extract_remote_chat_id, validate_optional_image_path
 from .tools.manage import (
     WEB_FEATURE_PROBES,
-    _RawRPCData,
     _chat_export_payload,
     _chat_to_dict,
-    _execute_observed_rpc,
-    _fetch_native_notebooks,
-    _extract_rpc_bodies,
-    _fetch_scheduled_registry,
-    _fetch_scheduled_task_by_id,
     _cleanup_test_artifacts_payload,
     _doctor_payload,
-    _format_cleanup_markdown,
+    _execute_observed_rpc,
+    _extract_rpc_bodies,
+    _fetch_native_notebooks,
+    _fetch_scheduled_registry,
+    _fetch_scheduled_task_by_id,
     _format_chat_export_markdown,
+    _format_cleanup_markdown,
     _format_doctor_markdown,
+    _format_tool_manifest_markdown,
     _format_web_capabilities_markdown,
     _get_chat_id,
     _get_probe,
-    _read_chat_turns,
-    _turn_matches_query,
+    _paginate_items,
     _parse_library_capability,
     _parse_public_link_entry,
     _parse_scheduled_action_create_body,
     _parse_scheduled_action_task_entry,
     _parse_tool_mode_entry,
     _parse_usage_entry,
-    _paginate_items,
+    _RawRPCData,
+    _read_chat_turns,
     _scheduled_daily_payload,
-    _format_tool_manifest_markdown,
     _summarize_probe_response,
     _tool_manifest_payload,
+    _turn_matches_query,
     _web_capabilities_payload,
 )
+from .tools.utils import extract_remote_chat_id, validate_optional_image_path
 
 logging.basicConfig(
     level=logging.WARNING,
@@ -230,10 +235,6 @@ def get_prompts() -> PromptManager:
         return _prompt_manager
 
 
-_sessions: dict[str, dict[str, Any]] = {}
-_sessions_lock = threading.Lock()
-
-
 def _truncate_text(text: Any, max_chars: int = 2000) -> str:
     value = str(text or "")
     if len(value) <= max_chars:
@@ -269,31 +270,33 @@ async def chat(
         if not valid_image:
             return [TextContent(type="text", text=f"Error: {image_error}")]
 
-        client = get_gemini_client()
-        await initialize_client()
-        await cleanup_due_remote_chats(client)
-
         model = _normalize_model(model)
         model_name = resolve_model_name(model)
         files = [safe_image_path] if safe_image_path else None
 
-        if session_id:
-            with _sessions_lock:
-                session_entry = _sessions.get(session_id)
-        else:
-            session_entry = None
+        session_lookup = lookup_session(session_id) if session_id else None
+        if session_id and (session_lookup is None or not session_lookup.ok or session_lookup.session is None):
+            return [TextContent(type="text", text=f"SESSION_NOT_FOUND: Invalid session: {session_id}")]
 
-        if session_id and session_entry:
+        client = get_gemini_client()
+        await initialize_client()
+        await cleanup_due_remote_chats(client)
+
+        if session_id and session_lookup is not None and session_lookup.session is not None:
+            session_entry = session_lookup.session
             request_kwargs = {
                 "prompt": message,
                 "files": files,
-                "thinking_level": thinking_level,
+                "thinking_level": session_entry.thinking_level or thinking_level,
             }
-            use_learning_mode = learning_mode or session_entry.get("learning_mode")
+            use_learning_mode = learning_mode or session_entry.learning_mode
             if use_learning_mode:
                 request_kwargs["learning_mode"] = use_learning_mode
-            response = await session_entry["session"].send_message(**request_kwargs)
-            _schedule_skill_response_cleanup(response, "skill_chat:session", session_entry["session"])
+            sent = await send_session_message(session_id, **request_kwargs)
+            if not sent.ok or sent.session is None:
+                return [TextContent(type="text", text=f"SESSION_NOT_FOUND: Invalid session: {session_id}")]
+            response = sent.response
+            _schedule_skill_response_cleanup(response, "skill_chat:session", sent.session.session)
         else:
             request_kwargs = {
                 "prompt": message,
@@ -862,14 +865,13 @@ async def _session_create(
     await cleanup_due_remote_chats(client)
     normalized = _normalize_model(model)
     sess = client.start_chat(model=resolve_model_name(normalized))
-    with _sessions_lock:
-        sid = f"sess_{len(_sessions) + 1}"
-        _sessions[sid] = {
-            "session": sess,
-            "model": normalized,
-            "thinking_level": thinking_level,
-            "learning_mode": learning_mode,
-        }
+    created = create_session(
+        sess,
+        normalized,
+        thinking_level=thinking_level,
+        learning_mode=learning_mode,
+    )
+    sid = created.session.session_id if created.session is not None else ""
     return [TextContent(type="text", text=f"Session created: {sid}")]
 
 
@@ -881,10 +883,10 @@ async def _session_send(
     safe_image_path: Optional[str],
     model: str,
 ) -> list[TextContent]:
-    with _sessions_lock:
-        session_entry = _sessions.get(session_id) if session_id else None
-    if not session_id or not session_entry:
-        return [TextContent(type="text", text=f"Invalid session: {session_id}")]
+    lookup = lookup_session(session_id) if session_id else None
+    if not session_id or lookup is None or not lookup.ok or lookup.session is None:
+        return [TextContent(type="text", text=f"SESSION_NOT_FOUND: Invalid session: {session_id}")]
+    session_entry = lookup.session
 
     client = get_gemini_client()
     await initialize_client()
@@ -894,44 +896,44 @@ async def _session_send(
     request_kwargs = {
         "prompt": message or "",
         "files": [safe_image_path] if safe_image_path else None,
-        "thinking_level": session_entry.get("thinking_level", thinking_level),
+        "thinking_level": session_entry.thinking_level or thinking_level,
     }
-    use_learning_mode = learning_mode or session_entry.get("learning_mode")
+    use_learning_mode = learning_mode or session_entry.learning_mode
     if use_learning_mode:
         request_kwargs["learning_mode"] = use_learning_mode
-    response = await session_entry["session"].send_message(**request_kwargs)
-    _schedule_skill_response_cleanup(response, "skill_session:send", session_entry["session"])
+    sent = await send_session_message(session_id, **request_kwargs)
+    if not sent.ok or sent.session is None:
+        return [TextContent(type="text", text=f"SESSION_NOT_FOUND: Invalid session: {session_id}")]
+    response = sent.response
+    _schedule_skill_response_cleanup(response, "skill_session:send", sent.session.session)
     return _format_response(response)
 
 
 def _session_list() -> list[TextContent]:
-    with _sessions_lock:
-        items = [
-            f"{i}. {sid} ({data['model']})"
-            for i, (sid, data) in enumerate(_sessions.items(), 1)
-        ]
+    items = [
+        f"{i}. {sid} ({data['model']})"
+        for i, (sid, data) in enumerate(list_sessions().items(), 1)
+    ]
     if not items:
         return [TextContent(type="text", text="No active sessions")]
     return [TextContent(type="text", text="\n".join(items))]
 
 
-async def _session_reset(session_id: Optional[str]) -> list[TextContent]:
-    with _sessions_lock:
-        if session_id and session_id in _sessions:
-            del _sessions[session_id]
-            cleared_all = False
-        else:
-            _sessions.clear()
-            cleared_all = True
-    if cleared_all:
+async def _session_reset(session_id: Optional[str], *, reset_all: bool = False) -> list[TextContent]:
+    if reset_all:
         await reset_client_async()
         return [TextContent(type="text", text="All sessions reset")]
+    if not session_id:
+        return [TextContent(type="text", text="INVALID_ARGUMENT: session_id is required; use action='reset_all'")]
+    result = await reset_session(session_id)
+    if not result.ok:
+        return [TextContent(type="text", text=f"SESSION_NOT_FOUND: Invalid session: {session_id}")]
     return [TextContent(type="text", text=f"Session deleted: {session_id}")]
 
 
 @mcp.tool(annotations=DESTRUCTIVE_REMOTE)
 async def session(
-    action: Literal["create", "send", "list", "reset"],
+    action: Literal["create", "send", "list", "reset", "reset_one", "reset_all"],
     session_id: Optional[str] = None,
     message: Optional[str] = None,
     model: str = "flash",
@@ -939,7 +941,7 @@ async def session(
     learning_mode: Optional[str] = None,
     image_path: Optional[str] = None,
 ) -> list[TextContent]:
-    """Manage conversation sessions."""
+    """Manage shared sessions; reset/reset_one need an ID and only reset_all clears all."""
     try:
         valid_image, safe_image_path, image_error = validate_optional_image_path(image_path)
         if not valid_image:
@@ -951,8 +953,10 @@ async def session(
             return await _session_send(session_id, message, thinking_level, learning_mode, safe_image_path, model)
         if action == "list":
             return _session_list()
-        if action == "reset":
+        if action in {"reset", "reset_one"}:
             return await _session_reset(session_id)
+        if action == "reset_all":
+            return await _session_reset(None, reset_all=True)
         return [TextContent(type="text", text="Invalid action")]
 
     except Exception as e:

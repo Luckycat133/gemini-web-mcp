@@ -6,6 +6,8 @@
 - extract_remote_chat_id: 两份实现的漂移守护（remote_chat_cleanup_manager 与 tools/utils）
 """
 
+import asyncio
+import re
 import time
 from types import SimpleNamespace
 
@@ -16,10 +18,9 @@ from src.error_handler import (
     handle_error,
     wrap_tool_error,
 )
-from src.session_manager import SessionManager
 from src.remote_chat_cleanup_manager import extract_remote_chat_id as _extract_from_cleanup
+from src.session_manager import SESSION_NOT_FOUND, SessionManager, SessionService
 from src.tools.utils import extract_remote_chat_id as _extract_from_utils
-
 
 # ---------------------------------------------------------------------------
 # error_handler.handle_error — 7 个 ERROR_CODES 分支
@@ -296,6 +297,163 @@ def test_session_manager_pop_session_triggers_cleanup():
     sm.store_session("old", object())
     sm._sessions["old"].created_at = time.time() - 100
     assert sm.pop_session("old") is None
+
+
+def test_session_service_generates_opaque_uuid_ids_without_reuse_after_reset():
+    sm = SessionService()
+    first = sm.create_session(object())
+    assert first.ok and first.session is not None
+    first_id = first.session.session_id
+    assert re.fullmatch(r"sess_[0-9a-f]{32}", first_id)
+
+    assert sm.reset_one(first_id).ok
+    second = sm.create_session(object())
+    assert second.ok and second.session is not None
+    assert re.fullmatch(r"sess_[0-9a-f]{32}", second.session.session_id)
+    assert second.session.session_id != first_id
+
+
+def test_session_service_retries_an_active_id_collision():
+    generated = iter(("sess_same", "sess_same", "sess_unique"))
+    sm = SessionService(id_factory=lambda: next(generated))
+
+    first = sm.create_session(object())
+    second = sm.create_session(object())
+
+    assert first.session is not None and first.session.session_id == "sess_same"
+    assert second.session is not None and second.session.session_id == "sess_unique"
+
+
+def test_session_service_delete_then_create_never_overwrites_a_survivor():
+    ids = iter(("sess_one", "sess_two", "sess_two", "sess_three"))
+    sm = SessionService(id_factory=lambda: next(ids))
+    first = sm.create_session(object())
+    survivor = sm.create_session(object())
+    assert first.session is not None and survivor.session is not None
+
+    sm.reset_one(first.session.session_id)
+    replacement = sm.create_session(object())
+
+    assert replacement.session is not None
+    assert replacement.session.session_id == "sess_three"
+    assert sm.lookup_session("sess_two").session is survivor.session
+    assert set(sm.list_sessions()) == {"sess_two", "sess_three"}
+
+
+def test_session_service_unknown_reset_is_explicit_and_preserves_other_sessions():
+    sm = SessionService(id_factory=lambda: "sess_kept")
+    created = sm.create_session(object())
+
+    result = sm.reset_one("sess_missing")
+
+    assert result.ok is False
+    assert result.error_code == SESSION_NOT_FOUND
+    assert created.session is not None
+    assert sm.lookup_session("sess_kept").session is created.session
+
+
+def test_session_service_reset_all_is_explicit_and_returns_detached_states():
+    ids = iter(("sess_one", "sess_two"))
+    sm = SessionService(id_factory=lambda: next(ids))
+    sm.create_session(object())
+    sm.create_session(object())
+
+    detached = sm.reset_all()
+
+    assert {data.session_id for data in detached} == {"sess_one", "sess_two"}
+    assert sm.list_sessions() == {}
+
+
+def test_session_service_send_unknown_is_explicit():
+    result = asyncio.run(SessionService().send_message("sess_missing", prompt="hi"))
+    assert result.ok is False
+    assert result.error_code == SESSION_NOT_FOUND
+
+
+def test_session_service_serializes_concurrent_sends_per_session():
+    class RecordingSession:
+        def __init__(self):
+            self.active = 0
+            self.max_active = 0
+            self.messages = []
+
+        async def send_message(self, *, prompt):
+            self.active += 1
+            self.max_active = max(self.max_active, self.active)
+            await asyncio.sleep(0)
+            self.messages.append(prompt)
+            self.active -= 1
+            return SimpleNamespace(text=f"reply:{prompt}")
+
+    upstream = RecordingSession()
+    sm = SessionService(id_factory=lambda: "sess_serial")
+    sm.create_session(upstream)
+
+    async def run():
+        return await asyncio.gather(
+            sm.send_message("sess_serial", prompt="one"),
+            sm.send_message("sess_serial", prompt="two"),
+        )
+
+    results = asyncio.run(run())
+    assert all(result.ok for result in results)
+    assert [result.response.text for result in results] == ["reply:one", "reply:two"]
+    assert upstream.messages == ["one", "two"]
+    assert upstream.max_active == 1
+
+
+def test_session_service_stream_send_uses_the_shared_session_state():
+    class StreamingSession:
+        cid = "c_stream"
+
+        async def send_message_stream(self, *, prompt):
+            yield SimpleNamespace(text_delta=prompt)
+            yield SimpleNamespace(text_delta="!")
+
+    sm = SessionService(id_factory=lambda: "sess_stream")
+    sm.create_session(StreamingSession())
+
+    result = asyncio.run(sm.send_message_stream("sess_stream", prompt="hello"))
+
+    assert result.ok and result.session is not None
+    assert [chunk.text_delta for chunk in result.response] == ["hello", "!"]
+    assert result.session.upstream_chat_id == "c_stream"
+
+
+def test_session_service_async_reset_waits_for_in_flight_send():
+    async def run():
+        started = asyncio.Event()
+        release = asyncio.Event()
+
+        class BlockingSession:
+            async def send_message(self, *, prompt):
+                started.set()
+                await release.wait()
+                return SimpleNamespace(text=prompt)
+
+        ids = iter(("sess_busy", "sess_other"))
+        sm = SessionService(id_factory=lambda: next(ids))
+        sm.create_session(BlockingSession())
+        send_task = asyncio.create_task(sm.send_message("sess_busy", prompt="done"))
+        await started.wait()
+        reset_task = asyncio.create_task(sm.reset_one_async("sess_busy"))
+        await asyncio.sleep(0)
+        assert reset_task.done() is False
+
+        # Other lifecycle operations remain coherent while this send is suspended.
+        sm.create_session(object())
+        assert set(sm.list_sessions()) == {"sess_busy", "sess_other"}
+        assert (await sm.reset_one_async("sess_missing")).error_code == SESSION_NOT_FOUND
+
+        release.set()
+        sent, reset = await asyncio.gather(send_task, reset_task)
+        return sm, sent, reset
+
+    sm, sent, reset = asyncio.run(run())
+    assert sent.ok is True
+    assert reset.ok is True
+    assert sm.lookup_session("sess_busy").error_code == SESSION_NOT_FOUND
+    assert sm.lookup_session("sess_other").ok is True
 
 
 # ---------------------------------------------------------------------------
