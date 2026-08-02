@@ -103,11 +103,17 @@
 | 4.4 | `gemini_generate_music(prompt="轻快钢琴", model="flash")` | 走 Lyria 3，返回音频文件 |
 | 4.5 | `gemini_generate_music(prompt="交响乐", model="pro")` | 走 Lyria 3 Pro |
 | 4.6 | `image_path="/abs/ref.jpg"` 作为参考图 | 不崩；如果上游不支持参考图，错误要明确 |
+| 4.7 | 用 MCP Inspector 查看一次成功图片/音乐结果的 `_meta.domain_result.data` | `state=remote` 或 `local`；`artifacts[].id/uri/kind` 完整，primary 与 compact 对同一 URI 的 ID 一致 |
+| 4.8 | 指定 `output_dir` 保存产物并检查对应 artifact | 文件真实存在且非零，`verification.status=verified`，MIME/bytes 与磁盘一致；图片有尺寸、音视频在 ffprobe 可用时有时长 |
+| 4.9 | 观测一次上游 queued/empty，或用离线 fixture 重放 | queued 为 `ok=true/operation_state=queued`；empty 为 `ARTIFACT_NOT_RETURNED`，两者不混淆 |
+| 4.10 | 使用不可写输出目录重试一个仍返回远端 URI 的请求 | 远端 artifact 保留，结果为 `partial` 并带 `ARTIFACT_SAVE_PARTIAL`；不得宣称本地保存成功 |
 
 **关键校验**：
 - 图像后端固定 Nano Banana 2，`pro` 不会换首轮——和 [live-ui-coverage.md](./live-ui-coverage.md) "Media Routing Notes" 一致
 - 音乐按 `flash`/`pro` 分流 Lyria 3 / Lyria 3 Pro
 - 文件实际落到磁盘，`generated_media/` 目录被 `.gitignore`
+- 远端 URI 只标记 `unverified`；只有本地文件存在且非零才标记 `verified`
+- `requested_model`、`request_model`、`effective_backend`、`observed_backend` 分开记录；没有观测证据时 `observed_backend=null`
 - 失败时返回**清晰的上游错误文本**，不能是空字符串（单元测试 `test_media_tool_returns_clear_upstream_failure` 验了形状，实机要验内容真实可读）
 
 ### 5. Deep Research（`gemini_deep_research`）
@@ -121,6 +127,7 @@
 | 5.3 | 故意设 `timeout_seconds=30` | 返回 `❌ Deep Research 超时（30秒）`，**不能把 start message 当成最终报告**返回（`test_deep_research_timeout_does_not_present_start_message_as_report` 验了形状） |
 | 5.4 | 完成后调 `gemini_list_research_report_actions(chat_id=<上一步 cid>)` | 列出 webpage / infographic / quiz / flashcards / audio_overview / custom_app 等动作 |
 | 5.5 | `gemini_create_from_research_report(chat_id, artifact_type="webpage", output_dir=/tmp/dr-test)` | 在 output_dir 生成 HTML，HTML 含报告正文和来源链接，`rel="noopener noreferrer"` |
+| 5.6 | 检查 5.5 的 `_meta.domain_result.data.artifacts[0]` | `state=local`、`kind=webpage`、path/bytes/MIME 与磁盘一致，backend 为 MCP local renderer / filesystem |
 
 **关键校验**：
 - `query` 里要带 `Requested MCP model alias: xxx`（便于事后审计）
@@ -136,6 +143,9 @@
 | 6.3 | `file_path` 指向不存在的文件 | **在 client 初始化前就报错**（`test_file_validation_runs_before_client_initialization` 验了路由，实机要验顺序） |
 | 6.4 | `gemini_analyze_url(url="https://example.com", message="总结这个网页")` | 返回网页内容摘要 |
 | 6.5 | `url` 是 YouTube 链接 | 返回视频内容分析 |
+| 6.6 | 检查 6.1/6.2 的 `_meta.domain_result.data.input_artifacts[0]` | 本地文件为 `local/verified`，绝对路径、MIME、bytes 与磁盘一致 |
+| 6.7 | 检查 6.4 的 input artifact | URL 为 `kind=webpage,state=remote,verification=unverified`；响应图片（如有）位于 `artifacts` |
+| 6.8 | 人为触发文件/URL 分析超时 | `error.code=TIMED_OUT`、`data.state=failed`，输入 artifact 身份仍保留 |
 
 ---
 
@@ -310,9 +320,9 @@
 - [ ] 1. 鉴权（5 项）
 - [ ] 2. 单轮对话（8 项）
 - [ ] 3. 多轮会话（9 项）
-- [ ] 4. 媒体生成（6 项）
-- [ ] 5. Deep Research（5 项，需 AI Plus）
-- [ ] 6. 文件上传与 URL（5 项）
+- [ ] 4. 媒体生成（10 项）
+- [ ] 5. Deep Research（6 项，需 AI Plus）
+- [ ] 6. 文件上传与 URL（8 项）
 
 ### P1
 - [ ] 7. 模型发现（2 项）

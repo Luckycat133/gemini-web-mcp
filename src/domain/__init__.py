@@ -1,5 +1,13 @@
 """Typed domain contracts shared by services and MCP adapters."""
 
+from .artifacts import (
+    Artifact,
+    ArtifactKind,
+    ArtifactResultData,
+    ArtifactState,
+    ArtifactVerification,
+    ArtifactVerificationStatus,
+)
 from .results import (
     DomainError,
     DomainErrorCode,
@@ -13,6 +21,12 @@ from .results import (
 )
 
 __all__ = [
+    "Artifact",
+    "ArtifactKind",
+    "ArtifactResultData",
+    "ArtifactState",
+    "ArtifactVerification",
+    "ArtifactVerificationStatus",
     "DomainError",
     "DomainErrorCode",
     "DomainResult",

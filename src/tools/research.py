@@ -6,14 +6,16 @@ Deep Research MCP 工具
 import asyncio
 import html
 import json
+import logging
 import os
 import re
 from types import SimpleNamespace
 from typing import Any, Literal
+
 from mcp.server.fastmcp import FastMCP
 from mcp.types import TextContent
-import logging
 
+from ..adapters import append_artifact_block, attach_domain_result, domain_text
 from ..client_wrapper import (
     cleanup_due_remote_chats,
     get_gemini_client,
@@ -22,6 +24,13 @@ from ..client_wrapper import (
     schedule_remote_chat_cleanup_from_response,
 )
 from ..constants import resolve_model_name
+from ..domain import ArtifactKind, ArtifactResultData, ArtifactState
+from ..services import (
+    artifact_exception_result,
+    artifact_from_local_path,
+    artifact_result,
+    artifact_save_failure_result,
+)
 from .annotations import MUTATES_LOCAL, MUTATES_REMOTE, READS_PRIVATE_REMOTE
 
 logger = logging.getLogger(__name__)
@@ -273,17 +282,96 @@ def register_research_tools(mcp: FastMCP):
         await initialize_client()
         report_output = await _fetch_deep_research_immersive_report(client, chat_id)
         if not report_output:
-            return [TextContent(type="text", text=f"❌ 未能在聊天 {chat_id} 中读取 Deep Research 沉浸式报告。")]
+            data = ArtifactResultData(
+                state=ArtifactState.EMPTY,
+                effective_backend="MCP local renderer",
+                source_chat_id=chat_id,
+                media_type="research_report",
+            )
+            return domain_text(
+                artifact_result(data),
+                f"❌ 未能在聊天 {chat_id} 中读取 Deep Research 沉浸式报告。",
+                use_result_data=True,
+            )
 
-        artifact = _create_research_report_artifact(
-            report_output=report_output,
-            artifact_type=artifact_type,
-            chat_id=chat_id,
-            output_dir=output_dir,
+        try:
+            artifact = _create_research_report_artifact(
+                report_output=report_output,
+                artifact_type=artifact_type,
+                chat_id=chat_id,
+                output_dir=output_dir,
+            )
+        except OSError as error:
+            data = ArtifactResultData(
+                state=ArtifactState.FAILED,
+                request_model=artifact_type,
+                effective_backend="MCP local renderer",
+                observed_backend="filesystem",
+                source_chat_id=chat_id,
+                media_type="research_report",
+            )
+            result = artifact_save_failure_result(
+                error,
+                data,
+                logger=logger,
+                operation="gemini_create_from_research_report",
+            )
+            return domain_text(
+                result,
+                "❌ Research report artifact creation failed. Check the output directory and retry.",
+                use_result_data=True,
+            )
+        except Exception as error:
+            data = ArtifactResultData(
+                state=ArtifactState.FAILED,
+                request_model=artifact_type,
+                effective_backend="MCP local renderer",
+                source_chat_id=chat_id,
+                media_type="research_report",
+            )
+            result = artifact_exception_result(
+                error,
+                data,
+                logger=logger,
+                operation="gemini_create_from_research_report",
+            )
+            return domain_text(
+                result,
+                "❌ Research report artifact creation failed. Inspect the diagnostic ID and retry.",
+                use_result_data=True,
+            )
+
+        typed_artifact = artifact_from_local_path(
+            _research_artifact_kind(artifact["path"]),
+            artifact["path"],
+            title=artifact["title"],
+            source_chat_id=chat_id,
+            request_model=artifact_type,
+            effective_backend="MCP local renderer",
+            observed_backend="filesystem",
         )
+        data = ArtifactResultData(
+            state=typed_artifact.state,
+            artifacts=(typed_artifact,),
+            request_model=artifact_type,
+            effective_backend="MCP local renderer",
+            observed_backend="filesystem",
+            source_chat_id=chat_id,
+            media_type="research_report",
+        )
+        save_failures = ("post_write_verification",) if typed_artifact.state == ArtifactState.FAILED else ()
+        result = artifact_result(data, save_failures=save_failures)
         if response_format == "json":
-            return [TextContent(type="text", text=json.dumps(artifact, ensure_ascii=False, indent=2))]
-        return [TextContent(type="text", text=_format_research_report_artifact(artifact))]
+            return attach_domain_result(
+                [TextContent(type="text", text=json.dumps(artifact, ensure_ascii=False, indent=2))],
+                result,
+                use_result_data=True,
+            )
+        text = _format_research_report_artifact(artifact)
+        if typed_artifact.state == ArtifactState.FAILED:
+            text = f"❌ Research report artifact could not be verified.\n\n{text}"
+        content = append_artifact_block([TextContent(type="text", text=text)], data.artifacts)
+        return attach_domain_result(content, result, use_result_data=True)
 
 
 async def _create_deep_research_plan(client, query: str, chat, model):
@@ -694,6 +782,10 @@ def _format_research_report_actions(payload: dict[str, Any]) -> str:
         lines.append(f"- `{action['type']}`: {action['label']} - {action['description']}")
     lines.extend(["", payload["native_web_menu_note"]])
     return "\n".join(lines)
+
+
+def _research_artifact_kind(path: str) -> ArtifactKind:
+    return ArtifactKind.WEBPAGE if os.path.splitext(path)[1].lower() == ".html" else ArtifactKind.REPORT
 
 
 def _create_research_report_artifact(

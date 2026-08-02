@@ -158,6 +158,7 @@ class DomainResult(Generic[T]):
         code: DomainErrorCode,
         message: str,
         *,
+        data: T | None = None,
         retryable: bool = False,
         suggested_action: str | None = None,
         operation_state: OperationState = OperationState.FAILED,
@@ -178,7 +179,7 @@ class DomainResult(Generic[T]):
         )
         return cls(
             ok=False,
-            data=None,
+            data=data,
             error=error,
             warnings=tuple(warnings),
             meta=ResultMeta.create(

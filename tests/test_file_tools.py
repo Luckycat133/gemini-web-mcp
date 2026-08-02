@@ -181,6 +181,39 @@ def test_upload_file_returns_success_prefix_with_filename(monkeypatch, tmp_path)
     assert "it is a report" in result[0].text
 
 
+def test_upload_file_exposes_verified_input_artifact_metadata(monkeypatch, tmp_path):
+    target = tmp_path / "report.pdf"
+    target.write_bytes(b"pdf content")
+    client = _FakeFileClient(response_text="ok", images=[])
+    _patch_file_client_env(monkeypatch, client)
+
+    mcp = _make_mcp()
+
+    async def run():
+        return await _call_tool(
+            mcp,
+            "gemini_upload_file",
+            file_path=str(target),
+            model="pro",
+        )
+
+    result = asyncio.run(run())
+    domain = result[0].meta["domain_result"]
+    artifact = domain["data"]["input_artifacts"][0]
+    assert domain["ok"] is True
+    assert domain["data"]["state"] == "local"
+    assert domain["meta"]["verification_status"] == "input_artifact_verified"
+    assert artifact["kind"] == "file"
+    assert artifact["state"] == "local"
+    assert artifact["local_path"] == str(target.resolve())
+    assert artifact["mime_type"] == "application/pdf"
+    assert artifact["size_bytes"] == len(b"pdf content")
+    assert artifact["verification"]["status"] == "verified"
+    assert artifact["requested_backend"] == "pro"
+    assert artifact["request_model"] == "gemini-3-pro"
+    assert artifact["effective_backend"] == "gemini-3-pro"
+
+
 def test_upload_file_appends_images_block_when_response_has_images(monkeypatch, tmp_path):
     """response.images 非空 → 拼接 '📷 Images in response:' + 编号 + title + url。"""
     target = tmp_path / "img.png"
@@ -277,6 +310,25 @@ def test_upload_file_timeout_returns_timeout_message(monkeypatch, tmp_path):
     result = asyncio.run(run())
     assert "文件分析超时" in result[0].text
     assert result[0].text.startswith("❌")
+
+
+def test_upload_file_timeout_keeps_failed_artifact_contract(monkeypatch, tmp_path):
+    target = tmp_path / "f.txt"
+    target.write_bytes(b"x")
+    client = _FakeFileClient(raise_exc=asyncio.TimeoutError())
+    _patch_file_client_env(monkeypatch, client)
+
+    mcp = _make_mcp()
+
+    async def run():
+        return await _call_tool(mcp, "gemini_upload_file", file_path=str(target))
+
+    result = asyncio.run(run())
+    domain = result[0].meta["domain_result"]
+    assert domain["ok"] is False
+    assert domain["error"]["code"] == "TIMED_OUT"
+    assert domain["data"]["state"] == "failed"
+    assert domain["data"]["input_artifacts"][0]["local_path"] == str(target.resolve())
 
 
 def test_upload_file_generic_exception_returns_error_message(monkeypatch, tmp_path):
@@ -412,6 +464,31 @@ def test_analyze_url_returns_response_text_without_success_prefix(monkeypatch):
     text = asyncio.run(run())[0].text
     assert text.startswith("url content summary")
     assert not text.startswith("✅")
+
+
+def test_analyze_url_exposes_remote_source_artifact(monkeypatch):
+    client = _FakeFileClient(response_text="summary", images=[])
+    _patch_file_client_env(monkeypatch, client)
+
+    mcp = _make_mcp()
+
+    async def run():
+        return await _call_tool(
+            mcp,
+            "gemini_analyze_url",
+            url="https://example.com/article",
+        )
+
+    result = asyncio.run(run())
+    domain = result[0].meta["domain_result"]
+    artifact = domain["data"]["input_artifacts"][0]
+    assert domain["ok"] is True
+    assert domain["data"]["state"] == "remote"
+    assert artifact["kind"] == "webpage"
+    assert artifact["state"] == "remote"
+    assert artifact["uri"] == "https://example.com/article"
+    assert artifact["verification"]["status"] == "unverified"
+    assert artifact["verification"]["methods"] == ["input_uri_provided"]
 
 
 def test_analyze_url_appends_images_block(monkeypatch):

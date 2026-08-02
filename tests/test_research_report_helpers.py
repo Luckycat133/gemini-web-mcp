@@ -1255,6 +1255,66 @@ def test_create_from_research_report_returns_json_when_requested(monkeypatch, tm
     assert "path" in artifact
 
 
+def test_create_from_research_report_exposes_verified_local_artifact(monkeypatch, tmp_path):
+    report_output = SimpleNamespace(
+        title="Verified Report", report="## S1\n" + ("x" * 1100),
+        immersive_id="im", text="## S1\n" + ("x" * 1100), sources=[],
+    )
+    _patch_entry_env(monkeypatch, report_output=report_output)
+    mcp = _make_mcp()
+    result = asyncio.run(_call_tool(
+        mcp,
+        "gemini_create_from_research_report",
+        chat_id="c_verified",
+        output_dir=str(tmp_path),
+        response_format="json",
+    ))
+
+    legacy_artifact = json.loads(result[0].text)
+    domain = result[0].meta["domain_result"]
+    typed_artifact = domain["data"]["artifacts"][0]
+    assert domain["ok"] is True
+    assert domain["data"]["state"] == "local"
+    assert domain["meta"]["verification_status"] == "artifact_saved_and_verified"
+    assert typed_artifact["kind"] == "webpage"
+    assert typed_artifact["local_path"] == legacy_artifact["path"]
+    assert typed_artifact["size_bytes"] == legacy_artifact["bytes"]
+    assert typed_artifact["mime_type"] == "text/html"
+    assert typed_artifact["verification"]["status"] == "verified"
+    assert typed_artifact["effective_backend"] == "MCP local renderer"
+    assert typed_artifact["observed_backend"] == "filesystem"
+    assert typed_artifact["source_chat_id"] == "c_verified"
+
+
+def test_create_from_research_report_classifies_write_failure(monkeypatch, tmp_path):
+    report_output = SimpleNamespace(
+        title="T", report="## S1\ntext", immersive_id="im",
+        text="## S1\ntext", sources=[],
+    )
+    _patch_entry_env(monkeypatch, report_output=report_output)
+
+    def fail_write(**_kwargs):
+        raise PermissionError("private filesystem detail")
+
+    monkeypatch.setattr(research_tools, "_create_research_report_artifact", fail_write)
+    mcp = _make_mcp()
+    result = asyncio.run(_call_tool(
+        mcp,
+        "gemini_create_from_research_report",
+        chat_id="c_failed",
+        output_dir=str(tmp_path),
+    ))
+
+    domain = result[0].meta["domain_result"]
+    assert result[0].text.startswith("❌ Research report artifact creation failed")
+    assert domain["ok"] is False
+    assert domain["error"]["code"] == "ARTIFACT_SAVE_FAILED"
+    assert domain["error"]["diagnostic_id"]
+    assert domain["data"]["state"] == "failed"
+    assert domain["meta"]["verification_status"] == "artifact_write_failed"
+    assert "private filesystem detail" not in domain["error"]["message"]
+
+
 @pytest.mark.parametrize("artifact_type,expected_ext", [
     ("webpage", "html"),
     ("infographic", "html"),
