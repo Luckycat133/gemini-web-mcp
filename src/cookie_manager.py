@@ -442,28 +442,24 @@ class CookieManager:
     async def _probe_scheduled_registry_count(client) -> int:
         try:
             from gemini_webapi.types import RPCData
-            from gemini_webapi.utils import extract_json_from_response, get_nested_value
+            from .infrastructure.rpc_contracts import get_contract
+            from .infrastructure.rpc_parsers import extract_rpc_bodies, parse_contract_body
         except ImportError as e:
             logger.warning("gemini_webapi 不可用，无法探测定时操作 registry: %s", e)
             return 0
 
         previous_language = getattr(client, "language", None)
         try:
+            contract = get_contract("scheduled.registry")
             client.language = "zh-CN"
             response = await client._batch_execute(
-                [RPCData("XPSWpd", "[]")],
-                source_path="/scheduled",
+                [RPCData(contract.rpc_id, contract.build_payload())],
+                source_path=contract.source_path,
                 close_on_error=False,
             )
-            for part in extract_json_from_response(response.text):
-                if get_nested_value(part, [0]) != "wrb.fr":
-                    continue
-                if get_nested_value(part, [1]) != "XPSWpd":
-                    continue
-                body = get_nested_value(part, [2])
-                if isinstance(body, str):
-                    parsed = json.loads(body)
-                    return len(parsed[0]) if isinstance(parsed, list) and parsed and isinstance(parsed[0], list) else 0
+            bodies = extract_rpc_bodies(response.text, contract.rpc_id)
+            parsed = parse_contract_body(contract, bodies[0] if bodies else [])
+            return len(parsed.value) if isinstance(parsed.value, list) else 0
         except Exception as e:
             logger.debug("Chrome profile 定时操作 registry 探测失败: %s", e)
         finally:

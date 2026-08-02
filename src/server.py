@@ -8,6 +8,7 @@ Gemini Web 逆向 MCP 服务器
 import json
 import logging
 import os
+from typing import Literal
 
 from mcp.server.fastmcp import FastMCP
 from mcp.types import TextContent
@@ -22,16 +23,16 @@ from .client_wrapper import (
 )
 from .domain import DomainResult
 from .error_handler import format_error_response, handle_error
+from .services.doctor import doctor_payload as _doctor_payload, format_doctor_markdown as _format_doctor_markdown
+from .services.manifest import (
+    ManifestScope,
+    format_tool_manifest_markdown as _format_tool_manifest_markdown,
+    tool_manifest_payload as _tool_manifest_payload,
+)
 from .tools import groups_enable_manage, register_tools
 from .tools.annotations import MUTATES_LOCAL, READ_ONLY_LOCAL
-from .tools.manage import (
-    ManifestScope,
-    ResponseFormat,
-    _doctor_payload,
-    _format_doctor_markdown,
-    _format_tool_manifest_markdown,
-    _tool_manifest_payload,
-)
+
+ResponseFormat = Literal["markdown", "json"]
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)

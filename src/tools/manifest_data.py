@@ -8,6 +8,8 @@ RPC probes, and the agent-facing tool manifest with safety/privacy metadata.
 
 from typing import Any
 
+from ..infrastructure.rpc_contracts import WEB_FEATURE_PROBES as RPC_WEB_FEATURE_PROBES
+
 WEB_UI_CAPABILITIES = {
     "observed_at": "2026-06-18",
     "account_tier": "Gemini Web Pro",
@@ -91,176 +93,9 @@ WEB_UI_CAPABILITIES = {
 }
 
 
-WEB_FEATURE_PROBES = [
-    {
-        "surface": "remy",
-        "name": "conversation_history_recent",
-        "rpcid": "MaZiqc",
-        "payload": "[13,null,[false,null,true]]",
-        "source_path": "/app",
-        "observed": "2026-07-04 Pro UI / Conversation history recent bucket",
-    },
-    {
-        "surface": "history",
-        "name": "conversation_history_pinned",
-        "rpcid": "MaZiqc",
-        "payload": "[13,null,[true,null,true]]",
-        "source_path": "/app",
-        "observed": "2026-07-04 Pro UI / Conversation history pinned bucket",
-    },
-    {
-        "surface": "history",
-        "name": "remy_goals",
-        "rpcid": "GS7W1",
-        "payload": "[13]",
-        "source_path": "/app",
-        "observed": "2026-07-04 Pro UI / Remy goals with conversation references",
-    },
-    {
-        "surface": "library",
-        "name": "library_index",
-        "rpcid": "sJBwce",
-        "payload": "[[1,2]]",
-        "source_path": "/app/library",
-        "observed": "2026-06-18 Pro UI / Library",
-    },
-    {
-        "surface": "library",
-        "name": "library_assets",
-        "rpcid": "VxUbXb",
-        "payload": "[]",
-        "source_path": "/app/library",
-        "observed": "2026-06-18 Pro UI / Library",
-    },
-    {
-        "surface": "library",
-        "name": "library_locale_capabilities",
-        "rpcid": "cYRIkd",
-        "payload": '["zh-CN"]',
-        "source_path": "/app/library",
-        "observed": "2026-06-18 Pro UI / Library",
-    },
-    {
-        "surface": "notebooks",
-        "name": "native_notebooks_list",
-        "rpcid": "CNgdBe",
-        "payload": '[2,["zh-CN"],false,null,[2]]',
-        "source_path": "/notebooks/view",
-        "observed": "2026-07-04 Pro UI / Native Gemini Notebooks",
-    },
-    {
-        "surface": "sharing",
-        "name": "public_links_index",
-        "rpcid": "K4WWud",
-        "payload": '[[1],["zh-CN"]]',
-        "source_path": "/app/sharing",
-        "observed": "2026-06-18 Pro UI / Your public links",
-    },
-    {
-        "surface": "sharing",
-        "name": "sharing_state",
-        "rpcid": "GPRiHf",
-        "payload": "[]",
-        "source_path": "/app/sharing",
-        "observed": "2026-06-18 Pro UI / Your public links",
-    },
-    {
-        "surface": "sharing",
-        "name": "sharing_preferences",
-        "rpcid": "maGuAc",
-        "payload": "[1]",
-        "source_path": "/app/sharing",
-        "observed": "2026-06-18 Pro UI / Your public links",
-    },
-    {
-        "surface": "usage",
-        "name": "usage_quota",
-        "rpcid": "qpEbW",
-        "payload": "[[[1,11],[2,11],[6,11]]]",
-        "source_path": "/app/usage",
-        "observed": "2026-06-18 Pro UI / Usage limits",
-    },
-    {
-        "surface": "usage",
-        "name": "usage_model_state",
-        "rpcid": "qpEbW",
-        "payload": "[[[1,4],[6,6],[1,15]]]",
-        "source_path": "/app/usage",
-        "observed": "2026-06-18 Pro UI / Usage limits",
-    },
-    {
-        "surface": "personalization",
-        "name": "personalization_state",
-        "rpcid": "GPRiHf",
-        "payload": "[]",
-        "source_path": "/app/personalization-settings",
-        "observed": "2026-06-18 Pro UI / Personalization settings",
-    },
-    {
-        "surface": "personalization",
-        "name": "personalization_preferences",
-        "rpcid": "maGuAc",
-        "payload": "[1]",
-        "source_path": "/app/personalization-settings",
-        "observed": "2026-06-18 Pro UI / Personalization settings",
-    },
-    {
-        "surface": "personalization",
-        "name": "personalization_labels",
-        "rpcid": "Te6DCf",
-        "payload": '[["zh-CN"],[1]]',
-        "source_path": "/app/personalization-settings",
-        "observed": "2026-06-18 Pro UI / Personalization settings",
-    },
-    {
-        "surface": "import",
-        "name": "memory_import_state",
-        "rpcid": "Te6DCf",
-        "payload": '[["zh-CN"],[1]]',
-        "source_path": "/app/import",
-        "observed": "2026-06-18 Pro UI / Memory import",
-    },
-    {
-        "surface": "scheduled",
-        "name": "scheduled_actions_registry",
-        "rpcid": "XPSWpd",
-        "payload": "[]",
-        "source_path": "/scheduled",
-        "observed": "2026-06-19 Pro UI / Scheduled actions registry",
-    },
-    {
-        "surface": "scheduled",
-        "name": "scheduled_actions_state",
-        "rpcid": "otAQ7b",
-        "payload": "[]",
-        "source_path": "/scheduled",
-        "observed": "2026-06-18 Pro UI / Scheduled actions",
-    },
-    {
-        "surface": "scheduled",
-        "name": "scheduled_actions_active",
-        "rpcid": "MaZiqc",
-        "payload": "[13,null,[1,null,1]]",
-        "source_path": "/scheduled",
-        "observed": "2026-06-18 Pro UI / Scheduled actions",
-    },
-    {
-        "surface": "scheduled",
-        "name": "scheduled_actions_inactive",
-        "rpcid": "MaZiqc",
-        "payload": "[13,null,[0,null,1]]",
-        "source_path": "/scheduled",
-        "observed": "2026-06-18 Pro UI / Scheduled actions",
-    },
-    {
-        "surface": "tool_modes",
-        "name": "tool_mode_status",
-        "rpcid": "MyzX6c",
-        "payload": "[]",
-        "source_path": "/app",
-        "observed": "2026-06-19 Pro UI / Canvas and Guided Learning tool mode toggles",
-    },
-]
+
+# Compatibility export backed by the executable RPC registry.
+WEB_FEATURE_PROBES = list(RPC_WEB_FEATURE_PROBES)
 
 
 TOOL_MANIFEST: list[dict[str, Any]] = [
