@@ -24,7 +24,7 @@ from .client_wrapper import (
     cleanup_due_remote_chats,
     get_gemini_client,
     initialize_client,
-    reset_client,
+    reset_client_async,
     get_cookie_status,
     get_cookie_from_browser,
     list_browser_cookie_profiles,
@@ -915,7 +915,7 @@ def _session_list() -> list[TextContent]:
     return [TextContent(type="text", text="\n".join(items))]
 
 
-def _session_reset(session_id: Optional[str]) -> list[TextContent]:
+async def _session_reset(session_id: Optional[str]) -> list[TextContent]:
     with _sessions_lock:
         if session_id and session_id in _sessions:
             del _sessions[session_id]
@@ -924,7 +924,7 @@ def _session_reset(session_id: Optional[str]) -> list[TextContent]:
             _sessions.clear()
             cleared_all = True
     if cleared_all:
-        reset_client()
+        await reset_client_async()
         return [TextContent(type="text", text="All sessions reset")]
     return [TextContent(type="text", text=f"Session deleted: {session_id}")]
 
@@ -952,7 +952,7 @@ async def session(
         if action == "list":
             return _session_list()
         if action == "reset":
-            return _session_reset(session_id)
+            return await _session_reset(session_id)
         return [TextContent(type="text", text="Invalid action")]
 
     except Exception as e:
