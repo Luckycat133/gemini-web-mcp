@@ -1574,12 +1574,16 @@ def test_session_list_renders(monkeypatch):
 
 
 def test_session_reset_specific(monkeypatch):
-    """reset 单个 session → 'Session deleted: {id}'，不调 reset_client。"""
+    """reset 单个 session → 'Session deleted: {id}'，不调 reset_client_async。"""
     monkeypatch.setattr(skill_server, "_sessions", {"sess_1": {"session": SimpleNamespace()}})
     monkeypatch.setattr(skill_server, "validate_optional_image_path",
                         lambda _p: (True, None, None))
     reset_called = []
-    monkeypatch.setattr(skill_server, "reset_client", lambda: reset_called.append(1))
+
+    async def fake_reset_client_async():
+        reset_called.append(1)
+
+    monkeypatch.setattr(skill_server, "reset_client_async", fake_reset_client_async)
     result = _run(skill_server.session(action="reset", session_id="sess_1"))
     assert result[0].text == "Session deleted: sess_1"
     assert "sess_1" not in skill_server._sessions
@@ -1587,7 +1591,7 @@ def test_session_reset_specific(monkeypatch):
 
 
 def test_session_reset_all(monkeypatch):
-    """reset 无 session_id → 清空所有 + 调 reset_client。"""
+    """reset 无 session_id → 清空所有 + 等待 reset_client_async。"""
     monkeypatch.setattr(skill_server, "_sessions", {
         "sess_1": {"session": SimpleNamespace()},
         "sess_2": {"session": SimpleNamespace()},
@@ -1595,7 +1599,11 @@ def test_session_reset_all(monkeypatch):
     monkeypatch.setattr(skill_server, "validate_optional_image_path",
                         lambda _p: (True, None, None))
     reset_called = []
-    monkeypatch.setattr(skill_server, "reset_client", lambda: reset_called.append(1))
+
+    async def fake_reset_client_async():
+        reset_called.append(1)
+
+    monkeypatch.setattr(skill_server, "reset_client_async", fake_reset_client_async)
     result = _run(skill_server.session(action="reset"))
     assert result[0].text == "All sessions reset"
     assert skill_server._sessions == {}

@@ -137,6 +137,18 @@ def test_reset_client_resets_client_manager_and_clears_sessions(monkeypatch):
     assert session_fake.calls == [("clear_sessions", (), {})]
 
 
+def test_reset_client_async_waits_for_retirement_and_clears_sessions(monkeypatch):
+    client_fake = _RecordingFake(_async_methods={"reset_async"})
+    session_fake = _RecordingFake()
+    monkeypatch.setattr(cw, "_client_manager", client_fake)
+    monkeypatch.setattr(cw, "_session_manager", session_fake)
+
+    _run(cw.reset_client_async())
+
+    assert client_fake.calls == [("reset_async", (), {})]
+    assert session_fake.calls == [("clear_sessions", (), {})]
+
+
 # ---------------------------------------------------------------------------
 # 会话管理门面
 # ---------------------------------------------------------------------------
@@ -374,7 +386,7 @@ def test_on_cookie_update_skips_psidts_when_falsy(monkeypatch):
     reset_calls = []
     monkeypatch.setattr(cw, "reset_client", lambda: reset_calls.append("reset"))
     monkeypatch.delenv("GEMINI_PSID", raising=False)
-    monkeypatch.delenv("GEMINI_PSIDTS", raising=False)
+    monkeypatch.setenv("GEMINI_PSIDTS", "stale-value")
 
     cookie_data = SimpleNamespace(psid="psid-val", psidts="")
     cw._on_cookie_update(cookie_data)

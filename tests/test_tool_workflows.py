@@ -1413,7 +1413,7 @@ def test_skill_server_session_lifecycle_and_dispatch(monkeypatch):
         def start_chat(self, model):
             return FakeSession()
 
-    def fake_reset_client():
+    async def fake_reset_client_async():
         reset_calls.append(True)
 
     async def noop_initialize():
@@ -1425,7 +1425,7 @@ def test_skill_server_session_lifecycle_and_dispatch(monkeypatch):
     monkeypatch.setattr(skill_server, "get_gemini_client", lambda: FakeClient())
     monkeypatch.setattr(skill_server, "initialize_client", noop_initialize)
     monkeypatch.setattr(skill_server, "cleanup_due_remote_chats", noop_cleanup)
-    monkeypatch.setattr(skill_server, "reset_client", fake_reset_client)
+    monkeypatch.setattr(skill_server, "reset_client_async", fake_reset_client_async)
 
     async def run():
         # list with no sessions -> empty hint
@@ -1453,9 +1453,9 @@ def test_skill_server_session_lifecycle_and_dispatch(monkeypatch):
         # reset a single session (no client reset)
         deleted = await skill_server.session("reset", session_id="sess_1")
         assert "Session deleted: sess_1" in deleted[0].text
-        assert reset_calls == []  # single-session reset must not call reset_client
+        assert reset_calls == []  # single-session reset must not reset the client
 
-        # reset all (calls reset_client)
+        # reset all (awaits client retirement)
         await skill_server.session("create", model="pro")
         reset_all = await skill_server.session("reset")
         assert "All sessions reset" in reset_all[0].text
