@@ -12,7 +12,7 @@
 | 修改 `tools/research.py` | P0 Deep Research 全流程 |
 | 修改 `tools/media.py` | P0 媒体生成 |
 | 修改 `services/chat.py` 或任一聊天适配器 | P0 单轮对话 + 多轮会话，并各抽查一次 primary/compact |
-| 修改 `tools/manage.py` 里的 RPC 形状 | 受影响的 P1 RPC 工具 |
+| 修改 `infrastructure/rpc_contracts.py`、`rpc_parsers.py` 或管理 service | 受影响的 P1 RPC 工具，并抽查 primary/compact 一致性 |
 | 发布新版本前 | 全量 P0 + 抽查 P1 |
 | 日常 PR | 单元测试通过即可，不强制实机 |
 
@@ -184,7 +184,7 @@
 |---|---|---|
 | 9.1 | `gemini_notebooks(action="list")` | 列出原生 Notebook |
 | 9.2 | `gemini_notebooks(action="chats", notebook_id=<某 id>)` | 列出该 notebook 下的对话 |
-| 9.3 | `gemini_move_chat_to_notebook(chat_id=<测试聊天>, notebook_id=<目标>)` | 移动成功，返回里带 verification；再 `notebooks(action="chats")` 应能找到该 chat |
+| 9.3 | `gemini_move_chat_to_notebook(chat_id=<测试聊天>, notebook_id=<目标>)` | 移动成功，`verification_status="verified"`；再 `notebooks(action="chats")` 应能找到该 chat |
 | 9.4 | 不存在的 `notebook_id` | 明确错误 |
 
 ### 10. 账号盘点（`gemini_account_inventory`）
@@ -210,15 +210,26 @@
 
 | # | 步骤 | 预期 |
 |---|---|---|
-| 11.1 | `gemini_create_scheduled_action(prompt="manual-test-scheduled 每日问候", schedule="daily")` | 返回 task id，`task_state="created"`，`verification_status` 非 unknown |
+| 11.1 | `gemini_create_scheduled_action(title="manual-test-scheduled", instructions="每日问候", hour=9)` | 返回 task id，`verification_status` 明确区分 registry/GetTask 读回结果 |
 | 11.2 | `gemini_get_scheduled_action(task_id=<上一步>)` | 立即可读，`task_state="created"`（参照 [live-ui-coverage.md](./live-ui-coverage.md) 2026-06-20 smoke test） |
 | 11.3 | `gemini_list_scheduled_actions()` | 新建的 task 应出现（**注意**：某些 cookie/profile 上下文下 registry 一直为空，这是已知现象，要记下来作为诊断而不是 bug） |
 | 11.4 | `gemini_delete_scheduled_action(task_id)` | `task_state="deleted"`，`verification_status="deleted_state_by_id"`，`deleted_by_id_after_delete=true` |
 | 11.5 | 删除后再 `gemini_get_scheduled_action(task_id)` | 返回 tombstone 状态（`Rg=6` / `Deleted`），不是 404 |
+| 11.6 | primary 与 compact `scheduled(action="create"/"delete")` 各做一次 | 相同上游状态得到相同 `verification_status`；无 body 时为 `rpc_unconfirmed` |
 
 **关键校验**：
 - `verification_status` 必须区分 "RPC 已接受" / "registry 已验证" / "deleted tombstone"
 - 如果 create 返回 id 但 `list` 看不到，要在返回里**显式诊断**，不能假装成功
+
+### 11A. Gems mutation 读回
+
+只使用专用测试 Gem，完成后删除。
+
+| # | 步骤 | 预期 |
+|---|---|---|
+| 11A.1 | `gemini_manage_gems(action="create", name="manual-test-gem", ...)` | 返回 Gem ID，读回校验为 `verified`；若列表暂未出现则明确为 `read_back_not_observed` |
+| 11A.2 | `action="update"` 修改名称/描述/指令 | 读回字段一致为 `verified`，字段不一致为 `read_back_mismatch` |
+| 11A.3 | `action="delete"` | 列表中消失为 `verified_deleted`；仍存在为 `still_present` |
 
 ### 12. 清理工具（`gemini_cleanup_test_artifacts`）
 
@@ -329,7 +340,8 @@
 - [ ] 8. 历史对话（8 项）
 - [ ] 9. Notebook（4 项）
 - [ ] 10. 账号盘点（10 项）
-- [ ] 11. 定时操作（5 项）
+- [ ] 11. 定时操作（6 项）
+- [ ] 11A. Gems mutation（3 项）
 - [ ] 12. 清理工具（3 项）
 
 ### P2 / P3（按需）

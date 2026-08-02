@@ -70,38 +70,49 @@ from .tools.annotations import (
     READ_ONLY_LOCAL,
     READS_PRIVATE_REMOTE,
 )
-from .tools.manage import (
-    WEB_FEATURE_PROBES,
+from .infrastructure.rpc_contracts import WEB_FEATURE_PROBES, RawRPCData as _RawRPCData
+from .infrastructure.rpc_parsers import extract_rpc_bodies as _extract_rpc_bodies
+from .services.account import (
+    execute_observed_rpc as _execute_observed_rpc,
+    get_probe as _get_probe,
+    parse_library_capability as _parse_library_capability,
+    parse_public_link_entry as _parse_public_link_entry,
+    parse_tool_mode_entry as _parse_tool_mode_entry,
+    parse_usage_entry as _parse_usage_entry,
+    summarize_rpc_response as _summarize_probe_response,
+)
+from .services.cleanup import (
+    cleanup_test_artifacts_payload as _cleanup_test_artifacts_payload,
+    format_cleanup_markdown as _format_cleanup_markdown,
+)
+from .services.doctor import (
+    doctor_payload as _doctor_payload,
+    format_doctor_markdown as _format_doctor_markdown,
+)
+from .services.history import (
     _chat_export_payload,
     _chat_to_dict,
-    _cleanup_test_artifacts_payload,
-    _doctor_payload,
-    _execute_observed_rpc,
-    _extract_rpc_bodies,
-    _fetch_native_notebooks,
-    _fetch_scheduled_registry,
-    _fetch_scheduled_task_by_id,
     _format_chat_export_markdown,
-    _format_cleanup_markdown,
-    _format_doctor_markdown,
-    _format_tool_manifest_markdown,
-    _format_web_capabilities_markdown,
     _get_chat_id,
-    _get_probe,
     _paginate_items,
-    _parse_library_capability,
-    _parse_public_link_entry,
-    _parse_scheduled_action_create_body,
-    _parse_scheduled_action_task_entry,
-    _parse_tool_mode_entry,
-    _parse_usage_entry,
-    _RawRPCData,
     _read_chat_turns,
-    _scheduled_daily_payload,
-    _summarize_probe_response,
-    _tool_manifest_payload,
     _turn_matches_query,
-    _web_capabilities_payload,
+)
+from .services.manifest import (
+    format_tool_manifest_markdown as _format_tool_manifest_markdown,
+    format_web_capabilities_markdown as _format_web_capabilities_markdown,
+    tool_manifest_payload as _tool_manifest_payload,
+    web_capabilities_payload as _web_capabilities_payload,
+)
+from .services.notebooks import fetch_native_notebooks as _fetch_native_notebooks
+from .services.scheduled import (
+    create_daily_action as _create_daily_action_service,
+    delete_action as _delete_scheduled_action_service,
+    fetch_scheduled_registry as _fetch_scheduled_registry,
+    fetch_scheduled_task_by_id as _fetch_scheduled_task_by_id,
+    parse_scheduled_action_create_body as _parse_scheduled_action_create_body,
+    parse_scheduled_action_task_entry as _parse_scheduled_action_task_entry,
+    scheduled_daily_payload as _scheduled_daily_payload,
 )
 from .tools.utils import extract_remote_chat_id, validate_optional_image_path
 
@@ -784,36 +795,23 @@ async def _scheduled_create(
         return [TextContent(type="text", text="instructions required")]
     if hour < 0 or hour > 23:
         return [TextContent(type="text", text="hour must be 0..23")]
-    payload = _scheduled_daily_payload(clean_title, clean_instructions, hour, clean_timezone or "Asia/Shanghai", "zh-CN")
-    response = await client._batch_execute(
-        [_RawRPCData("Jba3ib", payload)],
-        source_path="/scheduled",
-        close_on_error=False,
+    result = await _create_daily_action_service(
+        client,
+        title=clean_title,
+        instructions=clean_instructions,
+        hour=hour,
+        timezone_name=clean_timezone or "Asia/Shanghai",
+        locale="zh-CN",
+        max_chars=200,
+        fetch_registry=_fetch_scheduled_registry,
+        fetch_by_id=_fetch_scheduled_task_by_id,
+        extract_bodies=_extract_rpc_bodies,
+        parse_create=_parse_scheduled_action_create_body,
+        payload_builder=_scheduled_daily_payload,
     )
-    bodies = _extract_rpc_bodies(response.text, "Jba3ib")
-    body = bodies[0] if bodies else []
-    if isinstance(body, list) and body and isinstance(body[0], list):
-        body = body[0]
-    created = _parse_scheduled_action_create_body(body)
-    created_id = created.get("id", "")
-    visible = False
-    readable_by_id = None
-    verification_status = "not_attempted"
-    if created_id:
-        registry_entries, _ = await _fetch_scheduled_registry(client, 200)
-        visible = any(item.get("id") == created_id for item in registry_entries)
-        if visible:
-            verification_status = "visible_in_registry"
-        elif registry_entries:
-            verification_status = "not_visible_in_nonempty_registry"
-        else:
-            verification_status = "registry_empty_unverified"
-        task_by_id, _ = await _fetch_scheduled_task_by_id(client, created_id, 200)
-        readable_by_id = task_by_id is not None
-        if readable_by_id and verification_status == "registry_empty_unverified":
-            verification_status = "readable_by_id_registry_empty"
-        elif readable_by_id and verification_status == "not_visible_in_nonempty_registry":
-            verification_status = "readable_by_id_not_visible_in_registry"
+    created_id = result.get("id", "")
+    visible = bool(result.get("visible_in_registry"))
+    verification_status = result.get("verification_status", "not_attempted")
     suffix = "" if visible else f" ({verification_status}; verify account context)"
     return [TextContent(type="text", text=f"Created: {created_id or clean_title}{suffix}")]
 
@@ -822,39 +820,15 @@ async def _scheduled_delete(client: Any, action_id: str) -> list[TextContent]:
     clean_id = action_id.strip()
     if not clean_id:
         return [TextContent(type="text", text="action_id required")]
-    payload = json.dumps([None, [clean_id]], ensure_ascii=False, separators=(",", ":"))
-    response = await client._batch_execute(
-        [_RawRPCData("Q4Gw3c", payload)],
-        source_path="/scheduled",
-        close_on_error=False,
+    result = await _delete_scheduled_action_service(
+        client,
+        action_id=clean_id,
+        max_chars=200,
+        fetch_registry=_fetch_scheduled_registry,
+        fetch_by_id=_fetch_scheduled_task_by_id,
+        extract_bodies=_extract_rpc_bodies,
     )
-    bodies = _extract_rpc_bodies(response.text, "Q4Gw3c")
-    verification_status = "rpc_accepted" if bodies else "rpc_unconfirmed"
-    readable_by_id = None
-    deleted_by_id = None
-    if bodies:
-        registry_entries, _ = await _fetch_scheduled_registry(client, 200)
-        visible = any(item.get("id") == clean_id for item in registry_entries)
-        if visible:
-            verification_status = "still_visible_in_registry"
-        elif registry_entries:
-            verification_status = "not_visible_in_nonempty_registry"
-        else:
-            verification_status = "registry_empty_unverified"
-        task_after_delete, _ = await _fetch_scheduled_task_by_id(client, clean_id, 200)
-        readable_by_id = task_after_delete is not None
-        deleted_by_id = bool(task_after_delete and task_after_delete.get("task_state_id") == 6)
-        if deleted_by_id:
-            verification_status = "deleted_state_by_id"
-        elif readable_by_id:
-            if verification_status == "registry_empty_unverified":
-                verification_status = "registry_empty_active_or_unknown_by_id"
-            elif verification_status == "not_visible_in_nonempty_registry":
-                verification_status = "not_visible_active_or_unknown_by_id"
-        elif verification_status == "registry_empty_unverified":
-            verification_status = "registry_empty_not_readable_by_id"
-        elif verification_status == "not_visible_in_nonempty_registry":
-            verification_status = "not_visible_not_readable_by_id"
+    verification_status = result.get("verification_status", "not_attempted")
     return [TextContent(type="text", text=f"Delete requested: {clean_id} ({verification_status})")]
 
 
