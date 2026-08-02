@@ -129,13 +129,66 @@
 - `meta.observed_at`：UTC ISO-8601 观测时间；backend 与 verification 字段记录请求、实际后端和验证状态。
 - `meta.request_id`：每个结构化结果都有；`meta.diagnostic_id` 只在需要关联服务端异常日志时生成。
 
-当前首批覆盖 primary 的 `gemini_chat*`、`gemini_start_chat`、`gemini_send_message*`、
-`gemini_list_sessions`、`gemini_reset_session`、`gemini_reset`，以及 compact 的 `chat` / `session`。
-其余工具会在后续阶段迁移；迁移前仍以现有文本契约为准。
+当前覆盖 primary 的 `gemini_chat*`、`gemini_start_chat`、`gemini_send_message*`、
+`gemini_list_sessions`、`gemini_reset_session`、`gemini_reset`、媒体、文件/URL 分析和 research
+report 本地产物，以及 compact 的 `chat`、`session`、`create`、`edit`。未迁移工具仍以现有文本
+契约为准。
 
 从 P0.4 起，primary 与 compact 的聊天、创建会话和会话发送都调用同一个应用服务。
 工具名、参数和原有正文保持兼容；两个入口的差别（例如 compact 不向上游传 `gem` / `temporary`）
 由适配器配置明确表达，不再维护两份聊天业务实现。
+
+### 统一 artifact 元数据（P1.1）
+
+媒体、文件/URL 和 research report 工具在保留原有正文的同时，把统一 artifact 数据放在
+`_meta.domain_result.data`：
+
+```json
+{
+  "state": "local",
+  "artifacts": [
+    {
+      "id": "artifact_<stable-hash>",
+      "kind": "image",
+      "state": "local",
+      "uri": "https://.../generated.png",
+      "local_path": "/absolute/path/generated.png",
+      "mime_type": "image/png",
+      "size_bytes": 12345,
+      "width": 1024,
+      "height": 1024,
+      "duration_seconds": null,
+      "requested_backend": "pro",
+      "request_model": "gemini-3-flash",
+      "effective_backend": "Nano Banana 2",
+      "observed_backend": null,
+      "verification": {
+        "status": "verified",
+        "methods": ["file_exists", "size_checked", "size_nonzero", "image_dimensions"]
+      }
+    }
+  ],
+  "input_artifacts": [],
+  "requested_model": "pro",
+  "request_model": "gemini-3-flash",
+  "effective_backend": "Nano Banana 2",
+  "observed_backend": null,
+  "source_chat_id": "c_...",
+  "media_type": "image"
+}
+```
+
+- `state=remote`：响应含可用 URI，但尚未验证远端内容；artifact 的 verification 是 `unverified`。
+- `state=local`：本地文件存在且非零；记录大小和可推断的 MIME，尺寸和时长在探针可用时填写。
+- `state=queued`：上游明确返回 pending/processing/queued 等状态，操作结果仍为 `ok=true`、
+  `operation_state=queued`。
+- `state=empty`：请求完成但没有可用产物，返回 `ARTIFACT_NOT_RETURNED`，不把普通文本当作媒体成功。
+- `state=failed`：保存或验证失败；完全失败使用 `ARTIFACT_SAVE_FAILED`/`VERIFICATION_FAILED`，
+  远端 URI 仍可用但本地保存失败时使用 `operation_state=partial` 和 `ARTIFACT_SAVE_PARTIAL` 告警。
+
+`artifacts` 是输出，`input_artifacts` 是本地文件、URL 或参考图。相同类型和 URI 的 artifact ID
+在 primary 与 compact 表面一致。`response_format="json"` 的 research report 正文仍保持合法 JSON；
+统一契约只放在 `TextContent._meta`，不会拼进 JSON 字符串。
 
 ---
 
@@ -252,6 +305,9 @@
 - `music`: `flash` 系列走 `Lyria 3`，`pro` 走 `Lyria 3 Pro`
 - `image + model=pro` 不会直接切换首轮图像后端；Pro redo 是网页生成后的二次操作
 
+**artifact 行为：** 成功响应会公开远端 URI；指定输出目录后，实际写入的文件会再检查存在性、
+非零大小、MIME，以及可用的尺寸/时长。排队、空响应和保存失败有独立结构化状态。
+
 ### gemini_generate_music
 
 音乐生成（便捷工具）。
@@ -273,6 +329,9 @@
 上传本地文件并分析。代码文件也走这个本地文件路径；它不等同于
 Gemini Web 的 Google Drive 选择器。
 
+本地来源记录在 `input_artifacts`，并验证绝对路径、MIME 和大小；Gemini 响应中的图片记录为
+`artifacts`。请求别名、实际模型与观测后端也随结果返回。
+
 **关键参数：**
 - `model`: str - MCP 别名或运行时模型名
 - `thinking_level`: str - `standard` / `extended` (默认: `standard`)
@@ -280,6 +339,9 @@ Gemini Web 的 Google Drive 选择器。
 ### gemini_analyze_url
 
 让 Gemini 分析网页或视频 URL。
+
+输入 URL 作为 `kind=webpage,state=remote` 的 `input_artifacts` 返回；这只证明调用方提供了该 URI，
+不表示 MCP 已自行抓取并验证页面内容。
 
 **关键参数：**
 - `model`: str - MCP 别名或运行时模型名
@@ -312,6 +374,10 @@ Gemini Web 的 Google Drive 选择器。
 `webpage`、`infographic`、`quiz`、`flashcards`、`audio_overview`，并带有一个
 自定义应用描述入口 `custom_app`。当前 MCP 工具生成本地等价产物，不直接调用未稳定观测到的
 Gemini 私有 mutation RPC。
+
+写入完成后会重新检查文件存在、非零大小和 MIME；Markdown 模式附带可读 artifact 块，JSON 模式
+保持原 payload 不变并通过 `_meta.domain_result` 返回同一份类型化 artifact。写入异常使用
+`ARTIFACT_SAVE_FAILED` 和 diagnostic ID，不会把原始文件系统错误放入稳定错误消息。
 
 **关键参数：**
 - `chat_id`: str - Deep Research 所在的 Gemini Web chat ID

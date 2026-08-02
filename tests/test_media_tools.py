@@ -53,12 +53,18 @@ class _FakeMedia:
         self.title = title
         self.mp3_url = mp3_url
         self.url = url
-        self._save_return = save_return or {"audio": "/tmp/fake.mp3"}
+        self._save_return = {"audio": "/tmp/fake.mp3"} if save_return is None else save_return
         self.captured_save_kwargs = None
 
     async def save(self, **kwargs):
         self.captured_save_kwargs = dict(kwargs)
         return self._save_return
+
+
+class _FailingMedia(_FakeMedia):
+    async def save(self, **kwargs):
+        self.captured_save_kwargs = dict(kwargs)
+        raise PermissionError("cannot write output")
 
 
 class _FakeMediaClient:
@@ -70,7 +76,8 @@ class _FakeMediaClient:
 
     def __init__(self, *, response_text="done", images=None, videos=None,
                  media=None, response_cid="c_media1", raise_exc=None,
-                 timeout=100.0, watchdog_timeout=200.0):
+                 timeout=100.0, watchdog_timeout=200.0,
+                 response_status=None, observed_backend=None):
         self._response_text = response_text
         self._images = images or []
         self._videos = videos or []
@@ -79,6 +86,8 @@ class _FakeMediaClient:
         self._raise_exc = raise_exc
         self.timeout = timeout
         self.watchdog_timeout = watchdog_timeout
+        self._response_status = response_status
+        self._observed_backend = observed_backend
         self.captured_generate_kwargs = None
         self.captured_generate_during_timeout = None
         self.last_response = None
@@ -95,6 +104,8 @@ class _FakeMediaClient:
             videos=self._videos,
             media=self._media,
             metadata=[self._response_cid, "r_response"],
+            status=self._response_status,
+            backend=self._observed_backend,
         )
         self.last_response = response
         return response
@@ -493,6 +504,36 @@ def test_generate_media_timeout_returns_timeout_message_with_backend(monkeypatch
     assert "后端: Nano Banana 2" in text
     assert "❌ image 生成超时: 180s" in text
     assert "可增大 timeout_seconds" in text
+    domain = result[0].meta["domain_result"]
+    assert domain["error"]["code"] == "TIMED_OUT"
+    assert domain["data"]["state"] == "failed"
+    assert domain["data"]["request_model"] == "gemini-3-flash"
+    assert domain["data"]["effective_backend"] == "Nano Banana 2"
+
+
+def test_generate_media_timeout_retains_reference_image_identity(monkeypatch, tmp_path):
+    reference = tmp_path / "reference.png"
+    reference.write_bytes(b"image bytes")
+    client = _FakeMediaClient(raise_exc=asyncio.TimeoutError())
+    _patch_media_env(monkeypatch, client)
+    mcp = _make_mcp()
+
+    async def run():
+        return await _call_tool(
+            mcp,
+            "gemini_generate_media",
+            prompt="x",
+            media_type="image",
+            image_path=str(reference),
+        )
+
+    result = asyncio.run(run())
+    domain = result[0].meta["domain_result"]
+    input_artifact = domain["data"]["input_artifacts"][0]
+    assert domain["error"]["code"] == "TIMED_OUT"
+    assert input_artifact["id"]
+    assert input_artifact["state"] == "local"
+    assert input_artifact["local_path"] == str(reference.resolve())
 
 
 def test_generate_media_generic_exception_returns_error_message_with_backend(monkeypatch):
@@ -563,6 +604,66 @@ def test_generate_media_empty_response_still_schedules_cleanup(monkeypatch):
     text = result[0].text
     assert "⚠️ image 请求已完成，但没有返回文本、图片、视频或音乐资源" in text
     assert len(schedule_calls) == 1  # 关键：空响应仍调 cleanup
+    domain = result[0].meta["domain_result"]
+    assert domain["error"]["code"] == "ARTIFACT_NOT_RETURNED"
+    assert domain["data"]["state"] == "empty"
+
+
+def test_generate_media_queued_response_is_not_reported_as_empty(monkeypatch):
+    client = _FakeMediaClient(
+        response_text="accepted",
+        media=[],
+        images=[],
+        videos=[],
+        response_status="processing",
+    )
+    _patch_media_env(monkeypatch, client)
+    mcp = _make_mcp()
+
+    async def run():
+        return await _call_tool(mcp, "gemini_generate_media", prompt="x", media_type="video")
+
+    result = asyncio.run(run())
+    domain = result[0].meta["domain_result"]
+    assert "请求已进入上游队列" in result[0].text
+    assert domain["ok"] is True
+    assert domain["data"]["state"] == "queued"
+    assert domain["meta"]["operation_state"] == "queued"
+
+
+def test_generate_media_remote_uri_includes_backend_evidence(monkeypatch):
+    image = SimpleNamespace(
+        title="Generated",
+        alt="generated image",
+        url="https://cdn.example.test/out.png",
+    )
+    client = _FakeMediaClient(
+        response_text="done",
+        images=[image],
+        observed_backend="observed-image-generator",
+    )
+    _patch_media_env(monkeypatch, client)
+    mcp = _make_mcp()
+
+    async def run():
+        return await _call_tool(
+            mcp,
+            "gemini_generate_media",
+            prompt="x",
+            media_type="image",
+            model="pro",
+        )
+
+    result = asyncio.run(run())
+    domain = result[0].meta["domain_result"]
+    artifact = domain["data"]["artifacts"][0]
+    assert domain["data"]["state"] == "remote"
+    assert artifact["uri"] == "https://cdn.example.test/out.png"
+    assert artifact["requested_backend"] == "pro"
+    assert artifact["request_model"] == "gemini-3-flash"
+    assert artifact["effective_backend"] == "Nano Banana 2"
+    assert artifact["observed_backend"] == "observed-image-generator"
+    assert artifact["verification"]["status"] == "unverified"
 
 
 def test_generate_media_appends_remote_chat_id(monkeypatch):
@@ -658,7 +759,12 @@ def test_generate_media_music_recovers_media_when_response_media_empty(monkeypat
     恢复的 media 用于 _save_generated_media（media_items=recovered_media or None）。
     """
     client = _FakeMediaClient(response_text="ok", media=[])
-    recovered = _FakeMedia(title="recovered song")
+    recovered_path = tmp_path / "recovered.mp3"
+    recovered_path.write_bytes(b"audio")
+    recovered = _FakeMedia(
+        title="recovered song",
+        save_return={"audio": str(recovered_path)},
+    )
 
     async def fake_fetch(client_arg, cid):
         assert client_arg is client
@@ -676,8 +782,105 @@ def test_generate_media_music_recovers_media_when_response_media_empty(monkeypat
     result = asyncio.run(run())
     text = result[0].text
     assert "Saved files:" in text
-    # FakeMedia.save 默认返回 {"audio": "/tmp/fake.mp3"}
-    assert "audio: /tmp/fake.mp3" in text
+    assert f"audio: {recovered_path}" in text
+
+
+def test_generate_media_verifies_saved_file_metadata(monkeypatch, tmp_path):
+    saved_path = tmp_path / "saved.mp3"
+    saved_path.write_bytes(b"audio bytes")
+    media = _FakeMedia(
+        title="saved song",
+        mp3_url="https://cdn.example.test/saved.mp3",
+        save_return={"audio": str(saved_path)},
+    )
+    client = _FakeMediaClient(response_text="done", media=[media])
+    _patch_media_env(monkeypatch, client, probe_duration=lambda _path: 9.25)
+    mcp = _make_mcp()
+
+    async def run():
+        return await _call_tool(mcp, "gemini_generate_media", prompt="x", media_type="music")
+
+    result = asyncio.run(run())
+    domain = result[0].meta["domain_result"]
+    artifact = domain["data"]["artifacts"][0]
+    assert domain["data"]["state"] == "local"
+    assert domain["meta"]["verification_status"] == "artifact_saved_and_verified"
+    assert artifact["local_path"] == str(saved_path.resolve())
+    assert artifact["uri"] == "https://cdn.example.test/saved.mp3"
+    assert artifact["size_bytes"] == len(b"audio bytes")
+    assert artifact["mime_type"] == "audio/mpeg"
+    assert artifact["duration_seconds"] == 9.25
+    assert artifact["verification"]["status"] == "verified"
+
+
+def test_generate_music_keeps_audio_and_video_artifacts_distinct(monkeypatch, tmp_path):
+    audio_path = tmp_path / "song.mp3"
+    video_path = tmp_path / "song.mp4"
+    audio_path.write_bytes(b"audio")
+    video_path.write_bytes(b"video")
+    media = _FakeMedia(
+        title="song",
+        mp3_url="https://cdn.example.test/song.mp3",
+        url="https://cdn.example.test/song.mp4",
+        save_return={"audio": str(audio_path), "video": str(video_path)},
+    )
+    client = _FakeMediaClient(response_text="done", media=[media])
+    _patch_media_env(monkeypatch, client, probe_duration=lambda _path: 4.0)
+    mcp = _make_mcp()
+
+    async def run():
+        return await _call_tool(mcp, "gemini_generate_media", prompt="x", media_type="music")
+
+    result = asyncio.run(run())
+    artifacts = result[0].meta["domain_result"]["data"]["artifacts"]
+    assert len(artifacts) == 2
+    assert {artifact["kind"] for artifact in artifacts} == {"audio", "video"}
+    assert {artifact["uri"] for artifact in artifacts} == {
+        "https://cdn.example.test/song.mp3",
+        "https://cdn.example.test/song.mp4",
+    }
+    assert len({artifact["id"] for artifact in artifacts}) == 2
+    assert all(artifact["state"] == "local" for artifact in artifacts)
+
+
+def test_generate_media_save_failure_returns_remote_artifact_with_partial_warning(monkeypatch):
+    media = _FailingMedia(
+        title="remote song",
+        mp3_url="https://cdn.example.test/remote.mp3",
+    )
+    client = _FakeMediaClient(response_text="done", media=[media])
+    _patch_media_env(monkeypatch, client)
+    mcp = _make_mcp()
+
+    async def run():
+        return await _call_tool(mcp, "gemini_generate_media", prompt="x", media_type="music")
+
+    result = asyncio.run(run())
+    domain = result[0].meta["domain_result"]
+    assert domain["ok"] is True
+    assert domain["meta"]["operation_state"] == "partial"
+    assert domain["data"]["state"] == "remote"
+    assert domain["data"]["artifacts"][0]["uri"] == "https://cdn.example.test/remote.mp3"
+    assert domain["warnings"][0]["code"] == "ARTIFACT_SAVE_PARTIAL"
+    assert "Local artifact save was incomplete" in result[0].text
+
+
+def test_generate_media_empty_save_result_is_explicit_save_failure(monkeypatch):
+    media = _FakeMedia(title="missing song", mp3_url="", url="", save_return={})
+    client = _FakeMediaClient(response_text="done", media=[media])
+    _patch_media_env(monkeypatch, client)
+    mcp = _make_mcp()
+
+    async def run():
+        return await _call_tool(mcp, "gemini_generate_media", prompt="x", media_type="music")
+
+    result = asyncio.run(run())
+    domain = result[0].meta["domain_result"]
+    assert "产物未能保存或通过本地验证" in result[0].text
+    assert domain["ok"] is False
+    assert domain["error"]["code"] == "ARTIFACT_SAVE_FAILED"
+    assert domain["data"]["state"] == "failed"
+    assert domain["meta"]["details"]["save_failure_count"] == 1
 
 
 def test_generate_media_music_recovery_failure_logs_warning_and_continues(monkeypatch):

@@ -20,7 +20,7 @@ except ImportError:
     print("Error: mcp package required. Install with: pip install mcp fastmcp")
     exit(1)
 
-from .adapters import attach_domain_result, domain_text, exception_text
+from .adapters import append_artifact_block, attach_domain_result, domain_text, exception_text
 from .client_wrapper import (
     cleanup_due_remote_chats,
     create_session,
@@ -39,7 +39,14 @@ from .client_wrapper import (
     send_session_message_stream,
 )
 from .constants import resolve_media_request, resolve_model_name
-from .domain import DomainErrorCode, DomainResult
+from .domain import (
+    Artifact,
+    ArtifactKind,
+    ArtifactResultData,
+    ArtifactState,
+    DomainErrorCode,
+    DomainResult,
+)
 from .services import (
     ChatRequest,
     ChatService,
@@ -47,6 +54,13 @@ from .services import (
     CleanupStrategy,
     SessionMessageRequest,
     StartSessionRequest,
+    artifact_exception_result,
+    artifact_from_local_path,
+    artifact_result,
+    classify_artifact_state,
+    extract_response_artifacts,
+    observed_backend_from_response,
+    response_chat_id,
 )
 from .tools.annotations import (
     DESTRUCTIVE_LOCAL,
@@ -882,19 +896,27 @@ async def create(
     image_path: Optional[str] = None,
 ) -> list[TextContent]:
     """Generate image/video/music."""
+    requested_model = model
+    media_type = _normalize_media_type(type)
+    request_model: str | None = None
+    effective_backend: str | None = None
+    input_artifacts: tuple[Artifact, ...] = ()
     try:
         valid_image, safe_image_path, image_error = validate_optional_image_path(image_path)
         if not valid_image:
-            return [TextContent(type="text", text=f"Error: {image_error}")]
+            return domain_text(
+                _invalid_argument_result(image_error or "Invalid image path."),
+                f"Error: {image_error}",
+            )
 
         client = get_gemini_client()
         await initialize_client()
         await cleanup_due_remote_chats(client)
 
         model = _normalize_model(model)
-        media_type = _normalize_media_type(type)
         media_request = resolve_media_request(model, media_type, thinking_level)
-        model_name = media_request["request_model"]
+        request_model = media_request["request_model"]
+        effective_backend = media_request["backend_label"]
 
         prefixes = {
             "image": "Generate image: ",
@@ -903,24 +925,92 @@ async def create(
         }
         media_prompt = prefixes.get(media_type, "") + prompt
         files = [safe_image_path] if safe_image_path else None
+        if safe_image_path:
+            input_artifacts = (
+                artifact_from_local_path(
+                    ArtifactKind.IMAGE,
+                    safe_image_path,
+                    title=Path(safe_image_path).name,
+                    requested_backend=requested_model,
+                    request_model=request_model,
+                    effective_backend=effective_backend,
+                ),
+            )
 
         response = await client.generate_content(
             prompt=media_prompt,
             files=files,
-            model=model_name,
+            model=request_model,
             thinking_level=thinking_level,
         )
         _schedule_skill_response_cleanup(response, f"skill_create:{media_type}")
-
-        return _format_response(
+        observed_backend = observed_backend_from_response(response)
+        artifacts = extract_response_artifacts(
+            response,
+            media_type=media_type,
+            requested_backend=requested_model,
+            request_model=request_model,
+            effective_backend=effective_backend,
+            observed_backend=observed_backend,
+        )
+        if safe_image_path:
+            input_artifacts = (
+                artifact_from_local_path(
+                    ArtifactKind.IMAGE,
+                    safe_image_path,
+                    title=Path(safe_image_path).name,
+                    requested_backend=requested_model,
+                    request_model=request_model,
+                    effective_backend=effective_backend,
+                    observed_backend=observed_backend,
+                    source_chat_id=response_chat_id(response),
+                ),
+            )
+        data = ArtifactResultData(
+            state=classify_artifact_state(response, artifacts),
+            artifacts=artifacts,
+            input_artifacts=input_artifacts,
+            requested_model=requested_model,
+            request_model=request_model,
+            effective_backend=effective_backend,
+            observed_backend=observed_backend,
+            source_chat_id=response_chat_id(response),
+            media_type=media_type,
+        )
+        result = artifact_result(data)
+        content = _format_response(
             response,
             media_type,
-            backend_label=media_request["backend_label"],
+            backend_label=effective_backend,
             backend_note=media_request["note"],
         )
+        if data.state == ArtifactState.EMPTY:
+            content[0].text += "\n\nArtifact state: empty (no usable media URI was returned)."
+        elif data.state == ArtifactState.QUEUED:
+            content[0].text += "\n\nArtifact state: queued (no completed media is available yet)."
+        content = append_artifact_block(content, data.artifacts)
+        return attach_domain_result(content, result, use_result_data=True)
 
     except Exception as e:
-        return _error_text(e, "Create")
+        data = ArtifactResultData(
+            state=ArtifactState.FAILED,
+            requested_model=requested_model,
+            request_model=request_model,
+            effective_backend=effective_backend,
+            input_artifacts=input_artifacts,
+            media_type=media_type,
+        )
+        result = artifact_exception_result(
+            e,
+            data,
+            logger=logger,
+            operation=f"skill_create:{media_type}",
+        )
+        return attach_domain_result(
+            _error_text(e, "Create"),
+            result,
+            use_result_data=True,
+        )
 
 
 @mcp.tool(annotations=MUTATES_REMOTE)
@@ -931,30 +1021,98 @@ async def edit(
     thinking_level: str = "standard",
 ) -> list[TextContent]:
     """Edit existing image."""
+    requested_model = model
+    request_model: str | None = None
+    input_artifacts: tuple[Artifact, ...] = ()
     try:
         valid_image, safe_image_path, image_error = validate_optional_image_path(image_path)
         if not valid_image:
-            return [TextContent(type="text", text=f"Error: {image_error}")]
+            return domain_text(
+                _invalid_argument_result(image_error or "Invalid image path."),
+                f"Error: {image_error}",
+            )
 
         client = get_gemini_client()
         await initialize_client()
         await cleanup_due_remote_chats(client)
 
         model = _normalize_model(model)
-        model_name = resolve_model_name(model)
+        request_model = resolve_model_name(model)
+        input_artifacts = (
+            artifact_from_local_path(
+                ArtifactKind.IMAGE,
+                safe_image_path or image_path,
+                title=Path(safe_image_path or image_path).name,
+                requested_backend=requested_model,
+                request_model=request_model,
+                effective_backend=request_model,
+            ),
+        )
 
         response = await client.generate_content(
             prompt=f"Edit this image: {prompt}",
             files=[safe_image_path],
-            model=model_name,
+            model=request_model,
             thinking_level=thinking_level,
         )
         _schedule_skill_response_cleanup(response, "skill_edit")
-
-        return _format_response(response, "image")
+        observed_backend = observed_backend_from_response(response)
+        artifacts = extract_response_artifacts(
+            response,
+            media_type="image",
+            requested_backend=requested_model,
+            request_model=request_model,
+            effective_backend=request_model,
+            observed_backend=observed_backend,
+        )
+        input_artifacts = (
+            artifact_from_local_path(
+                ArtifactKind.IMAGE,
+                safe_image_path or image_path,
+                title=Path(safe_image_path or image_path).name,
+                requested_backend=requested_model,
+                request_model=request_model,
+                effective_backend=request_model,
+                observed_backend=observed_backend,
+                source_chat_id=response_chat_id(response),
+            ),
+        )
+        data = ArtifactResultData(
+            state=classify_artifact_state(response, artifacts),
+            artifacts=artifacts,
+            input_artifacts=input_artifacts,
+            requested_model=requested_model,
+            request_model=request_model,
+            effective_backend=request_model,
+            observed_backend=observed_backend,
+            source_chat_id=response_chat_id(response),
+            media_type="image_edit",
+        )
+        result = artifact_result(data)
+        content = _format_response(response, "image")
+        content = append_artifact_block(content, data.artifacts)
+        return attach_domain_result(content, result, use_result_data=True)
 
     except Exception as e:
-        return _error_text(e, "Edit")
+        data = ArtifactResultData(
+            state=ArtifactState.FAILED,
+            requested_model=requested_model,
+            request_model=request_model,
+            effective_backend=request_model,
+            input_artifacts=input_artifacts,
+            media_type="image_edit",
+        )
+        result = artifact_exception_result(
+            e,
+            data,
+            logger=logger,
+            operation="skill_edit",
+        )
+        return attach_domain_result(
+            _error_text(e, "Edit"),
+            result,
+            use_result_data=True,
+        )
 
 
 async def _session_create(

@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Unified Artifact Model
+- Added shared `Artifact` and `ArtifactResultData` contracts for image, video, audio, file, report, webpage, and data artifacts with explicit `remote`, `local`, `queued`, `empty`, and `failed` states
+- Added deterministic artifact identities, common response extraction, remote/local observation merging, backend evidence, and local existence/non-zero/MIME/dimension/duration verification in `src/services/artifacts.py`
+- Migrated primary media, file/URL analysis, research report creation, and compact create/edit outputs to `_meta.domain_result` while preserving legacy text and JSON response bodies
+- Classified empty media, upstream queues, timeouts, write failures, verification failures, and remote-success/local-save partial outcomes without treating response prose as proof of a generated artifact
+- Added shared artifact rendering plus offline tests for URI/file metadata, missing and empty files, queue/empty/failure states, timeout diagnostics, save failures, backend mismatch evidence, distinct MP3/MP4 identities, and primary/compact identity parity; the full offline suite now passes 1187 tests
+
 ### Shared Chat Service
 - Added `src/services/chat.py` as the application boundary shared by the primary and compact MCP adapters for one-shot chat, streaming, session creation, and session sends
 - Centralized model resolution, upstream request construction, client preparation, session fallback behavior, stream aggregation, cleanup policy, and typed `ChatOperationData` results while preserving each adapter's existing request shape

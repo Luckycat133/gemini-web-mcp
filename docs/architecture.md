@@ -55,9 +55,9 @@ gemini-mcp-server/
 │   ├── client_manager.py  # 客户端生命周期管理
 │   ├── cookie_manager.py  # Cookie 加载/验证/刷新
 │   ├── session_manager.py # 本地会话管理
-│   ├── domain/            # 领域结果、错误、告警与操作状态
-│   ├── adapters/          # MCP 文本兼容和结构化结果适配
-│   ├── services/          # primary/compact 共用的应用服务（首批为 chat）
+│   ├── domain/            # 领域结果、artifact、错误、告警与操作状态
+│   ├── adapters/          # MCP 文本兼容、artifact 展示和结构化结果适配
+│   ├── services/          # primary/compact 共用的应用服务与 artifact 验证
 │   ├── thinking_client.py # Thinking/Learning 模式传输层
 │   ├── error_handler.py   # 错误处理装饰器
 │   ├── constants.py       # 模型常量与配置
@@ -222,6 +222,43 @@ compact: src/skill_server.py┘
 适配器差异是显式配置：primary 继续传递 `gem` / `temporary`，compact 继续保持原有精简请求形状；
 两边共享同一类型化 `DomainResult[ChatOperationData]`。迁移后的聊天处理器不再复制上游请求与清理逻辑。
 `skill_server.py` 中仍有其他管理域对 `tools.manage` 私有 helper 的历史依赖，将在后续服务迁移阶段处理。
+
+### 7. 统一 Artifact 模型
+
+P1.1 在 media、file/URL 和 research report 工作流之间加入共享的 artifact 领域模型：
+
+```text
+Gemini response / local renderer
+              │
+              ▼
+Artifact service
+  ├─ deterministic identity
+  ├─ remote URI extraction
+  ├─ local file verification
+  ├─ backend evidence
+  └─ state classification
+              │
+              ▼
+ArtifactResultData
+  ├─ artifacts          # 输出产物
+  ├─ input_artifacts    # 文件、URL、参考图
+  └─ state              # remote/local/queued/empty/failed
+              │
+              ▼
+primary / compact MCP adapters
+```
+
+`src/domain/artifacts.py` 定义 `Artifact`、`ArtifactResultData`、artifact 类型、状态与验证状态。
+`src/services/artifacts.py` 是唯一的身份、响应提取、合并、文件验证和结果分类实现；两个 MCP
+入口不再各自猜测媒体 URI。相同类型和远端 URI 会生成相同 `artifact_<sha256-prefix>` ID，因此
+primary `gemini_generate_media` 与 compact `create` 可稳定引用同一产物。
+
+远端 URI 的验证状态是 `unverified`，只表示在上游响应中观测到 URI，不声称已经下载或解码。
+本地文件只有在路径存在且大小非零时才是 `local/verified`；同时记录 MIME、字节数，并在可用时
+记录图像尺寸或音视频时长。不存在、空文件或写入失败分别进入 `failed` 或 `partial` 结果，不能
+只凭上游返回文本宣称保存成功。请求别名、实际请求模型、声明的有效后端和响应中观测到的后端
+分别保存在 `requested_model`、`request_model`、`effective_backend`、`observed_backend`，避免把
+路由规则和运行时证据混为一谈。
 
 ---
 

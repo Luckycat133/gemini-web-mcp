@@ -7,6 +7,7 @@ from urllib.parse import urlparse
 from mcp.server.fastmcp import FastMCP
 from mcp.types import TextContent
 
+from ..adapters import append_artifact_block, attach_domain_result, domain_text
 from ..client_wrapper import (
     cleanup_due_remote_chats,
     get_gemini_client,
@@ -14,8 +15,26 @@ from ..client_wrapper import (
     schedule_remote_chat_cleanup_from_response,
 )
 from ..constants import resolve_model_name
+from ..domain import (
+    Artifact,
+    ArtifactKind,
+    ArtifactResultData,
+    ArtifactState,
+    DomainErrorCode,
+    DomainResult,
+)
+from ..services import (
+    artifact_exception_result,
+    artifact_from_local_path,
+    artifact_from_remote,
+    artifact_result,
+    classify_artifact_state,
+    extract_response_artifacts,
+    observed_backend_from_response,
+    response_chat_id,
+)
 from .annotations import MUTATES_REMOTE
-from .utils import extract_remote_chat_id, validate_local_file_path
+from .utils import validate_local_file_path
 
 logger = logging.getLogger(__name__)
 
@@ -47,6 +66,20 @@ def _validate_url(url: str) -> tuple[bool, str]:
         return False, f"URL 验证失败: {str(e)}"
 
 
+def _analysis_state(response, outputs: tuple[Artifact, ...], source: Artifact) -> ArtifactState:
+    state = classify_artifact_state(response, outputs)
+    return source.state if state == ArtifactState.EMPTY else state
+
+
+def _analysis_content(
+    text: str,
+    data: ArtifactResultData,
+) -> list[TextContent]:
+    content = [TextContent(type="text", text=text)]
+    content = append_artifact_block(content, data.input_artifacts, heading="Input artifacts")
+    return append_artifact_block(content, data.artifacts, heading="Output artifacts")
+
+
 def register_file_tools(mcp: FastMCP) -> None:
     """Register all file and URL related MCP tools.
 
@@ -74,18 +107,36 @@ def register_file_tools(mcp: FastMCP) -> None:
         """
         is_safe, safe_path_or_error = _validate_file_path(file_path)
         if not is_safe:
-            return [
-                TextContent(
-                    type="text",
-                    text=f"❌ {safe_path_or_error}"
-                )
-            ]
+            data = ArtifactResultData(
+                state=ArtifactState.FAILED,
+                requested_model=model,
+                media_type="file_analysis",
+            )
+            return domain_text(
+                DomainResult.failure(
+                    DomainErrorCode.INVALID_ARGUMENT,
+                    safe_path_or_error,
+                    data=data,
+                    suggested_action="Provide an existing file inside an allowed directory.",
+                    verification_status="input_rejected",
+                ),
+                f"❌ {safe_path_or_error}",
+                use_result_data=True,
+            )
         safe_file_path = safe_path_or_error
 
         client = get_gemini_client()
         await initialize_client()
         await cleanup_due_remote_chats(client)
         model_name = resolve_model_name(model)
+        source_artifact = artifact_from_local_path(
+            ArtifactKind.FILE,
+            safe_file_path,
+            title=Path(safe_file_path).name,
+            requested_backend=model,
+            request_model=model_name,
+            effective_backend=model_name,
+        )
 
         logger.info(f"上传文件: {safe_file_path}")
 
@@ -118,22 +169,85 @@ def register_file_tools(mcp: FastMCP) -> None:
                     if hasattr(img, "url"):
                         img_info += f": {img.url}"
                     result_text += f"\n{img_info}"
-            remote_chat_id = extract_remote_chat_id(response)
+            remote_chat_id = response_chat_id(response)
             if remote_chat_id:
                 result_text += f"\n\nRemote chat ID: {remote_chat_id}"
 
-            return [
-                TextContent(
-                    type="text",
-                    text=f"✅ Successfully analyzed {Path(safe_file_path).name}\n\n{result_text}"
-                )
-            ]
-        except asyncio.TimeoutError:
-            logger.error("Error uploading/analyzing file: request timed out")
-            return [TextContent(type="text", text="❌ Error: 文件分析超时，请检查认证状态或稍后重试。")]
+            observed_backend = observed_backend_from_response(response)
+            outputs = extract_response_artifacts(
+                response,
+                requested_backend=model,
+                request_model=model_name,
+                effective_backend=model_name,
+                observed_backend=observed_backend,
+            )
+            source_artifact = artifact_from_local_path(
+                ArtifactKind.FILE,
+                safe_file_path,
+                title=Path(safe_file_path).name,
+                source_chat_id=remote_chat_id,
+                requested_backend=model,
+                request_model=model_name,
+                effective_backend=model_name,
+                observed_backend=observed_backend,
+            )
+            data = ArtifactResultData(
+                state=_analysis_state(response, outputs, source_artifact),
+                artifacts=outputs,
+                input_artifacts=(source_artifact,),
+                requested_model=model,
+                request_model=model_name,
+                effective_backend=model_name,
+                observed_backend=observed_backend,
+                source_chat_id=remote_chat_id,
+                media_type="file_analysis",
+            )
+            result = artifact_result(data)
+            content = _analysis_content(
+                f"✅ Successfully analyzed {Path(safe_file_path).name}\n\n{result_text}",
+                data,
+            )
+            return attach_domain_result(content, result, use_result_data=True)
+        except asyncio.TimeoutError as error:
+            data = ArtifactResultData(
+                state=ArtifactState.FAILED,
+                input_artifacts=(source_artifact,),
+                requested_model=model,
+                request_model=model_name,
+                effective_backend=model_name,
+                media_type="file_analysis",
+            )
+            result = artifact_exception_result(
+                error,
+                data,
+                logger=logger,
+                operation="gemini_upload_file",
+            )
+            return attach_domain_result(
+                [TextContent(type="text", text="❌ Error: 文件分析超时，请检查认证状态或稍后重试。")],
+                result,
+                use_result_data=True,
+            )
         except Exception as e:
-            logger.error(f"Error uploading/analyzing file: {e}")
-            return [TextContent(type="text", text=f"❌ Error: {str(e)}")]
+            data = ArtifactResultData(
+                state=ArtifactState.FAILED,
+                input_artifacts=(source_artifact,),
+                requested_model=model,
+                request_model=model_name,
+                effective_backend=model_name,
+                media_type="file_analysis",
+            )
+            result = artifact_exception_result(
+                e,
+                data,
+                logger=logger,
+                operation="gemini_upload_file",
+            )
+            return attach_domain_result(
+                [TextContent(type="text", text=f"❌ Error: {str(e)}")],
+                result,
+                use_result_data=True,
+            )
 
     @mcp.tool(annotations=MUTATES_REMOTE)
     async def gemini_analyze_url(
@@ -155,18 +269,37 @@ def register_file_tools(mcp: FastMCP) -> None:
         """
         is_valid, valid_url_or_error = _validate_url(url)
         if not is_valid:
-            return [
-                TextContent(
-                    type="text",
-                    text=f"❌ {valid_url_or_error}"
-                )
-            ]
+            data = ArtifactResultData(
+                state=ArtifactState.FAILED,
+                requested_model=model,
+                media_type="url_analysis",
+            )
+            return domain_text(
+                DomainResult.failure(
+                    DomainErrorCode.INVALID_ARGUMENT,
+                    valid_url_or_error,
+                    data=data,
+                    suggested_action="Provide an absolute URL with a scheme and host.",
+                    verification_status="input_rejected",
+                ),
+                f"❌ {valid_url_or_error}",
+                use_result_data=True,
+            )
         valid_url = valid_url_or_error
 
         client = get_gemini_client()
         await initialize_client()
         await cleanup_due_remote_chats(client)
         model_name = resolve_model_name(model)
+        source_artifact = artifact_from_remote(
+            ArtifactKind.WEBPAGE,
+            valid_url,
+            title=urlparse(valid_url).netloc,
+            requested_backend=model,
+            request_model=model_name,
+            effective_backend=model_name,
+            verification_method="input_uri_provided",
+        )
 
         if analysis_prompt:
             prompt = (
@@ -205,14 +338,83 @@ def register_file_tools(mcp: FastMCP) -> None:
                     if hasattr(img, "url"):
                         img_info += f": {img.url}"
                     result_text += f"\n{img_info}"
-            remote_chat_id = extract_remote_chat_id(response)
+            remote_chat_id = response_chat_id(response)
             if remote_chat_id:
                 result_text += f"\n\nRemote chat ID: {remote_chat_id}"
 
-            return [TextContent(type="text", text=result_text)]
-        except asyncio.TimeoutError:
-            logger.error("Error analyzing URL: request timed out")
-            return [TextContent(type="text", text="❌ Error: URL 分析超时，请稍后重试。")]
+            observed_backend = observed_backend_from_response(response)
+            outputs = extract_response_artifacts(
+                response,
+                requested_backend=model,
+                request_model=model_name,
+                effective_backend=model_name,
+                observed_backend=observed_backend,
+            )
+            source_artifact = artifact_from_remote(
+                ArtifactKind.WEBPAGE,
+                valid_url,
+                title=urlparse(valid_url).netloc,
+                source_chat_id=remote_chat_id,
+                requested_backend=model,
+                request_model=model_name,
+                effective_backend=model_name,
+                observed_backend=observed_backend,
+                verification_method="input_uri_provided",
+            )
+            data = ArtifactResultData(
+                state=_analysis_state(response, outputs, source_artifact),
+                artifacts=outputs,
+                input_artifacts=(source_artifact,),
+                requested_model=model,
+                request_model=model_name,
+                effective_backend=model_name,
+                observed_backend=observed_backend,
+                source_chat_id=remote_chat_id,
+                media_type="url_analysis",
+            )
+            result = artifact_result(data)
+            return attach_domain_result(
+                _analysis_content(result_text, data),
+                result,
+                use_result_data=True,
+            )
+        except asyncio.TimeoutError as error:
+            data = ArtifactResultData(
+                state=ArtifactState.FAILED,
+                input_artifacts=(source_artifact,),
+                requested_model=model,
+                request_model=model_name,
+                effective_backend=model_name,
+                media_type="url_analysis",
+            )
+            result = artifact_exception_result(
+                error,
+                data,
+                logger=logger,
+                operation="gemini_analyze_url",
+            )
+            return attach_domain_result(
+                [TextContent(type="text", text="❌ Error: URL 分析超时，请稍后重试。")],
+                result,
+                use_result_data=True,
+            )
         except Exception as e:
-            logger.error(f"Error analyzing URL: {e}")
-            return [TextContent(type="text", text=f"❌ Error: {str(e)}")]
+            data = ArtifactResultData(
+                state=ArtifactState.FAILED,
+                input_artifacts=(source_artifact,),
+                requested_model=model,
+                request_model=model_name,
+                effective_backend=model_name,
+                media_type="url_analysis",
+            )
+            result = artifact_exception_result(
+                e,
+                data,
+                logger=logger,
+                operation="gemini_analyze_url",
+            )
+            return attach_domain_result(
+                [TextContent(type="text", text=f"❌ Error: {str(e)}")],
+                result,
+                use_result_data=True,
+            )
