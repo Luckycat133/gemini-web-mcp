@@ -84,8 +84,12 @@
 | 3.7 | 保留一个有效会话，再用 `session_id="sess_invalid"` 发送或重置 | 返回 `SESSION_NOT_FOUND`，有效会话仍可继续使用 |
 | 3.8 | primary 的 `gemini_start_chat` 创建后，从 compact `session(action="list"/"send")` 使用同一 ID；再反向测试 | 两个入口看到并操作同一份状态 |
 | 3.9 | compact `session(action="reset")` 不传 ID，再调用 `session(action="reset_all")` | 前者返回 `INVALID_ARGUMENT` 且不清状态；后者才清空全部并重置客户端 |
+| 3.10 | 用 MCP Inspector 查看 3.1–3.9 的第一条 `TextContent._meta.domain_result` | 有 `ok/data/error/warnings/meta`；正文仍与旧版本兼容 |
+| 3.11 | primary 和 compact 分别访问同一个不存在的 ID | 两边 `error.code=SESSION_NOT_FOUND`、`retryable=false`、`operation_state=failed`，不根据正文或 emoji 判断 |
+| 3.12 | 提供无效图片路径，再模拟一次上游超时 | 分别得到 `INVALID_ARGUMENT/failed` 与 `TIMED_OUT/timed_out`；超时的 `retryable=true` |
+| 3.13 | 触发一个可控的上游异常并查看 stderr | 返回 `diag_<uuid>`，日志中同一行可找到 request/diagnostic ID；不要记录或回传 Cookie |
 
-**关键校验**：session 是**本地概念**，`sess_<uuid>` 不等于 Gemini 的 `cid`。primary 与 compact 共用同一生命周期服务。单会话 reset 只删除指定本地状态；默认 `retain_chat=false` 时还会尝试立即删除对应远端聊天，`retain_chat=true` 时保留远端聊天。要清空全部本地会话并重置底层连接，primary 用 `gemini_reset`，compact 必须显式用 `action="reset_all"`。
+**关键校验**：session 是**本地概念**，`sess_<uuid>` 不等于 Gemini 的 `cid`。primary 与 compact 共用同一生命周期服务。单会话 reset 只删除指定本地状态；默认 `retain_chat=false` 时还会尝试立即删除对应远端聊天，`retain_chat=true` 时保留远端聊天。要清空全部本地会话并重置底层连接，primary 用 `gemini_reset`，compact 必须显式用 `action="reset_all"`。结构化断言读取 `_meta.domain_result`，不得以 emoji 或自然语言作为程序分支条件。
 
 ### 4. 媒体生成（`gemini_generate_media` / `gemini_generate_music`）
 

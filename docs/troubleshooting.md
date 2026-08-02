@@ -146,6 +146,23 @@ mcp dev src/server.py
 
 服务端日志默认走 stderr。MCP 客户端（Claude Desktop）会把 stderr 写进 `mcp*.log`。
 
+### 用结构化错误和诊断 ID 定位问题
+
+聊天、会话和客户端重置工具会在第一条 `TextContent` 的 `_meta.domain_result` 中返回
+结构化状态。排错时优先检查：
+
+1. `ok` 和 `meta.operation_state`：区分普通失败、超时和取消。
+2. `error.code`：按稳定错误码分流，不要匹配正文或 emoji。
+3. `error.retryable`：只有为 `true` 时才自动重试，并配合退避。
+4. `error.suggested_action`：认证、参数或能力问题通常需要先执行这里的动作。
+5. `meta.request_id` / `meta.diagnostic_id`：用来关联服务端日志。
+
+参数校验、未知会话等已知失败通常只有 `request_id`；捕获到上游或内部异常时会同时生成
+`diag_<uuid>`。原始异常和两个 ID 会写入服务端日志，结构化错误只保留可公开的分类和说明。
+compact 入口的旧 `Error: ...` 正文为兼容现有客户端暂时保留，可能仍含上游消息，因此不要把
+兼容正文当成稳定接口或公开转发。提交 issue 时请附工具名、错误码和 diagnostic ID，不要附
+Cookie。若 MCP 客户端暂不显示 `_meta`，仍可用兼容正文和 stderr 日志排查。
+
 调试技巧：
 - 设 `GEMINI_TOOLS=core python -m src.server` 直接在前台跑，看实时输出
 - `logging.getLogger("src").setLevel(logging.DEBUG)` 可在代码里临时开 DEBUG

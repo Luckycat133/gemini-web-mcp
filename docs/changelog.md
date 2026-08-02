@@ -9,13 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Typed Domain Results
+- Added generic `DomainResult`, `DomainError`, `DomainWarning`, and `ResultMeta` contracts with explicit operation state, retryability, suggested action, request ID, and diagnostic ID
+- Added a stable error taxonomy for invalid input, authentication, missing sessions, unavailable capabilities, upstream rejection/drift, network/rate-limit/timeout/cancellation, artifact, verification, and internal failures
+- Preserved current MCP tool names, return shape, and text while embedding the complete serializable contract at the first `TextContent._meta.domain_result`; callers no longer need to match prose or emoji
+- Migrated the first client/session/chat slice across both primary and compact adapters; `SessionOperationResult` now specializes `DomainResult` while retaining its existing `session`, `response`, and `error_code` compatibility accessors
+- Added public-safe exception classification and raw exception logging correlated by `req_<uuid>` and `diag_<uuid>` IDs
+- Added contract, serialization, invalid/auth/timeout/upstream/internal regression, tool-name compatibility, runtime-object exclusion, and cross-adapter parity tests; the full offline suite now passes 1156 tests
+
 ### Session Lifecycle
 - Unified the primary MCP tools and compact `skill_server` adapter on one `SessionService`; sessions created by either surface can be listed, sent to, streamed, and reset from the other
 - Replaced predictable/reusable short IDs (`sess_N` and truncated UUIDs) with opaque `sess_<uuid4 hex>` IDs generated under the shared store lock with active-collision checks
 - Added explicit `SESSION_NOT_FOUND` results for unknown send/reset operations; unknown IDs never fall back to one-shot chat and never clear unrelated state
 - Made compact reset semantics unambiguous: `reset`/`reset_one` require a session ID and affect one session, while only explicit `reset_all` clears all sessions and retires the client
 - Serialized normal and streaming sends per session; asynchronous single-session reset waits for an in-flight send before detaching state and applying the remote-retention policy
-- Added cross-adapter, ID collision, unknown-ID isolation, concurrent-send, stream, reset-race, facade, and workflow tests; full offline suite now passes 1132 tests
+- Added cross-adapter, ID collision, unknown-ID isolation, concurrent-send, stream, reset-race, facade, and workflow tests; the P0.2 phase gate passed 1132 offline tests
 
 ### MCP Protocol Version Compatibility
 - Aligned with MCP `2026-07-28` specification status: this repository contains no custom MCP protocol-layer code (protocol version negotiation, JSON-RPC framing, `initialize` handshake, `server/discover`, `resultType`, `ttlMs`/`cacheScope`, capabilities negotiation are all delegated to the `mcp` Python SDK via `FastMCP`); application-level error codes in `error_handler.py` (`NO_COOKIE`, `INVALID_COOKIE`, `SESSION_NOT_FOUND`, etc.) are returned as `TextContent`, not JSON-RPC protocol errors
