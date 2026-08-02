@@ -22,7 +22,7 @@ from .tools.manage import (
     _tool_manifest_payload,
 )
 from .client_wrapper import (
-    reset_client,
+    reset_client_async,
     get_cookie_from_browser,
     get_cookie_status,
     list_browser_cookie_profiles,
@@ -103,7 +103,7 @@ if not _tool_groups_include_manage():
 @mcp.tool(annotations=MUTATES_LOCAL)
 async def gemini_reset() -> list[TextContent]:
     """重置客户端"""
-    reset_client()
+    await reset_client_async()
     return [TextContent(type="text", text="✅ 客户端已重置")]
 
 

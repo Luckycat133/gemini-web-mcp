@@ -69,6 +69,12 @@ def reset_client() -> None:
     _session_manager.clear_sessions()
 
 
+async def reset_client_async() -> None:
+    """重置客户端并等待旧连接关闭。"""
+    _session_manager.clear_sessions()
+    await _client_manager.reset_async()
+
+
 # ============ 会话管理接口 ============
 
 def store_session(
@@ -194,10 +200,12 @@ def list_pending_remote_chat_cleanup() -> Dict[str, Dict[str, Any]]:
 def _on_cookie_update(cookie_data: CookieData) -> None:
     """Cookie 更新回调"""
     logger.info("🔄 Cookie 已更新，重置客户端...")
-    reset_client()
     os.environ["GEMINI_PSID"] = cookie_data.psid
     if cookie_data.psidts:
         os.environ["GEMINI_PSIDTS"] = cookie_data.psidts
+    else:
+        os.environ.pop("GEMINI_PSIDTS", None)
+    reset_client()
 
 
 def init_cookie_manager_integration() -> None:

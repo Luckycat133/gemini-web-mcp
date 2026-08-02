@@ -19,14 +19,14 @@ import logging
 import os
 import socket
 import tempfile
-import threading
 from pathlib import Path
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
 from src import client_manager
 from src.client_manager import (
+    ClientInitializationResetError,
     ClientManager,
     get_configured_proxy,
     get_default_chat_retention_seconds,
@@ -273,6 +273,7 @@ def test_client_manager_reset_clears_state(clean_psid_env, monkeypatch):
 
     def fake_factory(*args, **kwargs):
         instance = MagicMock()
+        instance.close = AsyncMock()
         instances.append(instance)
         return instance
 
@@ -286,6 +287,7 @@ def test_client_manager_reset_clears_state(clean_psid_env, monkeypatch):
     assert mgr._initialized is False  # 仅 get_client 不会标记 initialized
     mgr.reset()
     assert mgr._client is None
+    instances[0].close.assert_awaited_once_with()
     c2 = mgr.get_client()
     assert c2 is not c1
     assert len(instances) == 2
@@ -328,26 +330,114 @@ def test_client_manager_initialize_calls_init_when_not_initialized(monkeypatch):
 
 
 def test_client_manager_initialize_concurrent_safe(monkeypatch):
-    """并发 initialize 不会重复调用 client.init（_init_lock 保护）。"""
+    """真实挂起期间的并发 initialize 共享同一个初始化任务。"""
     mgr = ClientManager()
     fake_client = MagicMock()
     init_call_count = {"n": 0}
-    lock = threading.Lock()
+    started = asyncio.Event()
+    release = asyncio.Event()
 
     async def fake_init(**kwargs):
-        with lock:
-            init_call_count["n"] += 1
+        init_call_count["n"] += 1
+        started.set()
+        await release.wait()
 
     fake_client.init = fake_init
     mgr._client = fake_client
     mgr._initialized = False
 
     async def run_all():
-        await asyncio.gather(mgr.initialize(), mgr.initialize(), mgr.initialize())
+        calls = [asyncio.create_task(mgr.initialize()) for _ in range(4)]
+        await started.wait()
+        await asyncio.sleep(0)
+        assert init_call_count["n"] == 1
+        release.set()
+        results = await asyncio.gather(*calls)
+        assert results == [fake_client] * 4
 
     asyncio.run(run_all())
     assert init_call_count["n"] == 1
     assert mgr._initialized is True
+
+
+def test_client_manager_initialize_failure_can_retry(monkeypatch):
+    """失败的共享初始化会清理任务状态，后续调用可重试。"""
+    mgr = ClientManager()
+    fake_client = MagicMock()
+    attempts = 0
+
+    async def fake_init(**kwargs):
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise OSError("temporary upstream failure")
+
+    fake_client.init = fake_init
+    mgr._client = fake_client
+
+    async def run():
+        with pytest.raises(OSError, match="temporary upstream failure"):
+            await mgr.initialize()
+        assert mgr._initialized is False
+        assert mgr._init_task is None
+        assert await mgr.initialize() is fake_client
+
+    asyncio.run(run())
+    assert attempts == 2
+    assert mgr._initialized is True
+
+
+def test_client_manager_reset_during_initialize_cannot_publish_stale_state(monkeypatch):
+    """旧初始化即使吞掉取消并晚完成，也不能覆盖 reset 后的新一代状态。"""
+    mgr = ClientManager()
+    old_client = MagicMock()
+    old_client.close = AsyncMock()
+    replacement_client = MagicMock()
+    replacement_client.close = AsyncMock()
+    started = asyncio.Event()
+    cancelled = asyncio.Event()
+    release = asyncio.Event()
+
+    async def old_init(**kwargs):
+        started.set()
+        try:
+            await release.wait()
+        except asyncio.CancelledError:
+            cancelled.set()
+            await release.wait()
+
+    async def replacement_init(**kwargs):
+        return None
+
+    old_client.init = old_init
+    replacement_client.init = replacement_init
+    mgr._client = old_client
+
+    async def run():
+        stale_initialize = asyncio.create_task(mgr.initialize())
+        await started.wait()
+
+        reset = asyncio.create_task(mgr.reset_async())
+        await cancelled.wait()
+        assert mgr._client is None
+        assert mgr._initialized is False
+
+        with mgr._lock:
+            mgr._client = replacement_client
+        assert await mgr.initialize() is replacement_client
+        assert mgr._initialized is True
+
+        release.set()
+        await reset
+        with pytest.raises(ClientInitializationResetError):
+            await stale_initialize
+
+        assert mgr._client is replacement_client
+        assert mgr._initialized is True
+
+    asyncio.run(run())
+    old_client.close.assert_awaited_once_with()
+    replacement_client.close.assert_not_awaited()
 
 
 def test_client_manager_create_client_loads_extra_cookies(clean_psid_env, monkeypatch):
