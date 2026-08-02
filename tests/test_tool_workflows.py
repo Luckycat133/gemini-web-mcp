@@ -265,6 +265,7 @@ def test_deep_research_clears_stale_default_chat_metadata():
 
 def test_deep_research_extracts_immersive_report_and_sources():
     import json
+
     import src.tools.research as research_tools
 
     report = "# Research Report\n\n" + ("Body with [cite: 1]. " * 80)
@@ -708,6 +709,7 @@ def test_gem_partial_update_preserves_existing_fields(monkeypatch):
 
 def test_stream_tools_use_text_delta(monkeypatch):
     import src.tools.chat as chat_tools
+    from src.session_manager import SessionService
 
     class FakeStreamResponse:
         def __init__(self, text, text_delta):
@@ -735,11 +737,10 @@ def test_stream_tools_use_text_delta(monkeypatch):
 
     monkeypatch.setattr(chat_tools, "get_gemini_client", lambda: FakeClient())
     monkeypatch.setattr(chat_tools, "initialize_client", noop_initialize)
-    monkeypatch.setattr(
-        chat_tools,
-        "get_session",
-        lambda session_id: {"session": FakeSession(), "model": "fast"},
-    )
+    service = SessionService()
+    service.store_session("session-1", FakeSession(), model="fast")
+    monkeypatch.setattr(chat_tools, "lookup_session", service.lookup_session)
+    monkeypatch.setattr(chat_tools, "send_session_message_stream", service.send_message_stream)
 
     async def run():
         mcp = FastMCP("test")
@@ -762,6 +763,7 @@ def test_stream_tools_use_text_delta(monkeypatch):
 
 def test_chat_tools_forward_gem_and_temporary_chat_settings(monkeypatch):
     import src.tools.chat as chat_tools
+    from src.session_manager import SessionService
 
     calls = []
 
@@ -799,16 +801,11 @@ def test_chat_tools_forward_gem_and_temporary_chat_settings(monkeypatch):
     monkeypatch.setattr(chat_tools, "get_gemini_client", lambda: FakeClient())
     monkeypatch.setattr(chat_tools, "initialize_client", noop_initialize)
     monkeypatch.setattr(chat_tools, "cleanup_due_remote_chats", noop_cleanup)
-    monkeypatch.setattr(chat_tools, "store_session", lambda *args, **kwargs: None)
-    monkeypatch.setattr(
-        chat_tools,
-        "get_session",
-        lambda session_id: {
-            "session": FakeSession(),
-            "model": "fast",
-            "temporary": True,
-        },
-    )
+    service = SessionService()
+    service.store_session("session-1", FakeSession(), model="fast", temporary=True)
+    monkeypatch.setattr(chat_tools, "create_session", service.create_session)
+    monkeypatch.setattr(chat_tools, "lookup_session", service.lookup_session)
+    monkeypatch.setattr(chat_tools, "send_session_message", service.send_message)
 
     async def run():
         mcp = FastMCP("test")
@@ -1396,10 +1393,9 @@ def test_skill_server_static_account_actions_do_not_require_auth(monkeypatch):
 def test_skill_server_session_lifecycle_and_dispatch(monkeypatch):
     """Cover the session god-function split: create/send/list/reset + invalid action."""
     import src.skill_server as skill_server
+    from src.session_manager import SessionService
 
-    # Reset shared session state to isolate the test.
-    with skill_server._sessions_lock:
-        skill_server._sessions.clear()
+    service = SessionService()
 
     sent_messages: list[str] = []
     reset_calls: list[bool] = []
@@ -1415,6 +1411,16 @@ def test_skill_server_session_lifecycle_and_dispatch(monkeypatch):
 
     async def fake_reset_client_async():
         reset_calls.append(True)
+        service.reset_all()
+
+    async def reset_shared_session(session_id):
+        return service.reset_one(session_id)
+
+    def list_shared_sessions():
+        return {
+            sid: {"session": data.session, "model": data.model}
+            for sid, data in service.list_sessions().items()
+        }
 
     async def noop_initialize():
         return None
@@ -1426,6 +1432,11 @@ def test_skill_server_session_lifecycle_and_dispatch(monkeypatch):
     monkeypatch.setattr(skill_server, "initialize_client", noop_initialize)
     monkeypatch.setattr(skill_server, "cleanup_due_remote_chats", noop_cleanup)
     monkeypatch.setattr(skill_server, "reset_client_async", fake_reset_client_async)
+    monkeypatch.setattr(skill_server, "create_session", service.create_session)
+    monkeypatch.setattr(skill_server, "lookup_session", service.lookup_session)
+    monkeypatch.setattr(skill_server, "send_session_message", service.send_message)
+    monkeypatch.setattr(skill_server, "list_sessions", list_shared_sessions)
+    monkeypatch.setattr(skill_server, "reset_session", reset_shared_session)
 
     async def run():
         # list with no sessions -> empty hint
@@ -1434,30 +1445,31 @@ def test_skill_server_session_lifecycle_and_dispatch(monkeypatch):
 
         # create
         created = await skill_server.session("create", model="flash")
-        assert "Session created: sess_1" in created[0].text
+        session_id = created[0].text.removeprefix("Session created: ")
+        assert session_id.startswith("sess_")
 
         # list with one session
         one_list = await skill_server.session("list")
-        assert "sess_1" in one_list[0].text
+        assert session_id in one_list[0].text
         assert "flash" in one_list[0].text
 
         # send to invalid session
         invalid = await skill_server.session("send", session_id="nope", message="hi")
-        assert "Invalid session: nope" in invalid[0].text
+        assert "SESSION_NOT_FOUND: Invalid session: nope" in invalid[0].text
 
         # send to valid session
-        sent = await skill_server.session("send", session_id="sess_1", message="hello")
+        sent = await skill_server.session("send", session_id=session_id, message="hello")
         assert "reply:hello" in sent[0].text
         assert sent_messages == ["hello"]
 
         # reset a single session (no client reset)
-        deleted = await skill_server.session("reset", session_id="sess_1")
-        assert "Session deleted: sess_1" in deleted[0].text
+        deleted = await skill_server.session("reset", session_id=session_id)
+        assert f"Session deleted: {session_id}" in deleted[0].text
         assert reset_calls == []  # single-session reset must not reset the client
 
         # reset all (awaits client retirement)
         await skill_server.session("create", model="pro")
-        reset_all = await skill_server.session("reset")
+        reset_all = await skill_server.session("reset_all")
         assert "All sessions reset" in reset_all[0].text
         assert reset_calls == [True]
 
@@ -1466,8 +1478,7 @@ def test_skill_server_session_lifecycle_and_dispatch(monkeypatch):
         assert "Invalid action" in invalid_action[0].text
 
     asyncio.run(run())
-    with skill_server._sessions_lock:
-        skill_server._sessions.clear()
+    assert service.list_sessions() == {}
 
 
 def test_skill_server_session_invalid_image_path_short_circuits(monkeypatch):
@@ -2751,6 +2762,7 @@ def test_media_tool_saves_generated_music_files(monkeypatch, tmp_path):
 
 def test_media_tool_recovers_music_urls_from_raw_chat_card():
     import orjson
+
     import src.tools.media as media_tools
 
     mp3_url = "https://contribution.usercontent.google.com/download?filename=song.mp3"

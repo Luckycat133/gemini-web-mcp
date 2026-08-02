@@ -3,24 +3,26 @@ Gemini 客户端封装 - 门面模式
 提供统一的向后兼容接口，内部委托给专门的管理类
 """
 
-import os
 import logging
-from typing import Optional, Dict, Any
+import os
+from typing import Any, Dict, Optional
 
 from .client_manager import (
     ClientManager,
-    validate_config,  # noqa: F401  (re-exported as public facade API)
     get_configured_proxy,  # noqa: F401  (re-exported as public facade API)
     get_default_chat_retention_seconds,
+    validate_config,  # noqa: F401  (re-exported as public facade API)
+)
+from .client_manager import (
     prepare_browser_cookie_cache as _prepare_browser_cookie_cache,
 )
-from .session_manager import SessionManager, SessionData
 from .remote_chat_cleanup_manager import RemoteChatCleanupManager
+from .session_manager import SessionData, SessionOperationResult, SessionService
 
 logger = logging.getLogger(__name__)
 
 try:
-    from .cookie_manager import get_cookie_manager, init_cookie_manager, CookieData
+    from .cookie_manager import CookieData, get_cookie_manager, init_cookie_manager
     COOKIE_MANAGER_AVAILABLE = True
 except ImportError:
     COOKIE_MANAGER_AVAILABLE = False
@@ -28,7 +30,7 @@ except ImportError:
 
 # 全局管理器实例
 _client_manager = ClientManager()
-_session_manager = SessionManager()
+_session_manager = SessionService()
 _cleanup_manager = RemoteChatCleanupManager(
     client_provider=lambda: _client_manager.get_client(),
     retention_provider=get_default_chat_retention_seconds,
@@ -41,11 +43,14 @@ def _session_data_to_dict(data: Optional[SessionData]) -> Optional[Dict[str, Any
         return None
     return {
         "session": data.session,
+        "session_id": data.session_id,
         "model": data.model,
         "thinking_level": data.thinking_level,
         "learning_mode": data.learning_mode,
         "temporary": data.temporary,
         "created_at": data.created_at,
+        "updated_at": data.updated_at,
+        "upstream_chat_id": data.upstream_chat_id,
         "retain_chat": data.retain_chat,
         "delete_after_seconds": data.delete_after_seconds,
     }
@@ -77,6 +82,27 @@ async def reset_client_async() -> None:
 
 # ============ 会话管理接口 ============
 
+def create_session(
+    session: Any,
+    model: str = "flash",
+    thinking_level: str = "standard",
+    learning_mode: Optional[str] = None,
+    temporary: bool = False,
+    retain_chat: bool = False,
+    delete_after_seconds: Optional[int] = None,
+) -> SessionOperationResult:
+    """创建带不可碰撞本地 ID 的共享会话。"""
+    return _session_manager.create_session(
+        session,
+        model,
+        thinking_level=thinking_level,
+        learning_mode=learning_mode,
+        temporary=temporary,
+        retain_chat=retain_chat,
+        delete_after_seconds=delete_after_seconds,
+    )
+
+
 def store_session(
     session_id: str,
     session: Any,
@@ -103,6 +129,32 @@ def store_session(
 def get_session(session_id: str) -> Optional[Dict[str, Any]]:
     """获取存储的会话"""
     return _session_data_to_dict(_session_manager.get_session(session_id))
+
+
+def lookup_session(session_id: str) -> SessionOperationResult:
+    """查找共享会话并保留显式 SESSION_NOT_FOUND 结果。"""
+    return _session_manager.lookup_session(session_id)
+
+
+async def send_session_message(session_id: str, **request_kwargs: Any) -> SessionOperationResult:
+    """通过共享会话服务串行发送消息。"""
+    return await _session_manager.send_message(session_id, **request_kwargs)
+
+
+async def send_session_message_stream(session_id: str, **request_kwargs: Any) -> SessionOperationResult:
+    """通过共享会话服务串行消费一次流式消息。"""
+    return await _session_manager.send_message_stream(session_id, **request_kwargs)
+
+
+async def reset_session(session_id: str) -> SessionOperationResult:
+    """只重置指定会话，并按保留策略清理其远端聊天。"""
+    result = await _session_manager.reset_one_async(session_id)
+    data = result.session
+    if result.ok and data is not None and not data.retain_chat:
+        remote_chat_id = getattr(data.session, "cid", None) or data.upstream_chat_id
+        if remote_chat_id:
+            await delete_remote_chat(remote_chat_id)
+    return result
 
 
 def remove_session(session_id: str) -> None:
