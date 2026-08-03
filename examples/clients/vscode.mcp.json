@@ -1,0 +1,33 @@
+{
+  "inputs": [
+    {
+      "type": "promptString",
+      "id": "gemini-psid",
+      "description": "Gemini __Secure-1PSID Cookie",
+      "password": true
+    },
+    {
+      "type": "promptString",
+      "id": "gemini-psidts",
+      "description": "Gemini __Secure-1PSIDTS Cookie (leave blank if unavailable)",
+      "password": true
+    }
+  ],
+  "servers": {
+    "gemini": {
+      "type": "stdio",
+      "command": "uvx",
+      "args": [
+        "--from",
+        "git+https://github.com/Luckycat133/gemini-web-mcp@main",
+        "gemini-mcp-server"
+      ],
+      "env": {
+        "GEMINI_PSID": "${input:gemini-psid}",
+        "GEMINI_PSIDTS": "${input:gemini-psidts}",
+        "GEMINI_TOOLS": "model",
+        "GEMINI_AUTO_REFRESH": "false"
+      }
+    }
+  }
+}

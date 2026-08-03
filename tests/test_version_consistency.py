@@ -11,6 +11,7 @@ import pytest
 
 import src
 from scripts.release_metadata import (
+    CANONICAL_GIT_SOURCE,
     ReleaseMetadataError,
     find_product_version_errors,
     load_release_metadata,
@@ -40,6 +41,75 @@ def test_repository_version_consumers_are_consistent():
     metadata = load_release_metadata(PROJECT_ROOT)
 
     assert repository_version_errors(PROJECT_ROOT, metadata) == []
+
+
+def test_public_onboarding_surfaces_use_the_canonical_source_install(tmp_path):
+    metadata = load_release_metadata(PROJECT_ROOT)
+    for relative_path in (
+        "README.md",
+        "README.zh-CN.md",
+        "docs/quickstart.md",
+        "docs/launch-kit.md",
+        "docs/client-examples.md",
+        "examples/clients/codex.config.toml",
+        "examples/clients/claude-desktop.json",
+        "examples/clients/claude-code.mcp.json",
+        "examples/clients/vscode.mcp.json",
+    ):
+        source = PROJECT_ROOT / relative_path
+        target = tmp_path / relative_path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(source.read_bytes())
+    (tmp_path / "pyproject.toml").write_bytes((PROJECT_ROOT / "pyproject.toml").read_bytes())
+    for relative_path in ("src/__init__.py", "src/server.py", "src/skill_server.py"):
+        source = PROJECT_ROOT / relative_path
+        target = tmp_path / relative_path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(source.read_bytes())
+
+    readme = tmp_path / "README.md"
+    readme.write_text(
+        readme.read_text(encoding="utf-8").replace(CANONICAL_GIT_SOURCE, "git+https://example.invalid/repo@main"),
+        encoding="utf-8",
+    )
+
+    assert any("README.md: canonical source install" in error for error in repository_version_errors(tmp_path, metadata))
+
+
+def test_versioned_wheel_url_is_optional_but_must_match_when_present(tmp_path):
+    metadata = load_release_metadata(PROJECT_ROOT)
+    docs = tmp_path / "docs"
+    docs.mkdir()
+    (tmp_path / "README.md").write_text(CANONICAL_GIT_SOURCE, encoding="utf-8")
+    (tmp_path / "README.zh-CN.md").write_text(CANONICAL_GIT_SOURCE, encoding="utf-8")
+    for relative_path in (
+        "docs/quickstart.md",
+        "docs/launch-kit.md",
+        "docs/client-examples.md",
+        "examples/clients/codex.config.toml",
+        "examples/clients/claude-desktop.json",
+        "examples/clients/claude-code.mcp.json",
+        "examples/clients/vscode.mcp.json",
+    ):
+        target = tmp_path / relative_path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(CANONICAL_GIT_SOURCE, encoding="utf-8")
+    (tmp_path / "pyproject.toml").write_bytes((PROJECT_ROOT / "pyproject.toml").read_bytes())
+    for relative_path in ("src/__init__.py", "src/server.py", "src/skill_server.py"):
+        source = PROJECT_ROOT / relative_path
+        target = tmp_path / relative_path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(source.read_bytes())
+
+    assert repository_version_errors(tmp_path, metadata) == []
+
+    (docs / "example.md").write_text(
+        "https://github.com/Luckycat133/gemini-web-mcp/releases/download/"
+        "v9.8.7/gemini_mcp_server-9.8.7-py3-none-any.whl",
+        encoding="utf-8",
+    )
+    errors = repository_version_errors(tmp_path, metadata)
+    assert any("wheel URL versions tag='9.8.7', wheel='9.8.7'" in error for error in errors)
 
 
 def test_product_version_scan_detects_stale_non_historical_reference():

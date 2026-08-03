@@ -64,7 +64,7 @@ def test_compact_server_initializes_defaults_from_package_data(tmp_path, monkeyp
     assert json.loads(prompts_file.read_text(encoding="utf-8")) == json.loads(read_default_prompts())
 
 
-def test_package_data_and_both_console_entrypoints_are_explicit():
+def test_package_data_and_all_console_entrypoints_are_explicit():
     metadata = _pyproject()
     manifest = (PROJECT_ROOT / "MANIFEST.in").read_text(encoding="utf-8")
 
@@ -73,6 +73,8 @@ def test_package_data_and_both_console_entrypoints_are_explicit():
     assert "recursive-include src/data *.json" in manifest
     assert "recursive-include scripts *.py" in manifest
     assert "recursive-include compatibility *.json" in manifest
+    assert "recursive-include examples *.json *.toml" in manifest
+    assert (PROJECT_ROOT / "src" / "onboarding.py").is_file()
 
 
 def test_dependency_checker_cli_passes():

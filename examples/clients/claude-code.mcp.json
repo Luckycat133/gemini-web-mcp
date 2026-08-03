@@ -1,0 +1,20 @@
+{
+  "mcpServers": {
+    "gemini": {
+      "type": "stdio",
+      "command": "uvx",
+      "args": [
+        "--from",
+        "git+https://github.com/Luckycat133/gemini-web-mcp@main",
+        "gemini-mcp-server"
+      ],
+      "env": {
+        "GEMINI_PSID": "${GEMINI_PSID}",
+        "GEMINI_PSIDTS": "${GEMINI_PSIDTS:-}",
+        "GEMINI_TOOLS": "model",
+        "GEMINI_AUTO_REFRESH": "false"
+      },
+      "timeout": 720000
+    }
+  }
+}

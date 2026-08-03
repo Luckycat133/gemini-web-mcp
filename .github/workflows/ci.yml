@@ -146,6 +146,12 @@ jobs:
         run: |
           diff -ru .agents/skills/gemini-web-mcp-development .codex/skills/gemini-web-mcp-development
           diff -ru .agents/skills/gemini-web-mcp .codex/skills/gemini-web-mcp
+      - name: Install development skill directly from the repository
+        run: |
+          mkdir -p "$RUNNER_TEMP/development-skill-install"
+          cd "$RUNNER_TEMP/development-skill-install"
+          npx --cache "$RUNNER_TEMP/npm-cache" --yes skills@1.5.21 add "$GITHUB_WORKSPACE" --skill gemini-web-mcp-development --agent codex --copy --yes
+          diff -ru "$GITHUB_WORKSPACE/.agents/skills/gemini-web-mcp-development" .agents/skills/gemini-web-mcp-development
       - name: Run repository skill contracts
         run: python -m pytest -q tests/test_development_skill.py tests/test_skill_packaging.py
 
@@ -169,6 +175,11 @@ jobs:
         run: python scripts/package_release.py --outdir dist
       - name: Verify generated asset names and wheel metadata
         run: python scripts/check_version_consistency.py --artifacts-dir dist
+      - name: Set up pinned uv
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+      - name: Verify one-command onboarding in an isolated uv environment
+        working-directory: ${{ runner.temp }}
+        run: uvx --from "$GITHUB_WORKSPACE"/dist/*.whl gemini-mcp-onboarding
       - name: Install wheel in a clean environment
         run: |
           python -m venv "$RUNNER_TEMP/gemini-wheel-smoke"

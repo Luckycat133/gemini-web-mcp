@@ -27,6 +27,8 @@ _probe_duration（隔离 ffprobe subprocess）。parse_response 走真实实现�
 """
 
 import asyncio
+import base64
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -58,6 +60,27 @@ class _FakeMedia:
     async def save(self, **kwargs):
         self.captured_save_kwargs = dict(kwargs)
         return self._save_return
+
+
+class _FakeSavedImage:
+    """Match gemini-webapi Image.save(), which returns one path string."""
+
+    url = "https://cdn.example.test/onboarding.png"
+    title = "onboarding image"
+
+    async def save(self, **kwargs):
+        destination = Path(kwargs["path"])
+        destination.mkdir(parents=True, exist_ok=True)
+        filename = Path(kwargs["filename"])
+        if not filename.suffix:
+            filename = filename.with_suffix(".png")
+        path = destination / filename
+        path.write_bytes(
+            base64.b64decode(
+                "iVBORw0KGgoAAAANSUhEUgAAAAIAAAABAQMAAADO7O3JAAAAIGNIUk0AAHomAACAhAAA+gAAAIDoAAB1MAAA6mAAADqYAAAXcJy6UTwAAAAGUExURf8AAP///0EdNBEAAAABYktHRAH/Ai3eAAAAB3RJTUUH6ggDByA1n7aAbwAAAApJREFUCNdjYAAAAAIAAeIhvDMAAAAASUVORK5CYII="
+            )
+        )
+        return str(path)
 
 
 class _FailingMedia(_FakeMedia):
@@ -809,6 +832,39 @@ def test_generate_media_verifies_saved_file_metadata(monkeypatch, tmp_path):
     assert artifact["size_bytes"] == len(b"audio bytes")
     assert artifact["mime_type"] == "audio/mpeg"
     assert artifact["duration_seconds"] == 9.25
+    assert artifact["verification"]["status"] == "verified"
+
+
+def test_generate_media_saves_and_verifies_image_string_result(monkeypatch, tmp_path):
+    image = _FakeSavedImage()
+    client = _FakeMediaClient(
+        response_text="done",
+        images=[image],
+        observed_backend="observed-image-generator",
+    )
+    _patch_media_env(monkeypatch, client)
+    mcp = _make_mcp()
+
+    async def run():
+        return await _call_tool(
+            mcp,
+            "gemini_generate_media",
+            prompt="onboarding",
+            media_type="image",
+            output_dir=str(tmp_path),
+            filename="example",
+        )
+
+    result = asyncio.run(run())
+    domain = result[0].meta["domain_result"]
+    artifact = domain["data"]["artifacts"][0]
+    assert domain["data"]["state"] == "local"
+    assert domain["meta"]["verification_status"] == "artifact_saved_and_verified"
+    assert artifact["kind"] == "image"
+    assert artifact["local_path"] == str((tmp_path / "example.png").resolve())
+    assert artifact["mime_type"] == "image/png"
+    assert (artifact["width"], artifact["height"]) == (2, 1)
+    assert artifact["observed_backend"] == "observed-image-generator"
     assert artifact["verification"]["status"] == "verified"
 
 
