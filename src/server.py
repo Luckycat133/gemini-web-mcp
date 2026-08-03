@@ -2,7 +2,6 @@
 """
 Gemini Web 逆向 MCP 服务器
 支持: 文本对话、Deep Research、媒体生成、文件分析
-版本: 0.2.0 (2026.7)
 """
 
 import json
@@ -13,6 +12,7 @@ from typing import Literal
 from mcp.server.fastmcp import FastMCP
 from mcp.types import TextContent
 
+from . import __version__
 from .adapters import domain_error_boundary, domain_text
 from .client_wrapper import (
     get_cookie_from_browser,
@@ -42,8 +42,8 @@ TOOL_GROUPS = os.environ.get("GEMINI_TOOLS", "core").split(",")
 
 mcp = FastMCP(
     "Gemini Web MCP Server",
-    instructions="""
-# Gemini Web MCP Server (v0.2.0)
+    instructions=f"""
+# Gemini Web MCP Server (v{__version__})
 
 ## 可用模型
 - flash-lite → Web UI 3.1 Flash-Lite
@@ -207,7 +207,7 @@ async def gemini_get_cookie_from_browser(browser: str = "chrome", profile: str =
 
 def main():
     """启动服务器"""
-    logger.info("🚀 启动 Gemini Web MCP Server (v0.2.0)")
+    logger.info("🚀 启动 Gemini Web MCP Server (v%s)", __version__)
     logger.info(f"🔧 加载工具组: {', '.join(TOOL_GROUPS)}")
     init_cookie_manager_integration()
     mcp.run()

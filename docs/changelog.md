@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Single Version Source
+- Made `pyproject.toml` the only persisted project-version source; both MCP server banners now read installed distribution metadata through `src.__version__`
+- Added a repository consistency check for stale product-version references and release wheel URLs while excluding the historical changelog
+- Made release packaging validate an explicit or tag-build Git tag, deterministic wheel/sdist/skill asset names, and wheel `Name`/`Version` metadata before reporting success
+- Removed obsolete product-version labels from non-historical documentation and documented the single-source release workflow
+
 ### Management Domains and RPC Contracts
 - Added an evidence-backed RPC registry in `src/infrastructure/rpc_contracts.py` for management capability IDs, source paths, payload builders, parser names, observed dates, stability, and mutation verification strategies; active handlers and cookie profile probes no longer duplicate raw RPC IDs
 - Added pure RPC envelope/body parsers with explicit `success`, `empty`, `rejected`, and `changed_shape` outcomes plus fixture coverage for every registered parser
