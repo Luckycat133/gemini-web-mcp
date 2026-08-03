@@ -53,11 +53,10 @@ from src.services.manifest import (
 
 
 def test_payload_scheduled_rpc_accepted_but_not_deleted_state(monkeypatch):
-    """dry_run=False + bodies 非空 + task_after_delete.task_state_id != 6
-    → 覆盖 2038-2039 ``elif bodies: deleted = True``。
+    """dry_run=False + bodies 非空 + 删除后 action 仍在 registry 可见。
 
-    verification_status 应为 'rpc_accepted'（bodies 非空但 task_state_id != 6），
-    deleted=True（因为 elif bodies 命中）。
+    删除 RPC 已被接受（bodies 非空），但 registry 复检仍包含该 action，
+    因此删除未被验证 -> deleted=False，verification_status='still_visible_in_registry'。
     """
     client = MagicMock()
     # _batch_execute 返回非空 response（_extract_rpc_bodies 会返回非空 bodies）
@@ -68,27 +67,29 @@ def test_payload_scheduled_rpc_accepted_but_not_deleted_state(monkeypatch):
         manage_tools, "_fetch_scheduled_registry",
         AsyncMock(return_value=(entries, {"ok": True})),
     )
-    # task_after_delete.task_state_id=3 (running) != 6 (deleted) → 不走 2035-2037
+    # task_after_delete.task_state_id=3 (running) != 6 (deleted) → 未达删除态
     monkeypatch.setattr(
         manage_tools, "_fetch_scheduled_task_by_id",
         AsyncMock(return_value=({"task_state_id": 3}, {})),
     )
-    # _extract_rpc_bodies 返回非空 → bodies 真值 → 2033 verification_status='rpc_accepted'
+    # _extract_rpc_bodies 返回非空 → bodies 真值 → RPC 接受
     monkeypatch.setattr(manage_tools, "_extract_rpc_bodies", lambda *a, **kw: ["body"])
 
     payload = asyncio.run(_cleanup_test_artifacts_payload(
         client, markers="codex-", target="scheduled", dry_run=False,
     ))
 
-    assert payload["deleted_scheduled_count"] == 1
-    assert payload["matched_scheduled_actions"][0]["deleted"] is True
-    assert payload["matched_scheduled_actions"][0]["verification_status"] == "rpc_accepted"
+    assert payload["matched_scheduled_count"] == 1
+    assert payload["deleted_scheduled_count"] == 0
+    assert payload["matched_scheduled_actions"][0]["deleted"] is False
+    assert payload["matched_scheduled_actions"][0]["verification_status"] == "still_visible_in_registry"
 
 
 def test_payload_scheduled_rpc_accepted_with_task_after_none(monkeypatch):
-    """dry_run=False + bodies 非空 + task_after_delete=None
-    → 覆盖 2038-2039 ``elif bodies: deleted = True``（task_after_delete 为 None 时
-    2035 的 ``if task_after_delete and ...`` 短路为 False）。
+    """dry_run=False + bodies 非空 + task_after_delete=None（删除后复检）。
+
+    RPC 已接受，但 registry 复检仍包含该 action -> 删除未被验证，
+    deleted=False，verification_status='still_visible_in_registry'。
     """
     client = MagicMock()
     client._batch_execute = AsyncMock(return_value=SimpleNamespace(text='["wrb.fr","Q4Gw3c","body"]'))
@@ -98,7 +99,7 @@ def test_payload_scheduled_rpc_accepted_with_task_after_none(monkeypatch):
         manage_tools, "_fetch_scheduled_registry",
         AsyncMock(return_value=(entries, {"ok": True})),
     )
-    # task_after_delete=None → 2035 条件短路
+    # task_after_delete=None → 按 id 复检不可读
     monkeypatch.setattr(
         manage_tools, "_fetch_scheduled_task_by_id",
         AsyncMock(return_value=(None, {})),
@@ -109,8 +110,8 @@ def test_payload_scheduled_rpc_accepted_with_task_after_none(monkeypatch):
         client, markers="codex-", target="scheduled", dry_run=False,
     ))
 
-    assert payload["matched_scheduled_actions"][0]["deleted"] is True
-    assert payload["matched_scheduled_actions"][0]["verification_status"] == "rpc_accepted"
+    assert payload["matched_scheduled_actions"][0]["deleted"] is False
+    assert payload["matched_scheduled_actions"][0]["verification_status"] == "still_visible_in_registry"
 
 
 # ===========================================================================
