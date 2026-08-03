@@ -16,7 +16,7 @@ classifiers = [
 ]
 dependencies = [
     "gemini-webapi>=2.0.0,<3",
-    "mcp>=1.28.0,<2",
+    "mcp>=1.28.0,<3",
     "orjson>=3.11.7,<4",
 ]
 
