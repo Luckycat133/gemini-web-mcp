@@ -166,11 +166,11 @@ Target design:
 - both intended server entrypoints have package-install smoke tests;
 - optional system tools such as `ffprobe` are detected and reported as optional capabilities.
 
-### 9. CI does not yet verify the installed product
+### 9. CI must verify the installed product
 
-The current workflow primarily runs pytest and builds distributions. A large unit suite does not prove that the wheel contains required files, entrypoints start, profiles register the intended tools, or a real MCP handshake succeeds.
+The workflow separates source checks from installed-product checks. A large unit suite alone does not prove that the wheel contains required files, entrypoints start, profiles register the intended tools, or a real MCP handshake succeeds.
 
-Target CI layers:
+Required CI layers:
 
 - format/lint/type checks;
 - unit and behavioral tests;

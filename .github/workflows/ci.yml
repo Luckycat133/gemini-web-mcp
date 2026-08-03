@@ -9,15 +9,61 @@ on:
 permissions:
   contents: read
 
+env:
+  GEMINI_AUTO_REFRESH: "false"
+  PIP_DISABLE_PIP_VERSION_CHECK: "1"
+
 jobs:
+  lint:
+    name: Ruff and repository metadata
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install lint environment
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[all,dev]"
+      - name: Ruff — syntax, imports, and undefined names
+        run: python -m ruff check src tests scripts
+      - name: Dependency and version contracts
+        run: |
+          python scripts/check_dependency_contract.py
+          python scripts/check_version_consistency.py
+
+  type:
+    name: Mypy
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install type-check environment
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[all,dev]"
+      - name: Mypy — runtime and maintenance scripts
+        run: python -m mypy src scripts
+
   test:
+    name: Tests / Python ${{ matrix.python-version }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
         python-version: ["3.11", "3.12"]
-
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -26,10 +72,122 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
           cache: pip
-      - name: Install
-        run: python -m pip install --upgrade pip && python -m pip install -e ".[all,dev]"
-      - name: Test
-        run: pytest -q
-      - name: Build distributions
-        if: matrix.python-version == '3.12'
-        run: python -m build
+      - name: Install test environment
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[all,dev]"
+      - name: Run complete offline suite
+        run: python -m pytest -q
+
+  contracts:
+    name: Targeted architecture contracts
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install contract environment
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[all,dev]"
+      - name: Run targeted architecture contract checklist
+        run: python scripts/run_contract_checklist.py
+
+  protocol:
+    name: Profile and MCP stdio smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install protocol smoke environment
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[all,dev]"
+      - name: Snapshot representative full and compact profiles
+        run: python scripts/smoke_profiles.py
+      - name: Initialize and list tools over real MCP stdio
+        run: python scripts/smoke_mcp_protocol.py
+
+  skills:
+    name: Agent Skill validation and mirror parity
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install project and pinned reference validator
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[all,dev]"
+          python -m pip install "skills-ref @ git+https://github.com/agentskills/agentskills.git@38a2ff82958afee88dadf4831509e6f7e9d8ef4e#subdirectory=skills-ref"
+      - name: Validate public and Codex skill copies
+        run: |
+          skills-ref validate .agents/skills/gemini-web-mcp-development
+          skills-ref validate .codex/skills/gemini-web-mcp-development
+          skills-ref validate .agents/skills/gemini-web-mcp
+          skills-ref validate .codex/skills/gemini-web-mcp
+      - name: Compare mirrored skill bytes
+        run: |
+          diff -ru .agents/skills/gemini-web-mcp-development .codex/skills/gemini-web-mcp-development
+          diff -ru .agents/skills/gemini-web-mcp .codex/skills/gemini-web-mcp
+      - name: Run repository skill contracts
+        run: python -m pytest -q tests/test_development_skill.py tests/test_skill_packaging.py
+
+  package:
+    name: Build and clean-wheel smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install build environment
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[all,dev]"
+      - name: Build wheel, sdist, and standalone skill
+        run: python scripts/package_release.py --outdir dist
+      - name: Verify generated asset names and wheel metadata
+        run: python scripts/check_version_consistency.py --artifacts-dir dist
+      - name: Install wheel in a clean environment
+        run: |
+          python -m venv "$RUNNER_TEMP/gemini-wheel-smoke"
+          "$RUNNER_TEMP/gemini-wheel-smoke/bin/python" -m pip install --upgrade pip
+          "$RUNNER_TEMP/gemini-wheel-smoke/bin/python" -m pip install dist/*.whl
+          "$RUNNER_TEMP/gemini-wheel-smoke/bin/python" -m pip check
+      - name: Smoke installed resources, entrypoints, and profiles
+        run: |
+          cd "$RUNNER_TEMP"
+          "$RUNNER_TEMP/gemini-wheel-smoke/bin/python" "$GITHUB_WORKSPACE/scripts/smoke_installed_wheel.py"
+          "$RUNNER_TEMP/gemini-wheel-smoke/bin/python" "$GITHUB_WORKSPACE/scripts/smoke_profiles.py"
+      - name: Smoke installed MCP stdio protocol
+        run: |
+          cd "$RUNNER_TEMP"
+          "$RUNNER_TEMP/gemini-wheel-smoke/bin/python" "$GITHUB_WORKSPACE/scripts/smoke_mcp_protocol.py"
+      - name: Upload verified distributions for inspection
+        uses: actions/upload-artifact@v4
+        with:
+          name: distributions-${{ github.sha }}
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 7

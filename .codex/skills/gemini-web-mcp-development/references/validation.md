@@ -149,29 +149,26 @@ Repeat for `model`, `history`, `account-read`, `scheduled-admin`, and `all` when
 For packaging or release work:
 
 ```bash
-rm -rf dist build *.egg-info
-./.venv/bin/python -m build
+./.venv/bin/python scripts/package_release.py --outdir dist
 python -m venv /tmp/gemini-web-mcp-wheel-test
 /tmp/gemini-web-mcp-wheel-test/bin/pip install dist/*.whl
 /tmp/gemini-web-mcp-wheel-test/bin/pip check
-/tmp/gemini-web-mcp-wheel-test/bin/python - <<'PY'
-import importlib.metadata
-import src.server
-import src.skill_server
-print(importlib.metadata.version("gemini-mcp-server"))
-PY
+/tmp/gemini-web-mcp-wheel-test/bin/python scripts/smoke_installed_wheel.py
+/tmp/gemini-web-mcp-wheel-test/bin/python scripts/smoke_profiles.py
+/tmp/gemini-web-mcp-wheel-test/bin/python scripts/smoke_mcp_protocol.py
 ```
 
-Then start/list tools through the installed console entrypoints. Check that package data such as default prompts, docs/evaluations intended for distribution, and skill resources actually exist in the wheel/sdist.
+Run the three smoke scripts from outside the source checkout when verifying a clean wheel. They check installed origin and resources, exact representative profile names, both console entrypoints, and real MCP `initialize`/`tools/list` handshakes without live Gemini calls.
 
 ## Target Static Gates
 
 Once the dependencies are declared in the development extra, CI should run:
 
 ```bash
-python -m ruff check src tests
-python -m mypy src
+python -m ruff check src tests scripts
+python -m mypy src scripts
 python -m pytest -q
+python scripts/run_contract_checklist.py
 python -m build
 python -m pip check
 ```

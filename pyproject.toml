@@ -24,7 +24,12 @@ dependencies = [
 browser = ["browser-cookie3>=0.19.0,<1"]
 image = ["pillow>=10.0.0,<13"]
 all = ["browser-cookie3>=0.19.0,<1", "pillow>=10.0.0,<13"]
-dev = ["build>=1.2.0", "pytest>=8.0.0"]
+dev = [
+    "build>=1.2.0",
+    "mypy>=2.0.0,<3",
+    "pytest>=8.0.0",
+    "ruff>=0.16.0,<1",
+]
 
 [project.scripts]
 gemini-mcp-server = "src.server:main"
@@ -44,6 +49,12 @@ src = ["data/*.json"]
 [tool.ruff]
 line-length = 120
 target-version = "py311"
+
+[tool.ruff.lint]
+# Start with correctness rules that the existing tree can enforce without a
+# broad behavior-neutral rewrite. Style/modernization families can be enabled
+# incrementally in dedicated maintenance changes.
+select = ["E4", "E7", "E9", "F"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
