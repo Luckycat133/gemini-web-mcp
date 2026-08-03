@@ -1,53 +1,75 @@
 # Validation and Release Evidence
 
-Load this reference when implementing a bug fix, changing a tool contract, refactoring shared services, modifying package/release files, or preparing a release.
+Load this reference when fixing a bug, changing a tool contract, refactoring shared services, modifying package/release files, changing a skill, or preparing a release.
 
 ## Validation Principle
 
-Use the cheapest deterministic test that proves the changed contract, then add broader checks. Unit-test reverse-engineered parsers with fixtures; reserve live Gemini calls for explicit canary/manual verification.
+Use the cheapest deterministic test that proves the changed contract, then add the broader repository gates appropriate to the affected boundary.
+
+Unit-test reverse-engineered parsing with sanitized fixtures. Keep PR and normal CI offline. Report live Gemini observations only when the separately gated canary or an explicitly authorized manual workflow actually ran.
 
 ## Change Matrix
 
 | Change | Minimum evidence |
 | --- | --- |
-| Pure helper/parser | focused unit tests, success/empty/malformed fixtures |
-| Client lifecycle | real-suspension concurrency tests, reset/failure/retry tests |
-| Session behavior | create/send/list/reset-one/reset-all/not-found/collision tests |
-| Tool schema or registration | call test, annotation/profile registration test, manifest/evaluation update |
-| Shared service extraction | characterization tests plus primary/compact parity tests |
-| Media/artifact | URI/file/empty/timeout/save-failure tests and metadata verification |
-| Private RPC adapter | payload builder tests, parser fixtures, rejection/shape-drift tests, read-back verification |
-| Package data/entrypoint | wheel/sdist build, clean install, import/start smoke |
-| Version/release | metadata/tag/docs/asset consistency check |
-| Public onboarding/client config | parse every checked-in config, real auth-free stdio text call, credential stripping, clean `uvx` wheel install |
-| MCP SDK migration | protocol discovery, list-tools schema snapshots, representative calls across clients |
-| Skill change | `skills-ref validate`, copy parity, repository test |
+| Pure helper/parser | focused unit tests; success, empty, malformed/rejected fixtures where applicable |
+| MCP compatibility text | text assertion plus `_meta.domain_result` code/state assertion; contradictory-code regression |
+| Client lifecycle | real-suspension concurrency, cancellation, reset, failure, retry, and retirement tests |
+| Session behavior | create/send/list/reset-one/reset-all/not-found/collision/concurrent-send tests |
+| Tool schema/registration | representative call, annotations/profile test, golden schema review, manifest/docs update |
+| Shared service extraction | characterization tests plus primary/compact semantic parity |
+| Media/artifact | URI/local/queued/empty/timeout/save-failure tests and metadata/backend verification |
+| Long operation/stream | delta/cumulative/mixed normalization, cancellation, timeout, continuation and terminal-state tests |
+| Private RPC adapter | registry/payload tests, parser fixtures, rejection/shape-drift, mutation read-back verification |
+| Package resource/entrypoint | wheel/sdist build, clean install outside checkout, import/start/profile/resource smoke |
+| Version/release | metadata/tag/docs/asset consistency plus downloaded-asset revalidation |
+| Public onboarding/config | parse examples, auth-free stdio call, credential stripping, isolated `uvx` install, artifact verification |
+| MCP SDK/protocol | discovery, modern/legacy negotiation, list/call, generated schemas, structured output golden |
+| Live canary | refusal path offline; schema-valid sanitized report and explicit live evidence only when opted in |
+| Development skill | `skills-ref`, mirror parity, freshness assertions, direct repository installation |
 
-## Current Repository Baseline
+## Maintained Repository Gates
 
-Use the checkout's virtual environment and commands documented by the repository. The current maintained baseline is:
+Use the checkout's environment. Run focused tests first, then:
 
 ```bash
-./.venv/bin/python -m pytest -q
-./.venv/bin/python -m py_compile \
-  src/tools/annotations.py src/tools/chat.py src/tools/media.py \
-  src/tools/file.py src/tools/research.py src/tools/prompts.py \
-  src/tools/manage.py src/server.py src/skill_server.py \
-  src/client_wrapper.py src/thinking_client.py src/constants.py
+python -m ruff check src tests scripts
+python -m mypy src scripts
+python -m pytest -q
+python scripts/run_contract_checklist.py
 git diff --check
 ```
 
-Run targeted tests before the full suite, for example:
+The project development extra declares the required lint/type/test/build dependencies. Do not describe Ruff or Mypy as future gates.
 
-```bash
-./.venv/bin/python -m pytest -q tests/test_client_manager.py
-./.venv/bin/python -m pytest -q tests/test_chat_session_lifecycle.py
-./.venv/bin/python -m pytest -q tests/test_media_tools.py tests/test_tool_helpers.py
+CI additionally separates representative contract, protocol, installed-product, skill, and release checks so one failure is diagnosable without reading one monolithic job.
+
+## Focused Regression Pattern
+
+A valid bug fix should prove all relevant layers:
+
+```text
+input / triggering condition
+-> shared service or adapter result
+-> domain code and operation state
+-> compatibility text
+-> structured MCP content / _meta.domain_result
+-> state or artifact side effects
 ```
+
+For an MCP failure, assert at minimum:
+
+```python
+assert content.text.startswith(expected_error_code)
+assert content.meta["domain_result"]["error"]["code"] == expected_error_code
+assert content.meta["domain_result"]["meta"]["operation_state"] == expected_state
+```
+
+When preserving legacy prose, it need not start with a code. But if it explicitly advertises a known domain code, that code must match the structured result.
 
 ## Async Concurrency Test Pattern
 
-A valid initialization test must force scheduling while initialization owns the coordinator:
+A lifecycle test must force scheduling while initialization owns the shared attempt:
 
 ```python
 started = asyncio.Event()
@@ -69,47 +91,57 @@ await asyncio.gather(first, *others)
 assert calls == 1
 ```
 
-Also test failure followed by retry and reset during initialization. Avoid a fake async function that never awaits; it cannot reveal event-loop blocking.
+Also test:
 
-## Session Contract Tests
+- one waiting caller cancels without cancelling the shared attempt;
+- initialization failure permits retry;
+- reset during initialization rejects stale completion;
+- reset retires/ closes the detached client;
+- another event loop does not silently await an incompatible task.
 
-At minimum assert:
+A fake async function with no internal `await` cannot reveal event-loop blocking.
 
-- IDs remain unique after arbitrary deletion and creation order;
-- unknown ID changes no state;
-- `chat(session_id=unknown)` returns not-found rather than one-shot fallback;
-- reset-one preserves other sessions and the client;
-- reset-all is explicit and deterministic;
-- expiry/cleanup behavior is consistent between primary and compact adapters;
-- concurrent create/send/list/reset operations do not corrupt the store.
+## Session and Chat Contract Tests
+
+At minimum cover:
+
+- IDs remain unique after arbitrary deletion/creation order;
+- unknown send/reset changes no state and returns `SESSION_NOT_FOUND`;
+- `chat(session_id=unknown)` never becomes a one-shot request;
+- reset-one preserves other sessions and the current client;
+- reset-all is explicit;
+- normal and streaming sends serialize per session;
+- async reset waits for an in-flight send;
+- expiry and cleanup lifecycle agree across adapters;
+- valid-session authentication/network/upstream errors retain their real code in text and structured metadata.
 
 ## Primary/Compact Parity
 
-Create table-driven tests that call shared services or both adapters and compare:
+Use table-driven tests or shared fixtures to compare:
 
-- result/error code;
-- operation state;
-- normalized model and backend evidence;
-- artifact IDs/URIs/paths;
-- session identifiers and state changes;
-- pagination metadata;
-- mutation verification status.
+- `ok`, error code, retryability, and operation state;
+- normalized model and requested/effective/observed backend;
+- session IDs, lifecycle state, and cleanup observation;
+- artifact IDs, kinds, URIs, paths, and verification;
+- pagination/count/truncation metadata;
+- mutation verification status;
+- long-operation continuation IDs.
 
-Text formatting may differ; domain semantics should not.
+Text formatting may differ, except it must not contradict these semantics.
 
-## Parser and RPC Fixtures
+## RPC and Parser Fixtures
 
-Store sanitized fixtures representing:
+For every registered contract retain sanitized fixtures for:
 
 - normal success;
-- empty result;
-- permission/account rejection;
+- valid empty response;
+- provider/account rejection;
 - partial response;
-- malformed JSON/body;
-- unknown fields and reordered optional fields;
-- a changed shape that should return `UPSTREAM_CHANGED` rather than silently empty data.
+- malformed envelope/body;
+- unknown/reordered optional fields;
+- changed shape that must report drift instead of silently returning empty data.
 
-Payload builder tests should compare semantic JSON/list structures, not fragile whitespace.
+Payload builder tests should compare semantic structures. Parser tests should identify transport, envelope, RPC, parser, and verification stage where possible.
 
 ## Multimodal Artifact Tests
 
@@ -117,40 +149,50 @@ For each modality cover:
 
 1. remote URI only;
 2. successful local save;
-3. multiple artifacts;
-4. missing media despite successful text response;
-5. download/save failure;
-6. timeout/queued state;
-7. metadata probe available and unavailable;
-8. requested/effective/observed backend mismatch.
+3. multiple artifacts and stable identities;
+4. input artifact versus output artifact;
+5. missing media despite successful response text;
+6. queued/running state;
+7. timeout/cancellation;
+8. download/save/verification failure;
+9. metadata probes available and unavailable;
+10. requested/request/effective/observed backend mismatch;
+11. primary/compact artifact identity parity.
 
-Use temporary directories. Verify file existence, non-zero size, and modality metadata when a local fixture/tool is available.
+Use temporary directories. Verify file existence, non-zero size, MIME, dimensions for images, and duration for audio/video when the fixture/tool is available.
 
-## Tool/Profile Contract Checks
+## Stream and Long-Operation Tests
 
-For representative profiles, list tools and snapshot names plus important schemas/annotations. Do not snapshot volatile descriptions unless wording is part of the contract.
+Current stream tools collect upstream chunks into one MCP result. Assert:
+
+- `delivery=collected`;
+- delta chunks append exactly once;
+- cumulative chunks emit only new suffixes;
+- duplicates and stale cumulative chunks do not duplicate text;
+- mixed semantics are reported;
+- caller cancellation propagates and closes the upstream iterator;
+- timeout cannot be replaced by a cancellation-suppressing late result;
+- Deep Research distinguishes plan/running/completed/timed-out and retains continuation identifiers.
+
+## Tool, Profile, and Protocol Contracts
+
+Representative primary profiles and the compact surface have reviewed golden tool names and schema fingerprints. When registration changes:
+
+1. list tools in source tests;
+2. inspect the intended diff in the golden fixture;
+3. validate generated `outputSchema` against actual `structuredContent`;
+4. run both modern (`2026-07-28`) and legacy (`2025-11-25`) client paths;
+5. run real stdio list/call smoke for both installed entrypoints;
+6. update manifest/docs/examples only for intentional changes.
+
+Do not re-baseline a golden file merely to make CI pass.
+
+## Package and Installed-Product Smoke
+
+For packaging/release work:
 
 ```bash
-GEMINI_TOOLS=core ./.venv/bin/python - <<'PY'
-import asyncio
-from src.server import mcp
-
-async def main():
-    tools = await mcp.list_tools()
-    print([tool.name for tool in tools])
-
-asyncio.run(main())
-PY
-```
-
-Repeat for `model`, `history`, `account-read`, `scheduled-admin`, and `all` when those surfaces are changed.
-
-## Package Smoke
-
-For packaging or release work:
-
-```bash
-./.venv/bin/python scripts/package_release.py --outdir dist
+python scripts/package_release.py --outdir dist
 python -m venv /tmp/gemini-web-mcp-wheel-test
 /tmp/gemini-web-mcp-wheel-test/bin/pip install dist/*.whl
 /tmp/gemini-web-mcp-wheel-test/bin/pip check
@@ -159,33 +201,38 @@ python -m venv /tmp/gemini-web-mcp-wheel-test
 /tmp/gemini-web-mcp-wheel-test/bin/python scripts/smoke_mcp_protocol.py
 ```
 
-Run the three smoke scripts from outside the source checkout when verifying a clean wheel. They check installed origin and resources, exact representative profile names, all console entrypoints, a real auth-free text tool call, and MCP `initialize`/`tools/list` handshakes without live Gemini calls.
+Run clean-wheel smoke outside the source checkout. It must verify installed origin, resources, all console entrypoints, representative profiles, and an auth-free MCP text call.
 
-Also prove the public one-command mechanism in a separate uv-managed environment:
+Also prove the public one-command path in isolation:
 
 ```bash
 cd /tmp
 uvx --from /absolute/path/to/dist/gemini_mcp_server-*.whl gemini-mcp-onboarding
 ```
 
-The JSON must report `mode=offline`, `credentials_accessed=false`, `text_tool=gemini_get_tool_manifest`, and a non-empty negotiated protocol version. This is installation/protocol evidence, not live Gemini evidence.
+Offline onboarding should report:
 
-## Target Static Gates
+- `mode=offline`;
+- `credentials_accessed=false`;
+- the auth-free manifest text tool;
+- a non-empty negotiated protocol version;
+- no live Gemini request.
 
-Once the dependencies are declared in the development extra, CI should run:
+A live image example succeeds only when the returned local artifact stays inside the requested output directory and has path/existence/non-zero/MIME/dimensions plus structured verification evidence.
 
-```bash
-python -m ruff check src tests scripts
-python -m mypy src scripts
-python -m pytest -q
-python scripts/run_contract_checklist.py
-python -m build
-python -m pip check
-```
+## Version and Release Checks
 
-Do not claim these gates ran if the current checkout does not install them. Add them to `pyproject.toml` and CI in the same work package that makes them required.
+`pyproject.toml` is the persisted version source. Use repository scripts to verify:
 
-## Skill Validation
+- runtime version consumers use package metadata;
+- tag equals the derived release tag;
+- wheel/sdist/skill names and wheel metadata agree;
+- public source-install examples use the canonical evergreen source unless a valid tagged asset is intentionally documented;
+- stale release assets are rejected;
+- historical changelog entries are not rewritten;
+- downloaded release assets pass the same install/profile/protocol/onboarding checks before publication.
+
+## Skill Validation and Freshness
 
 ```bash
 skills-ref validate .agents/skills/gemini-web-mcp-development
@@ -196,75 +243,66 @@ npx --yes skills@1.5.21 add "$PWD" \
   --skill gemini-web-mcp-development --agent codex --copy --yes
 ```
 
-Keep `SKILL.md` below 500 lines and detailed guidance in focused one-level `references/` files.
+Skill contract tests should verify:
+
+- both mirrors contain the same files and bytes;
+- `SKILL.md` remains below 500 lines with one-level references;
+- no machine-specific path is introduced;
+- current foundational modules and P3 direction are named;
+- completed P0-P2 work is not described as absent current architecture;
+- maintained validation commands match configured tooling.
 
 ## Live Compatibility Canary
 
-Live tests must be opt-in and use a dedicated test account. A canary should record only diagnostic metadata needed to reproduce drift:
+Normal tests and PR CI stay offline. The maintained canary requires every explicit opt-in and a dedicated environment/account.
 
-- repository commit;
-- Python, MCP SDK, and `gemini-webapi` versions;
-- locale and Web build label when available;
-- requested capability/model;
-- terminal operation state;
-- parser/verification stage;
-- sanitized error code.
-
-The maintained P2.2 canary requires an explicit CLI flag plus repository enable
-and dedicated-account variables, runs in the `gemini-live-canary` environment,
-and only probes the centralized read-only RPC contracts. Persisted diagnostics
-must validate against `compatibility/live-canary-report.schema.json`; do not add
-raw responses, exception messages, cookies, session identifiers, chat/account
-content, titles, or URLs. Parser/envelope drift opens or updates the single
-actionable compatibility issue before the job fails. Record fixture-only work as
-not live-observed.
-
-Candidate canary workflows:
-
-1. text call with each supported alias;
-2. one image generation and artifact verification;
-3. short media request where account capability permits it;
-4. Deep Research plan/start/status using a fixed harmless query;
-5. history metadata list/read on canary-created content;
-6. scheduled-action create/read/delete with a unique marker;
-7. notebook list/move/read-back on canary content.
-
-The live workflow should clean up its own marked artifacts and open/update an actionable compatibility issue on sustained failure.
-
-Run the offline canary contract with:
+Offline validation:
 
 ```bash
 python -m pytest -q tests/test_live_canary.py tests/test_ci_contracts.py
 python scripts/run_live_canary.py --output /tmp/gemini-web-canary.json
 ```
 
-The second command must refuse live access unless every opt-in control is set.
+Without all opt-ins, the CLI must refuse live access. When live execution is deliberately enabled, persisted diagnostics must validate against `compatibility/live-canary-report.schema.json` and must not contain raw responses, exception messages, cookies, session identifiers, chat/account content, titles, or URLs.
+
+Report stages should distinguish:
+
+- dependency/import/setup;
+- client initialization/account availability;
+- transport/envelope;
+- RPC rejection;
+- parser completion or shape drift;
+- capability result.
+
+Fixture-only work must be labeled not live-observed.
 
 ## Release Checklist
 
-- version source, tag, wheel metadata, documented tagged URLs (if any), canonical Git source, changelog, and asset names agree;
-- unit/behavior/parity tests pass;
-- static gates pass where configured;
-- wheel/sdist clean-install smoke passes;
-- isolated `uvx` onboarding installs the wheel and calls the auth-free text tool;
-- all checked-in client examples parse and preserve the intended profile/secret boundary;
-- MCP list/call smoke passes for representative profiles;
-- both skills validate and mirrored copies match;
-- the development skill installs directly from the repository with the pinned CLI command;
-- release artifacts contain expected files;
+- semantic version decision and compatibility policy are explicit;
+- version/tag/metadata/docs/assets agree;
+- Ruff, Mypy, unit, contract, and `git diff --check` pass;
+- representative schema/profile/protocol tests pass;
+- clean wheel/sdist and installed resources/entrypoints pass;
+- isolated `uvx` onboarding calls the auth-free text tool;
+- all checked-in client examples parse;
+- both runtime and development skills validate and mirrors match;
+- development skill installs directly from the repository;
+- downloaded release assets are independently revalidated;
 - live canary status is reported separately from offline CI;
-- release notes distinguish implemented contract, expected routing, and observed live behavior.
+- release notes distinguish implemented contract, expected routing, fixture evidence, and live observation.
 
 ## PR Evidence Template
 
 ```text
-Contract/defect:
+Contract or defect:
+Root cause:
 Implementation boundary:
 Primary surface impact:
 Compact surface impact:
-Structured result/artifact impact:
-Tests run:
-Package/protocol checks run:
+Structured result / artifact impact:
+Focused tests:
+Static / repository checks:
+Package / protocol / onboarding checks:
 Live Gemini observations:
 Known uncertainty / next dependency:
 ```
