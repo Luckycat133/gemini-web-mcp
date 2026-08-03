@@ -38,6 +38,8 @@ from ..infrastructure.rpc_parsers import (
 )
 from ..services.compatibility import sanitized_error_code, sanitized_error_type
 from ..services.gems import (
+    _find_gem_by_id as registered_find_gem_by_id,
+    _gem_field as registered_gem_field,
     create_gem as create_gem_service,
     delete_gem as delete_gem_service,
     iter_gem_values as registered_iter_gems,
@@ -1296,6 +1298,8 @@ _format_tool_manifest_markdown = format_registered_tool_manifest
 _web_capabilities_payload = registered_web_capabilities_payload
 _format_web_capabilities_markdown = format_registered_web_capabilities
 _iter_gem_values = registered_iter_gems
+_find_gem_by_id = registered_find_gem_by_id
+_gem_field = registered_gem_field
 
 
 def register_manage_tools(mcp: MCPServer, layers: list[str] | set[str] | tuple[str, ...] | None = None):
