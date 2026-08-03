@@ -52,7 +52,7 @@ def test_codex_configuration_parses_and_forwards_host_secrets() -> None:
 
 
 def test_claude_desktop_configuration_uses_explicit_local_placeholders() -> None:
-    _, server = _server_from_json("claude-desktop.json", "mpServers")
+    _, server = _server_from_json("claude-desktop.json", "mcpServers")
 
     _assert_primary_model_server(server)
     assert server["env"]["GEMINI_PSID"] == "REPLACE_WITH_SECURE_1PSID"
