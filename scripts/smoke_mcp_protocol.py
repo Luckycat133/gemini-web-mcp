@@ -11,8 +11,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-from mcp import ClientSession, StdioServerParameters
-from mcp.client.stdio import stdio_client
+from mcp import Client, StdioServerParameters, stdio_client
 
 if __package__:
     from .smoke_profiles import COMPACT_TOOLS, PRIMARY_PROFILE_TOOLS
@@ -54,6 +53,7 @@ async def _handshake(
     profile: str,
     expected_tools: frozenset[str],
     cwd: Path,
+    mode: str,
 ) -> dict[str, object]:
     executable = _resolve_executable(command)
     parameters = StdioServerParameters(
@@ -62,23 +62,38 @@ async def _handshake(
         cwd=cwd,
     )
     async with asyncio.timeout(30):
-        async with stdio_client(parameters) as (reader, writer):
-            async with ClientSession(reader, writer) as session:
-                initialized = await session.initialize()
-                listed = await session.list_tools()
+        async with Client(stdio_client(parameters), mode=mode, cache=None) as client:
+            listed = await client.list_tools()
+            actual_tools = frozenset(tool.name for tool in listed.tools)
+            representative_name = "gemini_get_tool_manifest" if "gemini_get_tool_manifest" in actual_tools else "doctor"
+            representative_arguments = (
+                {"response_format": "json"} if representative_name == "gemini_get_tool_manifest" else {}
+            )
+            representative = await client.call_tool(representative_name, representative_arguments)
+            protocol_version = client.protocol_version
+            server_name = client.server_info.name if client.server_info is not None else None
 
-    actual_tools = frozenset(tool.name for tool in listed.tools)
     missing = sorted(expected_tools - actual_tools)
     unexpected = sorted(actual_tools - expected_tools)
     if missing or unexpected:
         raise RuntimeError(
             f"{command} protocol tool contract drifted; missing={missing}, unexpected={unexpected}"
         )
+    if representative.is_error or representative.result_type != "complete":
+        raise RuntimeError(
+            f"{command} representative call failed in {mode} mode: "
+            f"is_error={representative.is_error}, result_type={representative.result_type}"
+        )
+    if not isinstance(representative.structured_content, dict):
+        raise RuntimeError(f"{command} did not return MCP v2 structured content in {mode} mode")
     return {
         "command": command,
+        "mode": mode,
         "profile": profile,
-        "protocol_version": initialized.protocolVersion,
-        "server_name": initialized.serverInfo.name,
+        "protocol_version": protocol_version,
+        "server_name": server_name,
+        "representative_tool": representative_name,
+        "result_type": representative.result_type,
         "tools": len(actual_tools),
     }
 
@@ -86,20 +101,27 @@ async def _handshake(
 async def _run(primary_command: str, compact_command: str, profile: str) -> list[dict[str, object]]:
     with tempfile.TemporaryDirectory(prefix="gemini-protocol-smoke-") as directory:
         cwd = Path(directory)
-        return [
-            await _handshake(
-                primary_command,
-                profile=profile,
-                expected_tools=PRIMARY_PROFILE_TOOLS[profile],
-                cwd=cwd,
-            ),
-            await _handshake(
-                compact_command,
-                profile=profile,
-                expected_tools=COMPACT_TOOLS,
-                cwd=cwd,
-            ),
-        ]
+        results = []
+        for mode in ("auto", "legacy"):
+            results.extend(
+                [
+                    await _handshake(
+                        primary_command,
+                        profile=profile,
+                        expected_tools=PRIMARY_PROFILE_TOOLS[profile],
+                        cwd=cwd,
+                        mode=mode,
+                    ),
+                    await _handshake(
+                        compact_command,
+                        profile=profile,
+                        expected_tools=COMPACT_TOOLS,
+                        cwd=cwd,
+                        mode=mode,
+                    ),
+                ]
+            )
+        return results
 
 
 def main() -> None:

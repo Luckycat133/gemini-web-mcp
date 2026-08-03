@@ -54,7 +54,8 @@ For every non-trivial change:
 
 ## Current Repository Map
 
-- `src/server.py`: primary FastMCP entrypoint and profile-based registration.
+- `src/server.py`: primary MCPServer entrypoint and profile-based registration.
+- `src/adapters/mcp_sdk.py`: the single MCP Python SDK v2 and protocol-model import boundary.
 - `src/skill_server.py`: compact, low-token facade server. It currently duplicates substantial business logic and should progressively become an adapter over shared services.
 - `src/client_manager.py`, `client_wrapper.py`, `session_manager.py`, `remote_chat_cleanup_manager.py`, `cookie_manager.py`, `thinking_client.py`: client, session, lifecycle, authentication, and Gemini Web transport infrastructure.
 - `src/tools/`: primary tool modules. `manage.py` currently combines several domains and is a major refactor target.

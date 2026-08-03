@@ -1,0 +1,154 @@
+{
+  "format": 1,
+  "sdk_major": 2,
+  "surfaces": {
+    "compact": [
+      {
+        "annotations_sha256": "139076388a98d13d07bb3df5c31e17088f4e37e0af35e2d89a7d5b112ee0e214",
+        "input_schema_sha256": "4d59e27e805ae10b86ac976c88afc4a3d30da6e4cd9373e4dcf62938b13016d8",
+        "name": "account",
+        "output_schema_sha256": "b0307951a9a6a8a05cda5177fa611f201f6a82d36cd378c074bd2c4cf916319c"
+      },
+      {
+        "annotations_sha256": "99300d9e2937ba92c763822593cb3ba8ec634d1813f3ab37fad3d6d0432268f9",
+        "input_schema_sha256": "091d749a3352818ffb2eb309b3391e0553d0b7a9e49fafe79f859a276a7da9a2",
+        "name": "chat",
+        "output_schema_sha256": "193fff0ccd6623bb7c0c4609e4a150dae6290d0a52df2bf7a060617db64046ef"
+      },
+      {
+        "annotations_sha256": "bbca3f90a8f37a2e09188309470b131134c395dbc4eccad15de06d2c2f94f06a",
+        "input_schema_sha256": "c6d92ff240d03af38ca35552d246c653531f62265b522cf02c9b18804a913c32",
+        "name": "cleanup",
+        "output_schema_sha256": "20845a049f09ebca31463f1c83ecca230e47b6272131a0a8a8ab9d067e2c7255"
+      },
+      {
+        "annotations_sha256": "d72d3cb182e3d7fcf0b1c6782251eee772cdf2a99470e1a4bd6a006b5c8f4e25",
+        "input_schema_sha256": "a3988165065db9c8cce902b78b8a475732fd696edce56631fbd10fdcba3ecb1c",
+        "name": "cookie",
+        "output_schema_sha256": "424cce4d526314d1b00e41261d5b00a0079d04df120cd63c33d5273d39fd3ba3"
+      },
+      {
+        "annotations_sha256": "99300d9e2937ba92c763822593cb3ba8ec634d1813f3ab37fad3d6d0432268f9",
+        "input_schema_sha256": "310882a3a9183ac5608445c6aba4dee56c5aebd8f9a878222587af55aadf272b",
+        "name": "create",
+        "output_schema_sha256": "c40a6fff545524312dd4e529c51ac7cd310d11ca071bfceb8a39cd55c889e265"
+      },
+      {
+        "annotations_sha256": "ae78503371695cf7d7b89784165a967b2135219ecf6527f06a2c1c73d05c6ae6",
+        "input_schema_sha256": "1ce38aa8c9923cf90149292799b6b1e109f3461766f532e9c8b9c8f2292062a8",
+        "name": "doctor",
+        "output_schema_sha256": "8e2ead05f960700d445765e6e3439edae5cc3421d286baab25e51891c7b3d7fb"
+      },
+      {
+        "annotations_sha256": "99300d9e2937ba92c763822593cb3ba8ec634d1813f3ab37fad3d6d0432268f9",
+        "input_schema_sha256": "68ad131c3ad8ba5f97f25bf1adf88425e88fdaebc14d9b1d15f24ffe409803ee",
+        "name": "edit",
+        "output_schema_sha256": "776d3e93fe436d056231d4ef9b7a3f550af7bb6c26b7140eac5fba6db522265b"
+      },
+      {
+        "annotations_sha256": "bbca3f90a8f37a2e09188309470b131134c395dbc4eccad15de06d2c2f94f06a",
+        "input_schema_sha256": "4fabb523ccd499e6f73562627708378e63730b78383c64b070f923ca669cb7a1",
+        "name": "history",
+        "output_schema_sha256": "4776624b4de1ccb8f2bdfd73c701ccf6215fced8494667ce5bec646f7d78760e"
+      },
+      {
+        "annotations_sha256": "b15393126f12ebd7533afe7d31a1beb8938a1e37d0bb2a52c382aaba4373f265",
+        "input_schema_sha256": "2827a25f3caf28895d52cdd115fff903cdbd682562f30fdb3ba17ffa237ce891",
+        "name": "prompts",
+        "output_schema_sha256": "c48bba060c980c1b245be73c25a7ab37195af41e4f391ffe1721ee9c43f771e7"
+      },
+      {
+        "annotations_sha256": "bbca3f90a8f37a2e09188309470b131134c395dbc4eccad15de06d2c2f94f06a",
+        "input_schema_sha256": "be79aacc2c14e7b9fe793e79be42c30508355083d268db377ba2aa5c38e86c4e",
+        "name": "scheduled",
+        "output_schema_sha256": "ada7cc10a130959baed69dc9de97537953d0dd054ffa3ae5744cf6ea6c1a4e8e"
+      },
+      {
+        "annotations_sha256": "bbca3f90a8f37a2e09188309470b131134c395dbc4eccad15de06d2c2f94f06a",
+        "input_schema_sha256": "9432b28adfc5e7246152b3fc12ad489db7c90c3e599a1a2ee65227b179c9c4d1",
+        "name": "session",
+        "output_schema_sha256": "c3805d4d99092e9f4a1bb69def3c63b8146b38554d51f041b2a7026e3164eb45"
+      }
+    ],
+    "primary:model": [
+      {
+        "annotations_sha256": "99300d9e2937ba92c763822593cb3ba8ec634d1813f3ab37fad3d6d0432268f9",
+        "input_schema_sha256": "8ef97ca70b9db4b8ac51fcd6cea55924edb48c9eebb48ab85f83c6f031c0d4f7",
+        "name": "gemini_chat",
+        "output_schema_sha256": "0d97c655664258b74961419957f9263ee173804287ec3091e8af906549d7bca5"
+      },
+      {
+        "annotations_sha256": "99300d9e2937ba92c763822593cb3ba8ec634d1813f3ab37fad3d6d0432268f9",
+        "input_schema_sha256": "a9b2d1a2d04dc2d5987a6a121a163573807d4ce2971989aae5d5efa9469e40b9",
+        "name": "gemini_chat_stream",
+        "output_schema_sha256": "977c128d30df8f325efbed5ced605e05c7f49cf860371ebfee5f01d7a66efa76"
+      },
+      {
+        "annotations_sha256": "ae78503371695cf7d7b89784165a967b2135219ecf6527f06a2c1c73d05c6ae6",
+        "input_schema_sha256": "86fcd7caed53c5f6a903979db07f04bade0e5376c8e5cf4bc41d5081038ecba3",
+        "name": "gemini_doctor",
+        "output_schema_sha256": "2e996b8c1afabd7c465a3f03c6f10984efc70446b214f4c1e4734a6574f9fe12"
+      },
+      {
+        "annotations_sha256": "d72d3cb182e3d7fcf0b1c6782251eee772cdf2a99470e1a4bd6a006b5c8f4e25",
+        "input_schema_sha256": "6738827540e6d75334a55054b3a6f6bfe30628d6f17132684555817d5ce640dd",
+        "name": "gemini_get_cookie_from_browser",
+        "output_schema_sha256": "de385e21783dbc2908dce49cf0d3713134c0b3feb226325c86ddc39d251afdea"
+      },
+      {
+        "annotations_sha256": "ae78503371695cf7d7b89784165a967b2135219ecf6527f06a2c1c73d05c6ae6",
+        "input_schema_sha256": "b842f05240b9bb9a3ba79bb2fcca6fc11b97ffb459efef8b7512c8df41a1439f",
+        "name": "gemini_get_cookie_status",
+        "output_schema_sha256": "a0842f802fb05d352bf709762e4a02869050078cd5527d790f340c4a01faede4"
+      },
+      {
+        "annotations_sha256": "ae78503371695cf7d7b89784165a967b2135219ecf6527f06a2c1c73d05c6ae6",
+        "input_schema_sha256": "81ab60700fab42d073cb53d0646e7309f65ea66d4e50e2ff42bd78d6b06b6b4e",
+        "name": "gemini_get_tool_manifest",
+        "output_schema_sha256": "adf41c8249508a611f0e1beb1cf45c0fd19ad8e5bfb7da1b98eb1ecedadd6fe4"
+      },
+      {
+        "annotations_sha256": "ae78503371695cf7d7b89784165a967b2135219ecf6527f06a2c1c73d05c6ae6",
+        "input_schema_sha256": "51c5ef5709e38498b60fdad6ac3b0e2ec5578a82913a69403e0d7daed624aa99",
+        "name": "gemini_list_browser_cookie_profiles",
+        "output_schema_sha256": "74f894dcf0d987634fadb7c720d53da0458d23310b1f9fee32e6e24e2d9b55a8"
+      },
+      {
+        "annotations_sha256": "ae78503371695cf7d7b89784165a967b2135219ecf6527f06a2c1c73d05c6ae6",
+        "input_schema_sha256": "70ae73cc2e269428a9aac8cb33a3dfb143c183769f10110762f373abb1f56959",
+        "name": "gemini_list_sessions",
+        "output_schema_sha256": "54badddf73e42cf3e3d8c3f4fb8f4ef58b1262ef9115e8ccfeb0a3c1cceecb1a"
+      },
+      {
+        "annotations_sha256": "d72d3cb182e3d7fcf0b1c6782251eee772cdf2a99470e1a4bd6a006b5c8f4e25",
+        "input_schema_sha256": "e3ce632b327fcc1deb706c39260265eb59b514683802917c2e9871b96975e074",
+        "name": "gemini_reset",
+        "output_schema_sha256": "c246fe4bc80d4b12244bbb2bc044b6b9336af669dfc685b245cb0e3c108201af"
+      },
+      {
+        "annotations_sha256": "bbca3f90a8f37a2e09188309470b131134c395dbc4eccad15de06d2c2f94f06a",
+        "input_schema_sha256": "a1924294b00786bd68867a084327a36eaff5ee231b3faa9d68b7a79252ce8c1a",
+        "name": "gemini_reset_session",
+        "output_schema_sha256": "d77c3d1a7d4a7268c704877077abf6eb4182173d7368bad956805ebf3eeaaad9"
+      },
+      {
+        "annotations_sha256": "99300d9e2937ba92c763822593cb3ba8ec634d1813f3ab37fad3d6d0432268f9",
+        "input_schema_sha256": "25911a23ebd4a3fb5e68595c9920d5152ccaa223e4e1298628ed62aabae66f0a",
+        "name": "gemini_send_message",
+        "output_schema_sha256": "a3fd971094c2d88cb29d61983f649706801b18b6a0540772901099cd3754783e"
+      },
+      {
+        "annotations_sha256": "99300d9e2937ba92c763822593cb3ba8ec634d1813f3ab37fad3d6d0432268f9",
+        "input_schema_sha256": "e16a310f6e2a4a8f39c575c2421adfdc5def68b3bedcd20d0ebee8c81e6d5d2b",
+        "name": "gemini_send_message_stream",
+        "output_schema_sha256": "ffabd2acd20a25d670011d963b505eae6525bb957726b424a883c2b7d31ca361"
+      },
+      {
+        "annotations_sha256": "99300d9e2937ba92c763822593cb3ba8ec634d1813f3ab37fad3d6d0432268f9",
+        "input_schema_sha256": "575d603c87087bfaefc9bc0503af0c8b7bd5f3e004b1a3c8269f320909a5b895",
+        "name": "gemini_start_chat",
+        "output_schema_sha256": "2829e0fa10e205b81f8959594c234c41bfaaefeaca02dd94c665915f110c632c"
+      }
+    ]
+  }
+}

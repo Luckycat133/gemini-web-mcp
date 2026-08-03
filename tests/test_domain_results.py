@@ -8,8 +8,7 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
-from mcp.server.fastmcp import FastMCP
-from mcp.types import TextContent
+from src.adapters.mcp_sdk import MCPServer, TextContent
 
 import src.client_wrapper as client_wrapper
 import src.server as server
@@ -39,9 +38,8 @@ def _run(awaitable):
     return asyncio.run(awaitable)
 
 
-async def _call_primary(mcp: FastMCP, name: str, **kwargs: Any) -> list[TextContent]:
-    content, _structured = await mcp.call_tool(name, kwargs)
-    return content
+async def _call_primary(mcp: MCPServer, name: str, **kwargs: Any) -> list[TextContent]:
+    return (await mcp.call_tool(name, kwargs)).content
 
 
 def test_success_contract_is_json_safe_and_explicit():
@@ -216,7 +214,7 @@ def test_mcp_adapter_preserves_text_and_embeds_serializable_result():
 def test_unknown_session_has_identical_domain_code_across_adapters(monkeypatch):
     service = SessionService()
     monkeypatch.setattr(client_wrapper, "_session_manager", service)
-    primary = FastMCP("domain-parity")
+    primary = MCPServer("domain-parity")
     chat_tools.register_chat_tools(primary)
 
     async def run():
@@ -262,7 +260,7 @@ def test_invalid_image_is_typed_without_matching_legacy_emoji(monkeypatch):
         "validate_image_paths",
         lambda _paths: (False, [], "image path is invalid"),
     )
-    primary = FastMCP("invalid-argument")
+    primary = MCPServer("invalid-argument")
     chat_tools.register_chat_tools(primary)
 
     content = _run(_call_primary(primary, "gemini_chat", message="hello"))
@@ -273,17 +271,17 @@ def test_invalid_image_is_typed_without_matching_legacy_emoji(monkeypatch):
     assert payload["meta"]["operation_state"] == "failed"
 
 
-def test_fastmcp_serializes_domain_result_under_meta_alias(monkeypatch):
+def test_mcpserver_serializes_domain_result_under_meta_alias(monkeypatch):
     monkeypatch.setattr(
         chat_tools,
         "validate_image_paths",
         lambda _paths: (False, [], "invalid"),
     )
-    primary = FastMCP("meta-alias")
+    primary = MCPServer("meta-alias")
     chat_tools.register_chat_tools(primary)
 
-    _content, structured = _run(primary.call_tool("gemini_chat", {"message": "hello"}))
-    payload = structured["result"][0]["_meta"]["domain_result"]
+    result = _run(primary.call_tool("gemini_chat", {"message": "hello"}))
+    payload = result.structured_content["result"][0]["_meta"]["domain_result"]
 
     assert payload["error"]["code"] == "INVALID_ARGUMENT"
     assert payload["meta"]["operation_state"] == "failed"
@@ -316,7 +314,7 @@ def test_chat_success_records_requested_effective_and_verification_metadata(monk
         "parse_response",
         lambda _response, _model: [TextContent(type="text", text="done")],
     )
-    primary = FastMCP("success-metadata")
+    primary = MCPServer("success-metadata")
     chat_tools.register_chat_tools(primary)
 
     content = _run(
@@ -341,7 +339,7 @@ def test_auth_failure_is_typed_at_primary_chat_boundary(monkeypatch):
         "get_gemini_client",
         lambda: (_ for _ in ()).throw(_CodedError("NO_COOKIE", "PSID missing")),
     )
-    primary = FastMCP("auth-failure")
+    primary = MCPServer("auth-failure")
     chat_tools.register_chat_tools(primary)
 
     content = _run(_call_primary(primary, "gemini_chat", message="hello"))
@@ -370,7 +368,7 @@ def test_timeout_has_identical_retryable_state_across_chat_adapters(monkeypatch)
         monkeypatch.setattr(module, "initialize_client", noop_initialize)
         monkeypatch.setattr(module, "cleanup_due_remote_chats", noop_cleanup)
 
-    primary = FastMCP("timeout-parity")
+    primary = MCPServer("timeout-parity")
     chat_tools.register_chat_tools(primary)
 
     async def run():
@@ -392,7 +390,7 @@ def test_client_reset_exposes_typed_completed_state(monkeypatch):
 
     monkeypatch.setattr(server, "reset_client_async", noop_reset)
 
-    content = _run(server.mcp.call_tool("gemini_reset", {}))[0]
+    content = _run(server.mcp.call_tool("gemini_reset", {})).content
     payload = _payload(content[0])
 
     assert content[0].text == "✅ 客户端已重置"
@@ -403,7 +401,7 @@ def test_client_reset_exposes_typed_completed_state(monkeypatch):
 
 
 def test_chat_tool_names_remain_registered():
-    primary = FastMCP("tool-name-compatibility")
+    primary = MCPServer("tool-name-compatibility")
     chat_tools.register_chat_tools(primary)
 
     tools = _run(primary.list_tools())

@@ -19,7 +19,7 @@ initialize_client / cleanup_due_remote_chats，需 patch 这 3 个接缝 + 工�
 import asyncio
 from types import SimpleNamespace
 
-from mcp.server.fastmcp import FastMCP
+from src.adapters.mcp_sdk import MCPServer
 
 import src.tools.chat as chat_tools
 from src.session_manager import SessionData, SessionOperationResult
@@ -30,8 +30,7 @@ from src.session_manager import SessionData, SessionOperationResult
 
 
 async def _call_tool(mcp, name, **kwargs):
-    content, _structured = await mcp.call_tool(name, kwargs)
-    return content
+    return (await mcp.call_tool(name, kwargs)).content
 
 
 class _FakeChatClient:
@@ -105,7 +104,7 @@ def _patch_chat_client_env(monkeypatch, client, *, captured_schedule=None,
 
 
 def _make_mcp():
-    mcp = FastMCP("test")
+    mcp = MCPServer("test")
     chat_tools.register_chat_tools(mcp)
     return mcp
 

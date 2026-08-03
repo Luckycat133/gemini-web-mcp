@@ -15,6 +15,7 @@ _REQUIREMENT_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
 REQUIRED_IMPORTS = {
     "gemini_webapi": "gemini-webapi",
     "mcp": "mcp",
+    "mcp_types": "mcp-types",
     "orjson": "orjson",
 }
 
@@ -32,7 +33,8 @@ OPTIONAL_IMPORTS = {
 
 EXPECTED_REQUIREMENTS = {
     "gemini-webapi": "gemini-webapi>=2.0.0,<3",
-    "mcp": "mcp>=1.28.0,<2",
+    "mcp": "mcp>=2.0.0,<3",
+    "mcp-types": "mcp-types>=2.0.0,<3",
     "orjson": "orjson>=3.11.7,<4",
 }
 

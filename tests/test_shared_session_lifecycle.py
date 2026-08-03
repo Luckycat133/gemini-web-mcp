@@ -3,7 +3,7 @@
 import asyncio
 from types import SimpleNamespace
 
-from mcp.server.fastmcp import FastMCP
+from src.adapters.mcp_sdk import MCPServer
 
 import src.client_wrapper as client_wrapper
 import src.skill_server as skill_server
@@ -72,13 +72,12 @@ def _patch_adapter_environment(monkeypatch):
 
 
 async def _call_primary(mcp, name, **kwargs):
-    content, _structured = await mcp.call_tool(name, kwargs)
-    return content
+    return (await mcp.call_tool(name, kwargs)).content
 
 
 def test_primary_create_is_sendable_and_resettable_from_compact_adapter(monkeypatch):
     service, client, deleted_cids = _patch_adapter_environment(monkeypatch)
-    primary = FastMCP("primary-test")
+    primary = MCPServer("primary-test")
     chat_tools.register_chat_tools(primary)
 
     async def run():
@@ -108,7 +107,7 @@ def test_primary_create_is_sendable_and_resettable_from_compact_adapter(monkeypa
 
 def test_compact_create_is_sendable_and_resettable_from_primary_adapter(monkeypatch):
     service, client, deleted_cids = _patch_adapter_environment(monkeypatch)
-    primary = FastMCP("primary-test")
+    primary = MCPServer("primary-test")
     chat_tools.register_chat_tools(primary)
 
     async def run():

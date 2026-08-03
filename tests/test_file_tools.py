@@ -21,7 +21,7 @@ timeout 关键字），FakeClient 用 *args + **kwargs 捕获。包在 asyncio.w
 import asyncio
 from types import SimpleNamespace
 
-from mcp.server.fastmcp import FastMCP
+from src.adapters.mcp_sdk import MCPServer
 
 import src.tools.file as file_tools
 
@@ -32,8 +32,7 @@ import src.tools.file as file_tools
 
 
 async def _call_tool(mcp, name, **kwargs):
-    content, _structured = await mcp.call_tool(name, kwargs)
-    return content
+    return (await mcp.call_tool(name, kwargs)).content
 
 
 class _FakeFileClient:
@@ -88,7 +87,7 @@ def _patch_file_client_env(monkeypatch, client, *, captured_schedule=None,
 
 
 def _make_mcp():
-    mcp = FastMCP("test")
+    mcp = MCPServer("test")
     file_tools.register_file_tools(mcp)
     return mcp
 

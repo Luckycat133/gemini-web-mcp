@@ -22,7 +22,8 @@ python -m pytest -q                          # 全量离线测试套件
 python scripts/run_contract_checklist.py     # 稳定架构契约清单
 python scripts/check_dependency_contract.py  # 直接依赖 / optional extra 契约
 python scripts/smoke_profiles.py             # 代表 profile 完整工具名快照
-python scripts/smoke_mcp_protocol.py          # 两个 stdio 入口真实 initialize/list-tools
+python scripts/snapshot_mcp_v2_contract.py    # v2 工具名/schema/annotation golden 候选
+python scripts/smoke_mcp_protocol.py          # 两个 stdio 入口 auto/legacy 真实 list/call
 
 # 4. 本地跑服务（默认 core 工具面）
 GEMINI_TOOLS=core python -m src.server
@@ -76,6 +77,7 @@ python -m pytest -q
 python scripts/run_contract_checklist.py
 # 入口、profile、打包或协议敏感变更额外跑：
 python scripts/smoke_profiles.py
+python scripts/snapshot_mcp_v2_contract.py
 python scripts/smoke_mcp_protocol.py
 ```
 

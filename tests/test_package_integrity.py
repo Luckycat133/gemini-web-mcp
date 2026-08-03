@@ -30,6 +30,7 @@ def test_runtime_imports_have_direct_or_extra_dependency_intent():
         "browser_cookie3",
         "gemini_webapi",
         "mcp",
+        "mcp_types",
         "orjson",
     }
 

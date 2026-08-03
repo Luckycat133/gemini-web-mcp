@@ -4,7 +4,7 @@ import asyncio
 import logging
 from types import SimpleNamespace
 
-from mcp.server.fastmcp import FastMCP
+from src.adapters.mcp_sdk import MCPServer
 
 import src.skill_server as skill_server
 import src.tools.media as media_tools
@@ -257,15 +257,15 @@ def test_primary_and_compact_media_adapters_return_same_artifact_identity(monkey
         "schedule_remote_chat_cleanup_from_response",
         lambda *_args, **_kwargs: None,
     )
-    primary_mcp = FastMCP("artifact-parity-primary")
+    primary_mcp = MCPServer("artifact-parity-primary")
     media_tools.register_media_tools(primary_mcp)
 
     async def call_primary():
-        content, _structured = await primary_mcp.call_tool(
+        result = await primary_mcp.call_tool(
             "gemini_generate_media",
             {"prompt": "shared", "media_type": "image", "model": "flash"},
         )
-        return content
+        return result.content
 
     primary_content = asyncio.run(call_primary())
 

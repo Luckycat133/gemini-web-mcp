@@ -13,10 +13,9 @@ from pathlib import Path
 from typing import Any, Awaitable, Callable, Literal, Optional
 
 try:
-    from mcp.server.fastmcp import FastMCP
-    from mcp.types import TextContent
+    from src.adapters.mcp_sdk import MCPServer, TextContent
 except ImportError:
-    print("Error: mcp package required. Install with: pip install mcp fastmcp")
+    print('Error: MCP SDK v2 required. Install with: pip install "mcp>=2,<3"')
     exit(1)
 
 from . import __version__
@@ -141,8 +140,9 @@ MODEL_ALIASES = {
 
 MEDIA_TYPES = {"img": "image", "picture": "image", "photo": "image"}
 
-mcp = FastMCP(
-    "Gemini",
+mcp = MCPServer(
+    name="Gemini",
+    version=__version__,
     instructions=f"""
 # Gemini Skill (v{__version__})
 
