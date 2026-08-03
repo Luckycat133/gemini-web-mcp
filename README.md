@@ -156,15 +156,23 @@ python scripts/package_release.py --outdir dist
 Maintained baseline:
 
 ```bash
+./.venv/bin/python -m ruff check src tests scripts
+./.venv/bin/python -m mypy src scripts
 ./.venv/bin/python -m pytest -q
-./.venv/bin/python -m py_compile src/tools/annotations.py src/tools/chat.py src/tools/media.py src/tools/file.py src/tools/research.py src/tools/prompts.py src/tools/manage.py src/server.py src/skill_server.py src/client_wrapper.py src/thinking_client.py src/constants.py
+./.venv/bin/python scripts/run_contract_checklist.py
+./.venv/bin/python scripts/smoke_profiles.py
+./.venv/bin/python scripts/smoke_mcp_protocol.py
 git diff --check
 ```
 
 Skill packaging check:
 
 ```bash
-for path in .codex/skills/gemini-web-mcp .agents/skills/gemini-web-mcp; do
+for path in \
+  .agents/skills/gemini-web-mcp-development \
+  .codex/skills/gemini-web-mcp-development \
+  .agents/skills/gemini-web-mcp \
+  .codex/skills/gemini-web-mcp; do
   skills-ref validate "$path"
 done
 ```

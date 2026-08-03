@@ -304,7 +304,7 @@
 | 19.1 | `python -m build` | 生成 wheel + sdist |
 | 19.2 | `python scripts/package_release.py` | 生成 Codex skill zip |
 | 19.3 | 解压 wheel，检查 `src/data/prompts_default.json` 和两个 `console_scripts` | 包内资源与主/精简入口都在 |
-| 19.4 | wheel 安装到干净 venv，运行 `pip check` 和 `scripts/smoke_installed_wheel.py` | 两套入口可启动/列工具，且未从源码树误导入 |
+| 19.4 | wheel 安装到干净 venv，运行 `pip check`、`scripts/smoke_installed_wheel.py`、`scripts/smoke_profiles.py` 和 `scripts/smoke_mcp_protocol.py` | 两套入口可启动，代表 profile 工具名精确匹配，并完成真实 MCP initialize/list-tools，且未从源码树误导入 |
 
 ### 20. Evaluation
 

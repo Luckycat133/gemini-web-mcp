@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### CI and Release Gates
+- Split CI into separate Ruff, Mypy, Python 3.11/3.12 test, targeted contract, protocol smoke, Agent Skill, and installed-package jobs with pip caching and focused failure steps
+- Added a stable architecture contract checklist plus exact tool-name snapshots for six primary profiles and the compact surface
+- Added real MCP stdio `initialize`/`tools/list` smoke checks for both console entrypoints without Gemini credentials or live model calls
+- Added pinned `skills-ref` validation and byte parity checks for both development and user skill mirrors
+- Added clean-wheel resource/entrypoint/profile/protocol verification and a tag workflow that revalidates downloaded assets before creating a GitHub Release
+
 ### Dependency and Package Integrity
 - Declared `orjson` directly, bounded the tested `gemini-webapi`/MCP major lines, bounded optional browser/image extras, and removed the unused standalone `fastmcp` dependency
 - Added an AST-based dependency contract check so new runtime third-party imports cannot rely silently on transitive dependencies

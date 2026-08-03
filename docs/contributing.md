@@ -16,9 +16,13 @@ python -m venv .venv && . .venv/bin/activate
 pip install -e ".[all,dev]"
 
 # 3. 验证安装
-pytest -q                                   # 测试套件
-python -m py_compile src/server.py src/skill_server.py src/client_wrapper.py src/thinking_client.py src/constants.py src/tools/*.py
-python scripts/check_dependency_contract.py # 直接依赖 / optional extra 契约
+python -m ruff check src tests scripts       # 语法、导入与未定义名称
+python -m mypy src scripts                   # 运行时与维护脚本类型检查
+python -m pytest -q                          # 全量离线测试套件
+python scripts/run_contract_checklist.py     # 稳定架构契约清单
+python scripts/check_dependency_contract.py  # 直接依赖 / optional extra 契约
+python scripts/smoke_profiles.py             # 代表 profile 完整工具名快照
+python scripts/smoke_mcp_protocol.py          # 两个 stdio 入口真实 initialize/list-tools
 
 # 4. 本地跑服务（默认 core 工具面）
 GEMINI_TOOLS=core python -m src.server
@@ -62,12 +66,17 @@ mcp dev src/server.py
 - 测试文件放 `tests/test_*.py`，名字描述被测行为
 - 工具面变更要同时断言**工具注册**和 **MCP annotations**（`readOnlyHint` / `destructiveHint` / `openWorldHint` 等）
 - 用户可见能力或安全元数据变更时，同步更新 [evaluations/gemini_web_mcp_contract.xml](../evaluations/gemini_web_mcp_contract.xml)（当前 17 个只读 QA）
+- `scripts/run_contract_checklist.py` 是快速、可诊断的架构契约门禁；它不替代 Python 3.11/3.12 上的全量测试
 - 交付前必跑：
 
 ```bash
-pytest -q
-# 入口或 import 敏感变更额外跑：
-python -m py_compile src/server.py src/skill_server.py src/client_wrapper.py src/thinking_client.py src/constants.py src/tools/*.py
+python -m ruff check src tests scripts
+python -m mypy src scripts
+python -m pytest -q
+python scripts/run_contract_checklist.py
+# 入口、profile、打包或协议敏感变更额外跑：
+python scripts/smoke_profiles.py
+python scripts/smoke_mcp_protocol.py
 ```
 
 ---
@@ -144,6 +153,7 @@ Skill 遵循 [agentskills.io](https://agentskills.io) 规范：`references/` 目
 3. `docs/changelog.md`：`## Unreleased` → `## vX.Y.Z (YYYY-MM-DD)`
 4. 运行 `python scripts/package_release.py --tag vX.Y.Z`，校验 tag、wheel 元数据和所有资产名
 5. PR 合并后执行 `git tag -a vX.Y.Z -m "vX.Y.Z"` 并推送
+6. `.github/workflows/release.yml` 会重新执行静态检查、全量离线测试、skill 校验、profile/协议 smoke 和 clean-wheel 安装；只有下载后的资产再次通过 tag/名称/wheel 元数据校验，才创建 GitHub Release
 
 遵循 [SemVer](https://semver.org/)：破坏性工具面变更升 major，新工具/功能升 minor，bug 修复升 patch。
 
