@@ -79,7 +79,9 @@ gemini-mcp-server/
 │       └── manage.py      # 管理工具兼容注册适配器，不是 compact 依赖
 ├── tests/                 # pytest 测试套件（test_*.py）
 ├── evaluations/           # MCP contract evaluation prompts（gemini_web_mcp_contract.xml）
-├── scripts/               # 打包/发布脚本（package_release.py）
+├── compatibility/         # Live canary 报告 schema 与上游依赖矩阵
+├── scripts/               # 打包/发布、协议 smoke 与 opt-in canary CLI
+├── .github/workflows/     # 离线 CI/release 与隔离的 live-canary workflow
 ├── .agents/skills/        # 公开分发用 Codex skill 副本
 ├── .codex/skills/         # 本地开发用 Codex skill 副本
 └── docs/                  # 完整文档系统
@@ -468,6 +470,19 @@ client = GeminiClient(psid, psidts, ...)
 2. 更新工具函数
 3. 保持 MCPServer 装饰器与 v2 schema 契约
 4. 更新文档（docs/tools.md）
+
+---
+
+## Live compatibility boundary
+
+`src/services/compatibility.py` 从中央 RPC registry 执行只读 probe，并把 transport、
+envelope、RPC rejection、body parser 和完成状态分开分类。该 service 只构造
+schema allowlist 中的结构诊断，不让 raw response 或账号内容进入持久化结果。
+
+`scripts/run_live_canary.py` 在导入账号 client lifecycle 之前验证 CLI flag、仓库启用变量
+和专用账号确认变量。`.github/workflows/live-canary.yml` 进一步用独立 GitHub environment
+隔离 secrets，并在上传脱敏 artifact 后创建/更新固定 drift issue。日常 CI 与 release
+workflow 不引用这些 secrets，也不调用 live canary。
 
 ---
 

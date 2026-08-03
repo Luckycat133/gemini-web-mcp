@@ -198,6 +198,15 @@ Live tests must be opt-in and use a dedicated test account. A canary should reco
 - parser/verification stage;
 - sanitized error code.
 
+The maintained P2.2 canary requires an explicit CLI flag plus repository enable
+and dedicated-account variables, runs in the `gemini-live-canary` environment,
+and only probes the centralized read-only RPC contracts. Persisted diagnostics
+must validate against `compatibility/live-canary-report.schema.json`; do not add
+raw responses, exception messages, cookies, session identifiers, chat/account
+content, titles, or URLs. Parser/envelope drift opens or updates the single
+actionable compatibility issue before the job fails. Record fixture-only work as
+not live-observed.
+
 Candidate canary workflows:
 
 1. text call with each supported alias;
@@ -209,6 +218,15 @@ Candidate canary workflows:
 7. notebook list/move/read-back on canary content.
 
 The live workflow should clean up its own marked artifacts and open/update an actionable compatibility issue on sustained failure.
+
+Run the offline canary contract with:
+
+```bash
+python -m pytest -q tests/test_live_canary.py tests/test_ci_contracts.py
+python scripts/run_live_canary.py --output /tmp/gemini-web-canary.json
+```
+
+The second command must refuse live access unless every opt-in control is set.
 
 ## Release Checklist
 

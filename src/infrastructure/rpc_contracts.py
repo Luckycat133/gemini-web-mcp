@@ -462,7 +462,7 @@ RPC_CONTRACTS: Mapping[str, RPCContract] = MappingProxyType({contract.key: contr
 
 # These are the read-only probes exposed by the existing account/capability
 # tools.  Mutation and parameterized contracts stay registry-only.
-_PROBE_KEYS = (
+WEB_FEATURE_PROBE_KEYS = (
     "history.recent",
     "history.pinned",
     "history.remy_goals",
@@ -485,7 +485,12 @@ _PROBE_KEYS = (
     "scheduled.inactive",
     "tool_modes.status",
 )
-WEB_FEATURE_PROBES: tuple[dict[str, str], ...] = tuple(RPC_CONTRACTS[key].as_probe() for key in _PROBE_KEYS)
+WEB_FEATURE_PROBE_CONTRACTS: tuple[RPCContract, ...] = tuple(
+    RPC_CONTRACTS[key] for key in WEB_FEATURE_PROBE_KEYS
+)
+WEB_FEATURE_PROBES: tuple[dict[str, str], ...] = tuple(
+    contract.as_probe() for contract in WEB_FEATURE_PROBE_CONTRACTS
+)
 
 
 def get_contract(key: str) -> RPCContract:

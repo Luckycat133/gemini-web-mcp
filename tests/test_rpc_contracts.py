@@ -9,7 +9,13 @@ import sys
 
 import pytest
 
-from src.infrastructure.rpc_contracts import RPC_CONTRACTS, WEB_FEATURE_PROBES, get_contract
+from src.infrastructure.rpc_contracts import (
+    RPC_CONTRACTS,
+    WEB_FEATURE_PROBE_CONTRACTS,
+    WEB_FEATURE_PROBE_KEYS,
+    WEB_FEATURE_PROBES,
+    get_contract,
+)
 from src.infrastructure.rpc_parsers import PARSER_FUNCTIONS, parse_contract_body, parse_rpc_envelope
 
 
@@ -45,6 +51,8 @@ def test_registered_parser_fixture_status(parser_name: str, case_name: str):
 
 def test_registry_owns_probe_payloads_and_evidence():
     assert len(WEB_FEATURE_PROBES) == 21
+    assert tuple(contract.key for contract in WEB_FEATURE_PROBE_CONTRACTS) == WEB_FEATURE_PROBE_KEYS
+    assert all(contract.mode == "read" for contract in WEB_FEATURE_PROBE_CONTRACTS)
     assert len({contract.key for contract in RPC_CONTRACTS.values()}) == len(RPC_CONTRACTS)
     for probe in WEB_FEATURE_PROBES:
         assert probe["rpcid"]

@@ -36,6 +36,7 @@ from ..infrastructure.rpc_parsers import (
     parse_usage_entry as parse_registered_usage,
     summarize_rpc_response as summarize_registered_rpc_response,
 )
+from ..services.compatibility import sanitized_error_code, sanitized_error_type
 from ..services.gems import (
     create_gem as create_gem_service,
     delete_gem as delete_gem_service,
@@ -1954,7 +1955,8 @@ def register_manage_tools(mcp: MCPServer, layers: list[str] | set[str] | tuple[s
                         "source_path": probe["source_path"],
                         "observed": probe["observed"],
                         "ok": False,
-                        "error": f"{type(e).__name__}: {e}",
+                        "error_code": sanitized_error_code(e),
+                        "error_type": sanitized_error_type(e),
                     }
                 )
 
@@ -1983,8 +1985,8 @@ def register_manage_tools(mcp: MCPServer, layers: list[str] | set[str] | tuple[s
                 status = "可达" if item.get("ok") else "不可达"
                 reject = item.get("reject_code")
                 suffix = f", reject={reject}" if reject is not None else ""
-                if item.get("error"):
-                    suffix += f", error={item['error']}"
+                if item.get("error_code"):
+                    suffix += f", error={item['error_code']} ({item.get('error_type', 'Exception')})"
                 lines.append(f"- {item['name']} ({item['rpcid']}): {status}{suffix}")
         lines.append("\n说明: 输出已省略原始响应正文和账号内容。")
         return [TextContent(type="text", text="\n".join(lines))]

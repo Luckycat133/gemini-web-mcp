@@ -1,0 +1,48 @@
+{
+  "synthetic_only": true,
+  "contract_key": "library.index",
+  "cases": {
+    "available": {
+      "status_code": 200,
+      "response_text": "[[\"wrb.fr\",\"sJBwce\",\"[[\\\"synthetic-item\\\"]]\",null,null,null,\"generic\"]]",
+      "expected_outcome": "available",
+      "expected_stage": "complete"
+    },
+    "empty": {
+      "status_code": 200,
+      "response_text": "[[\"wrb.fr\",\"sJBwce\",\"[]\",null,null,null,\"generic\"]]",
+      "expected_outcome": "empty",
+      "expected_stage": "complete"
+    },
+    "rejected": {
+      "status_code": 200,
+      "response_text": "[[\"wrb.fr\",\"sJBwce\",\"[]\",null,null,[7],\"generic\"]]",
+      "expected_outcome": "unavailable",
+      "expected_stage": "rpc"
+    },
+    "parser_drift": {
+      "status_code": 200,
+      "response_text": "[[\"wrb.fr\",\"sJBwce\",\"\\\"synthetic-shape\\\"\",null,null,null,\"generic\"]]",
+      "expected_outcome": "parser_drift",
+      "expected_stage": "parser"
+    },
+    "envelope_drift": {
+      "status_code": 200,
+      "response_text": "synthetic-not-json",
+      "expected_outcome": "envelope_drift",
+      "expected_stage": "envelope"
+    },
+    "missing_body": {
+      "status_code": 200,
+      "response_text": "[[\"wrb.fr\",\"otherRpc\",\"[]\",null,null,null,\"generic\"]]",
+      "expected_outcome": "envelope_drift",
+      "expected_stage": "envelope"
+    },
+    "http_failure": {
+      "status_code": 503,
+      "response_text": "synthetic-body-that-must-not-be-reported",
+      "expected_outcome": "transport_failed",
+      "expected_stage": "transport"
+    }
+  }
+}
