@@ -115,6 +115,12 @@ PR 描述请包含：
 
 > 工具名、参数、annotations 和用户可见的输出文本应保持稳定。重构时优先"dispatcher + handler"模式，逐字保留输出文本，避免破坏依赖文本匹配的 agent。
 
+涉及 Gemini Web RPC、parser 或 `gemini-webapi` 依赖时，先运行完全离线的
+`tests/test_live_canary.py`。真实兼容性验证只能使用
+[`live-canary.yml`](../.github/workflows/live-canary.yml) 和专用测试账号；不要把 Cookie 放入
+PR、测试参数或本地输出。canary 配置与诊断 allowlist 见
+[live-canary.md](./live-canary.md)。
+
 ---
 
 ## 安全注意事项

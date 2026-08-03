@@ -72,6 +72,7 @@ def test_package_data_and_both_console_entrypoints_are_explicit():
     assert "data/*.json" in metadata["tool"]["setuptools"]["package-data"]["src"]
     assert "recursive-include src/data *.json" in manifest
     assert "recursive-include scripts *.py" in manifest
+    assert "recursive-include compatibility *.json" in manifest
 
 
 def test_dependency_checker_cli_passes():

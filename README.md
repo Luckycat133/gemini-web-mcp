@@ -149,6 +149,7 @@ python scripts/package_release.py --outdir dist
 - [Live UI coverage](docs/live-ui-coverage.md)
 - [Architecture](docs/architecture.md)
 - [MCP SDK and client compatibility](docs/mcp-sdk-compatibility.md)
+- [Opt-in live compatibility canary](docs/live-canary.md)
 - [Launch kit](docs/launch-kit.md)
 - [Changelog](docs/changelog.md)
 

@@ -14,6 +14,7 @@ This is a Python 3.11+ MCP Python SDK v2 server for Gemini Web workflows. Core r
 - `python -m pytest -q`: run the complete offline test suite.
 - `python scripts/run_contract_checklist.py`: run the targeted architecture/distribution contract gate.
 - `python scripts/smoke_profiles.py && python scripts/smoke_mcp_protocol.py`: verify exact representative tool surfaces and both modern/legacy stdio list/call paths without live Gemini calls.
+- `python scripts/run_live_canary.py --output /tmp/gemini-web-canary.json`: verify the refusal/report path without network access; live execution additionally requires the explicit flag, two opt-in variables, and a dedicated test account.
 - `mcp dev src/server.py`: inspect the server with MCP Inspector after installing `mcp[cli]`.
 
 ## Coding Style & Naming Conventions
@@ -22,7 +23,7 @@ Use 4-space indentation, Python `snake_case` for functions and variables, and cl
 
 ## Testing Guidelines
 
-Write pytest tests as `tests/test_*.py`, with test names that describe the behavior under contract. For tool-surface changes, assert both registration and MCP annotations, and update `evaluations/gemini_web_mcp_contract.xml` when user-visible capabilities or safety metadata change. Artifact-producing changes must cover stable identity, remote/local/queued/empty/failed state, save verification, backend evidence, and primary/compact parity where both surfaces expose the workflow. Reverse-engineered RPC changes belong in `src/infrastructure/rpc_contracts.py`; every registered parser needs fixture cases for success, empty, rejection, and changed shape, and every mutation service must return read-back verification status. Run Ruff, Mypy, the complete offline suite, and the targeted contract checklist before handing off; add the profile/protocol or clean-wheel smokes for entrypoint, tool-surface, package, or release changes.
+Write pytest tests as `tests/test_*.py`, with test names that describe the behavior under contract. For tool-surface changes, assert both registration and MCP annotations, and update `evaluations/gemini_web_mcp_contract.xml` when user-visible capabilities or safety metadata change. Artifact-producing changes must cover stable identity, remote/local/queued/empty/failed state, save verification, backend evidence, and primary/compact parity where both surfaces expose the workflow. Reverse-engineered RPC changes belong in `src/infrastructure/rpc_contracts.py`; every registered parser needs fixture cases for success, empty, rejection, and changed shape, and every mutation service must return read-back verification status. Run Ruff, Mypy, the complete offline suite, and the targeted contract checklist before handing off; add the profile/protocol or clean-wheel smokes for entrypoint, tool-surface, package, or release changes. Live compatibility probes are never part of PR CI: keep their report within `compatibility/live-canary-report.schema.json`, omit raw responses/account content/credentials/session identifiers, and use only the `gemini-live-canary` environment backed by a dedicated account.
 
 ## Commit & Pull Request Guidelines
 

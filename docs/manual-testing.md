@@ -315,6 +315,23 @@
 | 20.1 | `pytest tests/test_evaluations.py -v` | 2 个测试通过，17 个 QA 答案与 manifest 一致 |
 | 20.2 | 人工读 [evaluations/gemini_web_mcp_contract.xml](../evaluations/gemini_web_mcp_contract.xml) | 17 个 qa_pair，问题/答案与当前工具面一致 |
 
+### 21. 自动 Live Canary（专用账号、显式 opt-in）
+
+`.github/workflows/live-canary.yml` 与日常 PR/release gate 分离，只运行 RPC registry 中的
+21 个只读 capability probe。配置仓库变量、`gemini-live-canary` environment 和专用账号
+secrets 后，可手动确认 `run_live`，也可启用每周 schedule。完整配置、脱敏字段和 issue
+处理契约见 [live-canary.md](./live-canary.md)。
+
+| # | 步骤 | 预期 |
+|---|---|---|
+| 21.1 | 不加 `--allow-live-account` 运行 `python scripts/run_live_canary.py --output /tmp/canary.json` | 退出非零、`status=not_run`，不初始化 Gemini client |
+| 21.2 | 专用账号下执行 workflow | artifact 仅含 schema allowlist；无 Cookie、session ID、聊天正文、标题或 raw response |
+| 21.3 | fixture 模拟 parser/envelope drift | 报告指出依赖版本、RPC/capability、parser stage；workflow 创建或更新固定标题 issue 后失败 |
+| 21.4 | 后续 compatible run | workflow 评论恢复证据并关闭原 issue |
+
+P2.2 实现阶段没有可用的专用账号，因此只完成离线 fixture/workflow 契约；不得把这次开发
+记录为真实 Gemini Web 观测。
+
 ---
 
 ## 测试结果记录模板
