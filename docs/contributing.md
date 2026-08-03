@@ -35,11 +35,11 @@ mcp dev src/server.py
 
 | 项 | 约定 |
 |---|---|
-| Python 版本 | 3.10+（`pyproject.toml` 锁定 `target-version = "py310"`） |
+| Python 版本 | 3.11+（`pyproject.toml` 锁定 `target-version = "py311"`） |
 | 缩进 | 4 空格 |
 | 行宽 | 120 列（Ruff 配置） |
 | 命名 | `snake_case` 函数/变量；工具名前缀 `gemini_` |
-| 类型 | 鼓励类型标注；Mypy 配 `python_version = "3.10"` |
+| 类型 | 鼓励类型标注；Mypy 配 `python_version = "3.11"` |
 | 模块组织 | 按工具域分组（`chat.py` / `media.py` / `file.py` / `research.py` / `manage.py` / `prompts.py`） |
 | 共享逻辑 | 放 `src/tools/utils.py`，不要在多个工具里复制粘贴 |
 
@@ -136,10 +136,11 @@ Skill 遵循 [agentskills.io](https://agentskills.io) 规范：`references/` 目
 
 发布流程（仅维护者）：
 
-1. `pyproject.toml` 的 `version` 和 `src/__init__.py` 的 `__version__` **都要改**（曾经不同步过）
-2. `docs/changelog.md`：`## Unreleased` → `## vX.Y.Z (YYYY-MM-DD)`
-3. `git tag -a vX.Y.Z -m "vX.Y.Z"` 并推送
-4. PR 合并后打 tag
+1. 只修改 `pyproject.toml` 的 `project.version`；运行时版本从已安装包元数据读取
+2. 更新 README、Launch Kit 等含固定 release URL 的示例，然后运行 `python scripts/check_version_consistency.py`
+3. `docs/changelog.md`：`## Unreleased` → `## vX.Y.Z (YYYY-MM-DD)`
+4. 运行 `python scripts/package_release.py --tag vX.Y.Z`，校验 tag、wheel 元数据和所有资产名
+5. PR 合并后执行 `git tag -a vX.Y.Z -m "vX.Y.Z"` 并推送
 
 遵循 [SemVer](https://semver.org/)：破坏性工具面变更升 major，新工具/功能升 minor，bug 修复升 patch。
 

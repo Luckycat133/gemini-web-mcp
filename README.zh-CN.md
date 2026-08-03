@@ -29,7 +29,7 @@
 
 ---
 
-## ✨ 主要功能 (v2.2)
+## ✨ 主要功能
 
 ### 🤖 模型支持
 - **flash-lite** → Web UI `3.1 Flash-Lite`
@@ -360,7 +360,7 @@ Skill 只负责告诉 agent 如何安全、分层地使用 Gemini Web MCP；MCP 
 
 ## 🛡️ 智能错误处理
 
-v2.0 新增智能错误处理，让 AI 可以自主解决常见问题：
+内置智能错误处理，让 AI 可以自主解决常见问题：
 
 | 错误类型 | 自动解决方案 | 建议工具 |
 |---------|-------------|---------|
@@ -390,14 +390,14 @@ gemini-mcp-server/
 │   ├── cookie_manager.py   # Cookie 管理模块
 │   ├── session_manager.py  # 本地会话管理
 │   ├── thinking_client.py  # Thinking/Learning 模式传输层
-│   ├── error_handler.py    # 智能错误处理 (v2.0 新增)
+│   ├── error_handler.py    # 智能错误处理
 │   ├── constants.py        # 模型常量、配置
 │   ├── remote_chat_cleanup_manager.py  # 远程聊天清理
 │   └── tools/              # 工具集
-│       ├── __init__.py     # 分层加载入口 (v2.0 新增)
+│       ├── __init__.py     # 分层加载入口
 │       ├── annotations.py  # MCP 工具安全/隐私注解常量
 │       ├── manifest_data.py # 静态 manifest 数据（UI 能力/RPC probe/工具清单）
-│       ├── utils.py        # 共享工具函数 (v2.0 新增)
+│       ├── utils.py        # 共享工具函数
 │       ├── chat.py         # 对话工具
 │       ├── media.py        # 媒体生成
 │       ├── image.py        # media.py 向后兼容别名

@@ -796,9 +796,9 @@ compact 的 history/account/scheduled/doctor/cleanup 直接导入共享 service 
 
 ---
 
-## 🛡️ 智能错误处理 (v2.0 新增)
+## 🛡️ 智能错误处理
 
-v2.0 新增智能错误处理，遇到问题时会自动提供解决方案。
+智能错误处理会在遇到问题时自动提供解决方案。
 
 ### 错误响应格式
 

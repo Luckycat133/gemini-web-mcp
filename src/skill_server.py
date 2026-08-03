@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Gemini Skill - Optimized MCP Server (v3.0)
+Gemini Skill - Optimized MCP Server
 Low-token, production-ready.
 """
 
@@ -20,6 +20,7 @@ except ImportError:
     print("Error: mcp package required. Install with: pip install mcp fastmcp")
     exit(1)
 
+from . import __version__
 from .adapters import append_artifact_block, attach_domain_result, domain_text, exception_text
 from .client_wrapper import (
     cleanup_due_remote_chats,
@@ -142,8 +143,8 @@ MEDIA_TYPES = {"img": "image", "picture": "image", "photo": "image"}
 
 mcp = FastMCP(
     "Gemini",
-    instructions="""
-# Gemini Skill
+    instructions=f"""
+# Gemini Skill (v{__version__})
 
 ## Tools
 - **chat**: conversation
@@ -151,7 +152,8 @@ mcp = FastMCP(
 - **edit**: modify images
 - **session**: conversation history
 - **history**: remote Gemini chat history
-- **account**: account, models, tool manifest, web capabilities, feature probes, links, usage, library, native notebooks, scheduled actions, modes
+- **account**: account, models, manifest, capabilities, feature probes, links,
+  usage, library, native notebooks, scheduled actions, modes
 - **scheduled**: list, get by id, create daily, or delete scheduled actions
 - **cookie**: authentication helper
 - **doctor**: local preflight diagnostics
@@ -644,7 +646,8 @@ async def _account_usage(client: Any) -> list[TextContent]:
             if isinstance(first, list):
                 entries = [_parse_usage_entry(item) for item in first]
         return [
-            f"{probe_name}: key={item.get('key')} limit={item.get('limit_value')} remaining={item.get('remaining_value')}"
+            f"{probe_name}: key={item.get('key')} limit={item.get('limit_value')} "
+            f"remaining={item.get('remaining_value')}"
             for item in entries
         ]
 
@@ -712,7 +715,8 @@ async def _account_modes(client: Any) -> list[TextContent]:
     if not entries:
         return [TextContent(type="text", text="No mode status entries")]
     lines = [
-        f"mode_id={item.get('mode_id')} available={item.get('available')} quota={item.get('quota_value')} state={item.get('state')}"
+        f"mode_id={item.get('mode_id')} available={item.get('available')} "
+        f"quota={item.get('quota_value')} state={item.get('state')}"
         for item in entries
     ]
     return [TextContent(type="text", text="\n".join(lines))]
@@ -751,7 +755,19 @@ _ACCOUNT_CLIENT_ACTIONS: dict[str, Callable[[Any], Awaitable[list[TextContent]]]
 
 @mcp.tool(annotations=READS_PRIVATE_REMOTE)
 async def account(
-    action: Literal["status", "models", "manifest", "capabilities", "features", "links", "usage", "library", "notebooks", "scheduled", "modes"] = "status",
+    action: Literal[
+        "status",
+        "models",
+        "manifest",
+        "capabilities",
+        "features",
+        "links",
+        "usage",
+        "library",
+        "notebooks",
+        "scheduled",
+        "modes",
+    ] = "status",
 ) -> list[TextContent]:
     """Inspect Gemini account status and available models."""
     try:
