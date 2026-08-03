@@ -11,7 +11,7 @@ from mcp.types import TextContent
 
 import src.skill_server as skill_server
 import src.tools.chat as chat_tools
-from src.domain import DomainErrorCode, DomainResult
+from src.domain import DomainErrorCode, DomainResult, StreamChunkSemantics, StreamDelivery
 from src.services import (
     ChatOperationData,
     ChatRequest,
@@ -275,22 +275,82 @@ def test_generate_stream_collects_text_and_uses_final_response_for_cleanup():
     service, _client, events, _sessions = _make_service()
 
     result = asyncio.run(
-        service.generate_stream(
-            ChatRequest(message="stream"),
-            text_piece=lambda response: response.text_delta,
-        )
+        service.generate_stream(ChatRequest(message="stream"))
     )
 
     assert result.ok is True
     assert result.data is not None
-    assert result.data.streamed is True
+    assert result.data.stream is not None
+    assert result.data.stream.delivery is StreamDelivery.COLLECTED
+    assert result.data.stream.chunk_semantics is StreamChunkSemantics.DELTA
+    assert result.data.stream.chunk_count == 2
     assert result.data.stream_text == "firstsecond"
     assert [response.text for response in result.data.responses] == ["first", "second"]
     assert events[-1][0] == "cleanup_response"
     assert events[-1][1].text == "second"
     payload = result.to_dict()
+    assert payload["data"]["stream"]["delivery"] == "collected"
+    assert payload["data"]["stream"]["chunk_semantics"] == "delta"
+    assert "streamed" not in payload["data"]
     assert "responses" not in payload["data"]
     assert "stream_text" not in payload["data"]
+
+
+def test_generate_stream_cancellation_propagates_and_closes_upstream_iterator():
+    service, client, events, _sessions = _make_service()
+    started = asyncio.Event()
+    closed = asyncio.Event()
+
+    async def blocked_stream(**_kwargs: Any):
+        try:
+            started.set()
+            await asyncio.Event().wait()
+            yield SimpleNamespace(text_delta="late")
+        finally:
+            closed.set()
+
+    client.generate_content_stream = blocked_stream  # type: ignore[method-assign]
+
+    async def run() -> None:
+        task = asyncio.create_task(service.generate_stream(ChatRequest(message="cancel")))
+        await started.wait()
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        await asyncio.wait_for(closed.wait(), timeout=1)
+
+    asyncio.run(run())
+    assert not any(isinstance(event, tuple) and event[0] == "cleanup_response" for event in events)
+
+
+def test_session_stream_normalizes_cumulative_chunks_before_returning_once():
+    service, _client, _events, sessions = _make_service()
+
+    class RuntimeSession:
+        cid = "c_session_stream"
+
+        async def send_message_stream(self, **_kwargs: Any):
+            for text in ("H", "He", "Hello"):
+                yield SimpleNamespace(text=text)
+
+    sessions.store_session("sess_stream", RuntimeSession(), model="flash")
+
+    result = asyncio.run(
+        service.send_session_stream(
+            SessionMessageRequest(
+                session_id="sess_stream",
+                message="hello",
+                cleanup_strategy=CleanupStrategy.RESPONSE,
+            )
+        )
+    )
+
+    assert result.ok is True
+    assert result.data is not None
+    assert result.data.stream_text == "Hello"
+    assert result.data.stream is not None
+    assert result.data.stream.chunk_semantics is StreamChunkSemantics.CUMULATIVE
+    assert result.data.stream.chunk_count == 3
 
 
 def test_compact_cleanup_adapter_forwards_shared_retention_policy(monkeypatch):

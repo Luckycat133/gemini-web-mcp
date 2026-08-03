@@ -211,7 +211,8 @@ report 本地产物，以及 compact 的 `chat`、`session`、`create`、`edit`�
 
 ### gemini_chat_stream
 
-单次流式对话。
+兼容名称保持不变：工具会收集 Gemini Web 的上游流，归一化 delta、累计文本或混合片段，
+再把正文作为一个 MCP 结果返回；它不声明 MCP 客户端会收到增量内容。
 
 **参数：**
 - `message`: str - 要发送的消息
@@ -221,6 +222,10 @@ report 本地产物，以及 compact 的 `chat`、`session`、`create`、`edit`�
 - `image_paths`: list[str] - 可选图片路径
 - `gem_id`: str - 可选 Gem ID
 - `temporary`: bool - 是否使用 Temporary chat
+
+**结构化结果：** `_meta.domain_result.data.stream.delivery="collected"`，并提供
+`chunk_semantics`、`chunk_count`、`emitted_piece_count`、`duplicate_chunk_count` 和
+`text_length`。累计或重复片段不会让最终正文重复。
 
 ### gemini_start_chat
 
@@ -250,7 +255,8 @@ report 本地产物，以及 compact 的 `chat`、`session`、`create`、`edit`�
 
 ### gemini_send_message_stream
 
-会话流式消息。
+收集现有会话的 Gemini Web 上游流并一次性返回 MCP 结果；归一化和结构化 `stream`
+元数据与 `gemini_chat_stream` 相同。
 
 **参数：**
 - `session_id`: str - 会话 ID
@@ -358,6 +364,14 @@ Gemini Web 的 Google Drive 选择器。
 **关键参数：**
 - `model`: str - MCP 别名或运行时模型名
 - `thinking_level`: str - `standard` / `extended` (默认: `extended`)
+- `timeout_seconds`: int - 等待最终报告的时间上限（默认: `600`）
+- `poll_interval_seconds`: int - 轮询间隔，最小 3 秒
+- `wait_for_completion`: bool - 默认 `true`；设为 `false` 时只完成 plan/start 阶段并立即返回
+
+**结构化状态：** 第一条正文的 `_meta.domain_result` 会明确给出 `queued`、`running`、
+`completed` 或 `timed_out`。`data.upstream_operation_id` 和 `data.upstream_chat_id` 在上游
+已提供时会保留；因此超时不等于上游任务失败，`continuation_possible=true` 时可稍后用
+chat ID 读取报告。fallback 客户端只返回研究计划时，状态是 `running`，不会误报完成。
 
 ### gemini_list_research_report_actions
 

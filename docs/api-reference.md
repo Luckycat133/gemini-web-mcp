@@ -46,10 +46,10 @@ with `availability` and `current_enabled` per tool.
 | Tool | Purpose |
 |------|---------|
 | `gemini_chat` | One-shot Gemini conversation |
-| `gemini_chat_stream` | One-shot streaming conversation |
+| `gemini_chat_stream` | Collect and normalize a Gemini upstream stream into one MCP result |
 | `gemini_start_chat` | Create a multi-turn session |
 | `gemini_send_message` | Send a message to an existing session |
-| `gemini_send_message_stream` | Stream a message in an existing session |
+| `gemini_send_message_stream` | Collect and normalize an existing session's upstream stream into one MCP result |
 | `gemini_list_sessions` | List local active sessions |
 | `gemini_reset_session` | Reset a local session and optionally delete the remote chat |
 
@@ -69,6 +69,12 @@ Common chat parameters:
 `learning_mode` is implemented as a Web-compatible request injection for the
 observed 2026-06-19 Guided Learning companion. It is available on one-shot and
 session chat tools, including streaming variants.
+
+The compatibility names ending in `_stream` describe the Gemini Web transport,
+not MCP incremental delivery. These tools collect the upstream chunks, normalize
+delta/cumulative/mixed text without duplication, and return the final text once.
+`_meta.domain_result.data.stream.delivery` is `collected` and includes observed
+chunk semantics and counts.
 
 ### Media
 
@@ -100,7 +106,7 @@ The Pro image redo control is a post-generation Gemini Web UI action.
 
 | Tool | Purpose |
 |------|---------|
-| `gemini_deep_research` | Create a Deep Research plan, start research, and poll for the result when supported by the client |
+| `gemini_deep_research` | Start Deep Research and return explicit queued/running/completed/timed_out state plus continuation IDs |
 | `gemini_list_research_report_actions` | List MCP-side create actions for a completed Deep Research immersive report |
 | `gemini_create_from_research_report` | Create a local webpage, infographic, quiz, flashcards, audio overview script, or custom app spec from a completed report |
 

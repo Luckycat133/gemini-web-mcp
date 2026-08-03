@@ -33,7 +33,7 @@ from ..services import (
     StartSessionRequest,
 )
 from .annotations import DESTRUCTIVE_REMOTE, MUTATES_REMOTE, READ_ONLY_LOCAL
-from .utils import get_stream_text_piece, parse_response, validate_image_paths
+from .utils import parse_response, validate_image_paths
 
 logger = logging.getLogger(__name__)
 
@@ -271,7 +271,7 @@ def register_chat_tools(mcp: FastMCP):
         retain_chat: bool = False,
         delete_after_seconds: Optional[int] = None,
     ) -> list[TextContent]:
-        """流式对话"""
+        """收集 Gemini 上游流后一次性返回；不表示 MCP 增量推送。"""
         valid_images, safe_image_paths, image_error = validate_image_paths(image_paths)
         if not valid_images:
             return domain_text(
@@ -293,7 +293,6 @@ def register_chat_tools(mcp: FastMCP):
                 cleanup_source="gemini_chat_stream",
                 include_gem_argument=True,
             ),
-            text_piece=get_stream_text_piece,
         )
         assert result.data is not None
         if result.data.response is not None:
@@ -308,7 +307,7 @@ def register_chat_tools(mcp: FastMCP):
                     "model": result.data.requested_model,
                     "resolved_model": result.data.effective_model,
                     "temporary": result.data.temporary,
-                    "streamed": True,
+                    "stream": result.data.stream,
                     "lifecycle": result.data.lifecycle,
                 },
             )
@@ -319,7 +318,7 @@ def register_chat_tools(mcp: FastMCP):
                 "model": result.data.requested_model,
                 "resolved_model": result.data.effective_model,
                 "temporary": result.data.temporary,
-                "streamed": True,
+                "stream": result.data.stream,
                 "lifecycle": result.data.lifecycle,
             },
         )
@@ -335,7 +334,7 @@ def register_chat_tools(mcp: FastMCP):
         retain_chat: Optional[bool] = None,
         delete_after_seconds: Optional[int] = None,
     ) -> list[TextContent]:
-        """从现有共享会话流式取回消息；未知 ID 返回 SESSION_NOT_FOUND。"""
+        """收集现有会话的 Gemini 上游流后一次返回；未知 ID 返回 SESSION_NOT_FOUND。"""
         valid_images, safe_image_paths, image_error = validate_image_paths(image_paths)
         if not valid_images:
             return domain_text(
@@ -358,7 +357,6 @@ def register_chat_tools(mcp: FastMCP):
                 cleanup_strategy=CleanupStrategy.RESPONSE,
                 cleanup_source="gemini_send_message_stream",
             ),
-            text_piece=get_stream_text_piece,
         )
         if not result.ok or result.data is None:
             return domain_text(
@@ -371,7 +369,7 @@ def register_chat_tools(mcp: FastMCP):
             data={
                 "session_id": session_id,
                 "model": result.data.requested_model,
-                "streamed": True,
+                "stream": result.data.stream,
                 "lifecycle": result.data.lifecycle,
             },
         )

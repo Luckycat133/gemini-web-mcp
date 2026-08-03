@@ -318,13 +318,10 @@ def test_get_stream_text_piece_handles_missing_attributes():
     assert get_stream_text_piece(SimpleNamespace()) == ""
 
 
-def test_get_stream_text_piece_returns_empty_when_text_delta_is_falsy():
-    """text_delta=None → 返回空串（不回退到 text，因 hasattr 已 True）。
-
-    实现细节：函数用 hasattr 而非 truthiness 判断，故 falsy text_delta 不会触发回退。
-    """
+def test_get_stream_text_piece_falls_back_when_text_delta_is_falsy():
+    """text_delta=None → 回退到 text。"""
     resp = SimpleNamespace(text_delta=None, text="full")
-    assert get_stream_text_piece(resp) == ""
+    assert get_stream_text_piece(resp) == "full"
 
 
 # ---------------------------------------------------------------------------

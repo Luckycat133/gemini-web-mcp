@@ -13,9 +13,13 @@ from .conversations import (
     CleanupState,
     ConversationLifecycleMetadata,
     SessionLifecycleState,
+    StreamChunkSemantics,
+    StreamCollectionMetadata,
+    StreamDelivery,
     cleanup_observation_for_policy,
     is_valid_remote_chat_id,
 )
+from .operations import LongOperationData
 from .results import (
     DomainError,
     DomainErrorCode,
@@ -42,9 +46,13 @@ __all__ = [
     "DomainErrorCode",
     "DomainResult",
     "DomainWarning",
+    "LongOperationData",
     "OperationState",
     "ResultMeta",
     "SessionLifecycleState",
+    "StreamChunkSemantics",
+    "StreamCollectionMetadata",
+    "StreamDelivery",
     "cleanup_observation_for_policy",
     "is_valid_remote_chat_id",
     "new_diagnostic_id",
