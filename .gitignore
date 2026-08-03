@@ -14,3 +14,6 @@ generated_media/
 *.egg-info/
 build/
 dist/
+
+# local agent data (WorkBuddy memory/skills)
+.workbuddy/
