@@ -1,6 +1,6 @@
 ---
 name: gemini-web-mcp-development
-description: Develop, review, debug, test, package, and release the gemini-web-mcp repository as an agent-first Gemini Web gateway for text, images, video, music, files, URLs, and Deep Research. Use for repository audits, regressions, MCP tool or schema changes, primary/compact adapter parity, shared services, Gemini Web RPC compatibility, multimodal artifacts, CI, packaging, onboarding, live canaries, versioning, or release work.
+description: Develop, refactor, test, package, and release the gemini-web-mcp repository as an agent-first Gemini Web gateway for text, images, video, music, files, URLs, and Deep Research. Use for repository reviews, debugging regressions, MCP tool or schema changes, primary/compact adapter parity, shared services, Gemini Web RPC compatibility, multimodal artifacts, CI, onboarding, live canaries, versioning, or release work.
 license: AGPL-3.0-only
 compatibility: Requires a checkout of Luckycat133/gemini-web-mcp, Python 3.11+, git, and the project development dependencies. Most unit, contract, package, protocol, and skill work must remain runnable offline. Live Gemini verification requires the separately gated dedicated test-account canary.
 metadata:
