@@ -19,6 +19,7 @@ Use the cheapest deterministic test that proves the changed contract, then add b
 | Private RPC adapter | payload builder tests, parser fixtures, rejection/shape-drift tests, read-back verification |
 | Package data/entrypoint | wheel/sdist build, clean install, import/start smoke |
 | Version/release | metadata/tag/docs/asset consistency check |
+| Public onboarding/client config | parse every checked-in config, real auth-free stdio text call, credential stripping, clean `uvx` wheel install |
 | MCP SDK migration | protocol discovery, list-tools schema snapshots, representative calls across clients |
 | Skill change | `skills-ref validate`, copy parity, repository test |
 
@@ -158,7 +159,16 @@ python -m venv /tmp/gemini-web-mcp-wheel-test
 /tmp/gemini-web-mcp-wheel-test/bin/python scripts/smoke_mcp_protocol.py
 ```
 
-Run the three smoke scripts from outside the source checkout when verifying a clean wheel. They check installed origin and resources, exact representative profile names, both console entrypoints, and real MCP `initialize`/`tools/list` handshakes without live Gemini calls.
+Run the three smoke scripts from outside the source checkout when verifying a clean wheel. They check installed origin and resources, exact representative profile names, all console entrypoints, a real auth-free text tool call, and MCP `initialize`/`tools/list` handshakes without live Gemini calls.
+
+Also prove the public one-command mechanism in a separate uv-managed environment:
+
+```bash
+cd /tmp
+uvx --from /absolute/path/to/dist/gemini_mcp_server-*.whl gemini-mcp-onboarding
+```
+
+The JSON must report `mode=offline`, `credentials_accessed=false`, `text_tool=gemini_get_tool_manifest`, and a non-empty negotiated protocol version. This is installation/protocol evidence, not live Gemini evidence.
 
 ## Target Static Gates
 
@@ -182,6 +192,8 @@ skills-ref validate .agents/skills/gemini-web-mcp-development
 skills-ref validate .codex/skills/gemini-web-mcp-development
 diff -ru .agents/skills/gemini-web-mcp-development \
   .codex/skills/gemini-web-mcp-development
+npx --yes skills@1.5.21 add "$PWD" \
+  --skill gemini-web-mcp-development --agent codex --copy --yes
 ```
 
 Keep `SKILL.md` below 500 lines and detailed guidance in focused one-level `references/` files.
@@ -230,12 +242,15 @@ The second command must refuse live access unless every opt-in control is set.
 
 ## Release Checklist
 
-- version source, tag, wheel metadata, README commands, changelog, and asset names agree;
+- version source, tag, wheel metadata, documented tagged URLs (if any), canonical Git source, changelog, and asset names agree;
 - unit/behavior/parity tests pass;
 - static gates pass where configured;
 - wheel/sdist clean-install smoke passes;
+- isolated `uvx` onboarding installs the wheel and calls the auth-free text tool;
+- all checked-in client examples parse and preserve the intended profile/secret boundary;
 - MCP list/call smoke passes for representative profiles;
 - both skills validate and mirrored copies match;
+- the development skill installs directly from the repository with the pinned CLI command;
 - release artifacts contain expected files;
 - live canary status is reported separately from offline CI;
 - release notes distinguish implemented contract, expected routing, and observed live behavior.

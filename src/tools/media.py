@@ -7,6 +7,7 @@ import logging
 import re
 import shutil
 import subprocess
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from types import SimpleNamespace
@@ -89,7 +90,7 @@ async def _save_generated_media(
     observed_backend: str | None,
     source_chat_id: str | None,
 ) -> "_MediaSaveOutcome":
-    media_items = media_items if media_items is not None else (getattr(response, "media", None) or [])
+    media_items = media_items if media_items is not None else _response_media_items(response, media_type)
     if not media_items:
         return _MediaSaveOutcome()
 
@@ -106,7 +107,7 @@ async def _save_generated_media(
         if media_type == "music":
             save_kwargs["download_type"] = "both"
         try:
-            saved = await media.save(**save_kwargs)
+            raw_saved = await media.save(**save_kwargs)
         except Exception as error:
             logger.error(
                 "artifact save failed media_type=%s index=%s error=%r",
@@ -117,7 +118,11 @@ async def _save_generated_media(
             )
             failures.append(f"{type(error).__name__}:save")
             continue
-        for kind, path in sorted((saved or {}).items()):
+        saved = _normalize_saved_paths(raw_saved, media_type)
+        if saved is None:
+            failures.append(f"item_{index}:unsupported_save_result")
+            continue
+        for kind, path in sorted(saved.items()):
             if not path:
                 failures.append(f"{kind}:no_saved_path")
                 continue
@@ -151,6 +156,30 @@ async def _save_generated_media(
         artifacts=tuple(saved_artifacts),
         failures=tuple(failures),
     )
+
+
+def _response_media_items(response, media_type: str) -> list:
+    if media_type == "image":
+        return list(getattr(response, "images", None) or getattr(response, "media", None) or [])
+    if media_type == "video":
+        return list(getattr(response, "videos", None) or getattr(response, "media", None) or [])
+    return list(getattr(response, "media", None) or [])
+
+
+def _normalize_saved_paths(saved, media_type: str) -> dict[str, str | None] | None:
+    if isinstance(saved, (str, Path)):
+        return {media_type: str(saved)}
+    if isinstance(saved, Mapping):
+        normalized: dict[str, str | None] = {}
+        for kind, path in saved.items():
+            if path is None:
+                normalized[str(kind)] = None
+            elif isinstance(path, (str, Path)):
+                normalized[str(kind)] = str(path)
+            else:
+                return None
+        return normalized
+    return None
 
 
 @dataclass(frozen=True)

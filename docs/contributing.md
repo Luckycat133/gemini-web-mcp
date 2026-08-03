@@ -8,6 +8,15 @@
 
 ## 开发环境
 
+先把仓库开发 skill 安装到 Codex；它与仅用于操作 MCP 工具的运行时 skill 分离：
+
+```bash
+npx --yes skills@1.5.21 add \
+  https://github.com/Luckycat133/gemini-web-mcp \
+  --skill gemini-web-mcp-development \
+  --agent codex --copy --yes
+```
+
 ```bash
 # 1. 克隆并进入 venv
 python -m venv .venv && . .venv/bin/activate
@@ -24,6 +33,7 @@ python scripts/check_dependency_contract.py  # 直接依赖 / optional extra 契
 python scripts/smoke_profiles.py             # 代表 profile 完整工具名快照
 python scripts/snapshot_mcp_v2_contract.py    # v2 工具名/schema/annotation golden 候选
 python scripts/smoke_mcp_protocol.py          # 两个 stdio 入口 auto/legacy 真实 list/call
+gemini-mcp-onboarding                         # 无 Cookie 的安装后 stdio + 文本工具预检
 
 # 4. 本地跑服务（默认 core 工具面）
 GEMINI_TOOLS=core python -m src.server
@@ -54,6 +64,7 @@ mcp dev src/server.py
 核心运行时代码在 `src/`：
 - `server.py` —— 主 MCP 入口
 - `skill_server.py` —— 低 token skill surface
+- `onboarding.py` —— 公开安装预检、显式实时文本示例和本地图像产物验证
 - `client_wrapper.py` / `client_manager.py` / `cookie_manager.py` / `session_manager.py` —— 客户端/会话/Cookie
 - `src/tools/` —— 工具实现
 - `src/tools/manifest_data.py` —— 纯数据（`WEB_UI_CAPABILITIES` / `WEB_FEATURE_PROBES` / `TOOL_MANIFEST`）
@@ -79,6 +90,8 @@ python scripts/run_contract_checklist.py
 python scripts/smoke_profiles.py
 python scripts/snapshot_mcp_v2_contract.py
 python scripts/smoke_mcp_protocol.py
+# 构建后还要从源码目录外，以隔离 uvx 环境调用 dist wheel：
+uvx --from "$PWD"/dist/*.whl gemini-mcp-onboarding
 ```
 
 ---
@@ -144,6 +157,7 @@ annotations 定义在 [src/tools/annotations.py](../src/tools/annotations.py)。
 
 若改动影响 agent 使用流程，同步更新：
 - [`.agents/skills/gemini-web-mcp/SKILL.md`](../.agents/skills/gemini-web-mcp/SKILL.md) —— 公开可安装 skill
+- [`.agents/skills/gemini-web-mcp-development/SKILL.md`](../.agents/skills/gemini-web-mcp-development/SKILL.md) —— 仓库开发 skill
 - [`.codex/skills/gemini-web-mcp/`](../.codex/skills/gemini-web-mcp) —— 本地副本，需与 `.agents` 保持同步
 - [docs/tools.md](./tools.md) —— 工具手册
 - [docs/changelog.md](./changelog.md) —— 在 `## Unreleased` 段追加条目
@@ -157,7 +171,7 @@ Skill 遵循 [agentskills.io](https://agentskills.io) 规范：`references/` 目
 发布流程（仅维护者）：
 
 1. 只修改 `pyproject.toml` 的 `project.version`；运行时版本从已安装包元数据读取
-2. 更新 README、Launch Kit 等含固定 release URL 的示例，然后运行 `python scripts/check_version_consistency.py`
+2. 更新 README、客户端示例和 Launch Kit；固定 release URL 若存在必须匹配版本，公开 `uvx` 示例必须保留规范 Git 源，然后运行 `python scripts/check_version_consistency.py`
 3. `docs/changelog.md`：`## Unreleased` → `## vX.Y.Z (YYYY-MM-DD)`
 4. 运行 `python scripts/package_release.py --tag vX.Y.Z`，校验 tag、wheel 元数据和所有资产名
 5. PR 合并后执行 `git tag -a vX.Y.Z -m "vX.Y.Z"` 并推送

@@ -54,6 +54,11 @@ jobs:
         run: python scripts/package_release.py --outdir dist --tag "$GITHUB_REF_NAME"
       - name: Verify generated asset names and wheel metadata
         run: python scripts/check_version_consistency.py --tag "$GITHUB_REF_NAME" --artifacts-dir dist
+      - name: Set up pinned uv
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+      - name: Verify one-command release onboarding in an isolated uv environment
+        working-directory: ${{ runner.temp }}
+        run: uvx --from "$GITHUB_WORKSPACE"/dist/*.whl gemini-mcp-onboarding
       - name: Install release wheel in a clean environment
         run: |
           python -m venv "$RUNNER_TEMP/gemini-release-smoke"

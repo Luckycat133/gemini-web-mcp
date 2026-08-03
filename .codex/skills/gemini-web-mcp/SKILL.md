@@ -1,21 +1,22 @@
 ---
 name: gemini-web-mcp
-description: "Use when working in the gemini-web-mcp repository or using its Gemini Web MCP/skill servers: inspect the tool manifest, choose safe Gemini Web tools, manage chat history and native notebooks, validate Pro Web capability coverage, generate and verify media deliverables, update docs/tests/evaluations, or avoid unsafe destructive/private-account operations."
-compatibility: "Requires Python 3.11+, this package installed (pip install -e \".[all]\"), Chrome cookies for Gemini, and optional browser/image extras for media and cookie-from-browser flows. Primary server: GEMINI_TOOLS=core gemini-mcp-server (or python -m src.server); low-token server: gemini-mcp-skill-server (or python -m src.skill_server)."
+description: "Operate an installed Gemini Web MCP server safely: inspect the tool manifest, choose the narrowest profile and read-only workflow, manage explicitly selected history/notebook/account tasks, and verify generated media artifacts. Use for MCP tool operation; do not use for repository implementation, tests, CI, packaging, or releases—use gemini-web-mcp-development instead."
+compatibility: "Requires Python 3.11+ and an installed server (verify with uvx --from git+https://github.com/Luckycat133/gemini-web-mcp@main gemini-mcp-onboarding). Live Gemini calls require account Cookies; image verification requires the image or all extra."
 ---
 
 # Gemini Web MCP
 
-Use this skill for this repository's Gemini Web MCP server and low-token skill server.
+Use this skill only to operate the installed primary or low-token MCP server. For source changes, tests, CI, packaging, compatibility probes, or releases, stop and use the separate `gemini-web-mcp-development` skill.
 
 ## Start Here
 
-1. Prefer `gemini_get_tool_manifest` before choosing primary-server tools. It is always exposed by `src.server`, even when `GEMINI_TOOLS=core` or `GEMINI_TOOLS=prompts`.
-2. Check manifest `current_enabled`, `groups`, and `workflows`; do not hard-code tool counts because the static manifest can include groups not loaded in the current process.
-3. On the low-token server, prefer auth-free `account(action="manifest")` and `account(action="capabilities")` before account calls that initialize Gemini.
-4. Prefer read-only discovery first: `gemini_doctor`, manifest/capabilities, `gemini_probe_web_features`, metadata-only history search, profile diagnostics, and inventory/list tools.
-5. Treat `privacy=reads_private_chat_text` and other private text tools as explicit-user-intent tools: `gemini_read_chat`, `gemini_export_chat`, `gemini_search_chats(scan_turns=true)`, and research-report create actions that read chat text.
-6. Treat destructive tools as requiring explicit user intent: `gemini_delete_chat`, `gemini_cleanup_test_artifacts(dry_run=false)`, `gemini_delete_scheduled_action`, `gemini_reset_session`, `gemini_manage_gems(action="delete")`, and prompt deletion.
+1. Before configuring an account, verify the installed server with `uvx --from git+https://github.com/Luckycat133/gemini-web-mcp@main gemini-mcp-onboarding`; this calls a real auth-free text tool and strips Gemini Cookie variables from its child process.
+2. Prefer `gemini_get_tool_manifest` before choosing primary-server tools. It is always exposed by `src.server`, including the narrow `model` profile.
+3. Check manifest `current_enabled`, `groups`, and `workflows`; do not hard-code tool counts because the static manifest can include groups not loaded in the current process.
+4. On the low-token server, prefer auth-free `account(action="manifest")` and `account(action="capabilities")` before account calls that initialize Gemini.
+5. Prefer read-only discovery first: `gemini_doctor`, manifest/capabilities, `gemini_probe_web_features`, metadata-only history search, profile diagnostics, and inventory/list tools.
+6. Treat `privacy=reads_private_chat_text` and other private text tools as explicit-user-intent tools: `gemini_read_chat`, `gemini_export_chat`, `gemini_search_chats(scan_turns=true)`, and research-report create actions that read chat text.
+7. Treat destructive tools as requiring explicit user intent: `gemini_delete_chat`, `gemini_cleanup_test_artifacts(dry_run=false)`, `gemini_delete_scheduled_action`, `gemini_reset_session`, `gemini_manage_gems(action="delete")`, and prompt deletion.
 
 > Need the full tool/group/privacy/destructive map? See [references/tool_surface.md](references/tool_surface.md). Load it on demand — the live `gemini_get_tool_manifest` remains the source of truth.
 
@@ -81,6 +82,8 @@ Use this skill for this repository's Gemini Web MCP server and low-token skill s
 ## Media Workflow
 
 - For music/video/image generation requests, use the MCP tool path and finish only when the tool reports saved local media files or an explicit export failure.
+- Keep `requested_model`, `request_model`, `effective_backend`, and `observed_backend` separate. An expected/effective label is not live backend evidence.
+- For a local image claim, verify that the path is inside the requested output directory, the file exists and is non-empty, MIME is `image/*`, dimensions are positive, and structured verification is `verified`; response prose or a remote URI alone is insufficient.
 - For Lyria 3 Pro/fullsong claims, verify raw backend markers and saved media duration; do not trust wrapper labels, model names, or chat prose alone.
 - `gemini_generate_music` can recover media from raw chat payloads even when `response.media` is empty; inspect returned file paths and duration metadata before summarizing success.
 
@@ -90,37 +93,9 @@ Use this skill for this repository's Gemini Web MCP server and low-token skill s
 - Refresh Chrome cookies first when account context matters. If the registry is unexpectedly empty, call `gemini_list_browser_cookie_profiles`, then `gemini_get_cookie_from_browser(profile="...")` for the profile with Gemini cookies or scheduled registry entries.
 - After create/delete, check `verification_status`; after create also check `readable_by_id_after_create`, and after delete check `deleted_by_id_after_delete` or `task_state_after_delete=deleted` before claiming the task is gone.
 
-## Validation
+## Operational Verification
 
-Before finishing changes, run:
-
-```bash
-./.venv/bin/pytest -q
-./.venv/bin/python -m py_compile src/tools/annotations.py src/tools/chat.py src/tools/media.py src/tools/file.py src/tools/research.py src/tools/prompts.py src/tools/manage.py src/server.py src/skill_server.py src/client_wrapper.py src/thinking_client.py src/constants.py
-git diff --check
-```
-
-When changing manifest or capability metadata, also verify:
-
-```bash
-GEMINI_TOOLS=core ./.venv/bin/python - <<'PY'
-import asyncio
-from src.server import mcp
-async def main():
-    tools = await mcp.list_tools()
-    print(len(tools), [t.name for t in tools if t.annotations is None])
-asyncio.run(main())
-PY
-```
-
-For skill-only changes, validate each skill copy with the standard Agent Skills
-validator (`skills-ref`, see https://agentskills.io/specification#validation):
-
-```bash
-# Install once if needed: pip install skills-ref
-for path in .codex/skills/gemini-web-mcp .agents/skills/gemini-web-mcp; do
-  skills-ref validate "$path"
-done
-```
-
-Keep `evaluations/gemini_web_mcp_contract.xml` aligned with `gemini_get_tool_manifest` and `gemini_get_web_capabilities`.
+- Run the credential-free onboarding command before the first live call and retain its JSON protocol/profile evidence.
+- For a live text check, use `gemini-mcp-onboarding chat --allow-live-account --prompt ...`; for an image deliverable, use the `image` subcommand with the image extra and a dedicated output directory.
+- State explicitly whether backend behavior was observed live or only expected from routing metadata.
+- Use `evaluations/gemini_web_mcp_contract.xml` only as a repository contract reference; changing it or any implementation file is development work and belongs to `gemini-web-mcp-development`.

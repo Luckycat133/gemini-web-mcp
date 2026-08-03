@@ -13,6 +13,8 @@ The gateway should let a general-purpose agent obtain text, image, video, music,
 ```text
 MCP clients
    |
+   +-- src.onboarding ------------ install + auth-free text + verified image client
+   |
    +-- src.server ---------------- primary profile-based tool surface
    |
    +-- src.skill_server ---------- compact low-token facade surface
@@ -177,6 +179,8 @@ Required CI layers:
 - full/compact parity and tool-list snapshots;
 - wheel/sdist build and clean installation;
 - entrypoint import/start/list-tools smoke;
+- clean `uvx` onboarding that calls a real auth-free text tool;
+- checked-in Codex/Claude/VS Code config parsing and profile/secret-boundary contracts;
 - skill validation and copy parity;
 - optional scheduled live compatibility canary using a dedicated account.
 

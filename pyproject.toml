@@ -36,6 +36,7 @@ dev = [
 [project.scripts]
 gemini-mcp-server = "src.server:main"
 gemini-mcp-skill-server = "src.skill_server:main"
+gemini-mcp-onboarding = "src.onboarding:main"
 
 [build-system]
 requires = ["setuptools>=61.0"]
