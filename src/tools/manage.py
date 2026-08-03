@@ -7,8 +7,7 @@ import os
 import shutil
 import sys
 from datetime import datetime, timezone
-from mcp.server.fastmcp import FastMCP
-from mcp.types import TextContent
+from ..adapters.mcp_sdk import MCPServer, TextContent
 from typing import Any, Callable, Literal, Optional, TypeVar
 import logging
 
@@ -1298,13 +1297,13 @@ _format_web_capabilities_markdown = format_registered_web_capabilities
 _iter_gem_values = registered_iter_gems
 
 
-def register_manage_tools(mcp: FastMCP, layers: list[str] | set[str] | tuple[str, ...] | None = None):
+def register_manage_tools(mcp: MCPServer, layers: list[str] | set[str] | tuple[str, ...] | None = None):
     enabled_tool_names = resolve_manage_tool_names(layers)
 
     def _tool(tool_name: str, annotations) -> Callable[[_F], _F]:
         def decorator(func: _F) -> _F:
             if tool_name in enabled_tool_names:
-                # Register with FastMCP for external MCP dispatch, but keep the
+                # Register with MCPServer for external MCP dispatch, but keep the
                 # original typed function for in-process calls so callers retain
                 # the declared return type (avoids cascading Any returns).
                 mcp.tool(annotations=annotations)(func)

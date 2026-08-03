@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### MCP Python SDK v2 Adapter
+- Migrated the runtime to the official `mcp>=2,<3` and `mcp-types>=2,<3` packages through the project-owned `src/adapters/mcp_sdk.py` boundary, replacing removed FastMCP imports without changing domain services
+- Adopted SDK v2 `MCPServer`, snake_case Python model fields, complete `CallToolResult` values, generated `outputSchema`, validated `structuredContent`, `resultType`, and `server/discover` lifecycle behavior while retaining existing text content
+- Reworked the real stdio smoke to list and call representative tools through the v2 high-level client in both `auto` (`2026-07-28`) and `legacy` (`2025-11-25`) modes across both console entrypoints
+- Added reviewed golden fingerprints for primary-model and compact tool lists, input/output schemas, and annotations, plus cross-client schema validation against actual offline results
+- Documented the current Codex, Claude Desktop, and VS Code protocol paths and set project support for the legacy SDK-v1 compatibility track to end on **2027-01-31**
+- Added six SDK v2 adapter, discovery, legacy negotiation, golden, and structured-result tests; the full offline suite now passes 1299 tests
+
 ### Stream and Long-Operation Semantics
 - Kept the compatibility `_stream` tool names while documenting that Gemini upstream chunks are normalized and collected into one MCP result; added explicit `delivery=collected` metadata instead of claiming MCP incremental delivery
 - Added stateful delta/cumulative/mixed chunk normalization so repeated or stale cumulative text is not duplicated, with public chunk and deduplication diagnostics
@@ -72,14 +80,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Made compact reset semantics unambiguous: `reset`/`reset_one` require a session ID and affect one session, while only explicit `reset_all` clears all sessions and retires the client
 - Serialized normal and streaming sends per session; asynchronous single-session reset waits for an in-flight send before detaching state and applying the remote-retention policy
 - Added cross-adapter, ID collision, unknown-ID isolation, concurrent-send, stream, reset-race, facade, and workflow tests; the P0.2 phase gate passed 1132 offline tests
-
-### MCP Protocol Version Compatibility
-- Aligned with MCP `2026-07-28` specification status: this repository contains no custom MCP protocol-layer code (protocol version negotiation, JSON-RPC framing, `initialize` handshake, `server/discover`, `resultType`, `ttlMs`/`cacheScope`, capabilities negotiation are all delegated to the `mcp` Python SDK via `FastMCP`); application-level error codes in `error_handler.py` (`NO_COOKIE`, `INVALID_COOKIE`, `SESSION_NOT_FOUND`, etc.) are returned as `TextContent`, not JSON-RPC protocol errors
-- Confirmed that the current `mcp` SDK 1.28.x exposes `LATEST_PROTOCOL_VERSION = "2025-11-25"`, so this server currently speaks MCP `2025-11-25`
-- The `2026-07-28` revision (stateless core, mandatory `server/discover`, `resultType`, reserved error range `-32020..-32099`, Roots/Sampling/Logging deprecated, etc.) requires `mcp` SDK v2.0.0+; v2 is a breaking major release (`mcp.server.fastmcp` removed, `FastMCP`→`MCPServer`, camelCase→snake_case fields, `httpx`→`httpx2`), migration touches approximately 15 source files and is planned as separate future work
-- Per the [official SDK migration guide](https://py.sdk.modelcontextprotocol.io/migration/), added `<2` upper bound to `mcp` dependency in `pyproject.toml` (`mcp>=1.0.0,<2`) to prevent fresh installs/CI from pulling v2.0.0 and causing `from mcp.server.fastmcp import FastMCP` to fail with `ModuleNotFoundError`
-
----
 
 ## [0.2.0] - 2026-07-17
 

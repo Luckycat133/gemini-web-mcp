@@ -88,7 +88,7 @@ GitHub: https://github.com/Luckycat133/gemini-web-mcp
 
 ## Reddit / Hacker News Style
 
-I built Gemini Web MCP, a Python FastMCP server plus Codex skill for Gemini Web workflows.
+I built Gemini Web MCP, a Python MCPServer plus Codex skill for Gemini Web workflows.
 
 The interesting bit is the tool layering: instead of exposing every account/history/admin function to every agent, it has narrow `GEMINI_TOOLS` profiles such as `model`, `history`, `account-read`, `history-organize`, `scheduled-read`, and `scheduled-admin`.
 
@@ -107,7 +107,7 @@ Show HN: Gemini Web MCP - Layered Gemini Web tools for AI agents
 Body:
 
 ```text
-I built Gemini Web MCP, a Python FastMCP server and agent skill for using Gemini Web from MCP-compatible clients.
+I built Gemini Web MCP, a Python MCPServer and agent skill for using Gemini Web from MCP-compatible clients.
 
 The practical problem it solves is tool-surface control. An agent that only needs model calls can start with GEMINI_TOOLS=model instead of receiving private history, account, and admin tools. Separate profiles cover history organization, read-only account inventory, media workflows, and explicitly enabled scheduled-action administration.
 

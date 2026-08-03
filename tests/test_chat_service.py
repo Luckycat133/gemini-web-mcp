@@ -6,8 +6,7 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
-from mcp.server.fastmcp import FastMCP
-from mcp.types import TextContent
+from src.adapters.mcp_sdk import MCPServer, TextContent
 
 import src.skill_server as skill_server
 import src.tools.chat as chat_tools
@@ -456,16 +455,16 @@ def test_primary_and_compact_chat_adapters_have_success_contract_parity(monkeypa
         lambda _response, source, **_kwargs: "c_shared",
     )
 
-    primary = FastMCP("chat-service-parity")
+    primary = MCPServer("chat-service-parity")
     chat_tools.register_chat_tools(primary)
 
     async def run():
-        primary_content, _structured = await primary.call_tool(
+        primary_result = await primary.call_tool(
             "gemini_chat",
             {"message": "hello", "model": "flash"},
         )
         compact_content = await skill_server.chat(message="hello", model="flash")
-        return primary_content, compact_content
+        return primary_result.content, compact_content
 
     primary_content, compact_content = asyncio.run(run())
     primary_payload = _domain_payload(primary_content[0])
@@ -536,7 +535,7 @@ def test_both_chat_adapters_delegate_to_the_shared_service(monkeypatch):
         )
 
     monkeypatch.setattr(ChatService, "generate", fake_generate)
-    primary = FastMCP("chat-service-delegation")
+    primary = MCPServer("chat-service-delegation")
     chat_tools.register_chat_tools(primary)
 
     async def run():
@@ -553,14 +552,14 @@ def test_both_chat_adapters_delegate_to_the_shared_service(monkeypatch):
 
 
 def test_chat_tool_argument_schemas_remain_compatible():
-    primary = FastMCP("chat-schema-compatibility")
+    primary = MCPServer("chat-schema-compatibility")
     chat_tools.register_chat_tools(primary)
 
     async def schemas():
         primary_tools = {tool.name: tool for tool in await primary.list_tools()}
         compact_tools = {tool.name: tool for tool in await skill_server.mcp.list_tools()}
         return {
-            name: set(tool.inputSchema.get("properties", {}))
+            name: set(tool.input_schema.get("properties", {}))
             for name, tool in {**primary_tools, **compact_tools}.items()
             if name in {"gemini_chat", "gemini_start_chat", "gemini_send_message", "chat", "session"}
         }

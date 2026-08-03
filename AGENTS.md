@@ -2,7 +2,7 @@
 
 ## Project Structure & Module Organization
 
-This is a Python 3.11+ FastMCP server for Gemini Web workflows. Core runtime code lives in `src/`: `server.py` is the primary MCP entrypoint, `skill_server.py` exposes the low-token skill surface, `domain/` defines typed result and artifact contracts, `adapters/` preserves MCP compatibility, `services/` owns cross-adapter chat/artifact/history/account/notebook/scheduled/Gem/manifest/doctor workflows, and `infrastructure/` owns the evidence-backed Gemini Web RPC registry and pure parsers. Shared client/session/cookie/cleanup logic is split across `client_wrapper.py`, `client_manager.py`, `cookie_manager.py`, `session_manager.py`, `remote_chat_cleanup_manager.py`, `thinking_client.py`, and `error_handler.py`. Tool implementations live in `src/tools/`; `manage.py` is now a compatibility registration adapter and must not become a dependency of compact or unrelated services. Tests are in `tests/`, documentation is in `docs/`, and contract evaluation prompts live in `evaluations/gemini_web_mcp_contract.xml`. Local outputs such as `artifacts/`, `generated_media/`, cookies, and `.env` files must remain untracked.
+This is a Python 3.11+ MCP Python SDK v2 server for Gemini Web workflows. Core runtime code lives in `src/`: `server.py` is the primary MCP entrypoint, `skill_server.py` exposes the low-token skill surface, `domain/` defines typed result and artifact contracts, `adapters/mcp_sdk.py` is the single SDK/protocol-model import boundary, other `adapters/` preserve text and structured-result compatibility, `services/` owns cross-adapter chat/artifact/history/account/notebook/scheduled/Gem/manifest/doctor workflows, and `infrastructure/` owns the evidence-backed Gemini Web RPC registry and pure parsers. Shared client/session/cookie/cleanup logic is split across `client_wrapper.py`, `client_manager.py`, `cookie_manager.py`, `session_manager.py`, `remote_chat_cleanup_manager.py`, `thinking_client.py`, and `error_handler.py`. Tool implementations live in `src/tools/`; `manage.py` is now a compatibility registration adapter and must not become a dependency of compact or unrelated services. Tests are in `tests/`, documentation is in `docs/`, and contract evaluation prompts live in `evaluations/gemini_web_mcp_contract.xml`. Local outputs such as `artifacts/`, `generated_media/`, cookies, and `.env` files must remain untracked.
 
 ## Build, Test, and Development Commands
 
@@ -13,7 +13,7 @@ This is a Python 3.11+ FastMCP server for Gemini Web workflows. Core runtime cod
 - `python -m ruff check src tests scripts && python -m mypy src scripts`: run the maintained static correctness gates.
 - `python -m pytest -q`: run the complete offline test suite.
 - `python scripts/run_contract_checklist.py`: run the targeted architecture/distribution contract gate.
-- `python scripts/smoke_profiles.py && python scripts/smoke_mcp_protocol.py`: verify exact representative tool surfaces and both stdio MCP handshakes without live Gemini calls.
+- `python scripts/smoke_profiles.py && python scripts/smoke_mcp_protocol.py`: verify exact representative tool surfaces and both modern/legacy stdio list/call paths without live Gemini calls.
 - `mcp dev src/server.py`: inspect the server with MCP Inspector after installing `mcp[cli]`.
 
 ## Coding Style & Naming Conventions

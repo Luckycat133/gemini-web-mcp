@@ -13,8 +13,7 @@ from types import SimpleNamespace
 from typing import Literal, Optional, cast
 
 import orjson
-from mcp.server.fastmcp import FastMCP
-from mcp.types import TextContent
+from ..adapters.mcp_sdk import MCPServer, TextContent
 
 from gemini_webapi.constants import GRPC
 from gemini_webapi.types import RPCData
@@ -282,7 +281,7 @@ def _restore_client_timeouts(
         client.watchdog_timeout = previous_watchdog_timeout
 
 
-def register_media_tools(mcp: FastMCP):
+def register_media_tools(mcp: MCPServer):
 
     @mcp.tool(annotations=MUTATES_REMOTE)
     async def gemini_generate_media(

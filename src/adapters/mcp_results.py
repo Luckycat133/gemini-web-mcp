@@ -7,7 +7,7 @@ from collections.abc import Sequence
 from functools import wraps
 from typing import Any, Awaitable, Callable, ParamSpec, TypeVar
 
-from mcp.types import TextContent
+from .mcp_sdk import TextContent
 
 from ..domain import DomainResult, result_from_exception
 

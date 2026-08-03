@@ -23,7 +23,7 @@ import asyncio
 from types import SimpleNamespace
 
 import pytest
-from mcp.server.fastmcp import FastMCP
+from src.adapters.mcp_sdk import MCPServer
 
 import src.tools.research as research_tools
 from src.tools.research import _null_scope
@@ -35,8 +35,7 @@ from src.tools.research import _null_scope
 
 
 async def _call_tool(mcp, name, **kwargs):
-    content, _structured = await mcp.call_tool(name, kwargs)
-    return content
+    return (await mcp.call_tool(name, kwargs)).content
 
 
 class _FakeFallbackResearchClient:
@@ -192,7 +191,7 @@ def _patch_research_env(monkeypatch, client, *, captured_schedule=None,
 
 
 def _make_mcp():
-    mcp = FastMCP("test")
+    mcp = MCPServer("test")
     research_tools.register_research_tools(mcp)
     return mcp
 

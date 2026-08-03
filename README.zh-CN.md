@@ -8,7 +8,7 @@
   <a href="https://github.com/Luckycat133/gemini-web-mcp/releases/latest"><img alt="Release" src="https://img.shields.io/github/v/release/Luckycat133/gemini-web-mcp?label=release"></a>
   <a href="https://github.com/Luckycat133/gemini-web-mcp/tree/main/.agents/skills/gemini-web-mcp"><img alt="Codex Skill" src="https://img.shields.io/badge/Codex%20Skill-installable-0B6BFF"></a>
   <a href="https://www.gnu.org/licenses/agpl-3.0.html"><img alt="License" src="https://img.shields.io/badge/License-AGPL--3.0--only-blue.svg"></a>
-  <a href="docs/changelog.md"><img alt="Verified" src="https://img.shields.io/badge/tests-1293%20passing-1F8A70"></a>
+  <a href="docs/changelog.md"><img alt="Verified" src="https://img.shields.io/badge/tests-1299%20passing-1F8A70"></a>
 </p>
 
 <p align="center">
@@ -23,9 +23,9 @@
 
 ## MCP 协议兼容性
 
-本服务器把所有 MCP 协议层行为（版本协商、JSON-RPC 帧、`initialize` 握手、`server/discover`、结构化错误码）全部委托给官方 `mcp` Python SDK（经 `FastMCP`），自身不含任何协议层代码；`error_handler.py` 里的 `NO_COOKIE` / `INVALID_COOKIE` / `SESSION_NOT_FOUND` 等是应用层错误，以 `TextContent` 返回，不是 JSON-RPC 协议错误。
+本服务器通过专用 `MCPServer` 适配层，把 discovery、版本协商、JSON-RPC 帧、旧式 `initialize` 握手、结果校验和结构化协议错误委托给官方 `mcp` Python SDK v2。仓库不自建协议栈；`error_handler.py` 里的 `NO_COOKIE` / `INVALID_COOKIE` / `SESSION_NOT_FOUND` 等是工具结果中的应用层错误，不是 JSON-RPC 协议错误。
 
-当前测试范围 `mcp>=1.28,<2` 对外说的是协议 `2025-11-25`。MCP `2026-07-28` 修订（stateless 核心、`server/discover` 强制、`resultType`、保留错误码段 `-32020..-32099`、Roots/Sampling/Logging 弃用）需要 `mcp` SDK v2.0.0+，而 v2 是破坏性大版本（`FastMCP` → `MCPServer`、`mcp.server.fastmcp` 移除、字段 camelCase → snake_case、`httpx` → `httpx2`）。在该迁移完成前，`pyproject.toml` 按 [SDK 迁移指南](https://py.sdk.modelcontextprotocol.io/migration/) 给 `mcp` 加了 `<2` 上界，避免新安装误拉不兼容的 v2。
+当前运行时支持范围是 `mcp>=2,<3` 与 `mcp-types>=2,<3`。CI 同时覆盖协议 `2026-07-28` 的 `server/discover` 客户端，以及通过 `2025-11-25` initialize 路径接入的兼容客户端。每个工具都声明 `outputSchema`，返回经过校验的 `structuredContent`，并保留现有文本。SDK v1 的维护截止日期和完整客户端兼容边界见 [兼容政策](docs/mcp-sdk-compatibility.md)。
 
 ---
 

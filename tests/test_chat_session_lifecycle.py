@@ -30,7 +30,7 @@
 
 import asyncio
 
-from mcp.server.fastmcp import FastMCP
+from src.adapters.mcp_sdk import MCPServer
 
 import src.tools.chat as chat_tools
 from src.session_manager import SessionData, SessionOperationResult
@@ -43,10 +43,10 @@ from src.session_manager import SessionData, SessionOperationResult
 def _register_chat_tools():
     """注册 chat 工具并返回工具函数字典。
 
-    FastMCP 的 call_tool 路径较重，这里直接从 mcp._tool_manager 提取
+    MCPServer 的 call_tool 路径较重，这里直接从 mcp._tool_manager 提取
     已注册的工具函数，便于直接 await 调用。
     """
-    mcp = FastMCP("test")
+    mcp = MCPServer("test")
     chat_tools.register_chat_tools(mcp)
     return mcp
 
@@ -54,10 +54,9 @@ def _register_chat_tools():
 async def _call_tool(mcp, name, **kwargs):
     """通过 mcp.call_tool 调用工具，返回 TextContent 列表。
 
-    mcp.call_tool 返回 (content_list, structured_dict) 元组，这里只取 content_list。
+    MCP SDK v2 的 call_tool 返回 CallToolResult，这里只取 content。
     """
-    content, _structured = await mcp.call_tool(name, kwargs)
-    return content
+    return (await mcp.call_tool(name, kwargs)).content
 
 
 # ---------------------------------------------------------------------------

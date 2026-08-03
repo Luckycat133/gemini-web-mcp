@@ -14,7 +14,7 @@
                          │
                          ▼
 ┌─────────────────────────────────────────────────────────┐
-│         Gemini MCP Server (FastMCP)                      │
+│         Gemini MCP Server (MCPServer / SDK v2)           │
 │  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐  │
 │  │   Tools      │  │   Session    │  │    Client    │  │
 │  │  对话/媒体  │  │   Manager    │  │   Wrapper    │  │
@@ -105,13 +105,13 @@ gemini-mcp-server/
 ### 1. Server (server.py)
 
 **职责：**
-- FastMCP 服务器初始化
+- MCPServer 服务器初始化
 - 所有工具注册
 - 健康检查与管理工具
 - 服务器入口点
 
 **关键组件：**
-- FastMCP 实例
+- MCPServer 实例
 - 工具注册函数调用
 - 管理工具实现
 
@@ -210,8 +210,10 @@ MCP adapter ── TextContent.text（兼容）
 ```
 
 `src/domain/results.py` 定义稳定错误码、重试性、建议动作、操作状态和诊断关联 ID。
-`src/adapters/mcp_results.py` 保留既有文本与 FastMCP 返回形状，并只把 JSON 安全的公开数据写入
+`src/adapters/mcp_results.py` 保留既有文本，并只把 JSON 安全的公开数据写入
 `_meta.domain_result`。上游客户端、Cookie、session 实例、异步锁和原始响应对象不会序列化。
+`src/adapters/mcp_sdk.py` 是唯一的 SDK v2 / `mcp-types` 运行时边界；MCPServer 进一步返回带
+`resultType` 和经过 `outputSchema` 校验的 `structuredContent`，领域服务不依赖此协议适配层。
 未知异常在适配边界分类；结构化结果通过 request/diagnostic ID 与包含原始证据的服务端日志关联。
 compact 入口原有的 `Error: ...` 正文暂时保留，仅用于文本兼容，不属于稳定领域契约。
 
@@ -325,7 +327,7 @@ Deep Research 使用 `LongOperationData` 保存上游 research/chat ID、最新�
 用户请求
    │
    ▼
-FastMCP 工具调用 (gemini_chat)
+MCPServer 工具调用 (gemini_chat)
    │
    ▼
 共享 ChatService
@@ -464,7 +466,7 @@ client = GeminiClient(psid, psidts, ...)
 
 1. 找到相应工具模块
 2. 更新工具函数
-3. 保持 FastMCP 装饰器
+3. 保持 MCPServer 装饰器与 v2 schema 契约
 4. 更新文档（docs/tools.md）
 
 ---
@@ -474,7 +476,8 @@ client = GeminiClient(psid, psidts, ...)
 | 技术 | 版本 | 用途 |
 |------|------|------|
 | Python | >= 3.11 | 开发语言（受 `pyproject.toml` 约束） |
-| FastMCP | mcp >= 1.28, < 2 | MCP 服务器框架（`@mcp.tool(annotations=...)` 注册工具） |
+| MCPServer | mcp >= 2, < 3 | MCP SDK v2 服务器框架（`@mcp.tool(annotations=...)` 注册工具） |
+| mcp-types | >= 2, < 3 | 独立协议模型、snake_case Python 字段与 wire alias |
 | gemini-webapi | >= 2.0.0, < 3 | Gemini Web API 封装（依赖 `types.RPCData`、`constants.GRPC` 等 2.x API） |
 | orjson | >= 3.11.7, < 4 | 媒体和 Thinking 请求的直接 JSON 编解码依赖 |
 

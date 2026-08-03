@@ -4,12 +4,11 @@ import os
 import sys
 from types import SimpleNamespace
 
-from mcp.server.fastmcp import FastMCP
+from src.adapters.mcp_sdk import MCPServer
 
 
 def _tool_text(result):
-    content, _meta = result
-    return content[0].text
+    return result.content[0].text
 
 
 def test_parse_response_exposes_remote_chat_id_for_cleanup():
@@ -44,7 +43,7 @@ def test_all_group_registers_unique_complete_tool_surface():
     from src.tools import register_tools
 
     async def run():
-        mcp = FastMCP("test")
+        mcp = MCPServer("test")
         register_tools(mcp, ["all"])
         tools = await mcp.list_tools()
         names = [tool.name for tool in tools]
@@ -77,30 +76,30 @@ def test_all_group_tools_have_mcp_annotations():
     from src.tools import register_tools
 
     async def run():
-        mcp = FastMCP("test")
+        mcp = MCPServer("test")
         register_tools(mcp, ["all"])
         tools = await mcp.list_tools()
         by_name = {tool.name: tool for tool in tools}
 
         assert all(tool.annotations is not None for tool in tools)
-        assert by_name["gemini_chat"].annotations.readOnlyHint is False
-        assert by_name["gemini_chat"].annotations.openWorldHint is True
-        assert by_name["gemini_list_sessions"].annotations.readOnlyHint is True
-        assert by_name["gemini_list_sessions"].annotations.openWorldHint is False
-        assert by_name["gemini_reset_session"].annotations.destructiveHint is True
-        assert by_name["gemini_upload_file"].annotations.openWorldHint is True
-        assert by_name["gemini_deep_research"].annotations.readOnlyHint is False
-        assert by_name["gemini_list_research_report_actions"].annotations.readOnlyHint is True
-        assert by_name["gemini_create_from_research_report"].annotations.readOnlyHint is False
-        assert by_name["gemini_create_from_research_report"].annotations.openWorldHint is False
-        assert by_name["gemini_history"].annotations.readOnlyHint is True
-        assert by_name["gemini_account_inventory"].annotations.readOnlyHint is True
-        assert by_name["gemini_notebooks"].annotations.readOnlyHint is True
-        assert by_name["gemini_delete_chat"].annotations.destructiveHint is True
-        assert by_name["gemini_cleanup_test_artifacts"].annotations.destructiveHint is True
-        assert by_name["gemini_create_scheduled_action"].annotations.readOnlyHint is False
-        assert by_name["gemini_create_scheduled_action"].annotations.destructiveHint is False
-        assert by_name["gemini_delete_scheduled_action"].annotations.destructiveHint is True
+        assert by_name["gemini_chat"].annotations.read_only_hint is False
+        assert by_name["gemini_chat"].annotations.open_world_hint is True
+        assert by_name["gemini_list_sessions"].annotations.read_only_hint is True
+        assert by_name["gemini_list_sessions"].annotations.open_world_hint is False
+        assert by_name["gemini_reset_session"].annotations.destructive_hint is True
+        assert by_name["gemini_upload_file"].annotations.open_world_hint is True
+        assert by_name["gemini_deep_research"].annotations.read_only_hint is False
+        assert by_name["gemini_list_research_report_actions"].annotations.read_only_hint is True
+        assert by_name["gemini_create_from_research_report"].annotations.read_only_hint is False
+        assert by_name["gemini_create_from_research_report"].annotations.open_world_hint is False
+        assert by_name["gemini_history"].annotations.read_only_hint is True
+        assert by_name["gemini_account_inventory"].annotations.read_only_hint is True
+        assert by_name["gemini_notebooks"].annotations.read_only_hint is True
+        assert by_name["gemini_delete_chat"].annotations.destructive_hint is True
+        assert by_name["gemini_cleanup_test_artifacts"].annotations.destructive_hint is True
+        assert by_name["gemini_create_scheduled_action"].annotations.read_only_hint is False
+        assert by_name["gemini_create_scheduled_action"].annotations.destructive_hint is False
+        assert by_name["gemini_delete_scheduled_action"].annotations.destructive_hint is True
 
     asyncio.run(run())
 
@@ -109,7 +108,7 @@ def test_core_group_stays_focused_on_high_value_ai_tools():
     from src.tools import register_tools
 
     async def run():
-        mcp = FastMCP("test")
+        mcp = MCPServer("test")
         register_tools(mcp, ["core"])
         tools = await mcp.list_tools()
         names = {tool.name for tool in tools}
@@ -129,7 +128,7 @@ def test_intent_profiles_expose_focused_tool_surfaces():
     from src.tools import register_tools
 
     async def tool_names(groups):
-        mcp = FastMCP("test")
+        mcp = MCPServer("test")
         register_tools(mcp, groups)
         return {tool.name for tool in await mcp.list_tools()}
 
@@ -224,7 +223,7 @@ def test_deep_research_uses_default_transport_for_model_aliases(monkeypatch):
     monkeypatch.setattr(research_tools, "schedule_remote_chat_cleanup", lambda *args, **kwargs: None)
 
     async def run():
-        mcp = FastMCP("test")
+        mcp = MCPServer("test")
         research_tools.register_research_tools(mcp)
         result = await mcp.call_tool(
             "gemini_deep_research",
@@ -343,7 +342,7 @@ def test_research_report_actions_and_artifact_creation(monkeypatch, tmp_path):
     monkeypatch.setattr(research_tools, "_fetch_deep_research_immersive_report", fake_fetch_report)
 
     async def run():
-        mcp = FastMCP("test")
+        mcp = MCPServer("test")
         research_tools.register_research_tools(mcp)
 
         actions_result = await mcp.call_tool(
@@ -409,12 +408,12 @@ def test_prompts_group_tool_has_local_destructive_annotation():
     from src.tools import register_tools
 
     async def run():
-        mcp = FastMCP("test")
+        mcp = MCPServer("test")
         register_tools(mcp, ["prompts"])
         tools = await mcp.list_tools()
         tool = next(item for item in tools if item.name == "gemini_manage_prompts")
-        assert tool.annotations.destructiveHint is True
-        assert tool.annotations.openWorldHint is False
+        assert tool.annotations.destructive_hint is True
+        assert tool.annotations.open_world_hint is False
 
     asyncio.run(run())
 
@@ -441,7 +440,7 @@ def test_prompt_list_exposes_full_id_for_cleanup(tmp_path):
     prompt_tools._prompt_manager = prompt_tools.PromptManager(str(tmp_path / "prompts.json"))
 
     async def run():
-        mcp = FastMCP("test")
+        mcp = MCPServer("test")
         prompt_tools.register_prompts_tools(mcp)
         created = await mcp.call_tool(
             "gemini_manage_prompts",
@@ -471,17 +470,17 @@ def test_server_utility_tools_have_annotations():
         tools = await server.mcp.list_tools()
         by_name = {tool.name: tool for tool in tools}
         assert "gemini_get_tool_manifest" in by_name
-        assert by_name["gemini_get_tool_manifest"].annotations.readOnlyHint is True
-        assert by_name["gemini_get_tool_manifest"].annotations.openWorldHint is False
-        assert by_name["gemini_doctor"].annotations.readOnlyHint is True
-        assert by_name["gemini_doctor"].annotations.openWorldHint is False
-        assert by_name["gemini_reset"].annotations.readOnlyHint is False
-        assert by_name["gemini_reset"].annotations.openWorldHint is False
-        assert by_name["gemini_get_cookie_status"].annotations.readOnlyHint is True
-        assert by_name["gemini_list_browser_cookie_profiles"].annotations.readOnlyHint is True
-        assert by_name["gemini_list_browser_cookie_profiles"].annotations.openWorldHint is False
-        assert by_name["gemini_get_cookie_from_browser"].annotations.readOnlyHint is False
-        assert by_name["gemini_get_cookie_from_browser"].annotations.openWorldHint is False
+        assert by_name["gemini_get_tool_manifest"].annotations.read_only_hint is True
+        assert by_name["gemini_get_tool_manifest"].annotations.open_world_hint is False
+        assert by_name["gemini_doctor"].annotations.read_only_hint is True
+        assert by_name["gemini_doctor"].annotations.open_world_hint is False
+        assert by_name["gemini_reset"].annotations.read_only_hint is False
+        assert by_name["gemini_reset"].annotations.open_world_hint is False
+        assert by_name["gemini_get_cookie_status"].annotations.read_only_hint is True
+        assert by_name["gemini_list_browser_cookie_profiles"].annotations.read_only_hint is True
+        assert by_name["gemini_list_browser_cookie_profiles"].annotations.open_world_hint is False
+        assert by_name["gemini_get_cookie_from_browser"].annotations.read_only_hint is False
+        assert by_name["gemini_get_cookie_from_browser"].annotations.open_world_hint is False
 
     asyncio.run(run())
 
@@ -494,21 +493,21 @@ def test_skill_server_tools_have_mcp_annotations():
         by_name = {tool.name: tool for tool in tools}
 
         assert all(tool.annotations is not None for tool in tools)
-        assert by_name["chat"].annotations.readOnlyHint is False
-        assert by_name["chat"].annotations.openWorldHint is True
-        assert by_name["history"].annotations.destructiveHint is True
-        assert by_name["history"].annotations.openWorldHint is True
-        assert by_name["cleanup"].annotations.destructiveHint is True
-        assert by_name["cleanup"].annotations.openWorldHint is True
-        assert by_name["account"].annotations.readOnlyHint is True
-        assert by_name["account"].annotations.openWorldHint is True
-        assert by_name["session"].annotations.destructiveHint is True
-        assert by_name["prompts"].annotations.destructiveHint is True
-        assert by_name["prompts"].annotations.openWorldHint is False
-        assert by_name["doctor"].annotations.readOnlyHint is True
-        assert by_name["doctor"].annotations.openWorldHint is False
-        assert by_name["cookie"].annotations.readOnlyHint is False
-        assert by_name["cookie"].annotations.openWorldHint is False
+        assert by_name["chat"].annotations.read_only_hint is False
+        assert by_name["chat"].annotations.open_world_hint is True
+        assert by_name["history"].annotations.destructive_hint is True
+        assert by_name["history"].annotations.open_world_hint is True
+        assert by_name["cleanup"].annotations.destructive_hint is True
+        assert by_name["cleanup"].annotations.open_world_hint is True
+        assert by_name["account"].annotations.read_only_hint is True
+        assert by_name["account"].annotations.open_world_hint is True
+        assert by_name["session"].annotations.destructive_hint is True
+        assert by_name["prompts"].annotations.destructive_hint is True
+        assert by_name["prompts"].annotations.open_world_hint is False
+        assert by_name["doctor"].annotations.read_only_hint is True
+        assert by_name["doctor"].annotations.open_world_hint is False
+        assert by_name["cookie"].annotations.read_only_hint is False
+        assert by_name["cookie"].annotations.open_world_hint is False
 
     asyncio.run(run())
 
@@ -580,7 +579,7 @@ def test_file_validation_runs_before_client_initialization(monkeypatch):
     monkeypatch.setattr(file_tools, "initialize_client", fail_initialize)
 
     async def run():
-        mcp = FastMCP("test")
+        mcp = MCPServer("test")
         file_tools.register_file_tools(mcp)
 
         path_result = await mcp.call_tool("gemini_upload_file", {"file_path": "../secret.txt"})
@@ -624,7 +623,7 @@ def test_gem_management_uses_current_gemini_webapi_contract(monkeypatch):
     monkeypatch.setattr(manage_tools, "initialize_client", noop_initialize)
 
     async def run():
-        mcp = FastMCP("test")
+        mcp = MCPServer("test")
         manage_tools.register_manage_tools(mcp)
 
         list_result = await mcp.call_tool("gemini_manage_gems", {"action": "list"})
@@ -690,7 +689,7 @@ def test_gem_partial_update_preserves_existing_fields(monkeypatch):
     monkeypatch.setattr(manage_tools, "initialize_client", noop_initialize)
 
     async def run():
-        mcp = FastMCP("test")
+        mcp = MCPServer("test")
         manage_tools.register_manage_tools(mcp)
         result = await mcp.call_tool(
             "gemini_manage_gems",
@@ -743,7 +742,7 @@ def test_stream_tools_use_text_delta(monkeypatch):
     monkeypatch.setattr(chat_tools, "send_session_message_stream", service.send_message_stream)
 
     async def run():
-        mcp = FastMCP("test")
+        mcp = MCPServer("test")
         chat_tools.register_chat_tools(mcp)
 
         stream_result = await mcp.call_tool(
@@ -808,7 +807,7 @@ def test_chat_tools_forward_gem_and_temporary_chat_settings(monkeypatch):
     monkeypatch.setattr(chat_tools, "send_session_message", service.send_message)
 
     async def run():
-        mcp = FastMCP("test")
+        mcp = MCPServer("test")
         chat_tools.register_chat_tools(mcp)
 
         await mcp.call_tool(
@@ -875,7 +874,7 @@ def test_chat_tool_accepts_runtime_model_name(monkeypatch):
     monkeypatch.setattr(chat_tools, "cleanup_due_remote_chats", noop_cleanup)
 
     async def run():
-        mcp = FastMCP("test")
+        mcp = MCPServer("test")
         chat_tools.register_chat_tools(mcp)
         await mcp.call_tool(
             "gemini_chat",
@@ -899,7 +898,7 @@ def test_chat_tool_rejects_invalid_image_attachment_before_client(monkeypatch):
     monkeypatch.setattr(chat_tools, "get_gemini_client", fail_get_client)
 
     async def run():
-        mcp = FastMCP("test")
+        mcp = MCPServer("test")
         chat_tools.register_chat_tools(mcp)
         result = await mcp.call_tool(
             "gemini_chat",
@@ -1518,7 +1517,7 @@ def test_model_listing_prefers_runtime_registry(monkeypatch):
     monkeypatch.setattr(manage_tools, "initialize_client", noop_initialize)
 
     async def run():
-        mcp = FastMCP("test")
+        mcp = MCPServer("test")
         manage_tools.register_manage_tools(mcp)
         result = await mcp.call_tool("gemini_list_models", {})
         text = _tool_text(result)
@@ -1543,7 +1542,7 @@ def test_chat_listing_uses_current_chat_cid(monkeypatch):
     monkeypatch.setattr(manage_tools, "initialize_client", noop_initialize)
 
     async def run():
-        mcp = FastMCP("test")
+        mcp = MCPServer("test")
         manage_tools.register_manage_tools(mcp)
         result = await mcp.call_tool("gemini_list_chats", {})
         text = _tool_text(result)
@@ -1601,7 +1600,7 @@ def test_account_and_chat_management_tools_use_current_webapi_contract(monkeypat
     monkeypatch.setattr(manage_tools, "initialize_client", noop_initialize)
 
     async def run():
-        mcp = FastMCP("test")
+        mcp = MCPServer("test")
         manage_tools.register_manage_tools(mcp)
 
         account_result = await mcp.call_tool("gemini_inspect_account", {})
@@ -1644,7 +1643,7 @@ def test_chat_search_defaults_to_metadata_without_reading_turns(monkeypatch):
     monkeypatch.setattr(manage_tools, "initialize_client", noop_initialize)
 
     async def run():
-        mcp = FastMCP("test")
+        mcp = MCPServer("test")
         manage_tools.register_manage_tools(mcp)
 
         result = await mcp.call_tool(
@@ -1692,7 +1691,7 @@ def test_chat_search_can_scan_turns_with_truncated_snippets(monkeypatch):
     monkeypatch.setattr(manage_tools, "initialize_client", noop_initialize)
 
     async def run():
-        mcp = FastMCP("test")
+        mcp = MCPServer("test")
         manage_tools.register_manage_tools(mcp)
 
         result = await mcp.call_tool(
@@ -1742,7 +1741,7 @@ def test_chat_export_returns_markdown_and_json(monkeypatch):
     monkeypatch.setattr(manage_tools, "initialize_client", noop_initialize)
 
     async def run():
-        mcp = FastMCP("test")
+        mcp = MCPServer("test")
         manage_tools.register_manage_tools(mcp)
 
         markdown_result = await mcp.call_tool(
@@ -1786,7 +1785,7 @@ def test_web_feature_probe_uses_observed_rpc_shapes_without_raw_response(monkeyp
     monkeypatch.setattr(manage_tools, "initialize_client", noop_initialize)
 
     async def run():
-        mcp = FastMCP("test")
+        mcp = MCPServer("test")
         manage_tools.register_manage_tools(mcp)
         result = await mcp.call_tool(
             "gemini_probe_web_features",
@@ -1812,7 +1811,7 @@ def test_web_capabilities_manifest_describes_observed_pro_surface():
     import src.tools.manage as manage_tools
 
     async def run():
-        mcp = FastMCP("test")
+        mcp = MCPServer("test")
         manage_tools.register_manage_tools(mcp)
 
         json_result = await mcp.call_tool(
@@ -1847,18 +1846,18 @@ def test_tool_manifest_and_annotations_expose_agent_safety_metadata():
     import src.tools.manage as manage_tools
 
     async def run():
-        mcp = FastMCP("test")
+        mcp = MCPServer("test")
         manage_tools.register_manage_tools(mcp)
 
         tools = await mcp.list_tools()
         by_name = {tool.name: tool for tool in tools}
-        assert by_name["gemini_list_chats"].annotations.readOnlyHint is True
-        assert by_name["gemini_scan_chat_history_sources"].annotations.readOnlyHint is True
-        assert by_name["gemini_delete_chat"].annotations.destructiveHint is True
-        assert by_name["gemini_list_notebooks"].annotations.readOnlyHint is True
-        assert by_name["gemini_move_chat_to_notebook"].annotations.readOnlyHint is False
-        assert by_name["gemini_move_chat_to_notebook"].annotations.destructiveHint is False
-        assert by_name["gemini_manage_gems"].annotations.destructiveHint is True
+        assert by_name["gemini_list_chats"].annotations.read_only_hint is True
+        assert by_name["gemini_scan_chat_history_sources"].annotations.read_only_hint is True
+        assert by_name["gemini_delete_chat"].annotations.destructive_hint is True
+        assert by_name["gemini_list_notebooks"].annotations.read_only_hint is True
+        assert by_name["gemini_move_chat_to_notebook"].annotations.read_only_hint is False
+        assert by_name["gemini_move_chat_to_notebook"].annotations.destructive_hint is False
+        assert by_name["gemini_manage_gems"].annotations.destructive_hint is True
 
         json_result = await mcp.call_tool(
             "gemini_get_tool_manifest",
@@ -2146,7 +2145,7 @@ def test_parsed_web_surface_tools_return_structured_data(monkeypatch):
     monkeypatch.setattr(manage_tools, "initialize_client", noop_initialize)
 
     async def run():
-        mcp = FastMCP("test")
+        mcp = MCPServer("test")
         manage_tools.register_manage_tools(mcp)
 
         links_result = await mcp.call_tool(
@@ -2399,7 +2398,7 @@ def test_url_analysis_preserves_url_and_timeout(monkeypatch):
     monkeypatch.setattr(file_tools, "initialize_client", noop_initialize)
 
     async def run():
-        mcp = FastMCP("test")
+        mcp = MCPServer("test")
         file_tools.register_file_tools(mcp)
         await mcp.call_tool(
             "gemini_analyze_url",
@@ -2437,7 +2436,7 @@ def test_deep_research_uses_library_flag_and_timeout(monkeypatch):
     monkeypatch.setattr(research_tools, "initialize_client", noop_initialize)
 
     async def run():
-        mcp = FastMCP("test")
+        mcp = MCPServer("test")
         research_tools.register_research_tools(mcp)
         result = await mcp.call_tool(
             "gemini_deep_research",
@@ -2504,7 +2503,7 @@ def test_deep_research_runs_full_library_workflow(monkeypatch):
     monkeypatch.setattr(research_tools, "initialize_client", noop_initialize)
 
     async def run():
-        mcp = FastMCP("test")
+        mcp = MCPServer("test")
         research_tools.register_research_tools(mcp)
         result = await mcp.call_tool(
             "gemini_deep_research",
@@ -2573,7 +2572,7 @@ def test_deep_research_falls_back_to_chat_polling_without_research_id(monkeypatc
     monkeypatch.setattr(research_tools, "initialize_client", noop_initialize)
 
     async def run():
-        mcp = FastMCP("test")
+        mcp = MCPServer("test")
         research_tools.register_research_tools(mcp)
         result = await mcp.call_tool(
             "gemini_deep_research",
@@ -2625,7 +2624,7 @@ def test_deep_research_timeout_does_not_present_start_message_as_report(monkeypa
     monkeypatch.setattr(research_tools, "initialize_client", noop_initialize)
 
     async def run():
-        mcp = FastMCP("test")
+        mcp = MCPServer("test")
         research_tools.register_research_tools(mcp)
         result = await mcp.call_tool(
             "gemini_deep_research",
@@ -2658,7 +2657,7 @@ def test_media_tool_returns_clear_upstream_failure(monkeypatch):
     monkeypatch.setattr(media_tools, "initialize_client", noop_initialize)
 
     async def run():
-        mcp = FastMCP("test")
+        mcp = MCPServer("test")
         media_tools.register_media_tools(mcp)
         result = await mcp.call_tool(
             "gemini_generate_media",
@@ -2690,7 +2689,7 @@ def test_media_tool_reports_empty_media_response(monkeypatch):
     monkeypatch.setattr(media_tools, "initialize_client", noop_initialize)
 
     async def run():
-        mcp = FastMCP("test")
+        mcp = MCPServer("test")
         media_tools.register_media_tools(mcp)
         result = await mcp.call_tool(
             "gemini_generate_music",
@@ -2740,7 +2739,7 @@ def test_media_tool_saves_generated_music_files(monkeypatch, tmp_path):
     monkeypatch.setattr(media_tools, "_probe_duration", lambda path: 91.25)
 
     async def run():
-        mcp = FastMCP("test")
+        mcp = MCPServer("test")
         media_tools.register_media_tools(mcp)
         result = await mcp.call_tool(
             "gemini_generate_music",
@@ -2827,7 +2826,7 @@ def test_media_tool_routes_music_and_image_to_current_web_backends(monkeypatch):
     monkeypatch.setattr(media_tools, "schedule_remote_chat_cleanup_from_response", lambda *args, **kwargs: None)
 
     async def run():
-        mcp = FastMCP("test")
+        mcp = MCPServer("test")
         media_tools.register_media_tools(mcp)
 
         image_result = await mcp.call_tool(
