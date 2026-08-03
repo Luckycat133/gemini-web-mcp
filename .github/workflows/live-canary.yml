@@ -37,7 +37,7 @@ jobs:
       GEMINI_PSIDTS: ${{ secrets.GEMINI_PSIDTS }}
       GEMINI_PSIDCC: ${{ secrets.GEMINI_PSIDCC }}
       PIP_DISABLE_PIP_VERSION_CHECK: "1"
-      REPORT_PATH: ${{ runner.temp }}/gemini-web-live-canary.json
+      REPORT_PATH: ${{ github.workspace }}/gemini-web-live-canary.json
     steps:
       - name: Checkout
         uses: actions/checkout@v7
