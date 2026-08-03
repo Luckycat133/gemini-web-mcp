@@ -8,6 +8,14 @@ from .artifacts import (
     ArtifactVerification,
     ArtifactVerificationStatus,
 )
+from .conversations import (
+    CleanupObservation,
+    CleanupState,
+    ConversationLifecycleMetadata,
+    SessionLifecycleState,
+    cleanup_observation_for_policy,
+    is_valid_remote_chat_id,
+)
 from .results import (
     DomainError,
     DomainErrorCode,
@@ -27,12 +35,18 @@ __all__ = [
     "ArtifactState",
     "ArtifactVerification",
     "ArtifactVerificationStatus",
+    "CleanupObservation",
+    "CleanupState",
+    "ConversationLifecycleMetadata",
     "DomainError",
     "DomainErrorCode",
     "DomainResult",
     "DomainWarning",
     "OperationState",
     "ResultMeta",
+    "SessionLifecycleState",
+    "cleanup_observation_for_policy",
+    "is_valid_remote_chat_id",
     "new_diagnostic_id",
     "new_request_id",
     "result_from_exception",

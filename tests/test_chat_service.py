@@ -293,6 +293,63 @@ def test_generate_stream_collects_text_and_uses_final_response_for_cleanup():
     assert "stream_text" not in payload["data"]
 
 
+def test_compact_cleanup_adapter_forwards_shared_retention_policy(monkeypatch):
+    calls: list[tuple[str, Any, dict[str, Any]]] = []
+
+    def schedule_response(response: Any, **kwargs: Any) -> str:
+        calls.append(("response", response, kwargs))
+        return "c_policy"
+
+    def schedule_chat(chat_id: str, **kwargs: Any) -> None:
+        calls.append(("chat", chat_id, kwargs))
+
+    monkeypatch.setattr(
+        skill_server,
+        "schedule_remote_chat_cleanup_from_response",
+        schedule_response,
+    )
+    monkeypatch.setattr(
+        skill_server,
+        "schedule_remote_chat_cleanup",
+        schedule_chat,
+    )
+    response = SimpleNamespace(metadata=["c_policy"])
+
+    assert skill_server._schedule_compact_response_cleanup(
+        response,
+        retain_chat=True,
+        delete_after_seconds=90,
+        source="compact",
+    ) == "c_policy"
+    skill_server._schedule_compact_chat_cleanup(
+        "c_policy",
+        retain_chat=True,
+        delete_after_seconds=90,
+        source="compact",
+    )
+
+    assert calls == [
+        (
+            "response",
+            response,
+            {
+                "retain_chat": True,
+                "delete_after_seconds": 90,
+                "source": "compact",
+            },
+        ),
+        (
+            "chat",
+            "c_policy",
+            {
+                "retain_chat": True,
+                "delete_after_seconds": 90,
+                "source": "compact",
+            },
+        ),
+    ]
+
+
 def _domain_payload(content: TextContent) -> dict[str, Any]:
     assert content.meta is not None
     payload = content.meta["domain_result"]
@@ -336,7 +393,7 @@ def test_primary_and_compact_chat_adapters_have_success_contract_parity(monkeypa
     monkeypatch.setattr(
         skill_server,
         "schedule_remote_chat_cleanup_from_response",
-        lambda _response, source: "c_shared",
+        lambda _response, source, **_kwargs: "c_shared",
     )
 
     primary = FastMCP("chat-service-parity")
@@ -355,14 +412,30 @@ def test_primary_and_compact_chat_adapters_have_success_contract_parity(monkeypa
     compact_payload = _domain_payload(compact_content[0])
 
     assert primary_content[0].text == compact_content[0].text
+    expected_lifecycle = {
+        "session_id": None,
+        "upstream_chat_id": "c_shared",
+        "session_state": "stateless",
+        "retain_chat": False,
+        "delete_after_seconds": None,
+        "cleanup": {
+            "state": "pending",
+            "upstream_chat_id": "c_shared",
+            "attempts": 0,
+            "diagnostic_id": None,
+            "idempotent": False,
+        },
+    }
     assert primary_payload["data"] == {
         "model": "flash",
         "resolved_model": "web-flash",
         "temporary": False,
+        "lifecycle": expected_lifecycle,
     }
     assert compact_payload["data"] == {
         "model": "flash",
         "resolved_model": "web-flash",
+        "lifecycle": expected_lifecycle,
     }
     for payload in (primary_payload, compact_payload):
         assert payload["ok"] is True
@@ -370,6 +443,7 @@ def test_primary_and_compact_chat_adapters_have_success_contract_parity(monkeypa
         assert payload["meta"]["effective_backend"] == "web-flash"
         assert payload["meta"]["verification_status"] == "upstream_response_received"
         assert payload["meta"]["details"]["service"] == "chat"
+        assert payload["meta"]["details"]["lifecycle"] == expected_lifecycle
 
     common_kwargs = {
         "prompt": "hello",
