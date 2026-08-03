@@ -12,7 +12,7 @@
   <a href="https://github.com/Luckycat133/gemini-web-mcp/releases/latest"><img alt="Release" src="https://img.shields.io/github/v/release/Luckycat133/gemini-web-mcp?label=release"></a>
   <a href="https://github.com/Luckycat133/gemini-web-mcp/tree/main/.agents/skills/gemini-web-mcp"><img alt="Codex Skill" src="https://img.shields.io/badge/Codex%20Skill-installable-0B6BFF"></a>
   <a href="https://www.gnu.org/licenses/agpl-3.0.html"><img alt="License" src="https://img.shields.io/badge/License-AGPL--3.0--only-blue.svg"></a>
-  <a href="docs/changelog.md"><img alt="Verified" src="https://img.shields.io/badge/tests-1108%20passing-1F8A70"></a>
+  <a href="docs/changelog.md"><img alt="Verified" src="https://img.shields.io/badge/tests-1293%20passing-1F8A70"></a>
 </p>
 
 <p align="center">
@@ -117,7 +117,7 @@ gemini-mcp-skill-server
 | Area | Supported Workflows |
 | --- | --- |
 | Models | Gemini Web model aliases for Flash-Lite, Flash, Pro, thinking levels, and guided learning modes |
-| Chat | One-shot chat, streamed chat, local sessions, temporary chat, saved Gem usage |
+| Chat | One-shot chat, normalized collection of Gemini upstream streams, local sessions, temporary chat, saved Gem usage |
 | Media | Image generation/editing, Veo video generation, Lyria 3 / Lyria 3 Pro music routing |
 | History | List, scan, search, read, export, delete, and cleanup test artifacts |
 | Notebooks | List native Gemini notebooks, inspect notebook chats, move chats into notebooks |

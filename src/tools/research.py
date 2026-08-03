@@ -9,6 +9,7 @@ import json
 import logging
 import os
 import re
+from collections.abc import Awaitable
 from types import SimpleNamespace
 from typing import Any, Literal
 
@@ -24,7 +25,15 @@ from ..client_wrapper import (
     schedule_remote_chat_cleanup_from_response,
 )
 from ..constants import resolve_model_name
-from ..domain import ArtifactKind, ArtifactResultData, ArtifactState
+from ..domain import (
+    ArtifactKind,
+    ArtifactResultData,
+    ArtifactState,
+    DomainErrorCode,
+    DomainResult,
+    LongOperationData,
+    OperationState,
+)
 from ..services import (
     artifact_exception_result,
     artifact_from_local_path,
@@ -45,6 +54,191 @@ _MD_TITLE_HEADING_RE = re.compile(r"^#\s+(.+)$")
 _SAFE_FILENAME_RE = re.compile(r"[^A-Za-z0-9._-]+")
 
 
+def _consume_finished_task(task: asyncio.Future[Any]) -> None:
+    """Observe a detached task result so late completion cannot leak warnings."""
+    try:
+        task.result()
+    except BaseException:
+        pass
+
+
+async def _await_before_deadline(
+    awaitable: Awaitable[Any],
+    *,
+    timeout: float,
+) -> Any:
+    """Await strictly until a deadline and never adopt a late completion.
+
+    ``asyncio.wait_for`` can continue waiting when a child suppresses its
+    cancellation.  Long-operation state must be final at the declared
+    deadline, so this helper detaches and consumes any such late result.
+    """
+    task = asyncio.ensure_future(awaitable)
+    try:
+        done, _pending = await asyncio.wait(
+            {task},
+            timeout=max(0.0, float(timeout)),
+        )
+    except BaseException:
+        if not task.done():
+            task.cancel()
+        task.add_done_callback(_consume_finished_task)
+        raise
+
+    if not done:
+        task.cancel()
+        task.add_done_callback(_consume_finished_task)
+        raise asyncio.TimeoutError
+    return await task
+
+
+def _nonempty_identifier(value: Any) -> str | None:
+    return value.strip() if isinstance(value, str) and value.strip() else None
+
+
+def _research_chat_id(
+    *,
+    plan: Any = None,
+    chat: Any = None,
+    response: Any = None,
+) -> str | None:
+    for owner in (chat, plan, response):
+        identifier = _nonempty_identifier(getattr(owner, "cid", None))
+        if identifier:
+            return identifier
+    metadata = getattr(response, "metadata", None)
+    if isinstance(metadata, list) and metadata:
+        return _nonempty_identifier(metadata[0])
+    return None
+
+
+def _upstream_state(value: Any) -> str | None:
+    if value is None:
+        return None
+    state = getattr(value, "state", value)
+    if isinstance(state, OperationState):
+        return state.value
+    if isinstance(state, str) and state.strip():
+        return state.strip().lower()
+    return None
+
+
+def _operation_state_from_upstream(value: Any) -> OperationState:
+    state = _upstream_state(value)
+    if state in {"accepted", "pending", "queued", "scheduled"}:
+        return OperationState.QUEUED
+    if state in {"complete", "completed", "done", "success", "succeeded"}:
+        return OperationState.COMPLETED
+    if state in {"timed_out", "timeout"}:
+        return OperationState.TIMED_OUT
+    if state in {"cancelled", "canceled"}:
+        return OperationState.CANCELLED
+    if state in {"failed", "error"}:
+        return OperationState.FAILED
+    return OperationState.RUNNING
+
+
+def _research_operation_data(
+    state: OperationState,
+    *,
+    plan: Any = None,
+    chat: Any = None,
+    response: Any = None,
+    upstream_result: Any = None,
+    latest_upstream_state: str | None = None,
+    poll_count: int | None = None,
+) -> LongOperationData:
+    if plan is None:
+        plan = getattr(upstream_result, "plan", None)
+    statuses = list(getattr(upstream_result, "statuses", []) or [])
+    if latest_upstream_state is None and statuses:
+        latest_upstream_state = _upstream_state(statuses[-1])
+    if poll_count is None:
+        poll_count = getattr(upstream_result, "poll_count", None)
+    if not isinstance(poll_count, int):
+        poll_count = len(statuses)
+
+    operation_id = _nonempty_identifier(getattr(plan, "research_id", None))
+    chat_id = _research_chat_id(plan=plan, chat=chat, response=response)
+    final_output = getattr(upstream_result, "final_output", None)
+    final_text = getattr(final_output, "text", "") if final_output else ""
+    report_available = (
+        state is OperationState.COMPLETED
+        and isinstance(final_text, str)
+        and bool(final_text.strip())
+    )
+    return LongOperationData(
+        operation="gemini_deep_research",
+        state=state,
+        upstream_operation_id=operation_id,
+        upstream_chat_id=chat_id,
+        title=_nonempty_identifier(getattr(plan, "title", None)),
+        latest_upstream_state=latest_upstream_state,
+        continuation_possible=bool(operation_id or chat_id),
+        report_available=report_available,
+        poll_count=max(0, poll_count),
+    )
+
+
+def _research_domain_result(
+    data: LongOperationData,
+    *,
+    message: str = "",
+) -> DomainResult[LongOperationData]:
+    details = {
+        "upstream_operation_id_observed": bool(data.upstream_operation_id),
+        "upstream_chat_id_observed": bool(data.upstream_chat_id),
+        "continuation_possible": data.continuation_possible,
+        "poll_count": data.poll_count,
+    }
+    if data.state is OperationState.TIMED_OUT:
+        return DomainResult.failure(
+            DomainErrorCode.TIMED_OUT,
+            message or "Deep Research did not complete before the configured deadline.",
+            data=data,
+            retryable=True,
+            suggested_action=(
+                "Use the preserved upstream chat ID to inspect the report later, or retry with a longer timeout."
+                if data.continuation_possible
+                else "Retry with a longer timeout."
+            ),
+            operation_state=OperationState.TIMED_OUT,
+            verification_status="completion_not_observed",
+            details=details,
+        )
+    if data.state in {
+        OperationState.FAILED,
+        OperationState.CANCELLED,
+        OperationState.UNAVAILABLE,
+    }:
+        error_code = (
+            DomainErrorCode.CANCELLED
+            if data.state is OperationState.CANCELLED
+            else DomainErrorCode.INTERNAL_ERROR
+        )
+        return DomainResult.failure(
+            error_code,
+            message or "Deep Research failed before completion.",
+            data=data,
+            retryable=data.state is not OperationState.CANCELLED,
+            suggested_action="Inspect server diagnostics and retry.",
+            operation_state=data.state,
+            verification_status="operation_failed",
+            details=details,
+        )
+    verification_status = {
+        OperationState.COMPLETED: "report_observed",
+        OperationState.QUEUED: "upstream_queued",
+        OperationState.RUNNING: "upstream_running",
+    }.get(data.state, "upstream_state_observed")
+    return DomainResult.success(
+        data,
+        operation_state=data.state,
+        verification_status=verification_status,
+        details=details,
+    )
+
+
 def register_research_tools(mcp: FastMCP):
 
     async def _run_native_deep_research(
@@ -57,6 +251,7 @@ def register_research_tools(mcp: FastMCP):
         model_note: str,
         timeout_seconds: int,
         poll_interval: int,
+        wait_for_completion: bool,
         retain_chat: bool,
         delete_after_seconds: int | None,
     ) -> list[TextContent]:
@@ -70,48 +265,132 @@ def register_research_tools(mcp: FastMCP):
                 if thinking_scope
                 else _null_scope()
             )
-        with scope:
-            plan = await asyncio.wait_for(
-                _create_deep_research_plan(
+        plan = None
+        start_output = None
+        try:
+            with scope:
+                plan = await _await_before_deadline(
+                    _create_deep_research_plan(
+                        client,
+                        _format_research_query(query, model, model_note),
+                        chat=chat,
+                        model=research_model,
+                    ),
+                    timeout=_phase_timeout(timeout_seconds),
+                )
+                start_output = await _start_deep_research_with_recovery(
                     client,
-                    _format_research_query(query, model, model_note),
-                    chat=chat,
-                    model=research_model,
-                ),
-                timeout=_phase_timeout(timeout_seconds),
-            )
-            start_output = await _start_deep_research_with_recovery(
-                client,
-                plan,
-                chat,
-                timeout=min(_phase_timeout(timeout_seconds), 120),
-            )
-        if getattr(plan, "research_id", None):
-            result = await asyncio.wait_for(
-                client.wait_for_deep_research(
                     plan,
+                    chat,
+                    timeout=min(_phase_timeout(timeout_seconds), 120),
+                )
+
+            if not wait_for_completion:
+                state = _operation_state_from_upstream(
+                    getattr(start_output, "state", None),
+                )
+                status = SimpleNamespace(
+                    state=state.value,
+                    done=state is OperationState.COMPLETED,
+                    notes=["caller requested start-only execution"],
+                )
+                upstream_result = SimpleNamespace(
+                    plan=plan,
+                    start_output=start_output,
+                    final_output=None,
+                    statuses=[status],
+                    done=state is OperationState.COMPLETED,
+                    poll_count=0,
+                )
+                data = _research_operation_data(
+                    state,
+                    plan=plan,
+                    chat=chat,
+                    upstream_result=upstream_result,
+                    latest_upstream_state=state.value,
+                    poll_count=0,
+                )
+                operation_result = _research_domain_result(data)
+                content = _format_deep_research_result(
+                    query,
+                    upstream_result,
+                    model,
+                    research_model,
+                    model_note,
+                    operation_state=state,
+                    waited_for_completion=False,
+                )
+                return attach_domain_result(
+                    [content],
+                    operation_result,
+                    use_result_data=True,
+                )
+
+            if getattr(plan, "research_id", None):
+                upstream_result = await _await_before_deadline(
+                    client.wait_for_deep_research(
+                        plan,
+                        poll_interval=poll_interval,
+                        timeout=timeout_seconds,
+                    ),
+                    timeout=timeout_seconds + poll_interval + 10,
+                )
+            else:
+                upstream_result = await _wait_for_deep_research_by_chat(
+                    client=client,
+                    plan=plan,
+                    chat=chat,
+                    start_output=start_output,
                     poll_interval=poll_interval,
                     timeout=timeout_seconds,
-                ),
-                timeout=timeout_seconds + poll_interval + 10,
+                )
+            upstream_result.start_output = start_output
+            state = (
+                OperationState.COMPLETED
+                if getattr(upstream_result, "done", False)
+                else OperationState.TIMED_OUT
             )
-        else:
-            result = await _wait_for_deep_research_by_chat(
-                client=client,
+            data = _research_operation_data(
+                state,
                 plan=plan,
                 chat=chat,
-                start_output=start_output,
-                poll_interval=poll_interval,
-                timeout=timeout_seconds,
+                upstream_result=upstream_result,
             )
-        result.start_output = start_output
-        schedule_remote_chat_cleanup(
-            getattr(chat, "cid", None) or getattr(plan, "cid", None),
-            retain_chat=retain_chat,
-            delete_after_seconds=delete_after_seconds,
-            source="gemini_deep_research",
-        )
-        return [_format_deep_research_result(query, result, model, research_model, model_note)]
+            operation_result = _research_domain_result(data)
+            content = _format_deep_research_result(
+                query,
+                upstream_result,
+                model,
+                research_model,
+                model_note,
+                operation_state=state,
+                waited_for_completion=True,
+            )
+            return attach_domain_result(
+                [content],
+                operation_result,
+                use_result_data=True,
+            )
+        except asyncio.TimeoutError:
+            data = _research_operation_data(
+                OperationState.TIMED_OUT,
+                plan=plan,
+                chat=chat,
+                latest_upstream_state=_upstream_state(start_output),
+            )
+            return domain_text(
+                _research_domain_result(data),
+                _deep_research_timeout_error(timeout_seconds).text,
+                use_result_data=True,
+            )
+        finally:
+            if plan is not None:
+                schedule_remote_chat_cleanup(
+                    _research_chat_id(plan=plan, chat=chat),
+                    retain_chat=retain_chat,
+                    delete_after_seconds=delete_after_seconds,
+                    source="gemini_deep_research",
+                )
 
     async def _run_fallback_deep_research(
         client: Any,
@@ -125,7 +404,7 @@ def register_research_tools(mcp: FastMCP):
         delete_after_seconds: int | None,
     ) -> list[TextContent]:
         """Fallback when the client lacks the native plan/start/wait API."""
-        response = await asyncio.wait_for(
+        response = await _await_before_deadline(
             client.generate_content(
                 _format_research_query(query, model, model_note),
                 model=model_name,
@@ -141,19 +420,21 @@ def register_research_tools(mcp: FastMCP):
             delete_after_seconds=delete_after_seconds,
             source="gemini_deep_research:fallback",
         )
-        return [
-            TextContent(
-                type="text",
-                text=(
-                    f"# 📚 Deep Research 计划: {query}\n\n"
-                    f"- 请求模型: {model}\n"
-                    f"- 实际研究传输: {model_note}\n\n"
-                    f"{response.text}\n\n"
-                    "⚠️ 当前 gemini-webapi 客户端没有暴露完整研究轮询 API，"
-                    "这里只能返回研究计划。"
-                ),
-            )
-        ]
+        data = _research_operation_data(
+            OperationState.RUNNING,
+            response=response,
+            latest_upstream_state="running",
+        )
+        operation_result = _research_domain_result(data)
+        text = (
+            f"# 📚 Deep Research 计划: {query}\n\n"
+            f"- 请求模型: {model}\n"
+            f"- 实际研究传输: {model_note}\n\n"
+            f"{response.text}\n\n"
+            "⚠️ 当前 gemini-webapi 客户端没有暴露完整研究轮询 API，"
+            "这里只能返回研究计划。"
+        )
+        return domain_text(operation_result, text, use_result_data=True)
 
     def _deep_research_timeout_error(timeout_seconds: int) -> TextContent:
         return TextContent(
@@ -179,6 +460,7 @@ def register_research_tools(mcp: FastMCP):
         thinking_level: str = "extended",
         timeout_seconds: int = 600,
         poll_interval_seconds: int = 10,
+        wait_for_completion: bool = True,
         retain_chat: bool = False,
         delete_after_seconds: int | None = None,
     ) -> list[TextContent]:
@@ -192,6 +474,7 @@ def register_research_tools(mcp: FastMCP):
         - model: 模型选择 (thinking/pro)
         - timeout_seconds: 超时时间（默认10分钟）
         - poll_interval_seconds: 研究状态轮询间隔（默认10秒）
+        - wait_for_completion: 是否等待最终报告；False 时返回 queued/running 状态与上游 ID
 
         工作流程:
         1. 创建研究计划
@@ -220,7 +503,7 @@ def register_research_tools(mcp: FastMCP):
                 return await _run_native_deep_research(
                     client, query, model, model_name, research_model,
                     thinking_level, model_note, timeout_seconds, poll_interval,
-                    retain_chat, delete_after_seconds,
+                    wait_for_completion, retain_chat, delete_after_seconds,
                 )
             return await _run_fallback_deep_research(
                 client, query, model, model_name, thinking_level,
@@ -229,10 +512,26 @@ def register_research_tools(mcp: FastMCP):
 
         except asyncio.TimeoutError:
             logger.error("Deep Research 失败: request timed out")
-            return [_deep_research_timeout_error(timeout_seconds)]
+            data = LongOperationData(
+                operation="gemini_deep_research",
+                state=OperationState.TIMED_OUT,
+            )
+            return domain_text(
+                _research_domain_result(data),
+                _deep_research_timeout_error(timeout_seconds).text,
+                use_result_data=True,
+            )
         except Exception as e:
             logger.error(f"Deep Research 失败: {e}")
-            return [_deep_research_generic_error(e)]
+            data = LongOperationData(
+                operation="gemini_deep_research",
+                state=OperationState.FAILED,
+            )
+            return domain_text(
+                _research_domain_result(data, message=str(e)),
+                _deep_research_generic_error(e).text,
+                use_result_data=True,
+            )
 
     @mcp.tool(annotations=READS_PRIVATE_REMOTE)
     async def gemini_list_research_report_actions(
@@ -412,7 +711,7 @@ def _start_fresh_research_chat(client, model):
 
 async def _start_deep_research_with_recovery(client, plan, chat, timeout: int):
     try:
-        return await asyncio.wait_for(
+        return await _await_before_deadline(
             client.start_deep_research(plan, chat=chat),
             timeout=timeout,
         )
@@ -506,6 +805,7 @@ async def _wait_for_deep_research_by_chat(
                             )
                         ],
                         done=True,
+                        poll_count=checks + 1,
                     )
                 report_output = await _request_completed_research_report(chat)
                 report_text = (getattr(report_output, "text", "") or "").strip() if report_output else ""
@@ -522,6 +822,7 @@ async def _wait_for_deep_research_by_chat(
                             )
                         ],
                         done=True,
+                        poll_count=checks + 1,
                     )
             if latest_text and latest_text != start_text and not _is_research_start_message(latest_text):
                 return SimpleNamespace(
@@ -536,9 +837,12 @@ async def _wait_for_deep_research_by_chat(
                         )
                     ],
                     done=True,
+                    poll_count=checks + 1,
                 )
         checks += 1
-        await asyncio.sleep(poll_interval)
+        elapsed = asyncio.get_running_loop().time() - started
+        remaining = max(0.0, timeout - elapsed)
+        await asyncio.sleep(min(poll_interval, remaining))
 
     return SimpleNamespace(
         plan=plan,
@@ -557,6 +861,7 @@ async def _wait_for_deep_research_by_chat(
             )
         ],
         done=False,
+        poll_count=checks,
     )
 
 
@@ -600,7 +905,7 @@ async def _request_completed_research_report(chat):
         "不要只说已经完成。"
     )
     try:
-        return await asyncio.wait_for(chat.send_message(prompt), timeout=180)
+        return await _await_before_deadline(chat.send_message(prompt), timeout=180)
     except Exception as e:
         logger.warning("Failed to retrieve completed Deep Research report by follow-up: %s", e)
         return None
@@ -1149,18 +1454,27 @@ def _format_deep_research_result(
     requested_model: str = "",
     research_model: Any = "",
     model_note: str = "",
+    *,
+    operation_state: OperationState | None = None,
+    waited_for_completion: bool = True,
 ) -> TextContent:
     plan = result.plan
     statuses = getattr(result, "statuses", []) or []
     final_output = getattr(result, "final_output", None)
     start_output = getattr(result, "start_output", None)
-    heading = "报告" if getattr(result, "done", False) else "状态"
+    done = bool(getattr(result, "done", False))
+    if operation_state is None:
+        operation_state = (
+            OperationState.COMPLETED if done else OperationState.TIMED_OUT
+        )
+    heading = "报告" if done else "状态"
 
     lines = [
         f"# 📚 Deep Research {heading}: {query}",
         "",
         "## 状态",
-        f"- 完成: {'是' if getattr(result, 'done', False) else '否'}",
+        f"- 完成: {'是' if done else '否'}",
+        f"- MCP 状态: {operation_state.value}",
     ]
     if requested_model:
         lines.append(f"- 请求模型: {requested_model}")
@@ -1178,18 +1492,22 @@ def _format_deep_research_result(
             lines.append(f"- 最新进度: {notes[-1]}")
 
     report_text = getattr(final_output, "text", "") if final_output else ""
-    if not getattr(result, "done", False) and _is_research_start_message(report_text):
+    if not done and _is_research_start_message(report_text):
         report_text = ""
     if report_text.strip():
         lines.extend(["", "## 报告", report_text.strip()])
     else:
         start_text = getattr(start_output, "text", "") if start_output else ""
         plan_text = getattr(plan, "response_text", "") or start_text
-        if not getattr(result, "done", False):
-            plan_text = (
-                "研究已启动，但超时时间内还没有可读取的最终报告。\n\n"
-                + plan_text
-            )
+        if not done:
+            if not waited_for_completion:
+                state_text = "研究已排队" if operation_state is OperationState.QUEUED else "研究已启动"
+                prefix = f"{state_text}；本次调用未等待最终报告。"
+            elif operation_state is OperationState.TIMED_OUT:
+                prefix = "研究已启动，但超时时间内还没有可读取的最终报告。"
+            else:
+                prefix = "研究仍在进行，尚未读取到最终报告。"
+            plan_text = prefix + "\n\n" + plan_text
         lines.extend(
             [
                 "",
@@ -1202,11 +1520,11 @@ def _format_deep_research_result(
         lines.extend(["", "## 轮询记录"])
         for status in statuses[-8:]:
             state = getattr(status, "state", "unknown")
-            done = "done" if getattr(status, "done", False) else "running"
+            status_label = "done" if getattr(status, "done", False) else "running"
             note = ""
             notes = getattr(status, "notes", []) or []
             if notes:
                 note = f" - {notes[-1]}"
-            lines.append(f"- {state} ({done}){note}")
+            lines.append(f"- {state} ({status_label}){note}")
 
     return TextContent(type="text", text="\n".join(lines))

@@ -66,7 +66,7 @@
 | 2.3 | `model="flash-lite"` 重复 | 同上 |
 | 2.4 | `thinking_level="extended"` 重复 | 返回正常，文本长度通常比 standard 长 |
 | 2.5 | `image_paths=["/abs/path/cat.jpg"]` | Gemini 能识别图片内容并描述 |
-| 2.6 | `gemini_chat_stream(...)` 同样参数 | 流式返回多个 text delta，最终拼起来和 `gemini_chat` 接近 |
+| 2.6 | `gemini_chat_stream(...)` 同样参数 | 一次性返回归一化正文；`domain_result.data.stream.delivery=collected`，累计/重复 chunk 不会重复文本 |
 | 2.7 | `temporary=true` | 返回正常；调用 `gemini_list_chats` 不应看到这条 |
 | 2.8 | `gem_id="<某个 Gem ID>"` | 用指定 Gem 的人格回答 |
 | 2.9 | primary `gemini_chat` 与 compact `chat` 使用同一普通文本/模型调用 | 两者正文均正常，`_meta.domain_result` 的 model/backend/verification 语义一致；允许 request ID 不同 |
@@ -80,7 +80,7 @@
 | 3.1 | `gemini_start_chat(model="flash")` → 拿 `session_id`（形如 `sess_<32位十六进制 UUID>`） | 返回成功文本和不透明的本地会话 ID |
 | 3.2 | `gemini_send_message(session_id, "我叫张三")` | 正常回复 |
 | 3.3 | `gemini_send_message(session_id, "我叫什么名字？")` | 回复含"张三"，证明上下文保留 |
-| 3.4 | `gemini_send_message_stream(...)` 同上 | 流式正常 |
+| 3.4 | `gemini_send_message_stream(...)` 同上 | 一次性返回归一化正文和 `stream.delivery=collected` |
 | 3.5 | `gemini_list_sessions` | 列出 3.1 返回的 ID，含 model 信息 |
 | 3.6 | `gemini_reset_session(session_id)` 后再 `gemini_send_message` | 明确返回 `SESSION_NOT_FOUND`，不会悄悄创建新会话 |
 | 3.7 | 保留一个有效会话，再用 `session_id="sess_invalid"` 发送或重置 | 返回 `SESSION_NOT_FOUND`，有效会话仍可继续使用 |
@@ -125,12 +125,14 @@
 | 5.1 | `gemini_deep_research(query="2026 年大模型发展趋势", model="flash", timeout_seconds=600)` | 走 `_run_native_deep_research` 路径，返回报告，含 `# Deep Research` 标题、`请求模型` 字段、引用来源 `[cite: N]` |
 | 5.2 | 用 `model="pro"` 重复 | 走 native 路径；如果 `gemini-webapi` 不支持，回落到 `_run_fallback_deep_research`，返回里会写 "当前 gemini-webapi 客户端没有暴露完整研究轮询 API" |
 | 5.3 | 故意设 `timeout_seconds=30` | 返回 `❌ Deep Research 超时（30秒）`，**不能把 start message 当成最终报告**返回（`test_deep_research_timeout_does_not_present_start_message_as_report` 验了形状） |
-| 5.4 | 完成后调 `gemini_list_research_report_actions(chat_id=<上一步 cid>)` | 列出 webpage / infographic / quiz / flashcards / audio_overview / custom_app 等动作 |
-| 5.5 | `gemini_create_from_research_report(chat_id, artifact_type="webpage", output_dir=/tmp/dr-test)` | 在 output_dir 生成 HTML，HTML 含报告正文和来源链接，`rel="noopener noreferrer"` |
-| 5.6 | 检查 5.5 的 `_meta.domain_result.data.artifacts[0]` | `state=local`、`kind=webpage`、path/bytes/MIME 与磁盘一致，backend 为 MCP local renderer / filesystem |
+| 5.4 | `wait_for_completion=false, retain_chat=true` | 不调用 wait；返回 `queued` 或 `running`，并保留 research/chat ID 与 `continuation_possible=true` |
+| 5.5 | 完成后调 `gemini_list_research_report_actions(chat_id=<上一步 cid>)` | 列出 webpage / infographic / quiz / flashcards / audio_overview / custom_app 等动作 |
+| 5.6 | `gemini_create_from_research_report(chat_id, artifact_type="webpage", output_dir=/tmp/dr-test)` | 在 output_dir 生成 HTML，HTML 含报告正文和来源链接，`rel="noopener noreferrer"` |
+| 5.7 | 检查 5.6 的 `_meta.domain_result.data.artifacts[0]` | `state=local`、`kind=webpage`、path/bytes/MIME 与磁盘一致，backend 为 MCP local renderer / filesystem |
 
 **关键校验**：
 - `query` 里要带 `Requested MCP model alias: xxx`（便于事后审计）
+- `domain_result.meta.operation_state` 与 `data.state` 一致；超时仍保留已观测到的上游 ID
 - 完成后 `gemini_history(action="read", chat_id=<cid>)` 能读到同一份报告
 - `retain_chat=false` 时，cleanup 后台任务会删掉远端 chat；`retain_chat=true` 时保留
 

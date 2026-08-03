@@ -12,10 +12,12 @@ from ..domain import (
     ConversationLifecycleMetadata,
     DomainResult,
     SessionLifecycleState,
+    StreamCollectionMetadata,
     cleanup_observation_for_policy,
     is_valid_remote_chat_id,
 )
 from ..session_manager import SessionData, SessionOperationResult
+from .streams import StreamTextAccumulator
 
 
 class CleanupStrategy(str, Enum):
@@ -97,7 +99,7 @@ class ChatOperationData:
     session_id: str | None = None
     session_state: SessionData | None = None
     temporary: bool = False
-    streamed: bool = False
+    stream: StreamCollectionMetadata | None = None
     remote_chat_id: str | None = None
     response: Any = field(default=None, metadata={"domain_exclude": True})
     responses: tuple[Any, ...] = field(
@@ -154,8 +156,6 @@ class ChatService:
     async def generate_stream(
         self,
         request: ChatRequest,
-        *,
-        text_piece: Callable[[Any], str],
     ) -> DomainResult[ChatOperationData]:
         normalized_model = self._dependencies.normalize_model(request.model)
         effective_model = self._dependencies.resolve_model(normalized_model)
@@ -165,10 +165,10 @@ class ChatService:
             effective_model=effective_model,
         )
         responses: list[Any] = []
-        full_text = ""
+        collector = StreamTextAccumulator()
         async for response in client.generate_content_stream(**request_kwargs):
             responses.append(response)
-            full_text += text_piece(response)
+            collector.consume(response)
 
         final_response = responses[-1] if responses else None
         remote_chat_id = None
@@ -198,11 +198,11 @@ class ChatService:
                     cleanup=cleanup,
                 ),
                 temporary=request.temporary,
-                streamed=True,
+                stream=collector.metadata,
                 remote_chat_id=remote_chat_id,
                 response=final_response,
                 responses=tuple(responses),
-                stream_text=full_text,
+                stream_text=collector.text,
             )
         )
 
@@ -282,8 +282,6 @@ class ChatService:
     async def send_session_stream(
         self,
         request: SessionMessageRequest,
-        *,
-        text_piece: Callable[[Any], str],
     ) -> DomainResult[ChatOperationData]:
         lookup = self._dependencies.lookup_session(request.session_id)
         if not lookup.ok or lookup.session is None:
@@ -301,7 +299,9 @@ class ChatService:
             return self._copy_failure(streamed)
         state = streamed.session
         responses = tuple(streamed.response or ())
-        full_text = "".join(text_piece(response) for response in responses)
+        collector = StreamTextAccumulator()
+        for response in responses:
+            collector.consume(response)
         final_response = responses[-1] if responses else None
         remote_chat_id, cleanup = self._schedule_session_cleanup(
             request,
@@ -313,8 +313,8 @@ class ChatService:
             state,
             response=final_response,
             responses=responses,
-            stream_text=full_text,
-            streamed=True,
+            stream_text=collector.text,
+            stream=collector.metadata,
             remote_chat_id=remote_chat_id,
             cleanup=cleanup,
             request_id=streamed.meta.request_id,
@@ -419,7 +419,7 @@ class ChatService:
         response: Any,
         responses: Sequence[Any] = (),
         stream_text: str = "",
-        streamed: bool = False,
+        stream: StreamCollectionMetadata | None = None,
         remote_chat_id: str | None,
         cleanup: CleanupObservation,
         request_id: str,
@@ -446,7 +446,7 @@ class ChatService:
                 session_id=state.session_id,
                 session_state=state,
                 temporary=temporary,
-                streamed=streamed,
+                stream=stream,
                 remote_chat_id=remote_chat_id,
                 response=response,
                 responses=tuple(responses),

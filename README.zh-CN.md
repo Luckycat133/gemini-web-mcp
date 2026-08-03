@@ -8,7 +8,7 @@
   <a href="https://github.com/Luckycat133/gemini-web-mcp/releases/latest"><img alt="Release" src="https://img.shields.io/github/v/release/Luckycat133/gemini-web-mcp?label=release"></a>
   <a href="https://github.com/Luckycat133/gemini-web-mcp/tree/main/.agents/skills/gemini-web-mcp"><img alt="Codex Skill" src="https://img.shields.io/badge/Codex%20Skill-installable-0B6BFF"></a>
   <a href="https://www.gnu.org/licenses/agpl-3.0.html"><img alt="License" src="https://img.shields.io/badge/License-AGPL--3.0--only-blue.svg"></a>
-  <a href="docs/changelog.md"><img alt="Verified" src="https://img.shields.io/badge/tests-1108%20passing-1F8A70"></a>
+  <a href="docs/changelog.md"><img alt="Verified" src="https://img.shields.io/badge/tests-1293%20passing-1F8A70"></a>
 </p>
 
 <p align="center">
@@ -45,8 +45,8 @@
 - **音乐**: `flash` 系列 → Lyria 3，`pro` → Lyria 3 Pro
 
 ### 💬 对话功能
-- 单次对话 (支持流式输出 + 图片输入)
-- 多轮会话 (支持流式输出)
+- 单次对话（支持图片输入，并可收集 Gemini 上游流）
+- 多轮会话（可收集 Gemini 上游流）
 - Temporary chat (不进入 Gemini 历史记录)
 - 使用已保存 Gem 进行对话
 - 学习模式 (`learning_mode=quiz` / `flashcards` / `practice_test` / `study_guide`)
@@ -260,10 +260,10 @@ gemini-mcp-skill-server
 
 ### 对话工具
 - `gemini_chat`: 单次对话
-- `gemini_chat_stream`: 单次流式对话
+- `gemini_chat_stream`: 收集单次对话的 Gemini 上游流，归一化后一次性返回 MCP 结果
 - `gemini_start_chat`: 创建多轮会话，可指定 Gem 和 Temporary chat
 - `gemini_send_message`: 会话消息，可沿用或覆盖 Temporary chat
-- `gemini_send_message_stream`: 会话流式消息，可沿用或覆盖 Temporary chat
+- `gemini_send_message_stream`: 收集会话的 Gemini 上游流，归一化后一次性返回 MCP 结果
 - `gemini_list_sessions`: 列会话
 - `gemini_reset_session`: 重置会话
 
@@ -282,7 +282,7 @@ Gemini Web `学习辅导` 输入模式。
 - `gemini_analyze_url`: 分析网页或 YouTube 等 URL
 
 ### Deep Research
-- `gemini_deep_research`: 创建研究计划、启动研究，并轮询最终报告或返回清晰进度状态
+- `gemini_deep_research`: 创建研究计划、启动研究，并返回结构化的 `queued` / `running` / `completed` / `timed_out` 状态；`wait_for_completion=false` 可只启动不等待
 
 ### 账户和内容管理
 - `gemini_history`: 历史对话只读聚合入口，支持 `action=list|scan|search|read|export`

@@ -29,6 +29,39 @@ class CleanupState(str, Enum):
     INVALID_ID = "invalid_id"
 
 
+class StreamDelivery(str, Enum):
+    """How an upstream stream is exposed through the MCP tool result."""
+
+    COLLECTED = "collected"
+
+
+class StreamChunkSemantics(str, Enum):
+    """Observed text semantics across the chunks returned by the upstream API."""
+
+    EMPTY = "empty"
+    DELTA = "delta"
+    CUMULATIVE = "cumulative"
+    MIXED = "mixed"
+
+
+@dataclass(frozen=True)
+class StreamCollectionMetadata:
+    """Public diagnostics for a stream collected before one MCP response.
+
+    MCP clients receive the normalized text once.  ``upstream_stream`` makes it
+    explicit that the Gemini transport was streamed even though this adapter
+    does not claim MCP-level incremental delivery.
+    """
+
+    delivery: StreamDelivery = StreamDelivery.COLLECTED
+    chunk_semantics: StreamChunkSemantics = StreamChunkSemantics.EMPTY
+    chunk_count: int = 0
+    emitted_piece_count: int = 0
+    duplicate_chunk_count: int = 0
+    text_length: int = 0
+    upstream_stream: bool = True
+
+
 @dataclass(frozen=True)
 class CleanupObservation:
     """Public-safe evidence for one upstream cleanup decision or attempt.
