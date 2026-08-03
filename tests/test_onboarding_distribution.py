@@ -29,6 +29,16 @@ def _assert_primary_model_server(server: dict) -> None:
     assert server["env"]["GEMINI_AUTO_REFRESH"] == "false"
 
 
+def _normalize_shell_continuations(text: str) -> str:
+    """Collapse copyable backslash-newline commands without constraining formatting."""
+
+    return " ".join(
+        token
+        for line in text.splitlines()
+        for token in line.removesuffix("\\").split()
+    )
+
+
 def test_codex_configuration_parses_and_forwards_host_secrets() -> None:
     payload = tomllib.loads((CLIENTS / "codex.config.toml").read_text(encoding="utf-8"))
     server = payload["mcp_servers"]["gemini"]
@@ -85,12 +95,13 @@ def test_runtime_and_development_skills_have_distinct_roles_and_install_paths() 
     development = (
         PROJECT_ROOT / ".agents" / "skills" / "gemini-web-mcp-development" / "SKILL.md"
     ).read_text(encoding="utf-8")
+    normalized_development = _normalize_shell_continuations(development)
     client_doc = (PROJECT_ROOT / "docs" / "client-examples.md").read_text(encoding="utf-8")
 
     assert "Operate an installed Gemini Web MCP server safely" in runtime
     assert "do not use for repository implementation" in runtime
     assert "Develop, refactor, test, package, and release" in development
-    assert "--skill gemini-web-mcp-development --agent codex --copy --yes" in development
+    assert "--skill gemini-web-mcp-development --agent codex --copy --yes" in normalized_development
     assert client_doc.count(SKILLS_CLI) == 2
     assert "--skill gemini-web-mcp" in client_doc
     assert "--skill gemini-web-mcp-development" in client_doc

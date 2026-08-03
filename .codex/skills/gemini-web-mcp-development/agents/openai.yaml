@@ -1,4 +1,4 @@
 interface:
   display_name: "Gemini Web MCP Development"
-  short_description: "Build the agent-first multimodal Gemini Web gateway."
-  default_prompt: "Use $gemini-web-mcp-development to inspect the current repository, define the contract and acceptance criteria, implement shared domain logic instead of duplicating primary and compact server behavior, preserve verifiable multimodal outputs, and run targeted plus repository validation before handoff."
+  short_description: "Review and evolve the agent-first Gemini Web gateway."
+  default_prompt: "Use $gemini-web-mcp-development to inspect the current commit and changelog before planning, reproduce the requested defect, change the lowest shared domain/service/adapter boundary, keep compatibility text aligned with DomainResult, preserve primary/compact and multimodal contract evidence, and run focused plus maintained repository validation before handoff."

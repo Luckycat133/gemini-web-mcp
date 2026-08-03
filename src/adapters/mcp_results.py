@@ -9,10 +9,11 @@ from typing import Any, Awaitable, Callable, ParamSpec, TypeVar
 
 from .mcp_sdk import TextContent
 
-from ..domain import DomainResult, result_from_exception
+from ..domain import DomainErrorCode, DomainResult, result_from_exception
 
 T = TypeVar("T")
 P = ParamSpec("P")
+_DOMAIN_ERROR_CODES = frozenset(code.value for code in DomainErrorCode)
 
 
 def domain_text(
@@ -26,10 +27,51 @@ def domain_text(
     return [
         TextContent(
             type="text",
-            text=text,
+            text=_aligned_failure_text(result, text),
             _meta={"domain_result": payload},
         )
     ]
+
+
+def domain_failure_text(
+    result: DomainResult[Any],
+    *,
+    fallback: str = "Operation failed.",
+) -> str:
+    """Render compatibility text that cannot contradict a typed failure.
+
+    Some MCP clients still present only the first text block. Keep that text
+    derived from the same ``DomainResult`` that is attached in ``_meta`` so a
+    network/auth/upstream failure is never mislabeled as another error class.
+    """
+
+    error = result.error
+    if error is None:
+        return fallback
+
+    text = f"{error.code.value}: {error.message}"
+    if error.suggested_action:
+        text += f"\nSuggested action: {error.suggested_action}"
+    if error.diagnostic_id:
+        text += f"\nDiagnostic ID: {error.diagnostic_id}"
+    return text
+
+
+def _aligned_failure_text(result: DomainResult[Any], text: str) -> str:
+    """Replace only an explicit, contradictory error-code prefix.
+
+    Existing human-oriented compatibility prose remains stable. When a caller
+    labels the text with a different known domain code, however, the typed
+    result is authoritative and the compatibility text is regenerated from it.
+    """
+
+    if result.ok or result.error is None:
+        return text
+    prefix, separator, _remainder = text.partition(":")
+    advertised_code = prefix.strip() if separator else ""
+    if advertised_code in _DOMAIN_ERROR_CODES and advertised_code != result.error.code.value:
+        return domain_failure_text(result)
+    return text
 
 
 def attach_domain_result(
@@ -46,7 +88,12 @@ def attach_domain_result(
     first = output[0]
     meta = dict(first.meta or {})
     meta["domain_result"] = payload
-    output[0] = first.model_copy(update={"meta": meta})
+    output[0] = first.model_copy(
+        update={
+            "text": _aligned_failure_text(result, first.text),
+            "meta": meta,
+        }
+    )
     return output
 
 

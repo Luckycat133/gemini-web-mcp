@@ -1,268 +1,265 @@
-# Architecture and Technical Debt Map
+# Current Architecture and Remaining Debt
 
-Load this reference for refactors, lifecycle fixes, module extraction, package architecture, or MCP SDK migration.
+Load this reference for repository audits, refactors, lifecycle fixes, adapter work, package architecture, or protocol evolution.
 
 ## Product Direction
 
-Gemini Web MCP is a local compatibility gateway for agents. The durable product is not a collection of reverse-engineered calls; it is a stable agent contract over a changing Gemini Web implementation.
+Gemini Web MCP is a local compatibility gateway for agents. Its durable value is a stable, observable MCP contract over a changing Gemini Web implementation—not a collection of private RPC snippets.
 
-The gateway should let a general-purpose agent obtain text, image, video, music, file/URL analysis, and Deep Research capabilities without knowing Gemini Web payload layouts. Account/history/notebook/scheduled/Gem capabilities may be exposed when their contracts are sufficiently testable.
+The gateway should let a general-purpose agent complete text and multimodal workflows without knowing Gemini Web payload layouts. Reverse-engineered behavior belongs behind registries, parsers, services, typed results, fixtures, and separately reported live evidence.
 
-## Current Topology
+## Implemented Runtime Topology
 
 ```text
 MCP clients
    |
-   +-- src.onboarding ------------ install + auth-free text + verified image client
+   +-- gemini-mcp-onboarding / src.onboarding
+   |      installed-product preflight + gated live examples
    |
-   +-- src.server ---------------- primary profile-based tool surface
+   +-- src.server
+   |      primary profile-based MCP adapter
    |
-   +-- src.skill_server ---------- compact low-token facade surface
-             |
-             +-- duplicated handlers and imports from tools.manage internals
-
-client_wrapper
-   +-- ClientManager
-   +-- SessionManager
-   +-- RemoteChatCleanupManager
-   +-- CookieManager integration
-   +-- ThinkingLevelGeminiClient
-
-src/tools
-   +-- chat / media / file / research / prompts
-   +-- manage (history, account, notebooks, scheduled, Gems, manifest,
-               capability probes, doctor, cleanup, RPC parsers)
+   +-- src.skill_server
+          compact low-token MCP adapter
+                |
+                +--------------------------+
+                                           |
+                         src/adapters       | MCP SDK/result/artifact translation
+                         src/domain         | typed result/lifecycle/artifact contracts
+                         src/services       | shared application behavior
+                         src/infrastructure | RPC registry and pure parsers
+                                           |
+                         client_wrapper / ClientManager / SessionService
+                                           |
+                         ThinkingLevelGeminiClient + gemini-webapi
+                                           |
+                         Gemini Web
 ```
 
-This topology works, but the primary and compact servers have become separate business implementations. The management module is also carrying too many domains.
+The original P0-P2 foundations have been implemented. Do not use an old debt list to claim they are absent.
 
-## Confirmed High-Value Debt
+## Completed Foundations
 
-### 1. Async initialization can block the event loop
+### Async client lifecycle
 
-`ClientManager.initialize()` currently uses a synchronous `threading.Lock` around an awaited network initialization. Under real concurrent calls, one coroutine can hold the lock while suspended and another can synchronously block the event loop trying to acquire it.
+`ClientManager` now shares one initialization task across concurrent callers, shields shared initialization from individual caller cancellation, uses a generation boundary to reject stale completion, and retires replaced clients deliberately. Tests force real suspension and reset/failure races.
 
-Target design:
+### Shared session lifecycle
 
-- one async initialization lock or shared initialization task;
-- all concurrent callers await the same task;
-- initialization failure clears the task consistently;
-- reset uses a generation token or equivalent so stale completion cannot mark a new client initialized;
-- replaced clients are closed/retired deliberately.
+Primary and compact adapters use one `SessionService` with opaque UUID-based IDs, active-collision checks, explicit `SESSION_NOT_FOUND`, distinct reset-one/reset-all semantics, per-session send serialization, lifecycle metadata, and cross-adapter tests.
 
-A concurrency test must force a real suspension (`await asyncio.sleep(0)` or an event) inside fake initialization. A fake async function with no internal await is insufficient.
+### Typed results and adapter metadata
 
-### 2. Compact session semantics are unsafe and inconsistent
+`DomainResult`, `DomainError`, `DomainWarning`, `ResultMeta`, and operation states provide serializable success/failure contracts under `TextContent._meta.domain_result`. Public-safe exception classification keeps raw diagnostics in logs while exposing request and diagnostic IDs.
 
-Current compact session IDs are derived from `len(_sessions) + 1`, so deletion can cause collisions. Resetting an unknown ID can clear all sessions. Supplying an unknown session ID to compact `chat()` can silently fall back to a one-shot request.
+### Shared chat and stream behavior
 
-Target design:
+`src/services/chat.py` owns one-shot chat, session creation/send, model resolution, request construction, cleanup policy, and lifecycle output for both adapters. `src/services/streams.py` normalizes delta, cumulative, duplicate, stale, and mixed upstream chunks and reports collected-stream metadata accurately.
 
-- opaque UUID/ULID-like IDs;
-- explicit `SESSION_NOT_FOUND` data result;
-- separate reset-one and reset-all operations;
-- one shared SessionService used by both servers;
-- session state stores model, thinking/learning mode, upstream identifiers, creation/update times, and lifecycle options in a typed model.
+### Unified multimodal artifacts
 
-### 3. Errors are returned as ordinary prose
+The artifact domain represents remote/local/queued/empty/failed image, video, audio, file, report, webpage, and data outputs. Services preserve URI and local path, requested/request/effective/observed backend evidence, file metadata, dimensions/duration where available, and explicit save/verification failures.
 
-Many handlers catch every exception and return normal `TextContent` containing `Error:` or an emoji. Clients cannot reliably distinguish success, partial success, retryable upstream failure, invalid input, unavailable capability, or unverified mutation.
+### Management service extraction and RPC registry
 
-Target design:
+History, account, Notebook, scheduled-action, Gem, manifest, doctor, and cleanup behavior have shared service modules. `src/infrastructure/rpc_contracts.py` and pure parsers centralize observed RPC identifiers, source paths, payload/parser metadata, stability, and mutation verification strategy. Ambiguous mutations use read-back checks.
+
+### Cleanup lifecycle
+
+Remote conversation cleanup exposes typed pending/completed/failed observations and is integrated with shared chat/session workflows. Lifecycle evidence is carried in result metadata rather than hidden entirely in background behavior.
+
+### Package, CI, protocol, and onboarding
+
+The repository now has:
+
+- one persisted version source in `pyproject.toml`;
+- direct bounded dependencies and packaged prompt resources;
+- primary, compact, and onboarding console entrypoints;
+- MCP Python SDK v2 behind `src/adapters/mcp_sdk.py`;
+- modern `2026-07-28` and legacy `2025-11-25` protocol smoke;
+- Ruff, Mypy, unit tests, contract snapshots, clean-wheel, release, skill, and installed-product jobs;
+- checked-in client configurations and an auth-free onboarding path;
+- a separately gated live compatibility canary with sanitized report schema.
+
+## Current Architectural Boundaries
+
+### Domain
+
+`src/domain/` owns values that must survive adapter changes:
+
+- errors and operation states;
+- serializable results and warnings;
+- conversation/session/cleanup lifecycle;
+- stream collection metadata;
+- artifact identity, state, evidence, and verification.
+
+Domain code must not import MCP SDK types, Gemini clients, file-system presentation helpers, or tool registration.
+
+### Services
+
+`src/services/` owns reusable workflows:
+
+- request construction and execution;
+- session/chat lifecycle orchestration;
+- artifact extraction and verification;
+- management reads and mutations;
+- doctor, cleanup, manifest, and compatibility behavior;
+- long-operation state and stream normalization.
+
+Services return domain data/results or provider-neutral values. They should not decide final MCP wording.
+
+### Infrastructure
+
+`src/infrastructure/` owns provider-specific facts:
+
+- RPC IDs and source paths;
+- payload builders;
+- response envelope/body parsers;
+- observed contract metadata and stability;
+- adapter-specific verification steps.
+
+Changed upstream shapes should be reproduced with sanitized fixtures and fail explicitly as rejection/drift rather than silently becoming an empty result.
+
+### MCP adapters
+
+`src/server.py`, `src/skill_server.py`, `src/tools/`, and `src/adapters/` own:
+
+- tool registration and profile membership;
+- MCP input/output schemas and annotations;
+- primary versus compact granularity/defaults;
+- compatibility text and structured-content attachment;
+- SDK/protocol translation.
+
+They must not create a second business implementation.
+
+## Confirmed Remaining Debt
+
+### 1. Compact adapter still has legacy presentation logic
+
+`src.skill_server` now delegates chat/session and some management behavior to shared services, but it still contains a large amount of facade dispatch, prose formatting, prompt storage, cookie/doctor/cleanup presentation, and direct account/history orchestration.
+
+Target approach:
+
+1. select one bounded workflow;
+2. characterize current schema/text/metadata;
+3. move reusable behavior to an existing or new service;
+4. keep compact defaults/presentation in the adapter;
+5. add primary/compact semantic parity;
+6. delete obsolete private-helper imports.
+
+Do not rewrite the entire compact server at once.
+
+### 2. Typed-result coverage is incomplete
+
+The chat/session, artifact, long-operation, mutation, and selected management slices have typed contracts. Some legacy history, account, prompts, cookie, doctor, cleanup, and helper paths still return only prose or attach typed data inconsistently.
+
+Migrate by workflow. Preserve useful compatibility text, but make success, error code, retryability, operation state, pagination, and verification machine-readable.
+
+### 3. Compatibility text can drift from structured results
+
+A compact session send previously hard-coded `SESSION_NOT_FOUND` for every failed `ChatService.send_session` result, so authentication, network, upstream, or internal failures could be shown to text-only clients as a missing session while `_meta.domain_result` contained the real code.
+
+Architectural rule:
+
+- structured result is authoritative;
+- any explicit error-code prefix in compatibility text must match it;
+- shared result adapters should derive or validate coded text;
+- regression tests must inspect both text and `_meta.domain_result`.
+
+This is an integration-seam class of bug: individual services and schemas can be correct while the final adapter presentation is not.
+
+### 4. No deliberate live baseline has been recorded yet
+
+The live canary implementation, refusal paths, fixtures, report schema, workflow, and issue automation are tested offline. That is not evidence that current Gemini Web behavior has been observed successfully with the dedicated account.
+
+Next live step:
+
+- configure the dedicated environment deliberately;
+- run the bounded read-only canary;
+- retain only schema-approved diagnostics;
+- record dependency/Web build evidence where available;
+- distinguish provider drift from credentials, account capability, network, or workflow configuration failure.
+
+### 5. Release/version policy needs a public decision
+
+`main` contains extensive unreleased changes after the existing `1.3.0` line, including MCP SDK v2 and new result/artifact contracts. The mechanics for single-source versioning and verified release assets exist; the remaining question is product versioning and compatibility communication.
+
+Before release:
+
+- decide the next semantic version based on public compatibility, not SDK marketing version;
+- document changed guarantees and retained tool names/schemas;
+- state the legacy protocol support window;
+- produce and independently re-verify release assets;
+- ensure onboarding examples point to a valid evergreen or tagged source.
+
+### 6. RPC evidence requires ongoing freshness
+
+The centralized registry solves scattering, not upstream volatility. Each changed capability still needs:
+
+- sanitized success/empty/rejected/changed-shape fixtures;
+- parser-stage diagnostics;
+- current dependency matrix;
+- live canary evidence when explicitly run;
+- an observed date/build/account note only when actually known.
+
+### 7. Onboarding needs real ecosystem feedback
+
+Offline clean-install, stdio, configuration parsing, credential stripping, artifact verification, and `uvx` paths are covered. Remaining product work should come from real Codex/Claude/VS Code installation reports:
+
+- platform-specific command/path behavior;
+- browser/cookie setup failures;
+- long-operation UX;
+- artifact discovery and local save expectations;
+- profile selection and tool discoverability.
+
+Do not invent client-specific complexity without a reproducible report.
+
+### 8. Development guidance can itself become stale
+
+The previous development skill still described async initialization, session collisions, missing typed results, an unsplit management monolith, missing package data, absent SDK v2, and weak CI as current debt after all had been implemented.
+
+Prevent recurrence by testing that:
+
+- both skill mirrors remain byte-identical;
+- the skill names the current foundational modules;
+- completed milestones are not presented as active missing work;
+- active roadmap phases and validation commands match the checkout.
+
+## Current Runtime Flow
 
 ```text
-DomainResult[T]
-  ok: bool
-  data: T | null
-  error: DomainError | null
-  warnings: list[Warning]
-  meta: ResultMeta
+MCP request
+  -> SDK v2 adapter and generated schema
+  -> adapter-specific validation/defaults
+  -> shared application service
+  -> Gemini client or registered RPC contract
+  -> pure parser / lifecycle / artifact verification
+  -> DomainResult + typed data/evidence
+  -> structured MCP content + concise compatible text
 ```
 
-Adapters translate domain errors into the current SDK's supported tool-error mechanism and retain a text fallback for older clients. Raw exception text should remain diagnostic evidence rather than the public contract.
+## Refactor Decision Rules
 
-### 4. Primary and compact servers duplicate behavior
+Create or extend a shared service when two adapters need the same workflow, parsing/lifecycle logic is duplicated, or a provider-specific detail leaks into multiple tools.
 
-`src.skill_server` reimplements chat, history, account, scheduled actions, media, sessions, prompts, and cookie workflows. It imports many underscored helpers from `src.tools.manage`, so changes can drift between servers.
+Keep logic in an adapter when it is only tool registration, argument presets, profile membership, compatibility wording, or selection of structured fields.
 
-Target design:
+Create a domain type when a value must be serialized consistently across workflows or survive provider/SDK changes.
 
-```text
-src/
-  domain/
-    results.py
-    artifacts.py
-    sessions.py
-    capabilities.py
-  services/
-    chat.py
-    media.py
-    research.py
-    history.py
-    notebooks.py
-    scheduled.py
-    account.py
-    gems.py
-  infrastructure/
-    gemini_client.py
-    rpc_registry.py
-    rpc_parsers/
-    artifact_store.py
-  adapters/
-    mcp_primary.py
-    mcp_compact.py
-    mcp_v2.py          # later
-```
-
-The exact directory names may be introduced incrementally. The important boundary is that adapter code must not own domain behavior.
-
-### 5. The management module is a monolith
-
-`src/tools/manage.py` combines unrelated domains, payload builders, parsers, formatting, registration, and diagnostics. This raises merge conflict risk and encourages compact-server imports of private functions.
-
-Suggested extraction order:
-
-1. pure result/format helpers;
-2. RPC registry and response parsers;
-3. history service;
-4. notebook service;
-5. scheduled-action service;
-6. account inventory service;
-7. Gem service;
-8. doctor/cleanup/manifest presentation.
-
-Each extraction should route existing tools through the service before deleting old code.
-
-### 6. Conversation lifecycle behavior is fragmented
-
-Sessions and remote-chat cleanup are maintained by separate in-memory implementations, with compact and primary behavior differing. Background cleanup is not durable across process restarts, and lifecycle decisions are not always visible in results.
-
-Target design:
-
-- one conversation lifecycle service;
-- explicit lifecycle fields in session and result metadata;
-- idempotent cleanup operations;
-- observable pending/complete/failed cleanup states where cleanup is part of the requested workflow;
-- persistence only when there is a concrete product requirement, not as a prerequisite for every change.
-
-### 7. Version information has drifted
-
-The package metadata, server banners, compact-server header, docs, release URLs, and changelog have carried different version lines. This makes bug reports and release verification ambiguous.
-
-Target design:
-
-- package metadata is the source of truth;
-- runtime reads version through package metadata or one generated module;
-- release tooling validates tags, wheel metadata, documentation examples, and asset names;
-- CI fails on known stale version literals outside historical changelog entries.
-
-### 8. Dependency and package data contracts need tightening
-
-The code directly imports packages such as `orjson`, while dependency intent is not always explicit. Runtime code should not depend accidentally on a transitive dependency. The compact prompt defaults are read from a repository-root JSON file that may not be included in a wheel, and the compact server does not have a clear console entrypoint.
-
-Target design:
-
-- every direct runtime import is a direct dependency or an optional import behind an extra;
-- reverse-engineered upstream dependencies use a tested compatible range;
-- package data lives inside the importable package and is accessed with `importlib.resources`;
-- both intended server entrypoints have package-install smoke tests;
-- optional system tools such as `ffprobe` are detected and reported as optional capabilities.
-
-### 9. CI must verify the installed product
-
-The workflow separates source checks from installed-product checks. A large unit suite alone does not prove that the wheel contains required files, entrypoints start, profiles register the intended tools, or a real MCP handshake succeeds.
-
-Required CI layers:
-
-- format/lint/type checks;
-- unit and behavioral tests;
-- full/compact parity and tool-list snapshots;
-- wheel/sdist build and clean installation;
-- entrypoint import/start/list-tools smoke;
-- clean `uvx` onboarding that calls a real auth-free text tool;
-- checked-in Codex/Claude/VS Code config parsing and profile/secret-boundary contracts;
-- skill validation and copy parity;
-- optional scheduled live compatibility canary using a dedicated account.
-
-### 10. Streaming naming exceeds current client behavior
-
-The current stream tools consume the upstream stream and return after completion. They may still be useful for upstream reliability, but they are not client-visible incremental streams.
-
-Target design:
-
-- either rename/document them as collected stream calls;
-- or adopt SDK progress/task primitives that expose meaningful progress to MCP clients;
-- handle cumulative-text versus delta-text upstream events without duplication.
-
-### 11. Reverse-engineered contracts need a registry
-
-RPC IDs, source paths, payload shapes, response parsers, and model/media mappings are distributed across constants, transport code, media, research, and management modules.
-
-A registry entry should be able to describe:
-
-```text
-capability name
-rpc id / endpoint
-source path
-read or mutation
-payload builder
-response parser
-last verified date
-verified dependency version
-observed Web build/account notes
-verification strategy
-stability: stable | preview | experimental | unavailable
-```
-
-Tool handlers should ask the registry/service for a capability rather than embed raw payload knowledge.
-
-## Target Runtime Flow
-
-```text
-MCP adapter
-  -> validate/normalize input schema
-  -> application service
-  -> capability/model/RPC adapter
-  -> Gemini Web client
-  -> pure parser
-  -> typed domain result + artifacts + evidence
-  -> adapter structured output + concise text compatibility
-```
-
-## Core Domain Types
-
-### `DomainResult[T]`
-
-Carries success, data, domain error, warnings, and request/verification metadata.
-
-### `Artifact`
-
-Unifies image, video, audio, uploaded/downloaded file, and research-export deliverables.
-
-### `SessionHandle`
-
-Carries opaque local ID, upstream chat ID when available, model options, lifecycle state, and timestamps.
-
-### `CapabilityEvidence`
-
-Carries requested/effective/observed backend, source, verification method, and stability metadata.
-
-### `OperationState`
-
-For long-running work: `accepted`, `queued`, `running`, `completed`, `partial`, `timed_out`, `cancelled`, `failed`, `unavailable`.
+Create an infrastructure contract/parser when the behavior is specific to Gemini Web transport or private response shapes.
 
 ## Incremental Migration Pattern
 
-Do not begin with a repository-wide move. For one domain:
+For one remaining legacy workflow:
 
-1. lock current public behavior with characterization tests;
-2. create typed domain models and a service;
-3. move transport/parsing logic below the service;
-4. route one primary tool through it;
-5. route the matching compact facade through it;
-6. add parity tests;
-7. delete duplicated handlers/helpers;
-8. update manifest/docs/evaluations;
-9. repeat for the next domain.
+1. inspect current tool schema, profile registration, text, and tests;
+2. add characterization and failure-path tests;
+3. define provider-neutral service inputs/results;
+4. move RPC/client parsing below the service;
+5. route primary and compact adapters through it;
+6. compare domain semantics, not necessarily prose;
+7. remove duplicated helpers;
+8. update manifest, docs, evaluations, and skill references where needed;
+9. run package/protocol gates if registration or distribution changed.
 
-This pattern keeps the gateway usable throughout the refactor.
+This keeps the gateway usable while reducing debt.
