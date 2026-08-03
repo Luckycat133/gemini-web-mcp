@@ -156,7 +156,8 @@ def parse_response(
 
 
 def get_stream_text_piece(response) -> str:
-    """优先使用库提供的 text_delta，回退到完整 text。"""
-    if hasattr(response, "text_delta"):
-        return getattr(response, "text_delta", "") or ""
+    """Return one legacy text piece; collected streams use StreamTextAccumulator."""
+    text_delta = getattr(response, "text_delta", None)
+    if isinstance(text_delta, str) and text_delta:
+        return text_delta
     return getattr(response, "text", "") or ""

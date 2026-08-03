@@ -52,14 +52,14 @@ which tools are actually registered in the current process.
 
 | Tool | Group | Privacy |
 |---|---|---|
-| `gemini_chat` / `gemini_chat_stream` | core | `sends_user_prompt_and_optional_files` |
-| `gemini_start_chat` / `gemini_send_message` / `gemini_send_message_stream` | core | `sends_user_prompt...` |
+| `gemini_chat` / `gemini_chat_stream` | core | `sends_user_prompt_and_optional_files`; `_stream` collects the upstream stream into one MCP result |
+| `gemini_start_chat` / `gemini_send_message` / `gemini_send_message_stream` | core | `sends_user_prompt...`; `_stream` collects the upstream stream into one MCP result |
 | `gemini_list_sessions` | core | `local_session_metadata` (read-only) |
 | `gemini_generate_media` | media | `sends_user_prompt_and_optional_reference_files` |
 | `gemini_generate_music` | media | `sends_user_prompt` |
 | `gemini_upload_file` | files | `sends_local_file_content` |
 | `gemini_analyze_url` | files | `sends_url_to_gemini` |
-| `gemini_deep_research` | research | `sends_research_query` |
+| `gemini_deep_research` | research | `sends_research_query`; returns typed queued/running/completed/timed_out state and continuation IDs |
 
 ### History metadata (read-only, no turn text unless noted)
 

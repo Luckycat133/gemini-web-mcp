@@ -43,6 +43,14 @@ Use this skill for this repository's Gemini Web MCP server and low-token skill s
   - Use `doctor(validate_browser=false)` for low-cost local preflight before live account workflows.
   - Use `cookie(action="profiles")` before `cookie(action="get", profile="...")` when Chrome has multiple signed-in profiles.
 
+## Stream And Long-Operation Results
+
+- Treat `gemini_chat_stream` and `gemini_send_message_stream` as compatibility names for Gemini upstream streaming. The current MCP tools normalize and collect all chunks, then return one result; they do not provide MCP incremental delivery.
+- Read `_meta.domain_result.data.stream`: `delivery="collected"`, while `chunk_semantics` reports `delta`, `cumulative`, `mixed`, or `empty`. Do not concatenate the returned text again.
+- For `gemini_deep_research`, read `_meta.domain_result.meta.operation_state` and `data.state`; distinguish `queued`, `running`, `completed`, and `timed_out` rather than inferring completion from prose.
+- Use `wait_for_completion=false` when the user wants plan/start only. Prefer `retain_chat=true` for later retrieval, and preserve `upstream_chat_id` / `upstream_operation_id` whenever `continuation_possible=true`.
+- A `timed_out` result means this MCP wait ended, not necessarily that Gemini stopped the upstream research. Only claim a report exists when `report_available=true` or a later report-read call verifies it.
+
 ## Chat History Workflow
 
 1. Deep-scan metadata sources when completeness matters:

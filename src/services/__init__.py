@@ -24,6 +24,7 @@ from .chat import (
     StartSessionRequest,
 )
 from .lifecycle import ConversationLifecycleService, LifecycleResetAllData
+from .streams import StreamTextAccumulator
 
 __all__ = [
     "artifact_exception_result",
@@ -47,4 +48,5 @@ __all__ = [
     "response_chat_id",
     "SessionMessageRequest",
     "StartSessionRequest",
+    "StreamTextAccumulator",
 ]

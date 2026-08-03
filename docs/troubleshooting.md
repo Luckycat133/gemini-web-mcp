@@ -103,6 +103,7 @@ mcp dev src/server.py
 3. 确认账号有 **AI Plus** 订阅——免费账号无法用 Deep Research
 4. 缩小研究主题范围，避免一轮要跑几十次搜索
 5. 看 `gemini_deep_research` 返回的错误文本，它会区分"超时"和"功能不可用"
+6. 检查 `_meta.domain_result.data.upstream_chat_id`；若 `continuation_possible=true`，上游研究可能仍在运行，可稍后读取（建议启动时用 `retain_chat=true`）
 
 ### 媒体生成失败
 

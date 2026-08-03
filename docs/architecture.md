@@ -291,6 +291,30 @@ compact skill adapter ─┘          │
 响应只代表上游接受请求，最终状态由目标 Notebook 列表、scheduled registry/GetTask 或 Gem 列表
 读回决定。未观察到目标、读回失败和响应无法确认都是显式状态，不等同于已验证成功。
 
+### 9. 流与长任务语义
+
+P1.7 将 Gemini Web 的传输形状和 MCP 客户端实际看到的交付方式分开描述：
+
+```text
+Gemini upstream chunks          Deep Research plan/start/wait
+           │                                │
+           ▼                                ▼
+StreamTextAccumulator                deadline boundary
+ delta / cumulative / mixed          cancellation propagation
+           │                                │
+           ▼                                ▼
+one MCP TextContent                  LongOperationData
+delivery=collected                   queued/running/completed/timed_out
+```
+
+`*_stream` 名称为兼容性保留，当前适配器不会声称 MCP 增量推送。`StreamTextAccumulator`
+按状态归一化显式 delta、累计全文和混合片段，忽略重复或过时的累计 chunk；公开元数据只描述
+观测到的语义与计数。
+
+Deep Research 使用 `LongOperationData` 保存上游 research/chat ID、最新状态、轮询次数和报告
+可用性。超时是本次等待的终态，不会被取消后迟到的协程结果改写；如果已经拿到上游 ID，
+`continuation_possible` 仍为 true。调用方取消会继续向子任务传播，不会被一般异常边界吞掉。
+
 ---
 
 ## 📡 数据流

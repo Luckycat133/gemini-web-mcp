@@ -22,6 +22,7 @@ _format_deep_research_result 走真实实现。
 import asyncio
 from types import SimpleNamespace
 
+import pytest
 from mcp.server.fastmcp import FastMCP
 
 import src.tools.research as research_tools
@@ -76,7 +77,8 @@ class _FakeNativeResearchClient:
                  result_text="final report body",
                  result_done=True,
                  plan_exc=None, start_exc=None, wait_exc=None,
-                 thinking_scope_obj=None):
+                 thinking_scope_obj=None, start_state=None,
+                 result_status_state="completed"):
         self._research_id = research_id
         self._plan_cid = plan_cid
         self._plan_title = plan_title
@@ -87,6 +89,8 @@ class _FakeNativeResearchClient:
         self._start_exc = start_exc
         self._wait_exc = wait_exc
         self._thinking_scope_obj = thinking_scope_obj
+        self._start_state = start_state
+        self._result_status_state = result_status_state
         self.captured_start_chat_model = None
         self.captured_plan_query = None
         self.captured_plan_chat = None
@@ -123,7 +127,7 @@ class _FakeNativeResearchClient:
             raise self._start_exc
         self.captured_start_plan = plan
         self.captured_start_chat = chat
-        return SimpleNamespace(text="Deep Research started")
+        return SimpleNamespace(text="Deep Research started", state=self._start_state)
 
     async def wait_for_deep_research(self, plan, poll_interval=None, timeout=None):
         if self._wait_exc is not None:
@@ -134,7 +138,13 @@ class _FakeNativeResearchClient:
         return SimpleNamespace(
             plan=plan,
             final_output=SimpleNamespace(text=self._result_text),
-            statuses=[SimpleNamespace(state="completed", done=True, notes=["research done"])],
+            statuses=[
+                SimpleNamespace(
+                    state=self._result_status_state,
+                    done=self._result_done,
+                    notes=["research done" if self._result_done else "research still running"],
+                )
+            ],
             done=self._result_done,
         )
 
@@ -762,3 +772,183 @@ def test_native_wait_generic_exception_returns_error(monkeypatch):
 
     result = asyncio.run(run())
     assert "❌ Deep Research 失败: network down" in result[0].text
+
+
+# ---------------------------------------------------------------------------
+# F. Explicit long-operation state and deadline semantics
+# ---------------------------------------------------------------------------
+
+
+def _domain_payload(content):
+    assert content.meta is not None
+    return content.meta["domain_result"]
+
+
+def test_native_completed_result_exposes_completed_operation_and_ids(monkeypatch):
+    client = _FakeNativeResearchClient(
+        research_id="r_complete",
+        plan_cid="c_complete",
+        result_done=True,
+    )
+    _patch_research_env(monkeypatch, client)
+    mcp = _make_mcp()
+
+    async def run():
+        return await _call_tool(mcp, "gemini_deep_research", query="x", timeout_seconds=30)
+
+    payload = _domain_payload(asyncio.run(run())[0])
+    assert payload["ok"] is True
+    assert payload["meta"]["operation_state"] == "completed"
+    assert payload["data"]["state"] == "completed"
+    assert payload["data"]["upstream_operation_id"] == "r_complete"
+    assert payload["data"]["upstream_chat_id"] == "c_complete"
+    assert payload["data"]["report_available"] is True
+
+
+def test_fallback_plan_is_running_not_falsely_completed(monkeypatch):
+    client = _FakeFallbackResearchClient(response_cid="c_fallback_running")
+    _patch_research_env(monkeypatch, client)
+    mcp = _make_mcp()
+
+    async def run():
+        return await _call_tool(mcp, "gemini_deep_research", query="x", timeout_seconds=5)
+
+    payload = _domain_payload(asyncio.run(run())[0])
+    assert payload["ok"] is True
+    assert payload["meta"]["operation_state"] == "running"
+    assert payload["data"]["state"] == "running"
+    assert payload["data"]["upstream_chat_id"] == "c_fallback_running"
+    assert payload["data"]["continuation_possible"] is True
+    assert payload["data"]["report_available"] is False
+
+
+def test_native_can_return_running_without_waiting_for_completion(monkeypatch):
+    client = _FakeNativeResearchClient(research_id="r_running", plan_cid="c_running")
+    _patch_research_env(monkeypatch, client)
+    mcp = _make_mcp()
+
+    async def run():
+        return await _call_tool(
+            mcp,
+            "gemini_deep_research",
+            query="x",
+            timeout_seconds=30,
+            wait_for_completion=False,
+        )
+
+    content = asyncio.run(run())[0]
+    payload = _domain_payload(content)
+    assert payload["meta"]["operation_state"] == "running"
+    assert payload["data"]["upstream_operation_id"] == "r_running"
+    assert payload["data"]["upstream_chat_id"] == "c_running"
+    assert client.captured_wait_plan is None
+    assert "本次调用未等待最终报告" in content.text
+
+
+def test_native_non_waiting_call_preserves_observed_queued_state(monkeypatch):
+    client = _FakeNativeResearchClient(
+        research_id="r_queued",
+        plan_cid="c_queued",
+        start_state="queued",
+    )
+    _patch_research_env(monkeypatch, client)
+    mcp = _make_mcp()
+
+    async def run():
+        return await _call_tool(
+            mcp,
+            "gemini_deep_research",
+            query="x",
+            timeout_seconds=30,
+            wait_for_completion=False,
+        )
+
+    payload = _domain_payload(asyncio.run(run())[0])
+    assert payload["meta"]["operation_state"] == "queued"
+    assert payload["data"]["state"] == "queued"
+    assert payload["data"]["latest_upstream_state"] == "queued"
+
+
+def test_native_incomplete_wait_is_timed_out_and_keeps_continuation_ids(monkeypatch):
+    client = _FakeNativeResearchClient(
+        research_id="r_timeout",
+        plan_cid="c_timeout",
+        result_done=False,
+        result_status_state="running",
+    )
+    _patch_research_env(monkeypatch, client)
+    mcp = _make_mcp()
+
+    async def run():
+        return await _call_tool(mcp, "gemini_deep_research", query="x", timeout_seconds=30)
+
+    payload = _domain_payload(asyncio.run(run())[0])
+    assert payload["ok"] is False
+    assert payload["error"]["code"] == "TIMED_OUT"
+    assert payload["meta"]["operation_state"] == "timed_out"
+    assert payload["data"]["state"] == "timed_out"
+    assert payload["data"]["latest_upstream_state"] == "running"
+    assert payload["data"]["upstream_operation_id"] == "r_timeout"
+    assert payload["data"]["upstream_chat_id"] == "c_timeout"
+    assert payload["data"]["continuation_possible"] is True
+
+
+def test_native_wait_exception_timeout_keeps_ids_and_schedules_cleanup(monkeypatch):
+    client = _FakeNativeResearchClient(
+        research_id="r_timeout_exception",
+        plan_cid="c_timeout_exception",
+        wait_exc=asyncio.TimeoutError(),
+    )
+    scheduled = []
+    _patch_research_env(monkeypatch, client, captured_schedule=scheduled)
+    mcp = _make_mcp()
+
+    async def run():
+        return await _call_tool(mcp, "gemini_deep_research", query="x", timeout_seconds=30)
+
+    payload = _domain_payload(asyncio.run(run())[0])
+    assert payload["meta"]["operation_state"] == "timed_out"
+    assert payload["data"]["upstream_operation_id"] == "r_timeout_exception"
+    assert payload["data"]["upstream_chat_id"] == "c_timeout_exception"
+    assert scheduled[0]["cid"] == "c_timeout_exception"
+
+
+def test_deadline_ignores_a_completion_returned_after_cancellation() -> None:
+    from src.tools.research import _await_before_deadline
+
+    async def late_completion():
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            return "late completed value"
+
+    async def run():
+        with pytest.raises(asyncio.TimeoutError):
+            await _await_before_deadline(late_completion(), timeout=0)
+        await asyncio.sleep(0)
+
+    asyncio.run(run())
+
+
+def test_deadline_propagates_caller_cancellation_and_cancels_child() -> None:
+    from src.tools.research import _await_before_deadline
+
+    started = asyncio.Event()
+    child_cancelled = asyncio.Event()
+
+    async def blocked():
+        started.set()
+        try:
+            await asyncio.Event().wait()
+        finally:
+            child_cancelled.set()
+
+    async def run():
+        task = asyncio.create_task(_await_before_deadline(blocked(), timeout=60))
+        await started.wait()
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        await asyncio.wait_for(child_cancelled.wait(), timeout=1)
+
+    asyncio.run(run())
