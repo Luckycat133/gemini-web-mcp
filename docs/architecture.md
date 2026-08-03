@@ -48,7 +48,9 @@ gemini-mcp-server/
 ├── .env.example            # 环境变量示例
 ├── .gitignore             # Git 忽略规则
 ├── src/
-│   ├── __init__.py        # 包初始化（版本号）
+│   ├── __init__.py        # 包初始化（安装包元数据版本）
+│   ├── resources.py       # importlib.resources 包内数据入口
+│   ├── data/              # wheel 内不可变资源（默认 prompts）
 │   ├── server.py          # MCP 服务器主入口（primary surface）
 │   ├── skill_server.py    # 低 token skill 服务器（facade surface）
 │   ├── client_wrapper.py  # Gemini 客户端封装
@@ -447,9 +449,10 @@ client = GeminiClient(psid, psidts, ...)
 
 | 技术 | 版本 | 用途 |
 |------|------|------|
-| Python | >= 3.10 | 开发语言（受 `pyproject.toml` 约束） |
-| FastMCP | mcp >= 1.0 | MCP 服务器框架（`@mcp.tool(annotations=...)` 注册工具） |
-| gemini-webapi | >= 2.0.0 | Gemini Web API 封装（依赖 `types.RPCData`、`constants.GRPC` 等 2.x API） |
+| Python | >= 3.11 | 开发语言（受 `pyproject.toml` 约束） |
+| FastMCP | mcp >= 1.28, < 2 | MCP 服务器框架（`@mcp.tool(annotations=...)` 注册工具） |
+| gemini-webapi | >= 2.0.0, < 3 | Gemini Web API 封装（依赖 `types.RPCData`、`constants.GRPC` 等 2.x API） |
+| orjson | >= 3.11.7, < 4 | 媒体和 Thinking 请求的直接 JSON 编解码依赖 |
 
 ---
 

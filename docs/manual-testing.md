@@ -303,8 +303,8 @@
 |---|---|---|
 | 19.1 | `python -m build` | 生成 wheel + sdist |
 | 19.2 | `python scripts/package_release.py` | 生成 Codex skill zip |
-| 19.3 | 解压 wheel，检查含 `README.zh-CN.md` 和 `docs/assets/gemini-web-mcp-banner.svg` | 都在 |
-| 19.4 | `pip install dist/*.whl` 到干净 venv，`python -m src.server` 能起 | 启动正常 |
+| 19.3 | 解压 wheel，检查 `src/data/prompts_default.json` 和两个 `console_scripts` | 包内资源与主/精简入口都在 |
+| 19.4 | wheel 安装到干净 venv，运行 `pip check` 和 `scripts/smoke_installed_wheel.py` | 两套入口可启动/列工具，且未从源码树误导入 |
 
 ### 20. Evaluation
 

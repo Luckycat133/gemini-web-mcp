@@ -6,7 +6,7 @@
 
 ## 📋 前置条件
 
-- Python 3.10+
+- Python 3.11+
 - Claude Desktop 或支持 MCP 的应用
 - Google 账户（免费或 AI Plus）
 
@@ -33,11 +33,11 @@
 # 克隆或下载项目
 cd gemini-mcp-server
 
-# 安装依赖
-pip install "gemini-webapi>=2.0.0" mcp fastmcp
+# 安装项目及已测试范围内的直接依赖
+pip install -e ".[all]"
 
 # 或使用 uv（推荐）
-uv pip install "gemini-webapi>=2.0.0" mcp fastmcp
+uv pip install -e ".[all]"
 ```
 
 ---
@@ -69,8 +69,8 @@ uv pip install "gemini-webapi>=2.0.0" mcp fastmcp
 {
   "mcpServers": {
     "gemini": {
-      "command": "python",
-      "args": ["-m", "uv", "run", "--directory", "/path/to/gemini-mcp-server", "src/server.py"],
+      "command": "gemini-mcp-server",
+      "args": [],
       "env": {
         "GEMINI_PSID": "your___Secure-1PSID_value",
         "GEMINI_PSIDTS": "your___Secure-1PSIDTS_value",
@@ -80,6 +80,9 @@ uv pip install "gemini-webapi>=2.0.0" mcp fastmcp
   }
 }
 ```
+
+主入口也可用 `python -m src.server` 启动。需要低 token facade 时使用
+`gemini-mcp-skill-server`（兼容命令：`python -m src.skill_server`）。
 
 ### 方法 B：使用环境变量文件
 

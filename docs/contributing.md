@@ -18,9 +18,12 @@ pip install -e ".[all,dev]"
 # 3. 验证安装
 pytest -q                                   # 测试套件
 python -m py_compile src/server.py src/skill_server.py src/client_wrapper.py src/thinking_client.py src/constants.py src/tools/*.py
+python scripts/check_dependency_contract.py # 直接依赖 / optional extra 契约
 
 # 4. 本地跑服务（默认 core 工具面）
 GEMINI_TOOLS=core python -m src.server
+# 或安装后的 console entrypoint：GEMINI_TOOLS=core gemini-mcp-server
+# 低 token facade：gemini-mcp-skill-server
 
 # 5. 用 MCP Inspector 交互式调试
 pip install "mcp[cli]"
