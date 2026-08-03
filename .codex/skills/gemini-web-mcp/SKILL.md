@@ -1,7 +1,7 @@
 ---
 name: gemini-web-mcp
 description: "Use when working in the gemini-web-mcp repository or using its Gemini Web MCP/skill servers: inspect the tool manifest, choose safe Gemini Web tools, manage chat history and native notebooks, validate Pro Web capability coverage, generate and verify media deliverables, update docs/tests/evaluations, or avoid unsafe destructive/private-account operations."
-compatibility: "Requires Python 3.10+, a local .venv with this package installed (pip install -e \".[all]\"), Chrome cookies for Gemini, and optional browser/image extras for media and cookie-from-browser flows. Primary server run via GEMINI_TOOLS=core python -m src.server; low-token server via python -m src.skill_server."
+compatibility: "Requires Python 3.11+, this package installed (pip install -e \".[all]\"), Chrome cookies for Gemini, and optional browser/image extras for media and cookie-from-browser flows. Primary server: GEMINI_TOOLS=core gemini-mcp-server (or python -m src.server); low-token server: gemini-mcp-skill-server (or python -m src.skill_server)."
 metadata:
   version: "0.2.0"
 ---

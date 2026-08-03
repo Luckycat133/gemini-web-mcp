@@ -33,7 +33,7 @@ The main design choice is controlled tool layering. Agents should not see every 
 
 This server delegates all MCP protocol behavior — version negotiation, JSON-RPC framing, the `initialize` handshake, `server/discover`, structured error codes — to the official `mcp` Python SDK via `FastMCP`. It contains no protocol-layer code of its own; the codes in `error_handler.py` (`NO_COOKIE`, `INVALID_COOKIE`, `SESSION_NOT_FOUND`, …) are application-level errors returned as `TextContent`, not JSON-RPC protocol errors.
 
-The pinned `mcp` 1.28.x line speaks protocol `2025-11-25` (and earlier). The MCP `2026-07-28` revision (stateless core, mandatory `server/discover`, `resultType`, reserved error range `-32020..-32099`, Roots/Sampling/Logging deprecated) requires `mcp` SDK v2.0.0+, which is a breaking major release (`FastMCP` → `MCPServer`, `mcp.server.fastmcp` removed, camelCase → snake_case fields, `httpx` → `httpx2`). Until that migration lands, `pyproject.toml` caps `mcp` at `<2` per the [SDK migration guide](https://py.sdk.modelcontextprotocol.io/migration/) so fresh installs do not pull the incompatible v2.
+The tested `mcp>=1.28,<2` line speaks protocol `2025-11-25` (and earlier). The MCP `2026-07-28` revision (stateless core, mandatory `server/discover`, `resultType`, reserved error range `-32020..-32099`, Roots/Sampling/Logging deprecated) requires `mcp` SDK v2.0.0+, which is a breaking major release (`FastMCP` → `MCPServer`, `mcp.server.fastmcp` removed, camelCase → snake_case fields, `httpx` → `httpx2`). Until that migration lands, `pyproject.toml` caps `mcp` at `<2` per the [SDK migration guide](https://py.sdk.modelcontextprotocol.io/migration/) so fresh installs do not pull the incompatible v2.
 
 ## Install The Codex Skill
 
@@ -89,6 +89,14 @@ Run the default content workflow surface:
 
 ```bash
 GEMINI_TOOLS=core python -m src.server
+# equivalent installed console entrypoint
+GEMINI_TOOLS=core gemini-mcp-server
+```
+
+Run the compact, low-token facade:
+
+```bash
+gemini-mcp-skill-server
 ```
 
 ## Tool Profiles

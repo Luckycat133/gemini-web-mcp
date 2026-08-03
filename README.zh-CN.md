@@ -25,7 +25,7 @@
 
 本服务器把所有 MCP 协议层行为（版本协商、JSON-RPC 帧、`initialize` 握手、`server/discover`、结构化错误码）全部委托给官方 `mcp` Python SDK（经 `FastMCP`），自身不含任何协议层代码；`error_handler.py` 里的 `NO_COOKIE` / `INVALID_COOKIE` / `SESSION_NOT_FOUND` 等是应用层错误，以 `TextContent` 返回，不是 JSON-RPC 协议错误。
 
-当前锁定的 `mcp` 1.28.x 对外说的是协议 `2025-11-25`。MCP `2026-07-28` 修订（stateless 核心、`server/discover` 强制、`resultType`、保留错误码段 `-32020..-32099`、Roots/Sampling/Logging 弃用）需要 `mcp` SDK v2.0.0+，而 v2 是破坏性大版本（`FastMCP` → `MCPServer`、`mcp.server.fastmcp` 移除、字段 camelCase → snake_case、`httpx` → `httpx2`）。在该迁移完成前，`pyproject.toml` 按 [SDK 迁移指南](https://py.sdk.modelcontextprotocol.io/migration/) 给 `mcp` 加了 `<2` 上界，避免新安装误拉不兼容的 v2。
+当前测试范围 `mcp>=1.28,<2` 对外说的是协议 `2025-11-25`。MCP `2026-07-28` 修订（stateless 核心、`server/discover` 强制、`resultType`、保留错误码段 `-32020..-32099`、Roots/Sampling/Logging 弃用）需要 `mcp` SDK v2.0.0+，而 v2 是破坏性大版本（`FastMCP` → `MCPServer`、`mcp.server.fastmcp` 移除、字段 camelCase → snake_case、`httpx` → `httpx2`）。在该迁移完成前，`pyproject.toml` 按 [SDK 迁移指南](https://py.sdk.modelcontextprotocol.io/migration/) 给 `mcp` 加了 `<2` 上界，避免新安装误拉不兼容的 v2。
 
 ---
 
@@ -142,6 +142,12 @@ GEMINI_TOOLS=core python -m src.server
 
 # 完整维护/验证工具面
 GEMINI_TOOLS=all python -m src.server
+
+# 安装后的主入口（等价于 python -m src.server）
+GEMINI_TOOLS=core gemini-mcp-server
+
+# 安装后的低 token facade 入口
+gemini-mcp-skill-server
 ```
 
 ---
@@ -319,6 +325,9 @@ Gemini Web `学习辅导` 输入模式。
 
 ### 低 token Skill 入口
 `src.skill_server` 提供更短工具名的 skills 兼容入口，适合希望减少工具描述 token 的客户端：
+
+安装 wheel 或 editable package 后可直接运行 `gemini-mcp-skill-server`；
+`python -m src.skill_server` 仍保持兼容。
 
 - `chat`: 对话
 - `create`: 图片/视频/音乐生成

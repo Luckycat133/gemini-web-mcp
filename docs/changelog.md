@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Dependency and Package Integrity
+- Declared `orjson` directly, bounded the tested `gemini-webapi`/MCP major lines, bounded optional browser/image extras, and removed the unused standalone `fastmcp` dependency
+- Added an AST-based dependency contract check so new runtime third-party imports cannot rely silently on transitive dependencies
+- Moved the default prompt catalog into `src/data` and switched the compact server to `importlib.resources`, making defaults available from wheels and non-filesystem importers
+- Added explicit `gemini-mcp-server` and `gemini-mcp-skill-server` console entrypoints plus a clean-install smoke that verifies package origin, prompt data, tool listing, stdio startup, and prompt initialization
+
 ### Single Version Source
 - Made `pyproject.toml` the only persisted project-version source; both MCP server banners now read installed distribution metadata through `src.__version__`
 - Added a repository consistency check for stale product-version references and release wheel URLs while excluding the historical changelog
