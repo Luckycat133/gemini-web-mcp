@@ -32,6 +32,30 @@ def domain_text(
     ]
 
 
+def domain_failure_text(
+    result: DomainResult[Any],
+    *,
+    fallback: str = "Operation failed.",
+) -> str:
+    """Render compatibility text that cannot contradict a typed failure.
+
+    Some MCP clients still present only the first text block.  Keep that text
+    derived from the same ``DomainResult`` that is attached in ``_meta`` so a
+    network/auth/upstream failure is never mislabeled as another error class.
+    """
+
+    error = result.error
+    if error is None:
+        return fallback
+
+    text = f"{error.code.value}: {error.message}"
+    if error.suggested_action:
+        text += f"\nSuggested action: {error.suggested_action}"
+    if error.diagnostic_id:
+        text += f"\nDiagnostic ID: {error.diagnostic_id}"
+    return text
+
+
 def attach_domain_result(
     content: Sequence[TextContent],
     result: DomainResult[T],
