@@ -1,6 +1,3 @@
-Warning: truncated output (original token count: 31339)
-Total output lines: 2880
-
 """
 会话和 Gem 管理 MCP 工具
 """
@@ -1492,7 +1489,115 @@ def register_manage_tools(mcp: MCPServer, layers: list[str] | set[str] | tuple[s
                         client,
                         max_items=safe_max_items,
                         page_size=safe_page_size,
-                   …1339 tokens truncated…d": getattr(history, "cid", chat_id),
+                        max_pages=safe_max_pages,
+                    )
+                )
+
+            merged_items, _sources_by_id = _merge_conversation_source_items(source_blocks)
+            page, page_info = _paginate_items(merged_items, limit, offset, max_limit=500)
+            source_diagnostics = [
+                {
+                    "name": block.get("name"),
+                    "rpcid": block.get("rpcid"),
+                    "fetched_count": len(block.get("items", [])),
+                    "diagnostic": block.get("diagnostic", {}),
+                }
+                for block in source_blocks
+            ]
+            coverage_warnings = []
+            for block in source_diagnostics:
+                diagnostic = block.get("diagnostic", {})
+                stopped_reason = diagnostic.get("stopped_reason")
+                if stopped_reason in {"max_items", "max_pages"}:
+                    coverage_warnings.append(
+                        {
+                            "source": block.get("name"),
+                            "stopped_reason": stopped_reason,
+                            "message": "This source may have more remote items than this scan fetched.",
+                        }
+                    )
+
+            payload = {
+                "ok": True,
+                **page_info,
+                "items": page,
+                "source_rpc": get_contract("history.page").rpc_id,
+                "observed": "2026-07-04 Pro UI / deep conversation history metadata scan",
+                "scan_parameters": {
+                    "max_items_per_source": safe_max_items,
+                    "page_size": safe_page_size,
+                    "max_pages_per_source": safe_max_pages,
+                    "include_notebook_chats": include_notebook_chats,
+                    "include_remy_goals": include_remy_goals,
+                },
+                "source_counts": {str(block.get("name")): len(block.get("items", [])) for block in source_blocks},
+                "source_diagnostics": source_diagnostics,
+                "notebooks": {
+                    "included": include_notebook_chats,
+                    "diagnostic": notebook_diagnostic,
+                    "items": notebook_summary,
+                },
+                "coverage_warnings": coverage_warnings,
+                "note": "This is metadata-only and does not read chat turns. Use read/export tools only for selected chat IDs.",
+            }
+            if response_format == "json":
+                return _json_response(payload)
+
+            lines = [
+                "## Gemini 历史对话深度扫描",
+                f"合并唯一对话: {payload['total_count']}；当前 offset={payload['offset']} count={payload['count']}",
+                "",
+                "### 来源计数",
+            ]
+            for name, count in payload["source_counts"].items():
+                lines.append(f"- {name}: {count}")
+            if coverage_warnings:
+                lines.extend(["", "### 覆盖警告"])
+                for warning in coverage_warnings:
+                    lines.append(f"- {warning['source']}: {warning['stopped_reason']}")
+            lines.extend(["", "### 当前页"])
+            for idx, item in enumerate(page, payload["offset"] + 1):
+                pin = " 📌" if item.get("is_pinned") else ""
+                time_text = f" · {item['time']}" if item.get("time") else ""
+                sources = ", ".join(item.get("sources", []))
+                lines.append(f"{idx}. {item.get('title') or '(untitled)'}{pin} (ID: {item.get('id', '')}){time_text}")
+                if sources:
+                    lines.append(f"   sources: {sources}")
+                if item.get("project_id"):
+                    lines.append(f"   project_id: {item['project_id']}")
+            if payload["has_more"]:
+                lines.append(f"\n下一页: offset={payload['next_offset']}")
+            return [TextContent(type="text", text="\n".join(lines))]
+        except Exception as e:
+            logger.error(f"深度扫描聊天历史失败: {e}")
+            return [TextContent(type="text", text=f"❌ 深度扫描失败: {str(e)}")]
+
+    @_tool("gemini_read_chat", READS_PRIVATE_REMOTE)
+    async def gemini_read_chat(
+        chat_id: str,
+        limit: int = 20,
+        response_format: ResponseFormat = "markdown",
+        max_chars_per_turn: int = 4000,
+    ) -> list[TextContent]:
+        """读取指定 Gemini 历史对话内容。会返回私人聊天文本，请只在用户需要时调用。"""
+        client = get_gemini_client()
+        await initialize_client()
+
+        if not chat_id:
+            return [TextContent(type="text", text="❌ 读取聊天需要提供 chat_id。")]
+        if not hasattr(client, "read_chat"):
+            return [TextContent(type="text", text="❌ 当前 gemini-webapi 不支持 read_chat。")]
+
+        try:
+            safe_limit = min(max(limit, 1), 100)
+            safe_chars = min(max(max_chars_per_turn, 200), 20000)
+            history = await client.read_chat(chat_id, limit=safe_limit)
+            if not history:
+                return [TextContent(type="text", text=f"未找到聊天: {chat_id}")]
+            turns = getattr(history, "turns", []) or []
+            items = [_turn_to_dict(turn, safe_chars) for turn in turns[:safe_limit]]
+            payload = {
+                "chat_id": getattr(history, "cid", chat_id),
                 "count": len(items),
                 "limit": safe_limit,
                 "turns": items,
