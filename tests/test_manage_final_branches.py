@@ -37,8 +37,11 @@ from unittest.mock import AsyncMock, MagicMock
 import src.tools.manage as manage_tools
 from src.tools.manage import (
     _cleanup_test_artifacts_payload,
-    _configured_manage_layers,
     _conversation_metadata_payload,
+)
+from src.services.manifest import (
+    _configured_manage_layers,
+    _configured_tool_groups,
     _tool_availability,
     resolve_manage_tool_names,
 )
@@ -211,14 +214,14 @@ def test_configured_manage_layers_manage_prefix(monkeypatch):
     """
     monkeypatch.setenv("GEMINI_TOOLS", "manage:history-read")
     # _configured_tool_groups 读 GEMINI_TOOLS 环境变量
-    layers = _configured_manage_layers(manage_tools._configured_tool_groups())
+    layers = _configured_manage_layers(_configured_tool_groups())
     assert "history-read" in layers
 
 
 def test_configured_manage_layers_manage_prefix_with_all(monkeypatch):
     """GEMINI_TOOLS=manage:history-read,all → manage: 分支 + all profile 分支并存。"""
     monkeypatch.setenv("GEMINI_TOOLS", "manage:notebooks-write,all")
-    layers = _configured_manage_layers(manage_tools._configured_tool_groups())
+    layers = _configured_manage_layers(_configured_tool_groups())
     # manage:notebooks-write → 1457 分支
     assert "notebooks-write" in layers
     # all → profile_layers["all"] = {"all"}
@@ -231,7 +234,7 @@ def test_configured_manage_layers_profile_only(monkeypatch):
     此测试作为对照，确认非 manage: prefix 走 1458-1459 的 else 分支。
     """
     monkeypatch.setenv("GEMINI_TOOLS", "history")
-    layers = _configured_manage_layers(manage_tools._configured_tool_groups())
+    layers = _configured_manage_layers(_configured_tool_groups())
     # profile_layers["history"] = {"history-read"}
     assert "history-read" in layers
 
