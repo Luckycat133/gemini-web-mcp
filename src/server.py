@@ -9,11 +9,8 @@ import logging
 import os
 from typing import Literal
 
-from mcp.server.fastmcp import FastMCP
-from mcp.types import TextContent
-
 from . import __version__
-from .adapters import domain_error_boundary, domain_text
+from .adapters import MCPServer, TextContent, domain_error_boundary, domain_text
 from .client_wrapper import (
     get_cookie_from_browser,
     get_cookie_status,
@@ -40,8 +37,9 @@ logger = logging.getLogger(__name__)
 # 根据环境变量选择加载的工具组
 TOOL_GROUPS = os.environ.get("GEMINI_TOOLS", "core").split(",")
 
-mcp = FastMCP(
-    "Gemini Web MCP Server",
+mcp = MCPServer(
+    name="Gemini Web MCP Server",
+    version=__version__,
     instructions=f"""
 # Gemini Web MCP Server (v{__version__})
 

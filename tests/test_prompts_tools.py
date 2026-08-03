@@ -24,7 +24,7 @@ import asyncio
 import json
 import threading
 
-from mcp.server.fastmcp import FastMCP
+from src.adapters.mcp_sdk import MCPServer
 
 import src.tools.prompts as prompts_tools
 
@@ -35,12 +35,11 @@ import src.tools.prompts as prompts_tools
 
 
 async def _call_tool(mcp, tool_name, **kwargs):
-    content, _structured = await mcp.call_tool(tool_name, kwargs)
-    return content
+    return (await mcp.call_tool(tool_name, kwargs)).content
 
 
 def _make_mcp():
-    mcp = FastMCP("test")
+    mcp = MCPServer("test")
     prompts_tools.register_prompts_tools(mcp)
     return mcp
 
@@ -769,9 +768,9 @@ def test_tool_delete_success_returns_confirmation(tmp_path):
 
 
 def test_tool_invalid_action_via_mcp_raises_tool_error(tmp_path):
-    """FastMCP 在 dispatch 前用 pydantic 校验 Literal，action='bogus' 抛 ToolError，
+    """MCPServer 在 dispatch 前用 pydantic 校验 Literal，action='bogus' 抛 ToolError，
     不会进入函数体。这验证了类型注解的防御性校验生效。"""
-    from mcp.server.fastmcp.exceptions import ToolError
+    from mcp.server.mcpserver.exceptions import ToolError
 
     mgr = prompts_tools.PromptManager(str(tmp_path / "p.json"))
     _set_singleton(mgr)

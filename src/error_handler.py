@@ -5,7 +5,7 @@
 import logging
 import functools
 from typing import Any
-from mcp.types import TextContent
+from .adapters.mcp_sdk import TextContent
 
 logger = logging.getLogger(__name__)
 

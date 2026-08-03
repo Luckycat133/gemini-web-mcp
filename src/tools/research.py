@@ -13,8 +13,7 @@ from collections.abc import Awaitable
 from types import SimpleNamespace
 from typing import Any, Literal
 
-from mcp.server.fastmcp import FastMCP
-from mcp.types import TextContent
+from ..adapters.mcp_sdk import MCPServer, TextContent
 
 from ..adapters import append_artifact_block, attach_domain_result, domain_text
 from ..client_wrapper import (
@@ -239,7 +238,7 @@ def _research_domain_result(
     )
 
 
-def register_research_tools(mcp: FastMCP):
+def register_research_tools(mcp: MCPServer):
 
     async def _run_native_deep_research(
         client: Any,

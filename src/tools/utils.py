@@ -4,7 +4,7 @@
 
 from pathlib import Path
 from typing import List, Optional
-from mcp.types import TextContent
+from ..adapters.mcp_sdk import TextContent
 
 MAX_IMAGE_ATTACHMENT_BYTES = 25 * 1024 * 1024
 IMAGE_ATTACHMENT_EXTENSIONS = {

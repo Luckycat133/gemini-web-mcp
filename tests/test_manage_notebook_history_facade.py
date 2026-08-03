@@ -38,7 +38,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
-from mcp.server.fastmcp import FastMCP
+from src.adapters.mcp_sdk import MCPServer
 
 import src.tools.manage as manage_tools
 
@@ -111,14 +111,13 @@ def _patch_seams(monkeypatch, client):
 
 
 def _make_mcp():
-    mcp = FastMCP("test")
+    mcp = MCPServer("test")
     manage_tools.register_manage_tools(mcp, layers=["all"])
     return mcp
 
 
 async def _call(mcp, name, **kwargs):
-    content, _structured = await mcp.call_tool(name, kwargs)
-    return content
+    return (await mcp.call_tool(name, kwargs)).content
 
 
 def _chat(cid, title="t", is_pinned=False, timestamp=None):
@@ -548,7 +547,7 @@ def test_history_facade_unknown_action_rejected_by_pydantic(monkeypatch):
     action 类型为 ``Literal["list", "scan", "search", "read", "export"]``，
     非法值在 MCP 入口校验阶段即被拒，dispatcher 的 ``❌ 不支持的 history action``
     兜底分支是 Literal 类型保护下的防御性死代码，无法经 mcp.call_tool 触达。
-    mcp.server.fastmcp.exceptions.ToolError 是 Exception 子类，用 Exception 捕获
+    mcp.server.mcpserver.exceptions.ToolError 是 Exception 子类，用 Exception 捕获
     避免新增 mypy import-not-found 基线。
     """
     client = _ListChatsClient([])

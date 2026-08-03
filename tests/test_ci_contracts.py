@@ -33,7 +33,8 @@ def test_static_gates_are_declared_development_dependencies() -> None:
 def test_targeted_contract_checklist_covers_stable_architecture_boundaries() -> None:
     assert len(CONTRACT_TESTS) == len(set(CONTRACT_TESTS))
     assert {
-        "tests/test_domain_results.py",
+            "tests/test_domain_results.py",
+            "tests/test_mcp_sdk_v2.py",
         "tests/test_conversation_lifecycle.py",
         "tests/test_chat_service.py",
         "tests/test_artifacts.py",

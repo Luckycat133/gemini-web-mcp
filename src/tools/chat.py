@@ -5,8 +5,7 @@
 import logging
 from typing import Optional
 
-from mcp.server.fastmcp import FastMCP
-from mcp.types import TextContent
+from ..adapters.mcp_sdk import MCPServer, TextContent
 
 from ..adapters import attach_domain_result, domain_error_boundary, domain_text
 from ..client_wrapper import (
@@ -71,7 +70,7 @@ def _build_chat_service() -> ChatService:
     )
 
 
-def register_chat_tools(mcp: FastMCP):
+def register_chat_tools(mcp: MCPServer):
     chat_service = _build_chat_service()
 
     @mcp.tool(annotations=MUTATES_REMOTE)

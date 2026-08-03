@@ -34,7 +34,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from mcp.server.fastmcp import FastMCP
+from src.adapters.mcp_sdk import MCPServer
 
 import src.tools.research as research_tools
 from src.tools.research import (
@@ -1157,14 +1157,13 @@ def _patch_entry_env(monkeypatch, *, report_output=None):
 
 
 def _make_mcp():
-    mcp = FastMCP("test")
+    mcp = MCPServer("test")
     research_tools.register_research_tools(mcp)
     return mcp
 
 
 async def _call_tool(mcp, name, **kwargs):
-    content, _structured = await mcp.call_tool(name, kwargs)
-    return content
+    return (await mcp.call_tool(name, kwargs)).content
 
 
 def test_list_research_report_actions_returns_error_when_no_report(monkeypatch):

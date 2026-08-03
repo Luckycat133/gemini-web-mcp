@@ -5,14 +5,14 @@
 <h1 align="center">Gemini Web MCP</h1>
 
 <p align="center">
-  A layered FastMCP server and Codex skill for Gemini Web workflows.
+  A layered MCPServer and Codex skill for Gemini Web workflows.
 </p>
 
 <p align="center">
   <a href="https://github.com/Luckycat133/gemini-web-mcp/releases/latest"><img alt="Release" src="https://img.shields.io/github/v/release/Luckycat133/gemini-web-mcp?label=release"></a>
   <a href="https://github.com/Luckycat133/gemini-web-mcp/tree/main/.agents/skills/gemini-web-mcp"><img alt="Codex Skill" src="https://img.shields.io/badge/Codex%20Skill-installable-0B6BFF"></a>
   <a href="https://www.gnu.org/licenses/agpl-3.0.html"><img alt="License" src="https://img.shields.io/badge/License-AGPL--3.0--only-blue.svg"></a>
-  <a href="docs/changelog.md"><img alt="Verified" src="https://img.shields.io/badge/tests-1293%20passing-1F8A70"></a>
+  <a href="docs/changelog.md"><img alt="Verified" src="https://img.shields.io/badge/tests-1299%20passing-1F8A70"></a>
 </p>
 
 <p align="center">
@@ -31,9 +31,9 @@ The main design choice is controlled tool layering. Agents should not see every 
 
 ## MCP Protocol Compatibility
 
-This server delegates all MCP protocol behavior — version negotiation, JSON-RPC framing, the `initialize` handshake, `server/discover`, structured error codes — to the official `mcp` Python SDK via `FastMCP`. It contains no protocol-layer code of its own; the codes in `error_handler.py` (`NO_COOKIE`, `INVALID_COOKIE`, `SESSION_NOT_FOUND`, …) are application-level errors returned as `TextContent`, not JSON-RPC protocol errors.
+This server delegates MCP protocol behavior — discovery, version negotiation, JSON-RPC framing, the legacy `initialize` handshake, result validation, and structured protocol errors — to the official `mcp` Python SDK v2 through a dedicated `MCPServer` adapter. It contains no custom protocol stack; the codes in `error_handler.py` (`NO_COOKIE`, `INVALID_COOKIE`, `SESSION_NOT_FOUND`, …) are application-level errors returned in tool content, not JSON-RPC protocol errors.
 
-The tested `mcp>=1.28,<2` line speaks protocol `2025-11-25` (and earlier). The MCP `2026-07-28` revision (stateless core, mandatory `server/discover`, `resultType`, reserved error range `-32020..-32099`, Roots/Sampling/Logging deprecated) requires `mcp` SDK v2.0.0+, which is a breaking major release (`FastMCP` → `MCPServer`, `mcp.server.fastmcp` removed, camelCase → snake_case fields, `httpx` → `httpx2`). Until that migration lands, `pyproject.toml` caps `mcp` at `<2` per the [SDK migration guide](https://py.sdk.modelcontextprotocol.io/migration/) so fresh installs do not pull the incompatible v2.
+The supported runtime is `mcp>=2,<3` plus `mcp-types>=2,<3`. CI exercises both current `server/discover` clients on protocol `2026-07-28` and compatibility clients using the `2025-11-25` initialize path. Every tool advertises an `outputSchema` and returns validated `structuredContent` while retaining its existing text. See the explicit [SDK/client compatibility and v1 end-of-support policy](docs/mcp-sdk-compatibility.md).
 
 ## Install The Codex Skill
 
@@ -148,6 +148,7 @@ python scripts/package_release.py --outdir dist
 - [Tool reference](docs/tools.md)
 - [Live UI coverage](docs/live-ui-coverage.md)
 - [Architecture](docs/architecture.md)
+- [MCP SDK and client compatibility](docs/mcp-sdk-compatibility.md)
 - [Launch kit](docs/launch-kit.md)
 - [Changelog](docs/changelog.md)
 

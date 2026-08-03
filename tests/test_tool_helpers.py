@@ -16,7 +16,7 @@
 
 from types import SimpleNamespace
 
-from mcp.types import TextContent
+from src.adapters.mcp_sdk import TextContent
 
 from src.constants import (
     describe_model_name,

@@ -4,8 +4,7 @@ from pathlib import Path
 from typing import Optional
 from urllib.parse import urlparse
 
-from mcp.server.fastmcp import FastMCP
-from mcp.types import TextContent
+from ..adapters.mcp_sdk import MCPServer, TextContent
 
 from ..adapters import append_artifact_block, attach_domain_result, domain_text
 from ..client_wrapper import (
@@ -80,11 +79,11 @@ def _analysis_content(
     return append_artifact_block(content, data.artifacts, heading="Output artifacts")
 
 
-def register_file_tools(mcp: FastMCP) -> None:
+def register_file_tools(mcp: MCPServer) -> None:
     """Register all file and URL related MCP tools.
 
     Args:
-        mcp: FastMCP server instance
+        mcp: MCPServer instance
     """
 
     @mcp.tool(annotations=MUTATES_REMOTE)
