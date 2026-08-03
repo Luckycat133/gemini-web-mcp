@@ -240,6 +240,20 @@ def test_unknown_session_has_identical_domain_code_across_adapters(monkeypatch):
         assert payload["error"]["retryable"] is False
         assert payload["error"]["suggested_action"]
         assert payload["meta"]["operation_state"] == "failed"
+        assert payload["meta"]["details"]["lifecycle"] == {
+            "session_id": "sess_domain_missing",
+            "upstream_chat_id": None,
+            "session_state": "absent",
+            "retain_chat": False,
+            "delete_after_seconds": None,
+            "cleanup": {
+                "state": "not_applicable",
+                "upstream_chat_id": None,
+                "attempts": 0,
+                "diagnostic_id": None,
+                "idempotent": False,
+            },
+        }
 
 
 def test_invalid_image_is_typed_without_matching_legacy_emoji(monkeypatch):

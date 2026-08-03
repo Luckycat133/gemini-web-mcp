@@ -119,6 +119,7 @@ def register_chat_tools(mcp: FastMCP):
                 "model": result.data.requested_model,
                 "resolved_model": result.data.effective_model,
                 "temporary": result.data.temporary,
+                "lifecycle": result.data.lifecycle,
             },
         )
 
@@ -156,6 +157,7 @@ def register_chat_tools(mcp: FastMCP):
                 "session_id": session_id,
                 "model": result.data.requested_model,
                 "resolved_model": result.data.effective_model,
+                "lifecycle": result.data.lifecycle,
             },
         )
 
@@ -205,6 +207,7 @@ def register_chat_tools(mcp: FastMCP):
             data={
                 "session_id": session_id,
                 "model": result.data.requested_model,
+                "lifecycle": result.data.lifecycle,
             },
         )
 
@@ -221,7 +224,10 @@ def register_chat_tools(mcp: FastMCP):
         return domain_text(
             result,
             f"✅ 会话 {session_id} 已重置",
-            data={"session_id": session_id},
+            data={
+                "session_id": session_id,
+                "lifecycle": result.meta.details.get("lifecycle"),
+            },
         )
 
     @mcp.tool(annotations=READ_ONLY_LOCAL)
@@ -234,6 +240,7 @@ def register_chat_tools(mcp: FastMCP):
                 "session_id": sid,
                 "model": data["model"],
                 "retain_chat": data.get("retain_chat", False),
+                "lifecycle_state": data.get("lifecycle_state", "active"),
             }
             for sid, data in sessions.items()
         ]
@@ -302,6 +309,7 @@ def register_chat_tools(mcp: FastMCP):
                     "resolved_model": result.data.effective_model,
                     "temporary": result.data.temporary,
                     "streamed": True,
+                    "lifecycle": result.data.lifecycle,
                 },
             )
         return domain_text(
@@ -312,6 +320,7 @@ def register_chat_tools(mcp: FastMCP):
                 "resolved_model": result.data.effective_model,
                 "temporary": result.data.temporary,
                 "streamed": True,
+                "lifecycle": result.data.lifecycle,
             },
         )
 
@@ -363,5 +372,6 @@ def register_chat_tools(mcp: FastMCP):
                 "session_id": session_id,
                 "model": result.data.requested_model,
                 "streamed": True,
+                "lifecycle": result.data.lifecycle,
             },
         )

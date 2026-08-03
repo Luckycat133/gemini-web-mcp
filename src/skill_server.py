@@ -44,8 +44,11 @@ from .domain import (
     ArtifactKind,
     ArtifactResultData,
     ArtifactState,
+    CleanupObservation,
+    ConversationLifecycleMetadata,
     DomainErrorCode,
     DomainResult,
+    SessionLifecycleState,
 )
 from .services import (
     ChatRequest,
@@ -299,6 +302,11 @@ def _session_not_found_result() -> DomainResult[None]:
         "The requested session does not exist.",
         suggested_action="Create a session and use the returned ID.",
         verification_status="local_state_absent",
+        details={
+            "lifecycle": ConversationLifecycleMetadata(
+                session_state=SessionLifecycleState.ABSENT,
+            )
+        },
     )
 
 
@@ -316,9 +324,13 @@ def _schedule_compact_response_cleanup(
     delete_after_seconds: int | None,
     source: str,
 ) -> str | None:
-    """Preserve the compact adapter's cleanup call shape."""
-    del retain_chat, delete_after_seconds
-    return schedule_remote_chat_cleanup_from_response(response, source=source)
+    """Apply the same retention policy as the primary adapter."""
+    return schedule_remote_chat_cleanup_from_response(
+        response,
+        retain_chat=retain_chat,
+        delete_after_seconds=delete_after_seconds,
+        source=source,
+    )
 
 
 def _schedule_compact_chat_cleanup(
@@ -327,10 +339,14 @@ def _schedule_compact_chat_cleanup(
     retain_chat: bool,
     delete_after_seconds: int | None,
     source: str,
-) -> None:
-    """Preserve the compact adapter's cleanup call shape."""
-    del retain_chat, delete_after_seconds
-    schedule_remote_chat_cleanup(chat_id, source=source)
+) -> CleanupObservation | None:
+    """Apply the same retention policy as the primary adapter."""
+    return schedule_remote_chat_cleanup(
+        chat_id,
+        retain_chat=retain_chat,
+        delete_after_seconds=delete_after_seconds,
+        source=source,
+    )
 
 
 def _build_chat_service() -> ChatService:
@@ -424,11 +440,13 @@ async def chat(
                 {
                     "session_id": session_id,
                     "model": result.data.requested_model,
+                    "lifecycle": result.data.lifecycle,
                 }
                 if session_id
                 else {
                     "model": result.data.normalized_model,
                     "resolved_model": result.data.effective_model,
+                    "lifecycle": result.data.lifecycle,
                 }
             ),
         )
@@ -1114,6 +1132,9 @@ async def _session_create(
             "session_id": sid,
             "model": normalized_model,
             "resolved_model": effective_model,
+            "lifecycle": (
+                result.data.lifecycle if result.data is not None else None
+            ),
         },
     )
 
@@ -1156,6 +1177,7 @@ async def _session_send(
         data={
             "session_id": session_id,
             "model": result.data.requested_model,
+            "lifecycle": result.data.lifecycle,
         },
     )
 
@@ -1171,6 +1193,7 @@ def _session_list() -> list[TextContent]:
                     "session_id": sid,
                     "model": data["model"],
                     "retain_chat": data.get("retain_chat", False),
+                    "lifecycle_state": data.get("lifecycle_state", "active"),
                 }
                 for sid, data in sessions.items()
             ],
@@ -1183,7 +1206,13 @@ def _session_list() -> list[TextContent]:
 
 async def _session_reset(session_id: Optional[str], *, reset_all: bool = False) -> list[TextContent]:
     if reset_all:
-        await reset_client_async()
+        reset_result = await reset_client_async()
+        if isinstance(reset_result, DomainResult):
+            return domain_text(
+                reset_result,
+                "All sessions reset",
+                use_result_data=True,
+            )
         return domain_text(
             DomainResult.success({"scope": "all"}),
             "All sessions reset",
@@ -1204,7 +1233,10 @@ async def _session_reset(session_id: Optional[str], *, reset_all: bool = False) 
     return domain_text(
         result,
         f"Session deleted: {session_id}",
-        data={"session_id": session_id},
+        data={
+            "session_id": session_id,
+            "lifecycle": result.meta.details.get("lifecycle"),
+        },
     )
 
 

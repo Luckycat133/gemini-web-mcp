@@ -496,7 +496,7 @@ def test_chat_generates_content_without_session(monkeypatch):
     monkeypatch.setattr(skill_server, "validate_optional_image_path",
                         lambda _p: (True, None, None))
     monkeypatch.setattr(skill_server, "schedule_remote_chat_cleanup_from_response",
-                        lambda _r, source: None)
+                        lambda _r, source, **_kwargs: None)
     result = _run(skill_server.chat(message="hi", model="flash", learning_mode="quiz"))
     assert "response text" in result[0].text
     # learning_mode 注入
@@ -512,7 +512,7 @@ def test_chat_omits_learning_mode_when_none(monkeypatch):
     monkeypatch.setattr(skill_server, "validate_optional_image_path",
                         lambda _p: (True, None, None))
     monkeypatch.setattr(skill_server, "schedule_remote_chat_cleanup_from_response",
-                        lambda _r, source: None)
+                        lambda _r, source, **_kwargs: None)
     _run(skill_server.chat(message="hi", learning_mode=None))
     kwargs = client.generate_content.call_args.kwargs
     assert "learning_mode" not in kwargs
@@ -536,9 +536,9 @@ def test_chat_session_path_uses_session_send_message(monkeypatch):
     monkeypatch.setattr(skill_server, "validate_optional_image_path",
                         lambda _p: (True, None, None))
     monkeypatch.setattr(skill_server, "schedule_remote_chat_cleanup_from_response",
-                        lambda _r, source: None)
+                        lambda _r, source, **_kwargs: None)
     monkeypatch.setattr(skill_server, "schedule_remote_chat_cleanup",
-                        lambda _cid, source: None)
+                        lambda _cid, source, **_kwargs: None)
     result = _run(skill_server.chat(message="hi", session_id="sess_1"))
     assert "session response" in result[0].text
     kwargs = fake_session.send_message.call_args.kwargs
@@ -561,9 +561,9 @@ def test_chat_session_path_explicit_learning_mode_overrides_session(monkeypatch)
     monkeypatch.setattr(skill_server, "validate_optional_image_path",
                         lambda _p: (True, None, None))
     monkeypatch.setattr(skill_server, "schedule_remote_chat_cleanup_from_response",
-                        lambda _r, source: None)
+                        lambda _r, source, **_kwargs: None)
     monkeypatch.setattr(skill_server, "schedule_remote_chat_cleanup",
-                        lambda _cid, source: None)
+                        lambda _cid, source, **_kwargs: None)
     _run(skill_server.chat(message="hi", session_id="sess_1", learning_mode="explicit"))
     kwargs = fake_session.send_message.call_args.kwargs
     assert kwargs["learning_mode"] == "explicit"
@@ -583,9 +583,9 @@ def test_chat_session_path_no_learning_mode_anywhere_omits_kwarg(monkeypatch):
     monkeypatch.setattr(skill_server, "validate_optional_image_path",
                         lambda _p: (True, None, None))
     monkeypatch.setattr(skill_server, "schedule_remote_chat_cleanup_from_response",
-                        lambda _r, source: None)
+                        lambda _r, source, **_kwargs: None)
     monkeypatch.setattr(skill_server, "schedule_remote_chat_cleanup",
-                        lambda _cid, source: None)
+                        lambda _cid, source, **_kwargs: None)
     _run(skill_server.chat(message="hi", session_id="sess_1", learning_mode=None))
     kwargs = fake_session.send_message.call_args.kwargs
     assert "learning_mode" not in kwargs
@@ -1339,9 +1339,9 @@ def test_session_send_injects_learning_mode_from_session(monkeypatch):
     })
     _patch_client_seams(monkeypatch, SimpleNamespace())
     monkeypatch.setattr(skill_server, "schedule_remote_chat_cleanup_from_response",
-                        lambda _r, source: None)
+                        lambda _r, source, **_kwargs: None)
     monkeypatch.setattr(skill_server, "schedule_remote_chat_cleanup",
-                        lambda _cid, source: None)
+                        lambda _cid, source, **_kwargs: None)
     _run(_session_send("s1", "msg", "standard", None, None, "flash"))
     kwargs = fake_session.send_message.call_args.kwargs
     assert kwargs["learning_mode"] == "default_quiz"
@@ -1358,9 +1358,9 @@ def test_session_send_explicit_learning_mode_overrides(monkeypatch):
     })
     _patch_client_seams(monkeypatch, SimpleNamespace())
     monkeypatch.setattr(skill_server, "schedule_remote_chat_cleanup_from_response",
-                        lambda _r, source: None)
+                        lambda _r, source, **_kwargs: None)
     monkeypatch.setattr(skill_server, "schedule_remote_chat_cleanup",
-                        lambda _cid, source: None)
+                        lambda _cid, source, **_kwargs: None)
     _run(_session_send("s1", "msg", "standard", "explicit", None, "flash"))
     kwargs = fake_session.send_message.call_args.kwargs
     assert kwargs["learning_mode"] == "explicit"
@@ -1378,9 +1378,9 @@ def test_session_send_uses_session_thinking_level_when_default(monkeypatch):
     })
     _patch_client_seams(monkeypatch, SimpleNamespace())
     monkeypatch.setattr(skill_server, "schedule_remote_chat_cleanup_from_response",
-                        lambda _r, source: None)
+                        lambda _r, source, **_kwargs: None)
     monkeypatch.setattr(skill_server, "schedule_remote_chat_cleanup",
-                        lambda _cid, source: None)
+                        lambda _cid, source, **_kwargs: None)
     _run(_session_send("s1", "msg", "standard", None, None, "flash"))
     kwargs = fake_session.send_message.call_args.kwargs
     assert kwargs["thinking_level"] == "extended"
@@ -1828,8 +1828,8 @@ def test_session_main_dispatches_send(monkeypatch):
     monkeypatch.setattr(skill_server, "validate_optional_image_path",
                         lambda _p: (True, None, None))
     monkeypatch.setattr(skill_server, "schedule_remote_chat_cleanup_from_response",
-                        lambda _r, source: None)
+                        lambda _r, source, **_kwargs: None)
     monkeypatch.setattr(skill_server, "schedule_remote_chat_cleanup",
-                        lambda _cid, source: None)
+                        lambda _cid, source, **_kwargs: None)
     result = _run(skill_server.session(action="send", session_id="s1", message="hello"))
     assert "sent" in result[0].text
