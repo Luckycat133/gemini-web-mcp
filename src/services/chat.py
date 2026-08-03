@@ -7,7 +7,14 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
 
-from ..domain import DomainResult
+from ..domain import (
+    CleanupObservation,
+    ConversationLifecycleMetadata,
+    DomainResult,
+    SessionLifecycleState,
+    cleanup_observation_for_policy,
+    is_valid_remote_chat_id,
+)
 from ..session_manager import SessionData, SessionOperationResult
 
 
@@ -28,8 +35,8 @@ class ChatServiceDependencies:
     lookup_session: Callable[[str], SessionOperationResult]
     send_session_message: Callable[..., Awaitable[SessionOperationResult]]
     send_session_message_stream: Callable[..., Awaitable[SessionOperationResult]]
-    schedule_response_cleanup: Callable[..., str | None]
-    schedule_chat_cleanup: Callable[..., None]
+    schedule_response_cleanup: Callable[..., CleanupObservation | str | None]
+    schedule_chat_cleanup: Callable[..., CleanupObservation | None]
     normalize_model: Callable[[str], str]
     resolve_model: Callable[[str], str]
 
@@ -84,6 +91,9 @@ class ChatOperationData:
     requested_model: str
     normalized_model: str
     effective_model: str
+    lifecycle: ConversationLifecycleMetadata = field(
+        default_factory=ConversationLifecycleMetadata.stateless,
+    )
     session_id: str | None = None
     session_state: SessionData | None = None
     temporary: bool = False
@@ -112,10 +122,16 @@ class ChatService:
             effective_model=effective_model,
         )
         response = await client.generate_content(**request_kwargs)
-        remote_chat_id = self._dependencies.schedule_response_cleanup(
+        scheduled = self._dependencies.schedule_response_cleanup(
             response,
             retain_chat=request.retain_chat,
             delete_after_seconds=request.delete_after_seconds,
+            source=request.cleanup_source,
+        )
+        remote_chat_id, cleanup = self._scheduled_cleanup(
+            scheduled,
+            fallback_chat_id=self._response_chat_id(response),
+            retain_chat=request.retain_chat,
             source=request.cleanup_source,
         )
         return self._success(
@@ -123,6 +139,12 @@ class ChatService:
                 requested_model=request.model,
                 normalized_model=normalized_model,
                 effective_model=effective_model,
+                lifecycle=ConversationLifecycleMetadata.stateless(
+                    upstream_chat_id=remote_chat_id,
+                    retain_chat=request.retain_chat,
+                    delete_after_seconds=request.delete_after_seconds,
+                    cleanup=cleanup,
+                ),
                 temporary=request.temporary,
                 remote_chat_id=remote_chat_id,
                 response=response,
@@ -150,11 +172,18 @@ class ChatService:
 
         final_response = responses[-1] if responses else None
         remote_chat_id = None
+        cleanup = CleanupObservation()
         if final_response is not None:
-            remote_chat_id = self._dependencies.schedule_response_cleanup(
+            scheduled = self._dependencies.schedule_response_cleanup(
                 final_response,
                 retain_chat=request.retain_chat,
                 delete_after_seconds=request.delete_after_seconds,
+                source=request.cleanup_source,
+            )
+            remote_chat_id, cleanup = self._scheduled_cleanup(
+                scheduled,
+                fallback_chat_id=self._response_chat_id(final_response),
+                retain_chat=request.retain_chat,
                 source=request.cleanup_source,
             )
         return self._success(
@@ -162,6 +191,12 @@ class ChatService:
                 requested_model=request.model,
                 normalized_model=normalized_model,
                 effective_model=effective_model,
+                lifecycle=ConversationLifecycleMetadata.stateless(
+                    upstream_chat_id=remote_chat_id,
+                    retain_chat=request.retain_chat,
+                    delete_after_seconds=request.delete_after_seconds,
+                    cleanup=cleanup,
+                ),
                 temporary=request.temporary,
                 streamed=True,
                 remote_chat_id=remote_chat_id,
@@ -199,6 +234,7 @@ class ChatService:
                 requested_model=request.model,
                 normalized_model=normalized_model,
                 effective_model=effective_model,
+                lifecycle=self._session_lifecycle(state),
                 session_id=state.session_id,
                 session_state=state,
                 temporary=state.temporary,
@@ -228,12 +264,17 @@ class ChatService:
             return self._copy_failure(sent)
         state = sent.session
         response = sent.response
-        remote_chat_id = self._schedule_session_cleanup(request, state, response)
+        remote_chat_id, cleanup = self._schedule_session_cleanup(
+            request,
+            state,
+            response,
+        )
         return self._session_success(
             request,
             state,
             response=response,
             remote_chat_id=remote_chat_id,
+            cleanup=cleanup,
             request_id=sent.meta.request_id,
             verification_status=sent.meta.verification_status,
         )
@@ -262,7 +303,7 @@ class ChatService:
         responses = tuple(streamed.response or ())
         full_text = "".join(text_piece(response) for response in responses)
         final_response = responses[-1] if responses else None
-        remote_chat_id = self._schedule_session_cleanup(
+        remote_chat_id, cleanup = self._schedule_session_cleanup(
             request,
             state,
             final_response,
@@ -275,6 +316,7 @@ class ChatService:
             stream_text=full_text,
             streamed=True,
             remote_chat_id=remote_chat_id,
+            cleanup=cleanup,
             request_id=streamed.meta.request_id,
             verification_status=streamed.meta.verification_status,
         )
@@ -330,7 +372,7 @@ class ChatService:
         request: SessionMessageRequest,
         state: SessionData,
         response: Any,
-    ) -> str | None:
+    ) -> tuple[str | None, CleanupObservation]:
         retain_chat = state.retain_chat if request.retain_chat is None else request.retain_chat
         delete_after_seconds = request.delete_after_seconds
         if delete_after_seconds is None:
@@ -340,23 +382,34 @@ class ChatService:
             CleanupStrategy.RESPONSE,
             CleanupStrategy.RESPONSE_THEN_SESSION,
         }:
-            remote_chat_id = self._dependencies.schedule_response_cleanup(
+            scheduled = self._dependencies.schedule_response_cleanup(
                 response,
                 retain_chat=retain_chat,
                 delete_after_seconds=delete_after_seconds,
                 source=request.cleanup_source,
             )
+            remote_chat_id, cleanup = self._scheduled_cleanup(
+                scheduled,
+                fallback_chat_id=self._response_chat_id(response),
+                retain_chat=retain_chat,
+                source=request.cleanup_source,
+            )
             if remote_chat_id or request.cleanup_strategy == CleanupStrategy.RESPONSE:
-                return remote_chat_id
+                return remote_chat_id, cleanup
 
         remote_chat_id = self._session_chat_id(state)
-        self._dependencies.schedule_chat_cleanup(
+        scheduled = self._dependencies.schedule_chat_cleanup(
             remote_chat_id,
             retain_chat=retain_chat,
             delete_after_seconds=delete_after_seconds,
             source=request.cleanup_source,
         )
-        return remote_chat_id
+        return self._scheduled_cleanup(
+            scheduled,
+            fallback_chat_id=remote_chat_id,
+            retain_chat=retain_chat,
+            source=request.cleanup_source,
+        )
 
     def _session_success(
         self,
@@ -368,6 +421,7 @@ class ChatService:
         stream_text: str = "",
         streamed: bool = False,
         remote_chat_id: str | None,
+        cleanup: CleanupObservation,
         request_id: str,
         verification_status: str,
     ) -> DomainResult[ChatOperationData]:
@@ -379,6 +433,16 @@ class ChatService:
                 requested_model=state.model,
                 normalized_model=normalized_model,
                 effective_model=effective_model,
+                lifecycle=self._session_lifecycle(
+                    state,
+                    retain_chat=(state.retain_chat if request.retain_chat is None else request.retain_chat),
+                    delete_after_seconds=(
+                        state.delete_after_seconds
+                        if request.delete_after_seconds is None
+                        else request.delete_after_seconds
+                    ),
+                    cleanup=cleanup,
+                ),
                 session_id=state.session_id,
                 session_state=state,
                 temporary=temporary,
@@ -394,7 +458,59 @@ class ChatService:
 
     @staticmethod
     def _session_chat_id(state: SessionData) -> str | None:
-        return getattr(state.session, "cid", None) or state.upstream_chat_id
+        cid = getattr(state.session, "cid", None)
+        return cid if is_valid_remote_chat_id(cid) else state.upstream_chat_id
+
+    @staticmethod
+    def _response_chat_id(response: Any) -> str | None:
+        cid = getattr(response, "cid", None)
+        if is_valid_remote_chat_id(cid):
+            return cid
+        metadata = getattr(response, "metadata", None)
+        if isinstance(metadata, list) and metadata:
+            candidate = metadata[0]
+            if is_valid_remote_chat_id(candidate):
+                return candidate
+        return None
+
+    @staticmethod
+    def _scheduled_cleanup(
+        scheduled: CleanupObservation | str | None,
+        *,
+        fallback_chat_id: str | None,
+        retain_chat: bool,
+        source: str,
+    ) -> tuple[str | None, CleanupObservation]:
+        if isinstance(scheduled, CleanupObservation):
+            remote_chat_id = scheduled.upstream_chat_id or fallback_chat_id
+            return remote_chat_id, scheduled
+        embedded = getattr(scheduled, "cleanup_observation", None)
+        if isinstance(embedded, CleanupObservation):
+            remote_chat_id = embedded.upstream_chat_id or fallback_chat_id
+            return remote_chat_id, embedded
+        remote_chat_id = scheduled if is_valid_remote_chat_id(scheduled) else fallback_chat_id
+        return remote_chat_id, cleanup_observation_for_policy(
+            remote_chat_id,
+            retain_chat=retain_chat,
+            source=source,
+        )
+
+    @staticmethod
+    def _session_lifecycle(
+        state: SessionData,
+        *,
+        retain_chat: bool | None = None,
+        delete_after_seconds: int | None = None,
+        cleanup: CleanupObservation | None = None,
+    ) -> ConversationLifecycleMetadata:
+        return ConversationLifecycleMetadata(
+            session_id=state.session_id,
+            upstream_chat_id=ChatService._session_chat_id(state),
+            session_state=SessionLifecycleState.ACTIVE,
+            retain_chat=state.retain_chat if retain_chat is None else retain_chat,
+            delete_after_seconds=(state.delete_after_seconds if delete_after_seconds is None else delete_after_seconds),
+            cleanup=cleanup or CleanupObservation(),
+        )
 
     @staticmethod
     def _copy_failure(
@@ -422,5 +538,5 @@ class ChatService:
             requested_backend=data.requested_model,
             effective_backend=data.effective_model,
             verification_status=verification_status,
-            details={"service": "chat"},
+            details={"service": "chat", "lifecycle": data.lifecycle},
         )

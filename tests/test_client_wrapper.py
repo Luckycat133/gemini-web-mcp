@@ -106,6 +106,7 @@ def test_session_data_to_dict_maps_all_fields():
         "upstream_chat_id": None,
         "retain_chat": True,
         "delete_after_seconds": 120,
+        "lifecycle_state": "active",
     }
 
 
@@ -236,7 +237,10 @@ def test_reset_session_deletes_unretained_remote_chat(monkeypatch):
     monkeypatch.setattr(cw, "_session_manager", fake)
     monkeypatch.setattr(cw, "delete_remote_chat", fake_delete)
 
-    assert _run(cw.reset_session("sess_x")) is expected
+    result = _run(cw.reset_session("sess_x"))
+    assert result.session is data
+    assert result.meta.details["lifecycle"].cleanup.state.value == "completed"
+    assert result.meta.details["lifecycle"].session_state.value == "removed"
     assert fake.calls == [("reset_one_async", ("sess_x",), {})]
     assert deleted == ["c_remote"]
 
@@ -252,7 +256,10 @@ def test_reset_session_preserves_retained_chat(monkeypatch):
     monkeypatch.setattr(cw, "_session_manager", fake)
     monkeypatch.setattr(cw, "delete_remote_chat", explode)
 
-    assert _run(cw.reset_session("sess_x")) is expected
+    result = _run(cw.reset_session("sess_x"))
+    assert result.session is data
+    assert result.meta.details["lifecycle"].retain_chat is True
+    assert result.meta.details["lifecycle"].session_state.value == "removed"
 
 
 def test_reset_session_without_remote_id_has_no_client_side_effect(monkeypatch):
@@ -266,7 +273,10 @@ def test_reset_session_without_remote_id_has_no_client_side_effect(monkeypatch):
     monkeypatch.setattr(cw, "_session_manager", fake)
     monkeypatch.setattr(cw, "delete_remote_chat", explode)
 
-    assert _run(cw.reset_session("sess_x")) is expected
+    result = _run(cw.reset_session("sess_x"))
+    assert result.session is data
+    assert result.meta.details["lifecycle"].cleanup.state.value == "not_applicable"
+    assert result.meta.details["lifecycle"].session_state.value == "removed"
 
 
 def test_reset_session_unknown_id_has_no_remote_side_effect(monkeypatch):
@@ -480,8 +490,18 @@ def test_list_pending_remote_chat_cleanup_maps_cleanup_tasks(monkeypatch):
     monkeypatch.setattr(cw, "_cleanup_manager", fake)
     result = cw.list_pending_remote_chat_cleanup()
     assert result == {
-        "c_1": {"delete_at": now, "source": "src1"},
-        "c_2": {"delete_at": now + 10, "source": "src2"},
+        "c_1": {
+            "delete_at": now,
+            "source": "src1",
+            "attempts": 0,
+            "diagnostic_id": None,
+        },
+        "c_2": {
+            "delete_at": now + 10,
+            "source": "src2",
+            "attempts": 0,
+            "diagnostic_id": None,
+        },
     }
 
 

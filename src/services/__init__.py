@@ -23,6 +23,7 @@ from .chat import (
     SessionMessageRequest,
     StartSessionRequest,
 )
+from .lifecycle import ConversationLifecycleService, LifecycleResetAllData
 
 __all__ = [
     "artifact_exception_result",
@@ -36,9 +37,11 @@ __all__ = [
     "ChatService",
     "ChatServiceDependencies",
     "CleanupStrategy",
+    "ConversationLifecycleService",
     "classify_artifact_state",
     "extract_response_artifacts",
     "is_response_queued",
+    "LifecycleResetAllData",
     "merge_artifacts",
     "observed_backend_from_response",
     "response_chat_id",
