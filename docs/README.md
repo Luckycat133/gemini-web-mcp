@@ -26,6 +26,7 @@
 ### 技术文档
 - [技术架构](./architecture.md) - 系统设计
 - [MCP SDK 与客户端兼容性](./mcp-sdk-compatibility.md) - v2 运行时、协议路径与 SDK v1 维护截止日期
+- [Gemini Web Live Canary](./live-canary.md) - 专用账号 opt-in 探测、脱敏报告与漂移 issue 流程
 - [API 参考](./api-reference.md) - 内部 API 文档
 - [环境变量配置](./configuration.md) - 环境变量与常量说明
 - [MCP Contract Evaluation](../evaluations/gemini_web_mcp_contract.xml) - 只读工具选择与安全元数据评估

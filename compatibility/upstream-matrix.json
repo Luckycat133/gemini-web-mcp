@@ -1,0 +1,39 @@
+{
+  "schema_version": 1,
+  "reviewed_at": "2026-08-03",
+  "python": {
+    "supported": ">=3.11",
+    "offline_ci": [
+      "3.11",
+      "3.12"
+    ],
+    "live_canary": "3.12"
+  },
+  "dependencies": {
+    "gemini-mcp-server": {
+      "requirement": "project-version",
+      "fixture_verified": true,
+      "live_verified": false
+    },
+    "gemini-webapi": {
+      "requirement": "gemini-webapi>=2.0.0,<3",
+      "fixture_verified": "2.0.0",
+      "live_verified": false
+    },
+    "mcp": {
+      "requirement": "mcp>=2.0.0,<3",
+      "fixture_verified": "2.0.0",
+      "live_verified": false
+    },
+    "mcp-types": {
+      "requirement": "mcp-types>=2.0.0,<3",
+      "fixture_verified": "2.0.0",
+      "live_verified": false
+    }
+  },
+  "evidence": {
+    "offline": "fixture, package, profile, and MCP protocol gates",
+    "live": "not_observed_in_this_change",
+    "workflow": ".github/workflows/live-canary.yml"
+  }
+}

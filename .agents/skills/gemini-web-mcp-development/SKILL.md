@@ -63,6 +63,7 @@ For every non-trivial change:
 - `tests/`: unit, contract, behavior, and regression tests.
 - `evaluations/`: agent-facing MCP contract evaluations.
 - `.agents/skills/` and `.codex/skills/`: public and local skill copies.
+- `src/services/compatibility.py`, `compatibility/`, `scripts/run_live_canary.py`, and `.github/workflows/live-canary.yml`: privacy-bounded live capability diagnostics, report schema, dependency matrix, CLI, and dedicated-account automation.
 - `docs/`, `scripts/package_release.py`, `pyproject.toml`, and GitHub Actions: documentation, distribution, dependency, and release surfaces.
 
 The active runtime requirement is the value in `pyproject.toml`; do not repeat a different Python or package version in new documentation.

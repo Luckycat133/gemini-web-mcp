@@ -15,6 +15,7 @@ from scripts.smoke_profiles import COMPACT_TOOLS, PRIMARY_PROFILE_TOOLS
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 CI_WORKFLOW = PROJECT_ROOT / ".github" / "workflows" / "ci.yml"
 RELEASE_WORKFLOW = PROJECT_ROOT / ".github" / "workflows" / "release.yml"
+LIVE_CANARY_WORKFLOW = PROJECT_ROOT / ".github" / "workflows" / "live-canary.yml"
 SKILLS_REF_SHA = "38a2ff82958afee88dadf4831509e6f7e9d8ef4e"
 
 
@@ -39,6 +40,7 @@ def test_targeted_contract_checklist_covers_stable_architecture_boundaries() -> 
         "tests/test_chat_service.py",
         "tests/test_artifacts.py",
         "tests/test_rpc_contracts.py",
+        "tests/test_live_canary.py",
         "tests/test_package_integrity.py",
         "tests/test_version_consistency.py",
         "tests/test_evaluations.py",
@@ -119,6 +121,32 @@ def test_ci_pins_reference_skill_validator_and_checks_both_mirrors() -> None:
     assert workflow.count("skills-ref validate") == 4
     assert "diff -ru .agents/skills/gemini-web-mcp-development .codex/skills/gemini-web-mcp-development" in workflow
     assert "diff -ru .agents/skills/gemini-web-mcp .codex/skills/gemini-web-mcp" in workflow
+
+
+def test_live_canary_is_opt_in_offline_separated_and_reports_drift_to_one_issue() -> None:
+    workflow = LIVE_CANARY_WORKFLOW.read_text(encoding="utf-8")
+    offline_workflows = CI_WORKFLOW.read_text(encoding="utf-8") + RELEASE_WORKFLOW.read_text(encoding="utf-8")
+
+    assert "pull_request:" not in workflow
+    assert "push:" not in workflow
+    assert "workflow_dispatch:" in workflow
+    assert "schedule:" in workflow
+    assert "environment: gemini-live-canary" in workflow
+    assert "vars.GEMINI_LIVE_CANARY_ENABLED == 'true'" in workflow
+    assert "vars.GEMINI_LIVE_CANARY_DEDICATED_ACCOUNT == 'true'" in workflow
+    assert "inputs.run_live == true" in workflow
+    assert "--allow-live-account" in workflow
+    assert "actions/upload-artifact@v4" in workflow
+    assert "actions/github-script@v9" in workflow
+    assert 'const title = "[live-canary] Gemini Web compatibility drift"' in workflow
+    assert "issues.createComment" in workflow
+    assert "issues.create" in workflow
+    assert "issues.update" in workflow
+    assert "raw responses, account content, credentials, and session identifiers are omitted" in workflow
+    assert "JSON.stringify(report)" not in workflow
+    assert "steps.canary.outcome == 'failure'" in workflow
+    assert "run_live_canary.py" not in offline_workflows
+    assert "GEMINI_PSID" not in offline_workflows
 
 
 def test_tag_release_reverifies_assets_before_the_only_publish_command() -> None:

@@ -1807,6 +1807,39 @@ def test_web_feature_probe_uses_observed_rpc_shapes_without_raw_response(monkeyp
     assert close_on_error is False
 
 
+def test_web_feature_probe_sanitizes_transport_exception_messages(monkeypatch):
+    import src.tools.manage as manage_tools
+
+    private_message = "PSID=private-cookie chat=private-account-content"
+
+    class FakeClient:
+        async def _batch_execute(self, *_args, **_kwargs):
+            raise ConnectionError(private_message)
+
+    async def noop_initialize():
+        return None
+
+    monkeypatch.setattr(manage_tools, "get_gemini_client", lambda: FakeClient())
+    monkeypatch.setattr(manage_tools, "initialize_client", noop_initialize)
+
+    async def run():
+        mcp = MCPServer("test")
+        manage_tools.register_manage_tools(mcp)
+        result = await mcp.call_tool(
+            "gemini_probe_web_features",
+            {"surface": "library", "response_format": "json"},
+        )
+        result_text = _tool_text(result)
+        payload = json.loads(result_text)
+        assert payload["results"][0]["error_code"] == "NETWORK_ERROR"
+        assert payload["results"][0]["error_type"] == "ConnectionError"
+        assert private_message not in result_text
+        assert "private-cookie" not in result_text
+        assert "private-account-content" not in result_text
+
+    asyncio.run(run())
+
+
 def test_web_capabilities_manifest_describes_observed_pro_surface():
     import src.tools.manage as manage_tools
 

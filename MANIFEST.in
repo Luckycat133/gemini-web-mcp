@@ -4,6 +4,7 @@ include pyproject.toml
 recursive-include docs *.md
 recursive-include docs/assets *.svg
 recursive-include evaluations *.xml
+recursive-include compatibility *.json
 recursive-include src/data *.json
 recursive-include scripts *.py
 recursive-include .agents/skills/gemini-web-mcp *

@@ -2,6 +2,8 @@
 
 from .rpc_contracts import (
     RPC_CONTRACTS,
+    WEB_FEATURE_PROBE_CONTRACTS,
+    WEB_FEATURE_PROBE_KEYS,
     WEB_FEATURE_PROBES,
     RPCContract,
     RawRPCData,
@@ -12,6 +14,8 @@ from .rpc_contracts import (
 
 __all__ = [
     "RPC_CONTRACTS",
+    "WEB_FEATURE_PROBE_CONTRACTS",
+    "WEB_FEATURE_PROBE_KEYS",
     "WEB_FEATURE_PROBES",
     "RPCContract",
     "RawRPCData",

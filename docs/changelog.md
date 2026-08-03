@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Live Gemini Web Compatibility Canary
+- Added a separately gated weekly/manual workflow for a dedicated test account; PR, unit, package, protocol, and release gates remain offline
+- Added 21 centralized read-only capability probes with explicit transport, envelope, RPC rejection, parser, and completion stages, plus bounded timeouts and sanitized exception codes
+- Added a strict JSON report schema and synthetic fixtures that retain dependency versions, commit, Web build/locale when available, RPC identifiers, capability state, and parser stage while excluding raw responses, account content, credentials, and session identifiers
+- Added a machine-readable upstream dependency matrix synchronized with `pyproject.toml`; this change is fixture-verified only and did not observe live Gemini behavior
+- Added workflow automation that uploads the sanitized report, opens or updates one actionable compatibility issue before failing on drift/operational failure, and closes it after recovery
+- Added refusal-path, schema allowlist, initialization cleanup, exception sanitization, synthetic response-stage, matrix, registry, and workflow contracts; the full offline suite now passes 1323 tests
+
 ### MCP Python SDK v2 Adapter
 - Migrated the runtime to the official `mcp>=2,<3` and `mcp-types>=2,<3` packages through the project-owned `src/adapters/mcp_sdk.py` boundary, replacing removed FastMCP imports without changing domain services
 - Adopted SDK v2 `MCPServer`, snake_case Python model fields, complete `CallToolResult` values, generated `outputSchema`, validated `structuredContent`, `resultType`, and `server/discover` lifecycle behavior while retaining existing text content

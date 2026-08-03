@@ -18,6 +18,7 @@ CONTRACT_TESTS = (
     "tests/test_chat_service.py",
     "tests/test_artifacts.py",
     "tests/test_rpc_contracts.py",
+    "tests/test_live_canary.py",
     "tests/test_package_integrity.py",
     "tests/test_version_consistency.py",
     "tests/test_evaluations.py",
