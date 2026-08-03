@@ -8,7 +8,6 @@ import asyncio
 import json
 import logging
 import os
-import shutil
 import threading
 from pathlib import Path
 from typing import Any, Awaitable, Callable, Literal, Optional
@@ -76,6 +75,7 @@ from .tools.annotations import (
 )
 from .infrastructure.rpc_contracts import WEB_FEATURE_PROBES, RawRPCData as _RawRPCData
 from .infrastructure.rpc_parsers import extract_rpc_bodies as _extract_rpc_bodies
+from .resources import default_prompts_resource
 from .services.account import (
     execute_observed_rpc as _execute_observed_rpc,
     get_probe as _get_probe,
@@ -128,7 +128,7 @@ logger = logging.getLogger(__name__)
 
 CONFIG_DIR = Path(os.environ.get("GEMINI_CONFIG_DIR", ".gemini"))
 PROMPTS_FILE = CONFIG_DIR / "prompts.json"
-DEFAULT_PROMPTS_FILE = Path(__file__).parent.parent / "prompts_default.json"
+DEFAULT_PROMPTS_FILE = default_prompts_resource()
 
 MODEL_ALIASES = {
     "l": "flash-lite",
@@ -192,8 +192,8 @@ def _ensure_config_dir() -> None:
 def _init_default_prompts() -> None:
     """Initialize with default prompts if none exist."""
     _ensure_config_dir()
-    if not PROMPTS_FILE.exists() and DEFAULT_PROMPTS_FILE.exists():
-        shutil.copy(DEFAULT_PROMPTS_FILE, PROMPTS_FILE)
+    if not PROMPTS_FILE.exists() and DEFAULT_PROMPTS_FILE.is_file():
+        PROMPTS_FILE.write_text(DEFAULT_PROMPTS_FILE.read_text(encoding="utf-8"), encoding="utf-8")
         logger.info("Initialized default prompts")
 
 
