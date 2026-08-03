@@ -18,7 +18,9 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 EXPECTED_ENTRY_POINTS = {
     "gemini-mcp-server": "src.server:main",
     "gemini-mcp-skill-server": "src.skill_server:main",
+    "gemini-mcp-onboarding": "src.onboarding:main",
 }
+SERVER_ENTRY_POINTS = ("gemini-mcp-server", "gemini-mcp-skill-server")
 
 
 def _assert_installed_import() -> Path:
@@ -81,7 +83,7 @@ def _start_console_entrypoints() -> None:
 
     with tempfile.TemporaryDirectory(prefix="gemini-wheel-smoke-") as directory:
         smoke_cwd = Path(directory)
-        for name in EXPECTED_ENTRY_POINTS:
+        for name in SERVER_ENTRY_POINTS:
             executable = shutil.which(name, path=str(Path(sys.executable).parent))
             if executable is None:
                 raise RuntimeError(f"Cannot locate installed console entrypoint {name!r}")
@@ -109,6 +111,42 @@ def _start_console_entrypoints() -> None:
             raise RuntimeError("Compact console did not initialize prompts from installed package data")
 
 
+def _call_offline_text_tool() -> dict[str, Any]:
+    environment = os.environ.copy()
+    environment.pop("PYTHONPATH", None)
+    for name in ("GEMINI_PSID", "GEMINI_PSIDTS", "GEMINI_PSIDCC"):
+        environment.pop(name, None)
+    environment["GEMINI_AUTO_REFRESH"] = "false"
+
+    executable = shutil.which("gemini-mcp-onboarding", path=str(Path(sys.executable).parent))
+    if executable is None:
+        raise RuntimeError("Cannot locate installed gemini-mcp-onboarding entrypoint")
+    with tempfile.TemporaryDirectory(prefix="gemini-onboarding-smoke-") as directory:
+        completed = subprocess.run(
+            [executable],
+            cwd=directory,
+            env=environment,
+            capture_output=True,
+            text=True,
+            timeout=60,
+            check=False,
+        )
+    if completed.returncode != 0:
+        raise RuntimeError(
+            "Installed onboarding preflight failed:\n"
+            f"stdout:\n{completed.stdout}\nstderr:\n{completed.stderr}"
+        )
+    try:
+        payload = json.loads(completed.stdout)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(f"Onboarding preflight returned invalid JSON: {completed.stdout!r}") from exc
+    if payload.get("status") != "ok" or payload.get("text_tool") != "gemini_get_tool_manifest":
+        raise RuntimeError(f"Onboarding preflight did not call the expected text tool: {payload!r}")
+    if payload.get("credentials_accessed") is not False or payload.get("mode") != "offline":
+        raise RuntimeError(f"Onboarding preflight did not preserve its offline boundary: {payload!r}")
+    return cast(dict[str, Any], payload)
+
+
 def main() -> None:
     os.environ["GEMINI_TOOLS"] = "model"
     package_path = _assert_installed_import()
@@ -116,6 +154,7 @@ def main() -> None:
     _check_entry_point_metadata()
     primary_count, compact_count = asyncio.run(_check_tool_surfaces())
     _start_console_entrypoints()
+    onboarding = _call_offline_text_tool()
     print(
         json.dumps(
             {
@@ -126,6 +165,8 @@ def main() -> None:
                 "primary_tools": primary_count,
                 "compact_tools": compact_count,
                 "entrypoints_started": sorted(EXPECTED_ENTRY_POINTS),
+                "onboarding_text_tool": onboarding["text_tool"],
+                "onboarding_mode": onboarding["mode"],
                 "status": "ok",
             },
             sort_keys=True,

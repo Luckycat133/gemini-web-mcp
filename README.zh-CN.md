@@ -5,10 +5,10 @@
 <h1 align="center">Gemini Web MCP Server (v0.2.0)</h1>
 
 <p align="center">
-  <a href="https://github.com/Luckycat133/gemini-web-mcp/releases/latest"><img alt="Release" src="https://img.shields.io/github/v/release/Luckycat133/gemini-web-mcp?label=release"></a>
+  <a href="https://github.com/Luckycat133/gemini-web-mcp/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/Luckycat133/gemini-web-mcp/actions/workflows/ci.yml/badge.svg"></a>
   <a href="https://github.com/Luckycat133/gemini-web-mcp/tree/main/.agents/skills/gemini-web-mcp"><img alt="Codex Skill" src="https://img.shields.io/badge/Codex%20Skill-installable-0B6BFF"></a>
   <a href="https://www.gnu.org/licenses/agpl-3.0.html"><img alt="License" src="https://img.shields.io/badge/License-AGPL--3.0--only-blue.svg"></a>
-  <a href="docs/changelog.md"><img alt="Verified" src="https://img.shields.io/badge/tests-1299%20passing-1F8A70"></a>
+  <a href="docs/changelog.md"><img alt="Verified" src="https://img.shields.io/badge/tests-1340%20passing-1F8A70"></a>
 </p>
 
 <p align="center">
@@ -62,16 +62,28 @@
 - 智能错误处理
 
 ### 📦 Skill 分发
-- 公开 Codex skill: `.agents/skills/gemini-web-mcp`
-- 直接从 GitHub 安装 skill
-- Release 附带 standalone skill zip、wheel 和源码包
+- 运行时 skill：`.agents/skills/gemini-web-mcp`
+- 仓库开发 skill：`.agents/skills/gemini-web-mcp-development`
+- 两个 skill 都可直接从 GitHub 安装，并在 CI 中校验公开/本地镜像一致
+- Tag release 工作流构建 standalone skill zip、wheel 和源码包
 - `docs/launch-kit.md` 提供社交媒体发布文案和分发清单
 
 ---
 
 ## 🚀 快速开始
 
-### 1. 获取 Cookie
+### 0. 先做无需 Cookie 的一条命令验证
+
+安装 [uv](https://docs.astral.sh/uv/) 后运行：
+
+```bash
+uvx --from git+https://github.com/Luckycat133/gemini-web-mcp@main gemini-mcp-onboarding
+```
+
+这条命令会在隔离环境中安装当前 `main` 源码、启动真实 stdio 服务器，并调用静态文本工具
+`gemini_get_tool_manifest`。它会从子进程移除 Gemini Cookie，不会向 Gemini 发请求。需要不可变安装时，请把 `@main` 换成已审核的 commit SHA。
+
+### 1. 获取 Cookie（仅实时 Gemini 调用需要）
 
 #### 方法 1: 手动获取
 1. 打开 Chrome，访问 [gemini.google.com](https://gemini.google.com) 并登录
@@ -99,24 +111,19 @@ pip install browser-cookie3
       "command": "uvx",
       "args": [
         "--from",
-        "https://github.com/Luckycat133/gemini-web-mcp/releases/download/v0.2.0/gemini_mcp_server-0.2.0-py3-none-any.whl",
+        "git+https://github.com/Luckycat133/gemini-web-mcp@main",
         "gemini-mcp-server"
       ],
       "env": {
-        "GEMINI_TOOLS": "core"
+        "GEMINI_TOOLS": "model"
       }
     }
   }
 }
 ```
 
-需要先安装 [uv](https://docs.astral.sh/uv/)。也可以直接验证最小模型调用层：
-
-```bash
-GEMINI_TOOLS=model uvx \
-  --from https://github.com/Luckycat133/gemini-web-mcp/releases/download/v0.2.0/gemini_mcp_server-0.2.0-py3-none-any.whl \
-  gemini-mcp-server
-```
+Codex、Claude Desktop、Claude Code 和 VS Code 的完整可复制配置见
+[客户端安装与验证](docs/client-examples.md)。
 
 ### 3. 从源码开发（可选）
 
@@ -125,7 +132,7 @@ git clone https://github.com/Luckycat133/gemini-web-mcp.git
 cd gemini-web-mcp
 python -m venv .venv
 . .venv/bin/activate
-pip install -e ".[all]"
+pip install -e ".[all,dev]"
 ```
 
 ### 4. 启动服务器
@@ -178,6 +185,9 @@ gemini-mcp-skill-server
 | `manage` | 聚合入口 + 历史、账号、scheduled、Gems 颗粒工具 | 兼容旧配置；普通 agent 不建议默认使用 | 高 |
 | `prompts` | 本地提示词库存取 | 可选附加能力 | 低 |
 | `all` | `core` + `manage` | 完整维护/验证工具面 | 高 |
+
+文本调用优先从 `model` 开始；图片、视频、音乐、文件、URL 或 Deep Research 使用 `core`；
+需要固定十一工具、低 token facade 时使用 `gemini-mcp-skill-server`；`all` 只适合维护验证，不是通用默认值。
 
 ---
 
@@ -340,30 +350,30 @@ Gemini Web `学习辅导` 输入模式。
 - `prompts`: 本地提示词库
 - `cookie`: Cookie 状态和浏览器获取
 
-### Codex Skill
-`.agents/skills/gemini-web-mcp` 是公开分发用 Codex skill，符合 Codex repo skill
-发现约定；`.codex/skills/gemini-web-mcp` 保留为本仓库本地开发副本。这个 skill
-指导 agent 先读取 `gemini_get_tool_manifest`，按隐私/destructive 边界选择工具，
-并使用 `evaluations/gemini_web_mcp_contract.xml` 验证 MCP contract。
+### 运行时 Skill 与开发 Skill
+`.agents/skills/gemini-web-mcp` 只指导 agent 安全操作已安装的 MCP 工具；
+`.agents/skills/gemini-web-mcp-development` 用于修改本仓库的架构、测试、打包、兼容性和发布。
+不要用运行时 skill 指导开发工作。
 
 使用跨 agent 的 `skills` CLI 从 GitHub 一行安装：
 
 ```bash
-npx skills add https://github.com/Luckycat133/gemini-web-mcp/tree/main/.agents/skills/gemini-web-mcp
+npx --yes skills@1.5.21 add \
+  https://github.com/Luckycat133/gemini-web-mcp \
+  --skill gemini-web-mcp \
+  --agent codex --copy --yes
 ```
 
-安装器支持 Codex、Claude Code、Gemini CLI、Cline 等多种 agent；按提示选择目标即可。
-
-手动安装：
+仓库贡献者安装开发 skill：
 
 ```bash
-git clone https://github.com/Luckycat133/gemini-web-mcp.git
-mkdir -p ~/.codex/skills
-cp -R gemini-web-mcp/.agents/skills/gemini-web-mcp ~/.codex/skills/gemini-web-mcp
+npx --yes skills@1.5.21 add \
+  https://github.com/Luckycat133/gemini-web-mcp \
+  --skill gemini-web-mcp-development \
+  --agent codex --copy --yes
 ```
 
-Skill 只负责告诉 agent 如何安全、分层地使用 Gemini Web MCP；MCP server 本体仍按上面的
-安装和客户端配置步骤运行。
+两个 skill 都不安装 MCP server 本体；服务器仍按上面的 `uvx` 或源码步骤运行。
 
 ---
 
@@ -394,6 +404,7 @@ gemini-mcp-server/
 │   ├── __init__.py
 │   ├── server.py           # MCP 服务器主入口（primary surface）
 │   ├── skill_server.py     # 低 token skill 服务器（facade surface）
+│   ├── onboarding.py       # 公开安装、文本调用与本地图像产物验证客户端
 │   ├── client_wrapper.py   # Gemini 客户端封装
 │   ├── client_manager.py   # 客户端生命周期管理
 │   ├── cookie_manager.py   # Cookie 管理模块

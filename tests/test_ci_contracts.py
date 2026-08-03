@@ -17,6 +17,8 @@ CI_WORKFLOW = PROJECT_ROOT / ".github" / "workflows" / "ci.yml"
 RELEASE_WORKFLOW = PROJECT_ROOT / ".github" / "workflows" / "release.yml"
 LIVE_CANARY_WORKFLOW = PROJECT_ROOT / ".github" / "workflows" / "live-canary.yml"
 SKILLS_REF_SHA = "38a2ff82958afee88dadf4831509e6f7e9d8ef4e"
+SETUP_UV_SHA = "08807647e7069bb48b6ef5acd8ec9567f424441b"
+SKILLS_CLI_VERSION = "1.5.21"
 
 
 def _pyproject() -> dict:
@@ -34,14 +36,16 @@ def test_static_gates_are_declared_development_dependencies() -> None:
 def test_targeted_contract_checklist_covers_stable_architecture_boundaries() -> None:
     assert len(CONTRACT_TESTS) == len(set(CONTRACT_TESTS))
     assert {
-            "tests/test_domain_results.py",
-            "tests/test_mcp_sdk_v2.py",
+        "tests/test_domain_results.py",
+        "tests/test_mcp_sdk_v2.py",
         "tests/test_conversation_lifecycle.py",
         "tests/test_chat_service.py",
         "tests/test_artifacts.py",
         "tests/test_rpc_contracts.py",
         "tests/test_live_canary.py",
         "tests/test_package_integrity.py",
+        "tests/test_onboarding.py",
+        "tests/test_onboarding_distribution.py",
         "tests/test_version_consistency.py",
         "tests/test_evaluations.py",
         "tests/test_development_skill.py",
@@ -108,6 +112,7 @@ def test_ci_workflow_has_separate_diagnostic_offline_gates() -> None:
         "python scripts/package_release.py --outdir dist",
         "python scripts/check_version_consistency.py --artifacts-dir dist",
         "-m pip check",
+        'uvx --from "$GITHUB_WORKSPACE"/dist/*.whl gemini-mcp-onboarding',
     ):
         assert command in workflow
     assert workflow.count("cache: pip") == 7
@@ -121,6 +126,21 @@ def test_ci_pins_reference_skill_validator_and_checks_both_mirrors() -> None:
     assert workflow.count("skills-ref validate") == 4
     assert "diff -ru .agents/skills/gemini-web-mcp-development .codex/skills/gemini-web-mcp-development" in workflow
     assert "diff -ru .agents/skills/gemini-web-mcp .codex/skills/gemini-web-mcp" in workflow
+    assert f"skills@{SKILLS_CLI_VERSION} add \"$GITHUB_WORKSPACE\" --skill gemini-web-mcp-development" in workflow
+    assert (
+        'diff -ru "$GITHUB_WORKSPACE/.agents/skills/gemini-web-mcp-development" '
+        ".agents/skills/gemini-web-mcp-development"
+    ) in workflow
+
+
+def test_ci_and_release_pin_uv_and_smoke_the_one_command_onboarding() -> None:
+    ci_workflow = CI_WORKFLOW.read_text(encoding="utf-8")
+    release_workflow = RELEASE_WORKFLOW.read_text(encoding="utf-8")
+
+    for workflow in (ci_workflow, release_workflow):
+        assert SETUP_UV_SHA in workflow
+        assert workflow.count('uvx --from "$GITHUB_WORKSPACE"/dist/*.whl gemini-mcp-onboarding') == 1
+        assert "working-directory: ${{ runner.temp }}" in workflow
 
 
 def test_live_canary_is_opt_in_offline_separated_and_reports_drift_to_one_issue() -> None:

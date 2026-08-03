@@ -9,10 +9,10 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/Luckycat133/gemini-web-mcp/releases/latest"><img alt="Release" src="https://img.shields.io/github/v/release/Luckycat133/gemini-web-mcp?label=release"></a>
+  <a href="https://github.com/Luckycat133/gemini-web-mcp/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/Luckycat133/gemini-web-mcp/actions/workflows/ci.yml/badge.svg"></a>
   <a href="https://github.com/Luckycat133/gemini-web-mcp/tree/main/.agents/skills/gemini-web-mcp"><img alt="Codex Skill" src="https://img.shields.io/badge/Codex%20Skill-installable-0B6BFF"></a>
   <a href="https://www.gnu.org/licenses/agpl-3.0.html"><img alt="License" src="https://img.shields.io/badge/License-AGPL--3.0--only-blue.svg"></a>
-  <a href="docs/changelog.md"><img alt="Verified" src="https://img.shields.io/badge/tests-1299%20passing-1F8A70"></a>
+  <a href="docs/changelog.md"><img alt="Verified" src="https://img.shields.io/badge/tests-1340%20passing-1F8A70"></a>
 </p>
 
 <p align="center">
@@ -35,25 +35,37 @@ This server delegates MCP protocol behavior — discovery, version negotiation, 
 
 The supported runtime is `mcp>=2,<3` plus `mcp-types>=2,<3`. CI exercises both current `server/discover` clients on protocol `2026-07-28` and compatibility clients using the `2025-11-25` initialize path. Every tool advertises an `outputSchema` and returns validated `structuredContent` while retaining its existing text. See the explicit [SDK/client compatibility and v1 end-of-support policy](docs/mcp-sdk-compatibility.md).
 
-## Install The Codex Skill
+## Install The Runtime Skill
 
 Install the public skill with the cross-agent `skills` CLI:
 
 ```bash
-npx skills add https://github.com/Luckycat133/gemini-web-mcp/tree/main/.agents/skills/gemini-web-mcp
+npx --yes skills@1.5.21 add \
+  https://github.com/Luckycat133/gemini-web-mcp \
+  --skill gemini-web-mcp \
+  --agent codex --copy --yes
 ```
 
-The CLI can install the skill for Codex, Claude Code, Gemini CLI, Cline, and other supported agents. The skill lives at [.agents/skills/gemini-web-mcp](.agents/skills/gemini-web-mcp); the local development copy at [.codex/skills/gemini-web-mcp](.codex/skills/gemini-web-mcp) is kept byte-for-byte identical by tests.
+This runtime skill teaches an agent how to operate the installed tools safely. Repository contributors should install the separate development skill:
+
+```bash
+npx --yes skills@1.5.21 add \
+  https://github.com/Luckycat133/gemini-web-mcp \
+  --skill gemini-web-mcp-development \
+  --agent codex --copy --yes
+```
+
+The two roles are intentionally separate: `gemini-web-mcp` is for tool use; `gemini-web-mcp-development` owns implementation, tests, packaging, compatibility, and releases. Both public paths have byte-identical local mirrors enforced by CI.
 
 ## Install The MCP Server
 
-Fastest verified path (requires [uv](https://docs.astral.sh/uv/)):
+One-command, credential-free proof (requires [uv](https://docs.astral.sh/uv/)):
 
 ```bash
-GEMINI_TOOLS=model uvx \
-  --from https://github.com/Luckycat133/gemini-web-mcp/releases/download/v0.2.0/gemini_mcp_server-0.2.0-py3-none-any.whl \
-  gemini-mcp-server
+uvx --from git+https://github.com/Luckycat133/gemini-web-mcp@main gemini-mcp-onboarding
 ```
+
+This installs into an isolated environment, starts the real stdio server with the `model` profile, and calls the static text manifest without forwarding Gemini Cookies or making a Gemini request. Pin `@main` to a reviewed commit SHA for immutable installs.
 
 Minimal MCP client configuration:
 
@@ -64,11 +76,11 @@ Minimal MCP client configuration:
       "command": "uvx",
       "args": [
         "--from",
-        "https://github.com/Luckycat133/gemini-web-mcp/releases/download/v0.2.0/gemini_mcp_server-0.2.0-py3-none-any.whl",
+        "git+https://github.com/Luckycat133/gemini-web-mcp@main",
         "gemini-mcp-server"
       ],
       "env": {
-        "GEMINI_TOOLS": "core"
+        "GEMINI_TOOLS": "model"
       }
     }
   }
@@ -82,7 +94,7 @@ git clone https://github.com/Luckycat133/gemini-web-mcp.git
 cd gemini-web-mcp
 python -m venv .venv
 . .venv/bin/activate
-pip install -e ".[all]"
+pip install -e ".[all,dev]"
 ```
 
 Run the default content workflow surface:
@@ -99,6 +111,8 @@ Run the compact, low-token facade:
 gemini-mcp-skill-server
 ```
 
+See [copyable Codex, Claude Desktop, Claude Code, and VS Code configurations plus verified text/image walkthroughs](docs/client-examples.md). Live examples require explicit account opt-in; no live Gemini request is part of PR CI.
+
 ## Tool Profiles
 
 | Profile | Use When | Surface |
@@ -111,6 +125,8 @@ gemini-mcp-skill-server
 | `scheduled-admin` | The user explicitly authorized scheduled-action create/delete | Scheduled mutation tools |
 | `core` | General content workflows | Chat, media, files, research, manifest/cookie helpers |
 | `all` | Maintainers are verifying the full surface | Full maintenance surface |
+
+Use `model` as the primary starting profile for text-only work, `core` for multimodal/content workflows, and `gemini-mcp-skill-server` when a fixed eleven-tool facade is more valuable than the primary schemas. `all` is not a general default.
 
 ## Capabilities
 
@@ -125,11 +141,11 @@ gemini-mcp-skill-server
 | Safety Metadata | MCP annotations, tool manifest, privacy/destructive-operation guidance |
 | Distribution | Standalone Codex skill zip, wheel, source distribution, launch kit |
 
-## Release Assets
+## Distribution Assets
 
-Latest release: <https://github.com/Luckycat133/gemini-web-mcp/releases/latest>
+The current supported one-command path installs the reviewed `main` source (or a pinned commit) through `uvx`. GitHub release history may contain older independent version lines; use a wheel only when its tag and filename match the source version you intend to run.
 
-Each release includes:
+The tag release workflow builds:
 
 - `gemini-web-mcp-skill-*.zip`: standalone Codex skill package
 - `gemini_mcp_server-*-py3-none-any.whl`: Python wheel
@@ -144,6 +160,7 @@ python scripts/package_release.py --outdir dist
 ## Documentation
 
 - [Quickstart](docs/quickstart.md)
+- [Client installation and verified onboarding](docs/client-examples.md)
 - [Configuration](docs/configuration.md)
 - [Tool reference](docs/tools.md)
 - [Live UI coverage](docs/live-ui-coverage.md)

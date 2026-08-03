@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Public Distribution and Onboarding
+- Added `gemini-mcp-onboarding`: its default command installs/runs cleanly without Gemini credentials, launches the real stdio server, negotiates MCP, and calls the static text manifest; live chat and image examples require `--allow-live-account`
+- Added independently verified local image onboarding artifacts with path-boundary, existence, non-zero-size, MIME, dimensions, and structured verification checks; fixed image saves returned as a single path so they enter the shared artifact model
+- Added copyable Codex, Claude Desktop, Claude Code, and VS Code configurations with `model` as the text starting profile, `core` for multimodal workflows, and explicit compact/`all` guidance
+- Replaced broken fixed wheel onboarding URLs with the current Git source path (and commit-pinning guidance), while retaining version checks for any tagged wheel URL that is documented
+- Separated the runtime and repository-development skills, documented one-command installation for both, and added CI verification that the development skill installs directly from the repository
+- Added clean `uvx` wheel onboarding smoke coverage to CI and tag releases plus offline config, credential-boundary, stdio, artifact, package, and distribution contracts
+- The complete offline suite passes 1340 tests; all evidence in this phase is offline/fixture/package based, and no live Gemini account or backend behavior was observed
+
 ### Live Gemini Web Compatibility Canary
 - Added a separately gated weekly/manual workflow for a dedicated test account; PR, unit, package, protocol, and release gates remain offline
 - Added 21 centralized read-only capability probes with explicit transport, envelope, RPC rejection, parser, and completion stages, plus bounded timeouts and sanitized exception codes

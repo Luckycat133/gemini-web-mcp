@@ -14,6 +14,15 @@ metadata:
 
 Use this skill to develop the repository. Use the separate `gemini-web-mcp` skill when the task is to operate the installed server rather than change its implementation.
 
+Install this development skill directly from the repository with:
+
+```bash
+npx --yes skills@1.5.21 add \
+  https://github.com/Luckycat133/gemini-web-mcp \
+  --skill gemini-web-mcp-development \
+  --agent codex --copy --yes
+```
+
 ## Mission
 
 Build a broadly usable, agent-first Gemini Web gateway that gives MCP-compatible agents reliable access to:
@@ -55,6 +64,7 @@ For every non-trivial change:
 ## Current Repository Map
 
 - `src/server.py`: primary MCPServer entrypoint and profile-based registration.
+- `src/onboarding.py`: public credential-free stdio/text preflight plus explicitly gated live text and verified local-image examples.
 - `src/adapters/mcp_sdk.py`: the single MCP Python SDK v2 and protocol-model import boundary.
 - `src/skill_server.py`: compact, low-token facade server. It currently duplicates substantial business logic and should progressively become an adapter over shared services.
 - `src/client_manager.py`, `client_wrapper.py`, `session_manager.py`, `remote_chat_cleanup_manager.py`, `cookie_manager.py`, `thinking_client.py`: client, session, lifecycle, authentication, and Gemini Web transport infrastructure.
@@ -64,7 +74,7 @@ For every non-trivial change:
 - `evaluations/`: agent-facing MCP contract evaluations.
 - `.agents/skills/` and `.codex/skills/`: public and local skill copies.
 - `src/services/compatibility.py`, `compatibility/`, `scripts/run_live_canary.py`, and `.github/workflows/live-canary.yml`: privacy-bounded live capability diagnostics, report schema, dependency matrix, CLI, and dedicated-account automation.
-- `docs/`, `scripts/package_release.py`, `pyproject.toml`, and GitHub Actions: documentation, distribution, dependency, and release surfaces.
+- `docs/`, `examples/clients/`, `scripts/package_release.py`, `pyproject.toml`, and GitHub Actions: onboarding, client configuration, distribution, dependency, and release surfaces.
 
 The active runtime requirement is the value in `pyproject.toml`; do not repeat a different Python or package version in new documentation.
 
@@ -144,7 +154,7 @@ Unless the requested task has a narrower dependency, prefer this order:
 
 1. **P0 correctness foundation:** async client initialization, session semantics, typed results/domain errors, and shared services for primary/compact parity.
 2. **P1 maintainability and distribution:** split the management monolith, centralize RPC contracts, introduce the multimodal artifact model, unify versioning, fix package data/entrypoints/dependencies, strengthen CI, and make streaming semantics accurate.
-3. **P2 protocol and compatibility evolution:** migrate through a dedicated MCP SDK v2 adapter, add live compatibility canaries, and improve cross-client installation and release verification.
+3. **P2 protocol and compatibility evolution:** migrate through a dedicated MCP SDK v2 adapter, add live compatibility canaries, and prove cross-client installation, auth-free onboarding, multimodal artifacts, and release verification.
 
 Use [roadmap.md](references/roadmap.md) for issue-sized work packages and completion criteria.
 
@@ -191,22 +201,22 @@ Avoid a repository-wide rewrite when incremental extraction can preserve working
 Run the task-specific tests first. Before handoff, use the maintained commands that are available in the checkout:
 
 ```bash
+./.venv/bin/python -m ruff check src tests scripts
+./.venv/bin/python -m mypy src scripts
 ./.venv/bin/python -m pytest -q
-./.venv/bin/python -m py_compile \
-  src/tools/annotations.py src/tools/chat.py src/tools/media.py \
-  src/tools/file.py src/tools/research.py src/tools/prompts.py \
-  src/tools/manage.py src/server.py src/skill_server.py \
-  src/client_wrapper.py src/thinking_client.py src/constants.py
+./.venv/bin/python scripts/run_contract_checklist.py
 git diff --check
 ```
 
-For package or release work, also build distributions, install the wheel in a clean environment, import both server entrypoints, and list tools for representative profiles. For skill changes, validate and compare both copies:
+For package, onboarding, or release work, also build distributions, install the wheel in a clean environment, import all console entrypoints, list representative profiles, and call the auth-free text tool through the installed stdio server. A clean `uvx` environment must prove the public one-command path from outside the source checkout. For skill changes, validate and compare both copies, then prove the development skill can be installed directly from the repository:
 
 ```bash
 skills-ref validate .agents/skills/gemini-web-mcp-development
 skills-ref validate .codex/skills/gemini-web-mcp-development
 diff -ru .agents/skills/gemini-web-mcp-development \
   .codex/skills/gemini-web-mcp-development
+npx --yes skills@1.5.21 add "$PWD" \
+  --skill gemini-web-mcp-development --agent codex --copy --yes
 ```
 
 See [validation.md](references/validation.md) for the change matrix and stronger target CI gates.

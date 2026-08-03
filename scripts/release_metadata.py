@@ -1,8 +1,8 @@
 """Single-source release metadata and consistency checks.
 
 ``pyproject.toml`` is the only persisted source for the project version.  This
-module derives runtime-adjacent release names from it and validates the places
-where a concrete version must remain copyable, such as release download URLs.
+module derives runtime-adjacent release names from it and validates both tagged
+release references and the evergreen source-install path used for onboarding.
 """
 
 from __future__ import annotations
@@ -18,6 +18,7 @@ from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 SKILL_ASSET_BASENAME = "gemini-web-mcp-skill"
+CANONICAL_GIT_SOURCE = "git+https://github.com/Luckycat133/gemini-web-mcp@main"
 
 _STABLE_SEMVER = re.compile(r"[0-9]+\.[0-9]+\.[0-9]+")
 _PRODUCT_VERSION_PATTERNS = (
@@ -37,11 +38,17 @@ _WHEEL_URL = re.compile(
     r"https://github\.com/Luckycat133/gemini-web-mcp/releases/download/"
     r"v(?P<tag_version>[^/\s]+)/gemini_mcp_server-(?P<wheel_version>[^/\s]+)-py3-none-any\.whl"
 )
-_EXPECTED_WHEEL_URL_COUNTS = {
-    Path("README.md"): 2,
-    Path("README.zh-CN.md"): 2,
-    Path("docs/launch-kit.md"): 1,
-}
+_PUBLIC_SOURCE_INSTALL_PATHS = (
+    Path("README.md"),
+    Path("README.zh-CN.md"),
+    Path("docs/quickstart.md"),
+    Path("docs/launch-kit.md"),
+    Path("docs/client-examples.md"),
+    Path("examples/clients/codex.config.toml"),
+    Path("examples/clients/claude-desktop.json"),
+    Path("examples/clients/claude-code.mcp.json"),
+    Path("examples/clients/vscode.mcp.json"),
+)
 _RUNTIME_VERSION_FILES = (
     Path("src/__init__.py"),
     Path("src/server.py"),
@@ -170,18 +177,17 @@ def repository_version_errors(
         if "{__version__}" not in source:
             errors.append(f"{relative_path.as_posix()}: banner must interpolate package __version__")
 
-    for relative_path, expected_count in _EXPECTED_WHEEL_URL_COUNTS.items():
-        absolute_path = project_root / relative_path
+    version_reference_paths = [project_root / "README.md", project_root / "README.zh-CN.md"]
+    version_reference_paths.extend(sorted((project_root / "docs").rglob("*.md")))
+    version_reference_paths.extend(sorted((project_root / "examples" / "clients").glob("*")))
+    for absolute_path in version_reference_paths:
         if not absolute_path.is_file():
-            errors.append(f"{relative_path.as_posix()}: required release documentation is missing")
+            continue
+        relative_path = absolute_path.relative_to(project_root)
+        if relative_path == Path("docs/changelog.md"):
             continue
         text = absolute_path.read_text(encoding="utf-8")
-        matches = list(_WHEEL_URL.finditer(text))
-        if len(matches) != expected_count:
-            errors.append(
-                f"{relative_path.as_posix()}: expected {expected_count} versioned wheel URL(s), found {len(matches)}"
-            )
-        for match in matches:
+        for match in _WHEEL_URL.finditer(text):
             tag_version = match.group("tag_version")
             wheel_version = match.group("wheel_version")
             if tag_version != release.version or wheel_version != release.version:
@@ -190,6 +196,17 @@ def repository_version_errors(
                     f"{relative_path.as_posix()}:{line}: wheel URL versions "
                     f"tag={tag_version!r}, wheel={wheel_version!r}, expected={release.version!r}"
                 )
+
+    for relative_path in _PUBLIC_SOURCE_INSTALL_PATHS:
+        absolute_path = project_root / relative_path
+        if not absolute_path.is_file():
+            errors.append(f"{relative_path.as_posix()}: required public onboarding surface is missing")
+            continue
+        text = absolute_path.read_text(encoding="utf-8")
+        if CANONICAL_GIT_SOURCE not in text:
+            errors.append(
+                f"{relative_path.as_posix()}: canonical source install {CANONICAL_GIT_SOURCE!r} is missing"
+            )
 
     return errors
 

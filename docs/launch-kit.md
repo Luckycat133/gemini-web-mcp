@@ -1,135 +1,95 @@
 # Gemini Web MCP Launch Kit
 
-Use this kit when announcing or redistributing Gemini Web MCP.
+Use this evergreen kit when announcing or redistributing Gemini Web MCP. Do not present an older GitHub release as the current source line without checking its tag, wheel filename, and source version.
 
-## Canonical Links
+## Canonical links
 
-- Repository: https://github.com/Luckycat133/gemini-web-mcp
-- Latest release: https://github.com/Luckycat133/gemini-web-mcp/releases/latest
-- Public Codex skill: https://github.com/Luckycat133/gemini-web-mcp/tree/main/.agents/skills/gemini-web-mcp
-- Standalone skill zip: use the `gemini-web-mcp-skill-*.zip` asset from the latest release
+- Repository and current source: https://github.com/Luckycat133/gemini-web-mcp
+- Release history: https://github.com/Luckycat133/gemini-web-mcp/releases
+- Runtime skill: https://github.com/Luckycat133/gemini-web-mcp/tree/main/.agents/skills/gemini-web-mcp
+- Development skill: https://github.com/Luckycat133/gemini-web-mcp/tree/main/.agents/skills/gemini-web-mcp-development
+- Client examples: https://github.com/Luckycat133/gemini-web-mcp/blob/main/docs/client-examples.md
 
-## Install Snippets
+## Verified install snippets
 
-Install the skill directly from GitHub for Codex, Claude Code, Gemini CLI, Cline, and other supported agents:
+Install in an isolated environment, start the real MCP stdio server, and call an auth-free text tool:
 
 ```bash
-npx skills add https://github.com/Luckycat133/gemini-web-mcp/tree/main/.agents/skills/gemini-web-mcp
+uvx --from git+https://github.com/Luckycat133/gemini-web-mcp@main gemini-mcp-onboarding
 ```
 
-Install and run the MCP server locally:
+Pin `@main` to a reviewed commit SHA for an immutable install. The command above does not forward Gemini Cookies or call Gemini.
+
+Install the runtime skill for agents that operate the server:
+
+```bash
+npx --yes skills@1.5.21 add \
+  https://github.com/Luckycat133/gemini-web-mcp \
+  --skill gemini-web-mcp \
+  --agent codex --copy --yes
+```
+
+Install the development skill for contributors changing the repository:
+
+```bash
+npx --yes skills@1.5.21 add \
+  https://github.com/Luckycat133/gemini-web-mcp \
+  --skill gemini-web-mcp-development \
+  --agent codex --copy --yes
+```
+
+For local development:
 
 ```bash
 git clone https://github.com/Luckycat133/gemini-web-mcp.git
 cd gemini-web-mcp
 python -m venv .venv
 . .venv/bin/activate
-pip install -e ".[all]"
-GEMINI_TOOLS=core python -m src.server
+pip install -e ".[all,dev]"
+GEMINI_TOOLS=model python -m src.server
 ```
 
-Build release artifacts:
+## Product summary
 
-```bash
-python scripts/package_release.py --outdir dist
-```
+Gemini Web MCP gives MCP-compatible agents layered access to Gemini Web text, media, files, URLs, Deep Research, history, notebooks, scheduled actions, and account inventory. `model` is the narrow text starting point, `core` adds content and multimodal workflows, the compact server offers a fixed low-token facade, and `all` is reserved for maintenance verification.
 
-## One-Liners
+The runtime skill and development skill are deliberately separate. Media results preserve requested, effective, and observed backend fields and treat a deliverable as local only after file/MIME/size metadata verification.
 
-- English: Gemini Web MCP gives coding agents a safer, layered MCP interface for Gemini Web chat, media, history, notebooks, scheduled actions, and account inventory.
-- Chinese: Gemini Web MCP 给各类 AI agent 提供一个分层、安全、可验证的 Gemini Web MCP 接口，覆盖模型调用、媒体生成、历史整理、Notebook、定时任务和账号只读盘点。
+## Copy templates
 
-## X / Twitter Posts
+### Short English
 
-### English
-
-I just released Gemini Web MCP v0.2.0.
-
-It gives Codex, Claude Desktop, VS Code, and other MCP-capable agents a layered Gemini Web interface:
-
-- `GEMINI_TOOLS=model` for model calls only
-- `history` for chat history work
-- `account-read` for read-only inventory
-- `scheduled-admin` only when you explicitly need mutations
-- standalone Codex skill package included
+Gemini Web MCP gives Codex, Claude, VS Code, and other MCP clients a layered Gemini Web interface. Start with an auth-free one-command MCP preflight, select `model` for text or `core` for multimodal work, and install the separate runtime skill when an agent needs workflow guidance.
 
 Repo: https://github.com/Luckycat133/gemini-web-mcp
 
-### Chinese
+### 简体中文
 
-我发布了 Gemini Web MCP v0.2.0。
-
-它把 Gemini Web 封装成更适合 AI agent 使用的 MCP/Skill 工具层：模型调用、媒体生成、历史对话整理、Notebook、定时任务、账号只读盘点都做了分层。
-
-默认不是把所有工具一股脑暴露给 agent，而是按意图启用：
-
-- `model` 只调用模型
-- `history` 整理历史
-- `account-read` 只读盘点
-- `scheduled-admin` 才允许定时任务写操作
+Gemini Web MCP 为 Codex、Claude、VS Code 等 MCP 客户端提供分层的 Gemini Web 接口。先用无需账号的一条命令完成真实 MCP 预检；文本从 `model` 开始，多模态使用 `core`，agent 操作指南与仓库开发指南分别由两个 skill 提供。
 
 Repo: https://github.com/Luckycat133/gemini-web-mcp
 
-## LinkedIn / Longform Post
-
-I released Gemini Web MCP v0.2.0, an MCP server and Codex skill for using Gemini Web from AI coding agents.
-
-The main design goal is not just "more tools." It is safer tool layering:
-
-- narrow profiles for model-only, history-only, and account-read workflows
-- facade tools for chat history and account inventory
-- explicit boundaries for private chat text and destructive operations
-- a standalone Codex skill under `.agents/skills/gemini-web-mcp`
-- release assets for the MCP server wheel, source distribution, and skill zip
-
-This makes it easier for agents like Codex, Claude Desktop, VS Code MCP clients, and other MCP-compatible tools to use Gemini Web without exposing an oversized tool surface by default.
-
-GitHub: https://github.com/Luckycat133/gemini-web-mcp
-
-## Reddit / Hacker News Style
-
-I built Gemini Web MCP, a Python MCPServer plus Codex skill for Gemini Web workflows.
-
-The interesting bit is the tool layering: instead of exposing every account/history/admin function to every agent, it has narrow `GEMINI_TOOLS` profiles such as `model`, `history`, `account-read`, `history-organize`, `scheduled-read`, and `scheduled-admin`.
-
-Release includes a standalone Codex skill zip and direct GitHub skill install path.
-
-Repo: https://github.com/Luckycat133/gemini-web-mcp
-
-## Show HN
-
-Title:
+### Show HN body
 
 ```text
-Show HN: Gemini Web MCP - Layered Gemini Web tools for AI agents
-```
+I built Gemini Web MCP, a Python MCPServer plus separate runtime and development skills for Gemini Web workflows.
 
-Body:
+The practical design is tool-surface control: model for text, core for multimodal content, a fixed compact facade when token cost matters, and all only for maintenance. Structured media results distinguish expected routing from observed backend evidence and verify local artifacts independently from response prose.
 
-```text
-I built Gemini Web MCP, a Python MCPServer and agent skill for using Gemini Web from MCP-compatible clients.
+Credential-free MCP preflight:
+uvx --from git+https://github.com/Luckycat133/gemini-web-mcp@main gemini-mcp-onboarding
 
-The practical problem it solves is tool-surface control. An agent that only needs model calls can start with GEMINI_TOOLS=model instead of receiving private history, account, and admin tools. Separate profiles cover history organization, read-only account inventory, media workflows, and explicitly enabled scheduled-action administration.
-
-Install the agent skill:
-npx skills add https://github.com/Luckycat133/gemini-web-mcp/tree/main/.agents/skills/gemini-web-mcp
-
-Run the smallest MCP profile:
-GEMINI_TOOLS=model uvx --from https://github.com/Luckycat133/gemini-web-mcp/releases/download/v0.2.0/gemini_mcp_server-0.2.0-py3-none-any.whl gemini-mcp-server
-
-The project uses reverse-engineered Gemini Web behavior, so it includes an explicit account-risk disclaimer and keeps private/destructive tools outside the default narrow profiles.
+The project uses reverse-engineered Gemini Web behavior and carries explicit account/Terms-of-Service risk. PR checks stay offline; live behavior is only claimed when separately observed with an opted-in dedicated account.
 
 Repo: https://github.com/Luckycat133/gemini-web-mcp
 ```
 
-## Hashtags
+## Distribution checklist
 
-`#MCP` `#Codex` `#AIAgents` `#Gemini` `#OpenSource` `#Python`
-
-## Distribution Checklist
-
-- GitHub Release with wheel, source distribution, and standalone skill zip
-- Public skill path at `.agents/skills/gemini-web-mcp`
-- README install commands for both skill and MCP server
-- Repository topics: `codex-skills`, `agent-skills`, `mcp`, `mcp-server`, `gemini`, `gemini-web`
-- Submission to MCP/skill directories where a public submission path exists
+- The source or commit being announced passed CI and CodeQL.
+- The one-command onboarding smoke installed the built wheel in a clean `uvx` environment and called the auth-free text tool.
+- Codex, Claude Desktop, Claude Code, and VS Code example files still parse and use the intended profile.
+- Runtime and development skills both validate, their mirrors match, and the development skill installs directly from the repository.
+- A tag release, if announced, matches `pyproject.toml` and its wheel/sdist/skill asset names.
+- Expected routing is not described as observed Gemini backend behavior.
+- Live account behavior is reported separately from offline CI evidence.
