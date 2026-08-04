@@ -53,7 +53,7 @@ def test_development_skill_frontmatter_and_progressive_disclosure() -> None:
     assert re.search(r"^name: gemini-web-mcp-development$", frontmatter, re.MULTILINE)
     assert re.search(r"^description: .+Use for .+$", frontmatter, re.MULTILINE)
     assert "scope: development" in frontmatter
-    assert 'version: "1.1"' in frontmatter
+    assert 'version: "1.2"' in frontmatter
     assert len(lines) < 500
 
     reference_links = re.findall(r"\]\((references/[^)]+)\)", body)
@@ -83,9 +83,12 @@ def test_development_skill_tracks_the_current_implemented_foundation() -> None:
         "DomainResult",
         "src/infrastructure/rpc_contracts.py",
         "gemini-mcp-onboarding",
-        "P3 — Reliability, Release, and Adoption",
+        "P3 — Active Reliability, Release, and Adoption Work",
         "compatibility text",
         "structured result",
+        "Accepted Is Not Verified",
+        "tests._fastmcp_shim",
+        "read_back_mismatch",
     ):
         assert required in text
 
@@ -106,4 +109,6 @@ def test_development_skill_names_the_maintained_validation_gates() -> None:
     assert "python -m mypy src scripts" in text
     assert "python -m pytest -q" in text
     assert "python scripts/run_contract_checklist.py" in text
-    assert "Do not describe Ruff or Mypy as future gates" in text
+    assert "tests/test_manage_gem_verification_contract.py" in text
+    assert "${{ runner." in text
+    assert "Do not claim a gate ran unless it actually ran" in text
