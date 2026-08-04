@@ -2,19 +2,19 @@
 name: gemini-web-mcp-development
 description: Develop, refactor, test, package, and release the gemini-web-mcp repository as an agent-first Gemini Web gateway for text, images, video, music, files, URLs, and Deep Research. Use for repository reviews, debugging regressions, MCP tool or schema changes, primary/compact adapter parity, shared services, Gemini Web RPC compatibility, multimodal artifacts, CI, onboarding, live canaries, versioning, or release work.
 license: AGPL-3.0-only
-compatibility: Requires a checkout of Luckycat133/gemini-web-mcp, Python 3.11+, git, and the project development dependencies. Most unit, contract, package, protocol, and skill work must remain runnable offline. Live Gemini verification requires the separately gated dedicated test-account canary.
+compatibility: Requires a checkout of Luckycat133/gemini-web-mcp, Python 3.11+, git, and the project development dependencies. Offline unit, contract, package, protocol, and skill checks are the default. Live Gemini verification requires the separately gated dedicated-account canary.
 metadata:
   author: Luckycat133
   project: gemini-web-mcp
   scope: development
-  version: "1.1"
+  version: "1.2"
 ---
 
 # Gemini Web MCP Development
 
 Use this skill to change the repository. Use the separate `gemini-web-mcp` skill to operate an installed server.
 
-Install this development skill directly from the repository with:
+Install it directly from the repository:
 
 ```bash
 npx --yes skills@1.5.21 add \
@@ -25,202 +25,185 @@ npx --yes skills@1.5.21 add \
 
 ## Mission
 
-Maintain a broadly usable Gemini Web compatibility gateway that gives MCP-compatible agents dependable access to text, sessions, images, video, music, files, URLs, and Deep Research while hiding unstable Gemini Web transport details behind testable contracts.
+Maintain a public, agent-first compatibility gateway that exposes Gemini Web text and multimodal capabilities through stable MCP contracts while isolating reverse-engineered transport details behind tested adapters.
 
-Optimize for completed agent workflows and verifiable outputs, not raw tool count.
+Optimize for completed workflows, truthful machine-readable state, verifiable artifacts, reproducible installation, and recoverable upstream drift. Do not optimize for raw tool count.
 
 ## Inspect the Current Baseline First
 
-This repository moved through its original P0-P2 roadmap. Do not restart completed architecture work from an old plan.
-
-Before proposing changes, inspect:
+Before planning non-trivial work:
 
 ```bash
 git status -sb
 git log --oneline -20
 ```
 
-Then read the relevant source, tests, `docs/changelog.md`, open issues/PRs, and the active `pyproject.toml`. Treat the checkout as the source of truth; this skill is a routing guide, not a substitute for repository inspection.
+Then inspect the affected source, tests, `docs/changelog.md`, open issues/PRs, current workflow runs, and `pyproject.toml`. Recent direct merges may be followed by repair commits; review the final tree, not only the original feature commit.
 
-The maintained baseline already includes:
+The current baseline already includes:
 
-- async-safe shared client initialization and deliberate reset/retirement;
-- one collision-resistant `SessionService` used by primary and compact adapters;
-- serializable `DomainResult`, stable domain errors, operation states, and diagnostic IDs;
-- a shared chat service and collected-stream normalization;
-- one artifact model for remote/local/queued/empty/failed multimodal outputs;
+- async-safe, generation-aware Gemini client initialization and retirement;
+- one collision-resistant `SessionService` shared by primary and compact adapters;
+- serializable `DomainResult`, stable domain errors, operation states, warnings, request IDs, and diagnostic IDs;
+- shared chat/session execution and collected-stream normalization;
+- one artifact model for remote, local, queued, empty, and failed multimodal outputs;
 - extracted history, account, Notebook, scheduled-action, Gem, manifest, doctor, and cleanup services;
-- a centralized Gemini Web RPC contract/parser registry;
-- observable conversation cleanup state;
-- single-source package versioning, direct dependencies, package data, and three console entrypoints;
-- MCP Python SDK v2 with modern and legacy protocol smoke coverage;
-- Ruff, Mypy, tests, contract snapshots, clean-wheel, release, skill, and protocol gates;
-- an opt-in live compatibility canary whose persisted reports are sanitized;
-- public onboarding plus checked-in Codex, Claude, and VS Code examples.
+- centralized Gemini Web RPC contracts and pure parsers;
+- MCP Python SDK v2 with modern and legacy protocol contracts;
+- Ruff, Mypy, complete tests, targeted contracts, profile/schema snapshots, clean-wheel, onboarding, skill, and release gates;
+- an opt-in live canary with sanitized reports and issue automation;
+- public Codex, Claude, and VS Code onboarding examples;
+- extensive compatibility-adapter branch tests. The `tests._fastmcp_shim` object is test-only; real product behavior is still proven through `MCPServer` profile and stdio protocol smoke.
 
-Verify these claims against the current checkout, but do not describe them as missing foundations unless a regression proves otherwise.
+Do not reopen these foundations as missing work unless a regression demonstrates that the contract has broken.
 
-## Working Mode
+## Working Method
 
 For every non-trivial task:
 
-1. Resolve the exact branch, current commit, affected tool/profile, and recent changes.
-2. Reproduce the defect or characterize the existing contract before editing.
+1. Resolve the exact branch, commit, affected profile/tool, and recent changes.
+2. Reproduce the defect or characterize the current contract before editing.
 3. State the user-visible or developer-visible contract and acceptance criteria.
-4. Find the lowest shared layer that owns the behavior: domain, service, infrastructure adapter, MCP adapter, or presentation text.
-5. Add a focused regression test that fails for the original defect.
-6. Implement one coherent fix; avoid parallel business implementations.
-7. Synchronize primary/compact surfaces, manifest data, docs, evaluations, examples, and both skill copies only where the contract requires it.
-8. Run targeted checks first, then the maintained repository gates.
-9. Report what was fixture-tested, package-tested, protocol-tested, and actually observed live.
+4. Find the lowest shared owner: domain, service, infrastructure adapter, MCP adapter, or presentation layer.
+5. Add a focused regression that fails for the original behavior.
+6. Implement one coherent fix without introducing parallel business logic.
+7. Synchronize primary/compact surfaces, manifest data, schemas, evaluations, docs, examples, and both skill copies only where the contract requires it.
+8. Run focused checks first, then maintained repository gates.
+9. Separate fixture, package, protocol, workflow, and live evidence in the handoff.
 
 ## Focus Rules
 
-- Do not turn normal feature or refactor work into a generic policy review. Address concrete behavior, compatibility, data flow, output evidence, or failing tests.
-- Do not repeat completed roadmap phases because an old reference still mentions them. Confirm current code and history first.
-- Do not block useful work on speculative Gemini Web changes. Isolate assumptions behind adapters and add fixtures or a canary probe.
-- Do not add a second or third implementation when an existing service can own the behavior.
-- Do not preserve an accidental behavior merely because an old test encoded it. Decide whether it is a public contract, then update the regression deliberately.
-- Do not claim a backend, mutation, stream, or artifact from wrapper prose alone. Distinguish requested, effective, inferred, and observed evidence.
-- Do not increase tool count unless the new surface improves agent discoverability, composability, or task completion.
+- Do not turn normal feature or refactor work into a generic policy review. Address the requested behavior, data flow, compatibility, evidence, or failing test.
+- Do not repeat completed roadmap phases because a stale note still mentions them.
+- Do not block useful work on speculative Gemini Web changes. Isolate assumptions and add a fixture or canary probe.
+- Do not add a second implementation when an existing service can own the behavior.
+- Do not preserve an accidental behavior merely because an old test encoded it.
+- Do not claim a backend, mutation, stream, or artifact from wrapper prose alone.
+- Do not increase tool count unless it materially improves agent discoverability, composition, or task completion.
 
 ## Current Repository Map
 
 - `src/server.py`: primary profile-based MCP adapter.
-- `src/skill_server.py`: compact low-token MCP adapter; still contains some legacy presentation and facade code that should migrate incrementally, not through a rewrite.
-- `src/adapters/`: project-owned MCP SDK v2 boundary, text/structured-result adapters, and artifact rendering.
-- `src/domain/`: typed results, errors, operation state, conversation lifecycle, stream metadata, and artifact contracts.
-- `src/services/`: shared chat, stream, artifact, history, account, Notebook, scheduled, Gem, manifest, doctor, cleanup, and related application behavior.
-- `src/infrastructure/`: centralized reverse-engineered RPC contracts and pure response parsers.
+- `src/skill_server.py`: compact low-token MCP adapter with remaining legacy facade/presentation code.
+- `src/adapters/`: project-owned MCP SDK boundary, structured/text result alignment, and artifact rendering.
+- `src/domain/`: typed results, errors, operation/lifecycle/stream state, and artifact contracts.
+- `src/services/`: shared application behavior, including chat, artifacts, history, account, Notebooks, scheduled actions, Gems, cleanup, manifest, and compatibility probes.
+- `src/infrastructure/`: centralized reverse-engineered RPC contracts and response parsers.
 - `src/client_manager.py`, `client_wrapper.py`, `session_manager.py`, `remote_chat_cleanup_manager.py`, `cookie_manager.py`, `thinking_client.py`: runtime lifecycle and Gemini Web transport infrastructure.
-- `src/tools/`: primary granular tool registration and compatibility facades.
+- `src/tools/`: primary granular tools and compatibility registration adapters; `manage.py` must become thinner incrementally rather than absorbing new domain logic.
 - `src/onboarding.py`: installed-product preflight and explicitly gated live examples.
-- `compatibility/`: live-canary schemas, fixtures, and dependency evidence.
-- `tests/`: unit, regression, parity, schema, package, protocol, and workflow contracts.
-- `scripts/`: contract, package, version, protocol, release, onboarding, and canary verification.
-- `.agents/skills/` and `.codex/skills/`: byte-identical public/local copies of runtime and development skills.
+- `compatibility/`: live-canary schema, fixtures, and dependency evidence.
+- `tests/`: unit, regression, parity, schema, workflow, package, protocol, and product contracts.
+- `scripts/`: contract, packaging, release, onboarding, protocol, version, and canary verification.
+- `.agents/skills/` and `.codex/skills/`: byte-identical runtime and development skill mirrors.
 
 ## Engineering Invariants
 
-### 1. One Result, Two Presentations
+### One Result, Two Presentations
 
-`TextContent._meta.domain_result` is the machine-readable authority. Compatibility text may be more concise, but it must never name a different error code, success state, backend, or artifact state.
+`TextContent._meta.domain_result` is the machine-readable authority. Compatibility text may be concise, but it must not name a different error code, success state, backend, artifact state, or verification outcome.
 
-- Derive coded failure text from the same `DomainResult`.
-- Use shared adapter helpers instead of hard-coded error labels.
-- Add a regression whenever legacy text and structured content can diverge.
-- Preserve useful human text when it does not contradict the typed result.
+### Accepted Is Not Verified
 
-### 2. Async Lifecycle Correctness
+A remote mutation being accepted is not proof that its target state changed.
+
+- Only show a success marker when the relevant read-back evidence is terminal and positive.
+- Treat `read_back_error`, `read_back_not_observed`, `read_back_mismatch`, `still_present`, `missing_mutation_id`, and equivalent states as warning, partial, or failed outcomes—not success.
+- Preserve the verification status and actionable next check in the result.
+- Add regression tests for both positive and ambiguous mutation states.
+
+### Async and Session Correctness
 
 - Never hold a synchronous lock across `await`.
-- Concurrent initialization callers share one attempt.
-- Caller cancellation must not cancel initialization needed by other requests.
-- Reset must prevent stale initialization from publishing and must retire replaced clients deliberately.
-- Concurrency tests must force real suspension.
+- Concurrent initialization callers share one attempt; one caller's cancellation must not cancel work needed by others.
+- Reset prevents stale publication and retires replaced clients deliberately.
+- Session IDs are opaque; unknown IDs change no state; reset-one and reset-all stay distinct; sends are serialized per session.
 
-### 3. Deterministic Session Semantics
+### Shared Business Services
 
-- Session IDs are opaque and collision-resistant.
-- Unknown IDs return `SESSION_NOT_FOUND` and change no state.
-- Reset-one and reset-all remain distinct.
-- Sends are serialized per session.
-- Primary and compact adapters use the same `SessionService` and lifecycle metadata.
+Adapters register tools, normalize adapter-specific input, and present results. Reusable request construction, Gemini calls, parsing, mutation verification, lifecycle, and artifact logic belong below them.
 
-### 4. Shared Business Services
+When touching a legacy `skill_server.py` or `tools/manage.py` path, migrate one bounded workflow to a shared service instead of expanding the adapter.
 
-MCP adapters register tools, validate adapter-specific inputs, choose presentation, and translate results. Reusable request construction, Gemini calls, parsing, lifecycle, mutation verification, and artifact logic belong below them.
+### Verifiable Multimodal Outputs
 
-When touching a legacy compact handler, prefer migrating that bounded workflow to an existing or new shared service rather than expanding `skill_server.py`.
+Use the shared artifact model. Keep remote URI and local path independently, distinguish terminal states, verify local files and relevant metadata, and keep requested model, request model, effective backend, and observed backend separate.
 
-### 5. Verifiable Multimodal Outputs
+### Reverse-Engineered Compatibility
 
-- Use the shared artifact model for images, video, audio, files, reports, webpages, and data.
-- Keep remote URI and local path independently.
-- Distinguish `remote`, `local`, `queued`, `empty`, and `failed`.
-- Verify local files and relevant metadata before claiming a saved deliverable.
-- Keep requested model, request model, effective backend, and observed backend separate.
+Centralize RPC IDs, source paths, payload builders, parsers, observation dates, and verification strategies. Parse success, empty, rejection, and changed shape explicitly. Return `UPSTREAM_CHANGED` when evidence is insufficient.
 
-### 6. Reverse-Engineered Compatibility
+### Package, Protocol, and Workflow Integrity
 
-- Put RPC IDs, source paths, payload builders, parsers, observed dates, and verification strategies in the centralized registry.
-- Parse success, empty, rejection, and changed-shape states explicitly.
-- Verify ambiguous mutations by read-back.
-- Record fixture evidence separately from live canary evidence.
+- `pyproject.toml` is the persisted version/dependency source.
+- Runtime data is package-internal and loaded through `importlib.resources`.
+- Installed-wheel entrypoints, profiles, modern/legacy protocol negotiation, schemas, and onboarding remain under smoke tests.
+- GitHub Actions expressions must use contexts valid at their YAML location. Add a repository contract after every workflow parse/startup regression.
+- Test-only framework shims never replace real MCP protocol/product smoke.
 
-### 7. Package and Protocol Integrity
+### Honest Long Operations
 
-- `pyproject.toml` is the persisted version and dependency source.
-- Runtime data lives inside the package and is loaded with `importlib.resources`.
-- Both MCP entrypoints and onboarding must work from an installed wheel outside the source tree.
-- Modern and legacy MCP negotiation, tool schemas, structured content, and representative profiles remain under contract tests.
+Current `_stream` tools collect Gemini upstream chunks and return one MCP result; report `delivery=collected`. Normalize mixed stream semantics, preserve continuation identifiers, and propagate cancellation.
 
-### 8. Honest Long-Running Semantics
+## Active Direction
 
-- Current `_stream` tools collect Gemini upstream chunks and return one MCP result; report `delivery=collected`.
-- Normalize delta, cumulative, duplicate, stale, and mixed chunks without duplicated output.
-- Preserve operation and continuation identifiers for queued, running, timed-out, or resumable work.
-- Propagate caller cancellation.
+The active roadmap is P3 maintenance, reliability, release, and adoption. Load [roadmap.md](references/roadmap.md) for issue-sized acceptance criteria.
 
-## Current Priorities
+Near-term order:
 
-Use [roadmap.md](references/roadmap.md) for acceptance criteria. The active direction is now P3 maintenance and adoption:
-
-1. integration regressions and primary/compact contract drift;
-2. completing typed-result coverage for remaining legacy facades;
-3. reducing compact-adapter presentation debt through shared services;
-4. obtaining the first deliberate live-canary baseline and handling upstream drift;
-5. cutting a coherent public release with an explicit version/compatibility policy;
-6. improving ecosystem onboarding from real user reports.
-
-The deferred Glama account/listing issue is external account-side work, not an implementation prerequisite.
+1. complete typed-result coverage for remaining prose-only primary and compact facades;
+2. reduce compact/manage adapter debt one workflow at a time;
+3. audit mutation verification and compatibility text across all remote writes;
+4. establish the first deliberate read-only live-canary baseline;
+5. decide and cut a coherent public release;
+6. improve onboarding from reproducible client reports;
+7. maintain RPC/model compatibility through centralized fixtures and probes.
 
 ## Change Playbooks
 
 ### Bug Fix
 
 1. Reproduce at the lowest stable layer.
-2. Add a regression that proves the wrong behavior and the expected result.
-3. Check both text and structured content when an MCP adapter is involved.
-4. Fix the shared owner, not each caller independently.
-5. Run the focused test, related parity tests, and contract checklist.
+2. Test both structured and compatibility presentations when an MCP adapter is involved.
+3. Fix the shared owner.
+4. Add positive and negative/ambiguous regression cases.
+5. Run focused tests, related parity tests, and the contract checklist.
 
 ### Tool or Schema Change
 
-1. Inspect current tool snapshots and manifest/profile membership.
-2. Define input, structured result, compatibility text, annotations, and operation state.
+1. Inspect tool snapshots, profile membership, manifest, and current output schema.
+2. Define input, structured result, compatibility text, annotations, operation state, and verification evidence.
 3. Implement through a service or pure adapter.
-4. Update both surfaces only when they expose the workflow.
-5. Re-baseline golden schemas intentionally and explain why.
+4. Re-baseline golden schemas only for an explained contract change.
 
 ### Gemini Web Drift
 
 1. Identify transport, envelope, RPC, parser, or verification stage.
-2. Add a sanitized fixture reproducing the changed shape.
+2. Add a sanitized fixture.
 3. Update the registry/parser rather than scattering new indices or IDs.
-4. Preserve an explicit `UPSTREAM_CHANGED` result when evidence remains insufficient.
-5. Run the opt-in canary only when authorized and report whether live behavior was observed.
+4. Preserve explicit unavailable or changed state when observation remains incomplete.
+5. State whether the result is fixture-only or live-observed.
 
-### Packaging or Release
+### Packaging, CI, or Release
 
-1. Use release metadata derived from `pyproject.toml`.
-2. Build wheel, sdist, and skill assets.
-3. Install the wheel in a clean environment outside the checkout.
-4. Run entrypoint, profile, protocol, resource, `pip check`, and onboarding smoke.
-5. Verify downloaded release assets again before publication.
+1. Use metadata derived from `pyproject.toml`.
+2. Validate workflow syntax/context assumptions in repository tests.
+3. Build wheel, sdist, and skill assets.
+4. Install outside the checkout and run entrypoint/profile/protocol/resource/onboarding smoke.
+5. Re-verify downloaded assets before publication.
 
 ## References
 
 Load only what the task needs:
 
 - [architecture.md](references/architecture.md): current implemented architecture and remaining debt.
-- [tool-design.md](references/tool-design.md): agent-facing schemas, multimodal results, and backend evidence.
-- [roadmap.md](references/roadmap.md): completed milestones and active P3 work packages.
-- [validation.md](references/validation.md): focused tests, CI gates, package/protocol smoke, skills, and live evidence.
+- [tool-design.md](references/tool-design.md): agent-facing schemas, multimodal results, and mutation/backend evidence.
+- [roadmap.md](references/roadmap.md): completed integration packages and active P3 work.
+- [validation.md](references/validation.md): focused tests, CI, package/protocol smoke, skills, and live evidence.
 
 ## Maintained Validation
 
-Start with focused tests, then run:
+Start with task-specific tests, then run:
 
 ```bash
 python -m ruff check src tests scripts
@@ -230,7 +213,7 @@ python scripts/run_contract_checklist.py
 git diff --check
 ```
 
-For skill changes, validate and compare both copies. For package/release changes, run the clean-wheel and `uvx` onboarding paths documented in [validation.md](references/validation.md).
+Use the stronger package, workflow, skill, and canary checks from [validation.md](references/validation.md) when those surfaces change.
 
 ## Handoff Evidence
 
@@ -242,9 +225,9 @@ Root cause:
 Implementation boundary:
 Primary surface impact:
 Compact surface impact:
-Structured result / artifact impact:
+Structured result / verification impact:
 Focused tests:
-Repository / package / protocol checks:
+Repository / package / protocol / workflow checks:
 Live Gemini observations:
 Remaining uncertainty:
 ```
