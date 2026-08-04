@@ -29,7 +29,6 @@ dev = [
     "build>=1.2.0",
     "jsonschema>=4.0.0,<5",
     "mypy>=2.0.0,<3",
-    "pydantic-settings>=2.0.0",
     "pytest>=8.0.0",
     "ruff>=0.16.0,<1",
 ]
