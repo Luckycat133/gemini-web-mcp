@@ -31,6 +31,8 @@ def test_static_gates_are_declared_development_dependencies() -> None:
 
     assert any(requirement.startswith("ruff>=") and "<1" in requirement for requirement in development)
     assert any(requirement.startswith("mypy>=") and "<3" in requirement for requirement in development)
+    assert not any(requirement.startswith("fastmcp") for requirement in development)
+    assert not any(requirement.startswith("pydantic-settings") for requirement in development)
 
 
 def test_targeted_contract_checklist_covers_stable_architecture_boundaries() -> None:
@@ -41,6 +43,7 @@ def test_targeted_contract_checklist_covers_stable_architecture_boundaries() -> 
         "tests/test_conversation_lifecycle.py",
         "tests/test_chat_service.py",
         "tests/test_artifacts.py",
+        "tests/test_manage_gem_verification_contract.py",
         "tests/test_rpc_contracts.py",
         "tests/test_live_canary.py",
         "tests/test_package_integrity.py",
@@ -165,6 +168,8 @@ def test_live_canary_is_opt_in_offline_separated_and_reports_drift_to_one_issue(
     assert "raw responses, account content, credentials, and session identifiers are omitted" in workflow
     assert "JSON.stringify(report)" not in workflow
     assert "steps.canary.outcome == 'failure'" in workflow
+    assert 'REPORT_PATH: ${{ github.workspace }}/gemini-web-live-canary.json' in workflow
+    assert "${{ runner." not in workflow
     assert "run_live_canary.py" not in offline_workflows
     assert "GEMINI_PSID" not in offline_workflows
 
