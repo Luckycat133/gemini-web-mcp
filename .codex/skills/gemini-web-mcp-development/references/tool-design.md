@@ -4,9 +4,12 @@ This is the shortest path from “the repository builds” to “an agent can re
 
 ## 1. Prove Installation and MCP Stdio Without Credentials
 
+Replace the example value before running:
+
 ```bash
-uvx --from git+https://github.com/Luckycat133/gemini-web-mcp@<reviewed-sha> \
-  gemini-mcp-onboarding
+REVIEWED_SHA=replace-with-reviewed-40-character-commit
+SOURCE="git+https://github.com/Luckycat133/gemini-web-mcp@${REVIEWED_SHA}"
+uvx --from "$SOURCE" gemini-mcp-onboarding
 ```
 
 Expected result: JSON reporting `status=ok`, `mode=offline`, `credentials_accessed=false`, a negotiated protocol version, server version, and a non-zero `model` profile tool count.
@@ -15,11 +18,12 @@ This proves installation, entrypoint resolution, stdio transport, MCP negotiatio
 
 ## 2. Prove Live Text Explicitly
 
-Configure the account cookies in the shell or client environment, then run:
+Configure the account cookies in the shell or client environment, replace the example SHA, then run:
 
 ```bash
-uvx --from git+https://github.com/Luckycat133/gemini-web-mcp@<reviewed-sha> \
-  gemini-mcp-onboarding chat \
+REVIEWED_SHA=replace-with-reviewed-40-character-commit
+SOURCE="git+https://github.com/Luckycat133/gemini-web-mcp@${REVIEWED_SHA}"
+uvx --from "$SOURCE" gemini-mcp-onboarding chat \
   --allow-live-account \
   --prompt "Reply with exactly: gemini-mcp-live-ok" \
   --model flash \
@@ -31,9 +35,10 @@ Inspect both returned text and the structured domain result. Confirm the request
 ## 3. Prove a Verifiable Local Image
 
 ```bash
+REVIEWED_SHA=replace-with-reviewed-40-character-commit
+SOURCE="git+https://github.com/Luckycat133/gemini-web-mcp@${REVIEWED_SHA}"
 mkdir -p /tmp/gemini-mcp-images
-uvx --from git+https://github.com/Luckycat133/gemini-web-mcp@<reviewed-sha> \
-  gemini-mcp-onboarding image \
+uvx --from "$SOURCE" gemini-mcp-onboarding image \
   --allow-live-account \
   --prompt "A clean blue circle on a white background" \
   --output-dir /tmp/gemini-mcp-images
@@ -43,7 +48,7 @@ The command should fail unless it receives a local image inside the requested di
 
 ## 4. Connect a Real Agent Client
 
-Start with the smallest profile:
+Start with the smallest profile. Replace `REVIEWED_COMMIT_SHA` with the reviewed 40-character commit before copying the configuration into the client:
 
 ```json
 {
@@ -52,7 +57,7 @@ Start with the smallest profile:
       "command": "uvx",
       "args": [
         "--from",
-        "git+https://github.com/Luckycat133/gemini-web-mcp@<reviewed-sha>",
+        "git+https://github.com/Luckycat133/gemini-web-mcp@REVIEWED_COMMIT_SHA",
         "gemini-mcp-server"
       ],
       "env": {
