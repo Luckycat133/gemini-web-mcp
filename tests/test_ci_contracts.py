@@ -105,6 +105,9 @@ def test_ci_workflow_has_separate_diagnostic_offline_gates() -> None:
     workflow = CI_WORKFLOW.read_text(encoding="utf-8")
 
     assert 'branches: [main, "agent/**"]' in workflow
+    assert "concurrency:" in workflow
+    assert "group: ${{ github.workflow }}-${{ github.ref }}" in workflow
+    assert "cancel-in-progress: true" in workflow
     for job in ("lint", "type", "test", "contracts", "protocol", "skills", "package"):
         assert re.search(rf"^  {job}:$", workflow, re.MULTILINE)
     for command in (
