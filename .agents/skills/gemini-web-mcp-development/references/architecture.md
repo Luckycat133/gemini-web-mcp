@@ -1,101 +1,84 @@
-# Architecture and Remaining Debt
+# Current State, Missing Work, and Known Defects
 
-Load this reference for repository audits, refactors, service extraction, adapter parity, workflow repairs, or release planning.
+Use this reference when auditing the repository or choosing the next engineering task. Verify every statement against the current checkout and recent CI before acting.
 
-## Product Boundary
+## What Is Already Implemented
 
-Gemini Web MCP is a local compatibility gateway for agents. Its durable product is the stable MCP/domain contract, not any individual reverse-engineered payload.
+The project already has a broad usable surface:
 
-```text
-MCP clients
-  |
-  +-- src.server -------- primary granular/profile adapter
-  +-- src.skill_server -- compact low-token facade adapter
-  +-- src.onboarding ---- installed-product preflight/examples
-          |
-          v
-  adapters -> domain results/artifacts -> shared services
-          -> infrastructure RPC/model adapters -> Gemini Web client
-```
+- primary MCP server with narrow `model`, `history`, `history-organize`, `account-read`, `scheduled-read`, `scheduled-admin`, `core`, and `all` profiles;
+- compact eleven-tool facade for low-token discovery;
+- one-shot and session chat, thinking levels, guided-learning modes, temporary chats, and Gem-backed chat;
+- image generation/editing, video, music, local-file analysis, URL analysis, and Deep Research;
+- typed artifact state for remote/local/queued/empty/failed outcomes;
+- history list/scan/search/read/export/delete, native Notebook reads and chat moves;
+- account inventory, usage, public-link reads, model/mode discovery, scheduled-action daily create/get/list/delete, and Gem CRUD;
+- prompts, cookie diagnostics, doctor, cleanup, onboarding, package/release automation, and an opt-in live canary;
+- official MCP SDK v2 discovery, structured content, generated output schemas, and compatibility negotiation.
 
-## Implemented Foundation
+## Confirmed Defects Fixed in the Current Audit Package
 
-### Runtime lifecycle
+### Compact History Mapping Compatibility
 
-`ClientManager` coordinates one asynchronous initialization attempt, shields it from unrelated caller cancellation, prevents stale reset generations from publishing, and retires old clients deliberately. `SessionService` owns opaque IDs, per-session send serialization, explicit not-found state, expiry, reset-one, and reset-all.
+The compact `history` list/read paths previously assumed upstream records were attribute objects. Mapping-backed chats could render as `Untitled` with blank IDs, and mapping-backed turns could render as `unknown` with empty text. Use the shared history accessors for both object and mapping inputs.
 
-### Typed contracts
+### Volatile README Test Count
 
-`src/domain/` defines `DomainResult`, stable error codes, warnings, operation state, lifecycle/cleanup metadata, stream collection metadata, and multimodal artifacts. Runtime objects stay outside serialization.
+A hardcoded numeric test badge drifted behind the real suite. Public badges should report CI verification rather than a manually maintained test count.
 
-### Shared services
+## Remaining High-Priority Engineering Gaps
 
-`src/services/` owns chat/session execution, stream normalization, artifacts, history helpers, account inventory, Notebooks, scheduled actions, Gems, cleanup, manifests, and compatibility probing. Primary and compact adapters should differ in granularity/defaults/presentation rather than business semantics.
+### 1. No Current Live Baseline
 
-### Reverse-engineered infrastructure
+Offline, package, protocol, and synthetic canary tests are strong, but the scheduled live canary remains inactive unless repository variables and a dedicated-account environment are configured. The current Gemini Web build, account routing, media generation, and private RPC behavior therefore remain unverified until an authorized live run is recorded.
 
-`src/infrastructure/rpc_contracts.py` and parser modules centralize observed RPC identifiers, payload builders, source paths, parsers, observation metadata, and mutation verification strategies. Changed shapes should become explicit parser state rather than silent emptiness.
+### 2. Incomplete Typed-Result Coverage
 
-### MCP, package, and product verification
+Core chat/session/artifact/research paths are structured, but many history, account, prompt, cookie, doctor, cleanup, scheduled, Notebook, and compatibility tools still expose prose-first results. Agents should not need to parse phrases or emoji to determine success, retryability, pagination, or verification.
 
-`src/adapters/mcp_sdk.py` is the MCP SDK v2 boundary. CI covers modern/legacy negotiation, generated output schemas, representative profiles, wheel/sdist resources, all console entrypoints, isolated onboarding, skill parity/installation, and release assets.
+### 3. Primary/Compact Facade Duplication
 
-### Compatibility adapter testing
+The compact history, account, scheduled, prompt, cookie, doctor, and cleanup facades retain adapter-owned execution and formatting. Migrate one action family at a time to shared services; keep compactness as a discovery/presentation property, not a separate business implementation.
 
-Recent development added broad branch tests for `tools/manage.py`. These tests use `tests._fastmcp_shim` only as a minimal registration/dispatch double because standalone FastMCP is incompatible with the project's MCP SDK v2 dependency line. The shim is not product evidence; real `MCPServer` and stdio smoke remain mandatory.
+### 4. Mutation Verification Is Uneven
 
-## Remaining Debt
+Gem mutations now fail closed without positive read-back evidence. Apply the same review to chat deletion, Notebook moves, scheduled actions, cleanup, prompt storage, and any future sharing/settings mutation. Define which source is authoritative and which ambiguous states are partial rather than successful.
 
-### 1. Prose-only management surfaces
+### 5. Cleanup Is Process-Local
 
-A significant portion of `tools/manage.py` and `skill_server.py` still returns untyped prose. Failures, pagination, partial results, and mutation verification may therefore require text parsing. Migrate one action family at a time to shared services and `DomainResult`.
+Pending remote-chat cleanup and its observations live in memory. A server restart can lose delayed deletion work. Choose between best-effort process-local cleanup, a durable local queue, or using provider-native temporary conversations wherever possible.
 
-### 2. Mutation presentation drift
+### 6. Long Operations Lack a First-Class Job API
 
-Services already return read-back evidence, but adapters can still overstate it. Every remote write must map verification state to truthful text and structured state. `accepted` is not equivalent to `verified`; `still_present`, mismatch, read-back failure, or missing mutation ID must not receive a success marker.
+Deep Research and media can report queued/running/timed-out states and preserve identifiers, but agents do not have a uniform `start / status / result / cancel` contract. A dedicated operation service would make timeout recovery and cross-client UX substantially clearer.
 
-### 3. Compatibility monolith size
+### 7. Search Pagination Semantics Need a Contract
 
-`tools/manage.py` remains large because it preserves many public tool names and formatting paths. Do not rewrite it wholesale. Extract bounded workflows, route both adapters through the service, add parity tests, then remove obsolete helper aliases.
+Current history search treats `offset`/`limit` as the source page to scan, not necessarily the match page to return. That is bounded and predictable but can surprise users who expect global match pagination. Decide and document whether search pagination applies before or after filtering, especially when `scan_turns=true` could require many remote reads.
 
-### 4. Live evidence gap
+## Gemini UI Workflows Not Yet Implemented
 
-The canary machinery is extensively fixture/workflow tested, but a deliberate dedicated-account baseline is still required before making current live compatibility claims. Keep live observation separate from offline correctness.
+These are real missing capabilities, but should only be added when they improve agent workflows and have stable evidence:
 
-### 5. Release accumulation
+- Google Drive picker/attachment import;
+- Canvas document create/read/update/export;
+- scheduled-action edit, enable/disable, weekly, and richer recurrence;
+- Notebook create, rename, delete, and source management;
+- public-link create, update, revoke, and sharing management;
+- history rename, pin/unpin, archive, and share workflows;
+- personalization/settings and memory-import mutations;
+- Library asset listing beyond capability/probe surfaces;
+- first-class media/research job polling and cancellation;
+- genuine client-visible incremental progress rather than collected upstream streams;
+- onboarding commands for video, music, file, URL, and Deep Research.
 
-Substantial additive and behavioral changes remain under `Unreleased` while the package version is still 1.3.0. The next release needs an explicit semantic-version decision, protocol compatibility statement, migration notes, and downloaded-asset revalidation.
+Theme, help, feedback, location, subscription, and other UI chrome should remain out of scope unless a concrete agent workflow requires them.
 
-### 6. Workflow expression regressions
+## Recommended Priority
 
-GitHub Actions can fail before creating jobs when a context is invalid at a YAML location. Repository contracts should lock every repaired expression, especially job-level `env`, permissions, and conditional contexts.
-
-### 7. Skill and documentation freshness
-
-The development skill is a routing layer, not an independent architecture source. Update both mirrors whenever the implemented baseline, active priorities, maintained gates, or evidence rules materially change.
-
-## Incremental Migration Pattern
-
-For one workflow:
-
-1. characterize current names, schema, text, metadata, and side effects;
-2. add a regression for the defect or ambiguity;
-3. define typed service input/output;
-4. route the primary adapter;
-5. route the compact adapter where applicable;
-6. compare semantic parity;
-7. remove duplicate execution/parsing;
-8. update manifest/schema/docs/evaluations;
-9. run installed-product and protocol checks when registration changes.
-
-## Target Runtime Flow
-
-```text
-MCP adapter
-  -> normalize/validate adapter input
-  -> shared application service
-  -> Gemini Web capability/RPC adapter
-  -> pure parser
-  -> DomainResult + artifacts + verification evidence
-  -> structured MCP output + non-contradictory compatibility text
-```
+1. Run and record a deliberate read-only live baseline.
+2. Complete typed results for compact history/account, then prompt/cookie/doctor/cleanup.
+3. Audit every remote mutation for positive read-back and honest presentation.
+4. Introduce a shared long-operation job contract.
+5. Decide cleanup durability and release/version strategy.
+6. Improve end-to-end video, music, file, URL, and research onboarding before pursuing broad UI parity.

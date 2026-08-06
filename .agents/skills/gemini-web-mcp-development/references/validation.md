@@ -1,158 +1,158 @@
-# Validation and Release Evidence
+# Testing and Evidence
 
-Load this reference for bug fixes, shared-service changes, MCP contracts, workflow edits, packaging, skills, compatibility probes, or releases.
+Use the narrowest test that proves the changed contract, then add the broader gates required by the affected boundary.
 
-## Principle
+## Evidence Levels
 
-Use the cheapest deterministic test that proves the changed contract, then run broader gates. Fixture-test reverse-engineered behavior; reserve live Gemini access for the explicitly gated canary.
+Keep these distinct in every PR:
 
-## Change Matrix
+1. **Unit/fixture evidence** — pure helpers, parsers, services, fake clients.
+2. **Repository contract evidence** — full pytest, Ruff, Mypy, snapshots.
+3. **Protocol evidence** — real MCP stdio discovery/list/call.
+4. **Installed-product evidence** — wheel/sdist, clean environment, resources, entrypoints, `uvx` onboarding.
+5. **Live Gemini evidence** — explicitly authorized calls against a dedicated current account.
 
-| Change | Minimum evidence |
-| --- | --- |
-| pure parser/helper | focused success/empty/malformed/changed-shape tests |
-| client lifecycle | real-suspension concurrency, cancellation, reset, retry |
-| session behavior | create/send/list/reset-one/reset-all/not-found/race |
-| compatibility text | structured/text agreement, matching and contradictory states |
-| remote mutation | accepted, verified, read-back error, mismatch/still-present tests |
-| shared service | characterization plus primary/compact semantic parity |
-| artifact/media | URI/local/queue/empty/timeout/save/metadata/backend evidence |
-| tool/schema/profile | call test, annotations, manifest, snapshot/evaluation update |
-| workflow | repaired expression/context contract plus actual Actions startup |
-| package/entrypoint | wheel/sdist build, clean install, resources, `pip check`, stdio |
-| skill | validator, byte parity, direct repository install, repository tests |
-| live compatibility | explicit opt-in, dedicated account, schema-valid sanitized report |
+A higher test count is not a substitute for levels 3–5.
 
-## Focused Gem/Workflow Review
-
-For Gem mutation presentation and the live-canary context regression, run:
+## Fast Local Sequence
 
 ```bash
-python -m pytest -q \
-  tests/test_manage_gem_verification_contract.py \
-  tests/test_ci_contracts.py \
-  tests/test_development_skill.py
+python -m py_compile <changed-python-files>
+python -m pytest -q <focused-tests>
+python -m ruff check <changed-python-files-and-tests>
+python -m mypy <changed-source-files>
+git diff --check
 ```
 
-Gem tests must cover mapping-backed list entries, whitespace-only required input, verified success, missing mutation ID, read-back absence/error/mismatch, and delete-still-present evidence.
+For the compact-history mapping regression:
 
-The workflow contract must assert the repaired job-level report path uses an allowed context and that the invalid `${{ runner.` expression does not reappear at job scope.
+```bash
+python -m pytest -q tests/test_compact_history_contract.py
+```
 
-## Maintained Repository Gates
+For a remote mutation, cover at least:
+
+- accepted and positively verified;
+- accepted but not observed;
+- read-back error;
+- mismatch or still-present state;
+- invalid/blank identifiers before network access;
+- compatibility text and structured result agreement.
+
+## Maintained Offline Gates
 
 ```bash
 python -m ruff check src tests scripts
 python -m mypy src scripts
 python -m pytest -q
 python scripts/run_contract_checklist.py
+python scripts/smoke_profiles.py
+python scripts/smoke_mcp_protocol.py
 git diff --check
 ```
 
-Do not claim a gate ran unless it actually ran in the checkout or CI.
+Do not encode a volatile passing-test number into the skill or README. Cite the actual CI run instead.
 
-## Test-Only FastMCP Shim
+## Tool, Schema, and Profile Changes
 
-`tests._fastmcp_shim` is a narrow registration/dispatch double for management-handler branch tests. It intentionally does not prove MCP SDK validation, output schemas, protocol negotiation, or installed-product behavior.
+Verify:
 
-Always retain the real checks:
+- exact tool registration in every affected profile;
+- input schema, annotations, output schema, and representative call;
+- structured content validates against the generated schema;
+- primary/compact semantic parity where both expose the workflow;
+- manifest, evaluation, docs, and client examples are intentionally synchronized.
 
-```bash
-python scripts/smoke_profiles.py
-python scripts/smoke_mcp_protocol.py
-```
+Golden snapshots are reviewed contracts, not files to regenerate automatically after a failure.
 
-## Primary/Compact Parity
-
-Compare semantic results rather than exact prose:
-
-- error code/retryability;
-- operation state;
-- lifecycle/cleanup state;
-- normalized model/backend evidence;
-- artifact identity/verification;
-- pagination/truncation;
-- mutation verification outcome.
-
-## RPC and Parser Fixtures
-
-Cover normal success, empty result, rejection, partial response, malformed body, optional/reordered fields, and a changed shape that produces `UPSTREAM_CHANGED` rather than silent emptiness. Compare semantic payloads, not whitespace.
-
-## Mutation Verification
-
-For create/update/delete:
-
-1. parse the returned identifier;
-2. read back by ID and/or authoritative registry;
-3. distinguish request acceptance from target-state observation;
-4. return the verification method/status;
-5. render success only for positive terminal evidence;
-6. retain actionable warning/partial/failure text otherwise.
-
-## Workflow Validation
-
-Repository text contracts catch known context regressions, but GitHub Actions startup is additional evidence. After a workflow edit, inspect whether jobs were actually created and whether each intended gate ran. A zero-job parse failure is not a passing workflow.
-
-Job-level `env` expressions may only use contexts valid at that YAML location; step-only contexts such as `runner` must stay inside steps.
-
-## Package and Protocol Smoke
-
-For package/release work:
+## Package and Onboarding Changes
 
 ```bash
 python scripts/package_release.py --outdir dist
-python -m venv /tmp/gemini-web-mcp-wheel-test
-/tmp/gemini-web-mcp-wheel-test/bin/pip install dist/*.whl
-/tmp/gemini-web-mcp-wheel-test/bin/pip check
+python scripts/check_version_consistency.py --artifacts-dir dist
+
+python -m venv /tmp/gemini-wheel-smoke
+/tmp/gemini-wheel-smoke/bin/python -m pip install dist/*.whl
+/tmp/gemini-wheel-smoke/bin/python -m pip check
+
 cd /tmp
-/tmp/gemini-web-mcp-wheel-test/bin/python "$OLDPWD/scripts/smoke_installed_wheel.py"
-/tmp/gemini-web-mcp-wheel-test/bin/python "$OLDPWD/scripts/smoke_profiles.py"
-/tmp/gemini-web-mcp-wheel-test/bin/python "$OLDPWD/scripts/smoke_mcp_protocol.py"
-uvx --from "$OLDPWD"/dist/*.whl gemini-mcp-onboarding
+/tmp/gemini-wheel-smoke/bin/python <checkout>/scripts/smoke_installed_wheel.py
+/tmp/gemini-wheel-smoke/bin/python <checkout>/scripts/smoke_profiles.py
+/tmp/gemini-wheel-smoke/bin/python <checkout>/scripts/smoke_mcp_protocol.py
 ```
 
-Run installed-product checks outside the source checkout.
+Also prove the public one-command path outside the checkout:
 
-## Skill Validation
+```bash
+uvx --from <wheel-or-reviewed-git-sha> gemini-mcp-onboarding
+```
+
+## Skill Changes
 
 ```bash
 skills-ref validate .agents/skills/gemini-web-mcp-development
 skills-ref validate .codex/skills/gemini-web-mcp-development
 diff -ru .agents/skills/gemini-web-mcp-development \
   .codex/skills/gemini-web-mcp-development
-npx --yes skills@1.5.21 add "$PWD" \
-  --skill gemini-web-mcp-development --agent codex --copy --yes
+python -m pytest -q tests/test_development_skill.py tests/test_skill_packaging.py
 ```
 
-Keep `SKILL.md` below 500 lines and detailed guidance in one-level `references/` files.
+Then install the development skill from the repository and byte-compare it with the source copy.
 
-## Live Canary
+## Workflow Changes
 
-Live runs require the CLI flag, repository enable variable, dedicated-account variable, and protected environment credentials. Persist only schema-allowed diagnostics; omit raw responses, account/chat content, credentials, URLs, titles, and session identifiers.
+A repository text assertion is useful but insufficient. Confirm that GitHub Actions actually created the intended jobs. A zero-job parse/startup failure is not a passing workflow.
 
-The current first live target is read-only capability compatibility. Do not describe fixture/workflow tests as live observation.
+Check:
 
-## Release Checklist
+- expression contexts are valid at their YAML location;
+- all expected jobs exist;
+- each diagnostic step ran;
+- artifacts were uploaded when required;
+- skipped live jobs are reported as skipped, not live success.
 
-- version/tag/wheel/sdist/skill/changelog/docs agree;
-- static, full test, targeted contract, skill, profile, protocol, and package gates pass;
-- workflow jobs actually start and finish;
-- clean-wheel and isolated onboarding pass;
-- downloaded assets are revalidated;
-- release notes distinguish implemented behavior, expected routing, fixture evidence, and live evidence;
-- mutation claims reflect read-back verification.
+## Live Test Ladder
 
-## PR Evidence Template
+Use a dedicated non-personal account and record the exact commit, dependency versions, locale, Web build when visible, account tier, and client.
+
+### P0 — Must Prove Before a Public Release
+
+1. credential/account initialization;
+2. one-shot temporary text call;
+3. session create/send/reset across primary and compact surfaces;
+4. local verified image artifact;
+5. video and music artifact state, URI/file, MIME, size, and duration when available;
+6. local file and URL analysis;
+7. Deep Research start, terminal/timeout state, preserved IDs, and report retrieval;
+8. history list/search/read/export and a marked temporary delete verification;
+9. one reversible or disposable scheduled/Gem mutation with read-back;
+10. cleanup outcome and no untracked test artifacts.
+
+### P1 — Account/Compatibility Matrix
+
+- at least Codex plus one other MCP client;
+- Python 3.11 and 3.12 installed-product paths;
+- supported desktop OSes that the project claims;
+- multiple model aliases and thinking levels;
+- accounts with and without optional media/research entitlements;
+- browser-cookie profile diagnostics where supported.
+
+## Live Result Record
+
+For each call retain only bounded evidence:
 
 ```text
-Contract or defect:
-Root cause:
-Implementation boundary:
-Primary impact:
-Compact impact:
-Structured result / verification impact:
-Focused tests:
-Full/static/contract checks:
-Package/protocol/workflow checks:
-Live observations:
-Remaining uncertainty:
+commit:
+client and protocol:
+dependency versions:
+account tier / locale:
+tool and arguments (without credentials):
+operation state:
+error code / retryability:
+verification status:
+artifact IDs, paths/URIs, MIME, size, dimensions/duration:
+requested / effective / observed backend:
+cleanup result:
 ```
+
+Never treat response prose alone as proof of a mutation or artifact.

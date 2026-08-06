@@ -1,0 +1,33 @@
+name: Apply repository audit patch
+
+on:
+  push:
+    branches:
+      - agent/audit-experience-and-refresh-skill
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    name: Apply audited source and contract changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v7
+        with:
+          ref: agent/audit-experience-and-refresh-skill
+          fetch-depth: 0
+      - name: Apply reviewed patch and remove one-shot assets
+        run: |
+          git apply --check .github/audit-experience.patch
+          git apply .github/audit-experience.patch
+          rm .github/audit-experience.patch .github/workflows/apply-audit-experience-patch.yml
+      - name: Commit final audited tree
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "fix(compact): normalize history mappings and refresh skill"
+          git push origin HEAD:agent/audit-experience-and-refresh-skill
