@@ -26,6 +26,10 @@ The compact `history` list/read paths previously assumed upstream records were a
 
 A hardcoded numeric test badge drifted behind the real suite. Public badges should report CI verification rather than a manually maintained test count.
 
+## Remaining Confirmed Metadata Drift
+
+The GitHub repository description still calls the project a “FastMCP server,” while the runtime has migrated to the official `MCPServer`/MCP Python SDK v2 boundary. Update the repository description after merge; this requires repository-settings access rather than a source-code patch.
+
 ## Remaining High-Priority Engineering Gaps
 
 ### 1. No Current Live Baseline
