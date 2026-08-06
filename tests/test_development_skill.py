@@ -53,7 +53,7 @@ def test_development_skill_frontmatter_and_progressive_disclosure() -> None:
     assert re.search(r"^name: gemini-web-mcp-development$", frontmatter, re.MULTILINE)
     assert re.search(r"^description: .+Use for .+$", frontmatter, re.MULTILINE)
     assert "scope: development" in frontmatter
-    assert 'version: "1.2"' in frontmatter
+    assert 'version: "2.0"' in frontmatter
     assert len(lines) < 500
 
     reference_links = re.findall(r"\]\((references/[^)]+)\)", body)
@@ -74,41 +74,49 @@ def test_development_skill_has_no_machine_specific_paths() -> None:
         assert "C:\\Users\\" not in text
 
 
-def test_development_skill_tracks_the_current_implemented_foundation() -> None:
+def test_development_skill_tracks_current_product_questions() -> None:
     text = _all_text(PUBLIC_SKILL)
 
     for required in (
-        "MCP Python SDK v2",
-        "SessionService",
-        "DomainResult",
-        "src/infrastructure/rpc_contracts.py",
-        "gemini-mcp-onboarding",
-        "P3 — Active Reliability, Release, and Adoption Work",
-        "compatibility text",
-        "structured result",
         "Accepted Is Not Verified",
+        "No Current Live Baseline",
+        "Long Operations Lack a First-Class Job API",
+        "Google Drive picker/attachment import",
+        "How to Actually Experience the Product",
+        "gemini-mcp-onboarding chat",
+        "gemini-mcp-onboarding image",
+        "What Is the Next Public Version?",
+        "historical Git tags/releases include higher `2.x` versions",
         "tests._fastmcp_shim",
-        "read_back_mismatch",
+        "Do not hardcode volatile test counts",
     ):
         assert required in text
 
-    for stale_claim in (
-        "currently uses a synchronous `threading.Lock` around an awaited network initialization",
-        "Current compact session IDs are derived from `len(_sessions) + 1`",
-        "The management module is also carrying too many domains",
-        "the compact server does not have a clear console entrypoint",
-        "Do not start a broad MCP v2 rewrite before the P0 lifecycle",
+    for obsolete in (
+        "P3 — Reliability, Release, and Adoption",
+        "P0.1",
+        "P1.7",
+        "P2.3",
+        "Immediate Suggested Issue Order",
     ):
-        assert stale_claim not in text
+        assert obsolete not in text
 
 
-def test_development_skill_names_the_maintained_validation_gates() -> None:
-    text = (PUBLIC_SKILL / "references/validation.md").read_text(encoding="utf-8")
+def test_development_skill_names_the_maintained_validation_and_experience_paths() -> None:
+    testing = (PUBLIC_SKILL / "references/validation.md").read_text(encoding="utf-8")
+    experience = (PUBLIC_SKILL / "references/tool-design.md").read_text(encoding="utf-8")
 
-    assert "python -m ruff check src tests scripts" in text
-    assert "python -m mypy src scripts" in text
-    assert "python -m pytest -q" in text
-    assert "python scripts/run_contract_checklist.py" in text
-    assert "tests/test_manage_gem_verification_contract.py" in text
-    assert "${{ runner." in text
-    assert "Do not claim a gate ran unless it actually ran" in text
+    for command in (
+        "python -m ruff check src tests scripts",
+        "python -m mypy src scripts",
+        "python -m pytest -q",
+        "python scripts/run_contract_checklist.py",
+        "python scripts/smoke_profiles.py",
+        "python scripts/smoke_mcp_protocol.py",
+    ):
+        assert command in testing
+
+    assert "credentials_accessed=false" in experience
+    assert "--allow-live-account" in experience
+    assert "verification.status=verified" in experience
+    assert "Do not encode a volatile passing-test number" in testing

@@ -20,7 +20,7 @@ The project already has a broad usable surface:
 
 ### Compact History Mapping Compatibility
 
-The compact `history` list/read paths previously assumed upstream records were attribute objects. Mapping-backed chats could render as `Untitled` with blank IDs, and mapping-backed turns could render as `unknown` with empty text. Use the shared history accessors for both object and mapping inputs.
+The compact `history` list/read paths previously assumed upstream records were attribute objects. Mapping-backed chats could render as `Untitled` with blank IDs, and mapping-backed turns could render as `unknown` with empty text. The client facade now adapts mapping-backed history values once while preserving mapping semantics and the original client identity.
 
 ### Volatile README Test Count
 

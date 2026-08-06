@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import tomllib
 from pathlib import Path
 
@@ -120,3 +121,10 @@ def test_public_onboarding_docs_do_not_depend_on_the_broken_release_url() -> Non
     assert "releases/download/v1.3.0" not in combined
     assert combined.count(CANONICAL_GIT_SOURCE) >= len(paths)
     assert "commit SHA" in combined
+
+
+def test_public_readme_badges_do_not_hardcode_volatile_test_counts() -> None:
+    for path in (PROJECT_ROOT / "README.md", PROJECT_ROOT / "README.zh-CN.md"):
+        text = path.read_text(encoding="utf-8")
+        assert "tests-CI%20verified" in text
+        assert re.search(r"tests-[0-9]+", text) is None
