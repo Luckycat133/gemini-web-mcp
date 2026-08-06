@@ -119,4 +119,6 @@ def test_development_skill_names_the_maintained_validation_and_experience_paths(
     assert "credentials_accessed=false" in experience
     assert "--allow-live-account" in experience
     assert "verification.status=verified" in experience
+    assert "REVIEWED_SHA=replace-with-reviewed-40-character-commit" in experience
+    assert "<reviewed-sha>" not in experience
     assert "Do not encode a volatile passing-test number" in testing
