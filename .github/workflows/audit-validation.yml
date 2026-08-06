@@ -1,0 +1,108 @@
+name: Audit Validation
+
+on:
+  push:
+    branches:
+      - agent/audit-experience-and-refresh-skill
+
+permissions:
+  contents: read
+
+env:
+  GEMINI_AUTO_REFRESH: "false"
+  PIP_DISABLE_PIP_VERSION_CHECK: "1"
+
+jobs:
+  tests:
+    name: Complete tests / Python ${{ matrix.python-version }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+      - run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[all,dev]"
+      - run: python -m pytest -q
+
+  quality-protocol:
+    name: Static, contracts, profiles, and MCP stdio
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[all,dev]"
+      - run: python -m ruff check src tests scripts
+      - run: python -m mypy src scripts
+      - run: python scripts/run_contract_checklist.py
+      - run: python scripts/smoke_profiles.py
+      - run: python scripts/smoke_mcp_protocol.py
+
+  skills:
+    name: Development Skill validation and direct install
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[all,dev]"
+          python -m pip install "skills-ref @ git+https://github.com/agentskills/agentskills.git@38a2ff82958afee88dadf4831509e6f7e9d8ef4e#subdirectory=skills-ref"
+      - run: |
+          skills-ref validate .agents/skills/gemini-web-mcp-development
+          skills-ref validate .codex/skills/gemini-web-mcp-development
+          skills-ref validate .agents/skills/gemini-web-mcp
+          skills-ref validate .codex/skills/gemini-web-mcp
+          diff -ru .agents/skills/gemini-web-mcp-development .codex/skills/gemini-web-mcp-development
+          diff -ru .agents/skills/gemini-web-mcp .codex/skills/gemini-web-mcp
+      - run: |
+          mkdir -p "$RUNNER_TEMP/development-skill-install"
+          cd "$RUNNER_TEMP/development-skill-install"
+          npx --cache "$RUNNER_TEMP/npm-cache" --yes skills@1.5.21 add "$GITHUB_WORKSPACE" --skill gemini-web-mcp-development --agent codex --copy --yes
+          diff -ru "$GITHUB_WORKSPACE/.agents/skills/gemini-web-mcp-development" .agents/skills/gemini-web-mcp-development
+      - run: python -m pytest -q tests/test_development_skill.py tests/test_skill_packaging.py
+
+  package:
+    name: Build, isolated onboarding, and clean-wheel smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[all,dev]"
+      - run: python scripts/package_release.py --outdir dist
+      - run: python scripts/check_version_consistency.py --artifacts-dir dist
+      - uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b
+      - working-directory: ${{ runner.temp }}
+        run: uvx --from "$GITHUB_WORKSPACE"/dist/*.whl gemini-mcp-onboarding
+      - run: |
+          python -m venv "$RUNNER_TEMP/gemini-wheel-smoke"
+          "$RUNNER_TEMP/gemini-wheel-smoke/bin/python" -m pip install --upgrade pip
+          "$RUNNER_TEMP/gemini-wheel-smoke/bin/python" -m pip install dist/*.whl
+          "$RUNNER_TEMP/gemini-wheel-smoke/bin/python" -m pip check
+          cd "$RUNNER_TEMP"
+          "$RUNNER_TEMP/gemini-wheel-smoke/bin/python" "$GITHUB_WORKSPACE/scripts/smoke_installed_wheel.py"
+          "$RUNNER_TEMP/gemini-wheel-smoke/bin/python" "$GITHUB_WORKSPACE/scripts/smoke_profiles.py"
+          "$RUNNER_TEMP/gemini-wheel-smoke/bin/python" "$GITHUB_WORKSPACE/scripts/smoke_mcp_protocol.py"
