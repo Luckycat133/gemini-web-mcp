@@ -104,6 +104,7 @@ def test_profile_snapshot_smoke_passes_from_the_installed_environment() -> None:
 def test_ci_workflow_has_separate_diagnostic_offline_gates() -> None:
     workflow = CI_WORKFLOW.read_text(encoding="utf-8")
 
+    assert 'branches: [main, "agent/**"]' in workflow
     for job in ("lint", "type", "test", "contracts", "protocol", "skills", "package"):
         assert re.search(rf"^  {job}:$", workflow, re.MULTILINE)
     for command in (
