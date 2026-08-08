@@ -68,6 +68,9 @@ Use this skill only to operate the installed primary or low-token MCP server. Fo
    - `gemini_notebooks(action="chats", notebook_id=...)`
 6. Delete only with explicit confirmation:
    - `gemini_delete_chat(chat_id=...)`
+   - Claim deletion only when `_meta.domain_result.data.deleted=true` and
+     `verification.status=verified_absent`; this requires a complete fresh history-metadata read-back.
+     `not_available` means accepted but unverified, and `read_chat(None)` alone is never absence proof.
 
 ## Web Pro Coverage Rules
 
@@ -91,6 +94,7 @@ Use this skill only to operate the installed primary or low-token MCP server. Fo
 
 - Use observed daily create, registry list, by-id get, and explicit delete by id through `gemini_create_scheduled_action`, `gemini_list_scheduled_actions`, `gemini_get_scheduled_action`, and `gemini_delete_scheduled_action`.
 - Refresh Chrome cookies first when account context matters. If the registry is unexpectedly empty, call `gemini_list_browser_cookie_profiles`, then `gemini_get_cookie_from_browser(profile="...")` for the profile with Gemini cookies or scheduled registry entries.
+- On macOS, treat `BROWSER_COOKIE_ACCESS_TIMEOUT` as a local Keychain authorization/timeout problem, not an invalid-account result. Adjust `GEMINI_BROWSER_COOKIE_TIMEOUT_SECONDS` only when the user controls that host; never request or print Cookie values.
 - After create/delete, check `verification_status`; after create also check `readable_by_id_after_create`, and after delete check `deleted_by_id_after_delete` or `task_state_after_delete=deleted` before claiming the task is gone.
 
 ## Operational Verification

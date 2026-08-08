@@ -66,6 +66,8 @@
 | Gem 管理 | ✅ 自定义助手管理 |
 | MCP 评估 | ✅ 17 个只读 contract-level QA |
 | Agent Skills | ✅ 运行时/开发 skill 分离，`.agents/skills` 为唯一仓库来源 |
+| History 结果 | ✅ primary/compact 的 list/search/read/export/delete 共用 typed service；delete 区分已验证与仅接受 |
+| 浏览器 Cookie | ✅ 不输出 Cookie 值；macOS Keychain 等待有可配置超时 |
 | 分发资料 | ✅ `docs/launch-kit.md` |
 
 路线图不是全部完成状态；当前剩余边界见 [开发状态与下一步](./development-status.md)。

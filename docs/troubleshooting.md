@@ -39,6 +39,17 @@ gemini_doctor
 - Chrome 必须处于关闭状态，或允许其他进程读取其 Cookie 数据库（部分系统会锁文件）
 - macOS 上可能需要在"系统设置 → 隐私与安全 → 完全磁盘访问"里授权终端
 
+### 症状：`BROWSER_COOKIE_ACCESS_TIMEOUT`
+
+这表示 macOS Keychain 没有在限定时间内返回 Chrome Safe Storage 密钥，不表示账号无效。
+
+1. 查找并处理 macOS 的 Keychain 授权提示。
+2. 确认发起 MCP 的宿主进程有完全磁盘访问权限。
+3. 需要更长授权时间时，临时提高 `GEMINI_BROWSER_COOKIE_TIMEOUT_SECONDS`（默认 15，最大 120）。
+4. 仍无法读取时，按 [Cookie 获取指南](./cookie-setup.md) 手动注入，不要绕过 Keychain。
+
+超时会返回脱敏错误并恢复 `browser-cookie3` 的原函数；不应再让 MCP 调用无限挂起。
+
 ---
 
 ## 连接与网络
@@ -138,6 +149,7 @@ mcp dev src/server.py
 ### 症状：删除 / 定时操作"成功"但实际没生效
 
 - `gemini_delete_chat`、`gemini_delete_scheduled_action` 是 destructive 操作，确认调用前看清 `destructiveHint`
+- `gemini_delete_chat` 只有在 `data.deleted=true` 且 `verification.status=verified_absent` 时才证明聊天已消失；`not_available` 只是请求已返回
 - 定时操作的 `verification_status` 区分"RPC 已接受"和"registry 已验证"——前者可能最终不落库
 - 用对应的 get/list 工具二次校验，别只信 create/delete 的返回
 

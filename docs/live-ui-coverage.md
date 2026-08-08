@@ -51,7 +51,7 @@ NotebookLM, help/feedback, and location entries.
 | Chat history search | Covered | `gemini_history(action="search")` searches titles/IDs by default and only scans turn text when `scan_turns=true` |
 | Chat history reading | Covered | `gemini_history(action="read")` reads a specific chat by ID |
 | Chat history export | Covered | `gemini_history(action="export")` exports one selected chat as Markdown or JSON |
-| Chat deletion | Covered | `gemini_delete_chat` maps to the installed client's `delete_chat` |
+| Chat deletion | Covered with explicit evidence state | `gemini_delete_chat` requests deletion, then reports `verified_absent`, `not_available`, `still_present`, or `read_back_error`; only positive absence is verified deletion |
 | Native Gemini Notebooks | Covered in part | `gemini_notebooks(action="list|chats")` is the recommended read-only facade; granular tools remain available in `all/manage`, and `gemini_move_chat_to_notebook` moves existing chats with verification; notebook create/delete/source mutation remains disabled except for observed source helpers |
 | Library capability/templates | Covered in part | `gemini_list_library_capabilities` parses observed `cYRIkd` capability entries |
 | Library assets | Probe covered | `gemini_probe_web_features(surface="library")` checks observed `sJBwce` and `VxUbXb`; no stable asset list wrapper yet |

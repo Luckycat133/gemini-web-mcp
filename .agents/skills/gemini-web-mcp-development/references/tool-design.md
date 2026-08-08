@@ -109,7 +109,7 @@ Then use an MCP client to run, in order:
 5. local file analysis;
 6. URL analysis;
 7. Deep Research with both wait and start-only modes;
-8. history list/search/read/export;
+8. history list/search/read/export, followed by a marked temporary chat deletion when authorized;
 9. a disposable Gem or scheduled-action mutation with read-back;
 10. cleanup of all marked artifacts.
 
@@ -125,7 +125,7 @@ For every result check:
 - lifecycle and cleanup state;
 - whether text agrees with structured content.
 
-For video/audio, play the artifact. For files, open the saved path. For history or mutations, read back the authoritative state. For long operations, verify that a timeout still leaves enough information to recover later.
+For video/audio, play the artifact. For files, open the saved path. For history or mutations, read back the authoritative state. A chat deletion is verified only when complete fresh history-metadata pagination produces `verification.status=verified_absent` and `data.deleted=true`; `read_chat(None)`, accepted-but-unverified, still-present, and read-back-error results are not proof of deletion. For long operations, verify that a timeout still leaves enough information to recover later.
 
 ## 7. Record Friction as Product Evidence
 

@@ -10,11 +10,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- Added shared typed history list/read results across primary and compact adapters, including one-time object/mapping normalization while preserving existing compatibility text
+- Added shared typed history list/search/read/export/delete results across primary and compact adapters, including one-time object/mapping normalization while preserving compatibility text
+- Added chat-delete read-back states for verified absence, unavailable verification, still-present records, and read-back errors; only a complete fresh recent/pinned metadata scan can prove absence
 - Added a dated development status page that separates implemented repository contracts, partial work, unobserved live behavior, deferred UI parity, and owner decisions
 
 ### Changed
 - Made `.agents/skills` the single repository skill source and updated CI, release, packaging, and documentation checks to install and validate that source directly
+- Changed chat deletion so an accepted upstream call without read-back evidence is reported as accepted/unverified instead of verified success
+- Stopped treating `read_chat(None)` as deletion proof because the dependency also uses `None` for incomplete or failed reads
+- Updated the GitHub repository description and public launch copy to match the MCP Python SDK v2, agent-first gateway architecture
 
 ### Removed
 - Removed duplicate `.codex/skills` copies that caused clients scanning both discovery roots to list the runtime and development skills twice
@@ -22,6 +26,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - Made the compact stdio protocol smoke call the auth-free static account manifest instead of browser-profile doctor diagnostics, preventing macOS Keychain prompts in offline verification
 - Made `GEMINI_AUTO_REFRESH=false` skip the Cookie monitor thread instead of starting an idle background monitor during offline and CI runs
+- Bounded `browser-cookie3` macOS Keychain waits, restored the dependency reader after each call, and returned a sanitized `BROWSER_COOKIE_ACCESS_TIMEOUT` instead of hanging indefinitely
 
 ### Public Distribution and Onboarding
 - Added `gemini-mcp-onboarding`: its default command installs/runs cleanly without Gemini credentials, launches the real stdio server, negotiates MCP, and calls the static text manifest; live chat and image examples require `--allow-live-account`
@@ -30,7 +35,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Replaced broken fixed wheel onboarding URLs with the current Git source path (and commit-pinning guidance), while retaining version checks for any tagged wheel URL that is documented
 - Separated the runtime and repository-development skills, documented one-command installation for both, and added CI verification that the development skill installs directly from the repository
 - Added clean `uvx` wheel onboarding smoke coverage to CI and tag releases plus offline config, credential-boundary, stdio, artifact, package, and distribution contracts
-- The complete offline suite passes 1340 tests; all evidence in this phase is offline/fixture/package based, and no live Gemini account or backend behavior was observed
+- All evidence in this phase is offline/fixture/package based unless a dedicated live-canary report is explicitly cited; no current live Gemini account or backend behavior is inferred from CI
+- For this unreleased change set, no live Gemini account or backend behavior was observed; the Chrome probe only established a local sanitized Keychain timeout
 
 ### Live Gemini Web Compatibility Canary
 - Added a separately gated weekly/manual workflow for a dedicated test account; PR, unit, package, protocol, and release gates remain offline

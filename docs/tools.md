@@ -131,8 +131,8 @@
 
 当前覆盖 primary 的 `gemini_chat*`、`gemini_start_chat`、`gemini_send_message*`、
 `gemini_list_sessions`、`gemini_reset_session`、`gemini_reset`、媒体、文件/URL 分析和 research
-report 本地产物，以及 compact 的 `chat`、`session`、`create`、`edit`。未迁移工具仍以现有文本
-契约为准。
+report 本地产物；history 的 list/search/read/export/delete 也在 primary 与 compact 之间共享同一
+`DomainResult`。`gemini_scan_chat_history_sources` 和其他未迁移管理工具仍以现有文本契约为准。
 
 从 P0.4 起，primary 与 compact 的聊天、创建会话和会话发送都调用同一个应用服务。
 工具名、参数和原有正文保持兼容；两个入口的差别（例如 compact 不向上游传 `gem` / `temporary`）
@@ -406,7 +406,9 @@ Gemini 私有 mutation RPC。
 `src/infrastructure/rpc_contracts.py`；handler 不再内嵌私有 RPC 常量。history、account、Notebook、
 scheduled、Gem、manifest 和 doctor 分别由 `src/services/` 中的模块承载，primary 与 compact
 只保留参数/文本适配。上游 body parser 会显式区分 `success`、`empty`、`rejected` 和
-`changed_shape`，避免把空响应或网页结构变化误报为正常结果。
+`changed_shape`，避免把空响应或网页结构变化误报为正常结果。history 的
+list/search/read/export/delete 已迁入同一个 service；其他管理域仍按 bounded slice 逐步迁移，
+不能把 adapter 文本相似当成语义共享。
 
 ### gemini_history
 
@@ -425,6 +427,9 @@ Gemini Web 历史对话只读聚合入口。推荐给 `GEMINI_TOOLS=history` 和
 `action=scan` 会枚举已观测历史来源和 notebook 对话；`action=read/export`
 会返回私人聊天文本，应只在用户明确指定目标后调用。
 
+`action=list/search/read/export` 的第一条内容带 `_meta.domain_result`。`scan` 目前仍是 primary
+专用的深度元数据聚合结果，尚未迁入该 typed history service。
+
 ### gemini_list_chats
 
 分页列出 Gemini Web 历史聊天元数据。
@@ -433,6 +438,9 @@ Gemini Web 历史对话只读聚合入口。推荐给 `GEMINI_TOOLS=history` 和
 - `limit`: int - 单页数量，最大 50
 - `offset`: int - 分页偏移
 - `response_format`: "markdown" | "json"
+
+结构化结果的 `count` / `offset` / `limit` 描述本次扫描的来源页，`match_count` 描述该页命中数。
+当前分页在过滤前应用，不是对全局匹配结果分页；`scan_turns=true` 也只读取当前来源页。
 
 ### gemini_scan_chat_history_sources
 
@@ -485,6 +493,23 @@ Gemini Web 历史对话只读聚合入口。推荐给 `GEMINI_TOOLS=history` 和
 - `limit`: int - 最多导出的 turn 数，最大 200
 - `max_chars_per_turn`: int - 单条 turn 最大字符数，最大 20000
 - `include_metadata`: bool - 是否附带标题、时间等元数据
+
+### gemini_delete_chat
+
+请求删除一个明确选定的 Gemini Web 历史对话。该操作不可逆，必须有显式用户确认。
+
+**参数：**
+- `chat_id`: str - 要删除的聊天 ID
+
+调用返回后会在客户端支持底层只读 RPC 时，完整分页刷新 canonical recent/pinned 历史元数据并检查目标 ID。
+`read_chat()` 返回 `None` 也可能表示读取失败或内容仍在生成，不能单独作为删除证据：
+
+- `verification.status=verified_absent` / `deleted=true`：回读确认聊天不存在；
+- `verification.status=not_available` / `deleted=null`：删除请求已返回，但客户端无法完成新鲜回读或分页达到安全上限；
+- `verification.status=still_present`：聊天仍可读取，结果以 `VERIFICATION_FAILED` 失败关闭；
+- `verification.status=read_back_error`：回读出错，结果以 `VERIFICATION_FAILED` 失败关闭。
+
+不要把 `operation_state=accepted` 或兼容正文中的“已请求”改写成“已删除”。
 
 ### gemini_cleanup_test_artifacts
 
@@ -652,13 +677,6 @@ JSON 输出包含 `verification_status`、`visible_after_delete`、`readable_by_
 `mode_id` 是 Gemini Web 内部数字枚举，可能随网页版本漂移；这个工具只做
 只读状态读取，不创建或发送任何工具模式请求。
 
-### gemini_delete_chat
-
-删除指定 Gemini Web 历史对话。
-
-**参数：**
-- `chat_id`: str - 要删除的聊天 ID
-
 ### gemini_inspect_account
 
 检查当前账号可用能力和 Web RPC 状态，并隐藏原始 RPC 预览。
@@ -760,6 +778,9 @@ create/update/delete 都会再次读取 Gem 列表。返回文本包含 `读回�
 - `validate`: bool - 是否初始化 Gemini 客户端验证账号与 scheduled registry (默认: true)
 - `response_format`: "markdown" | "json"
 
+macOS Keychain 读取由 `GEMINI_BROWSER_COOKIE_TIMEOUT_SECONDS` 限制，默认 15 秒。超时会返回
+`BROWSER_COOKIE_ACCESS_TIMEOUT`，不会无限阻塞工具，也不会在错误中包含 Cookie 值。
+
 当定时任务 create 返回 ID 但 list 的 registry 为空时，先调用这个工具，检查
 `chrome_selected_profile`、`chrome_selected_profile_directory`、`scheduled_registry_count`
 和 `account_available`，再用
@@ -772,6 +793,8 @@ create/update/delete 都会再次读取 Gem 列表。返回文本包含 `读回�
 **参数：**
 - `browser`: str - 浏览器类型 (默认: "chrome")
 - `profile`: str - Chrome profile 名称，可从 `gemini_list_browser_cookie_profiles` 获取
+
+该路径使用同一 macOS Keychain 超时。失败只表示当前进程未加载浏览器 Cookie；不要据此宣称账号无效。
 
 ---
 

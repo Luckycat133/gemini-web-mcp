@@ -22,6 +22,9 @@ export GEMINI_PSIDTS='your __Secure-1PSIDTS value'  # optional but recommended
 ```
 
 See [Cookie setup](cookie-setup.md) and run the offline preflight before a live call.
+Browser-based discovery on macOS bounds Keychain access to 15 seconds by default. Override
+`GEMINI_BROWSER_COOKIE_TIMEOUT_SECONDS` only when the host needs a different local timeout; a timeout is a diagnostic,
+not evidence that no matching browser profile exists.
 
 ## Copyable client configurations
 

@@ -52,6 +52,7 @@
 | 1.1 | 调 `gemini_doctor` | `cookie_status.has_cookie=true`、`tool_surface` 列出期望分组、`media_dependencies` 无缺失 |
 | 1.2 | 调 `gemini_get_cookie_status` | `status="ok"`、`source` 指向环境变量或浏览器 |
 | 1.3 | 调 `gemini_list_browser_cookie_profiles` | 列出 Chrome profile，`Default` 与 `Profile 1` 等；`has_psid` 至少一个为 true |
+| 1.3a | 在 macOS 拒绝/不响应 Keychain 授权并重试 profile list | 在 `GEMINI_BROWSER_COOKIE_TIMEOUT_SECONDS` 内返回 `BROWSER_COOKIE_ACCESS_TIMEOUT`；进程不挂起、响应无 Cookie 值 |
 | 1.4 | 删掉 `GEMINI_PSID`，重启，调 `gemini_doctor` | `cookie_status.status="missing"`，但工具不崩 |
 | 1.5 | 提供过期 `GEMINI_PSID`，调 `gemini_chat` | 返回明确的认证错误文本，不返回空字符串 |
 
@@ -172,13 +173,14 @@
 | 8.4 | `gemini_history(action="scan")` | 合并 `MaZiqc`、notebook、`GS7W1` 来源，不读 turn 正文 |
 | 8.5 | `gemini_history(action="read", chat_id=<某条>)` | 返回完整 turn 列表（私密文本，要确认用户意图） |
 | 8.6 | `gemini_history(action="export", chat_id=<某条>, response_format="json")` | 返回 JSON，结构完整 |
-| 8.7 | `gemini_delete_chat(chat_id=<测试 marker 聊天>)` | 删除成功；再 `gemini_history(action="search", query="manual-test-history")` 应返回 `match_count=0` |
+| 8.7 | `gemini_delete_chat(chat_id=<测试 marker 聊天>)` | 检查 `_meta.domain_result.data.verification`；只有 `verified_absent` / `deleted=true` 才可称删除成功，`not_available` 需继续搜索验证 |
 | 8.8 | 删除后调 `gemini_search_chats(query=marker)` | `match_count=0`（参照 [live-ui-coverage.md](./live-ui-coverage.md) 2026-06-20 E2E smoke test 的契约） |
+| 8.9 | 对同一 fixture 从 primary 与 compact 执行 list/search/read/export/delete | 两边 `domain_result.data` 语义一致；允许 request/observed 时间不同，兼容正文可不同 |
 
 **关键校验**：
 - `search` 默认 `scan_turns=false` 是隐私默认（单元测试 `test_chat_search_defaults_to_metadata_without_reading_turns` 验了形状）
 - `delete_chat` 是 destructive，必须有 `destructiveHint=True`（已验）
-- 删除是**不可逆**的，只能用测试 marker 聊天
+- 删除是**不可逆**的，只能用测试 marker 聊天；`operation_state=accepted` 不等于已验证删除
 
 ### 9. Notebook
 
@@ -252,6 +254,7 @@
 | 13.1 | 多账号 Chrome，`gemini_list_browser_cookie_profiles` | 列出所有 profile，`has_psid` 字段区分 |
 | 13.2 | `gemini_get_cookie_from_browser(profile="Profile 1")` 后 `gemini_doctor` | Cookie 切换成功，scheduled registry 可见性可能变化 |
 | 13.3 | 指定不存在的 profile | 明确错误 |
+| 13.4 | macOS 将 `GEMINI_BROWSER_COOKIE_TIMEOUT_SECONDS=0.1` 并不处理 Keychain 提示 | 快速返回脱敏 timeout；恢复正常超时值后后续调用仍能工作 |
 
 ### 14. 代理与网络
 

@@ -70,7 +70,7 @@ Recommended direction: keep the compact discovery experience, but move all execu
 Possible next feature tracks:
 
 - **Core multimodal reliability:** video/music/file/research onboarding, job recovery, artifact rendering, cross-client tests.
-- **Account workflows:** typed history/account/admin results, verified mutations, cleanup durability.
+- **Account workflows:** typed account/admin results, verified remaining mutations, cleanup durability.
 - **UI parity:** Drive picker, Canvas, richer scheduled actions, sharing/settings.
 
 Recommended priority: core multimodal reliability and agent task completion before broad UI parity.

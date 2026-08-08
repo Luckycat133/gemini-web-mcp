@@ -1,8 +1,9 @@
 # API Reference
 
 This reference documents the current MCP tool surface exposed by
-`src.server`. It reflects the actual `list_tools()` output after the
-2026-06-18 Gemini Web Pro UI alignment.
+`src.server`. It reflects the current checked-in `list_tools()` contract;
+dated Gemini Web observations are documented separately in
+[`live-ui-coverage.md`](./live-ui-coverage.md).
 
 ---
 
@@ -122,8 +123,8 @@ The Pro image redo control is a post-generation Gemini Web UI action.
 |------|---------|
 | `gemini_get_cookie_status` | Report current cookie/auth status |
 | `gemini_doctor` | Run safe preflight over tool groups, cookie status, browser profile alignment, and media verification dependencies |
-| `gemini_list_browser_cookie_profiles` | List local browser profile diagnostics without returning cookie values |
-| `gemini_get_cookie_from_browser` | Load Gemini cookies from Chrome, Firefox, Edge, or a selected Chrome profile |
+| `gemini_list_browser_cookie_profiles` | List local browser profile diagnostics without returning cookie values; macOS Keychain waits are bounded |
+| `gemini_get_cookie_from_browser` | Load Gemini cookies from Chrome, Firefox, Edge, or a selected Chrome profile, with the same bounded macOS Keychain access |
 | `gemini_reset` | Reset the Gemini client |
 
 ---
@@ -146,7 +147,7 @@ Adds these management tools to `core`:
 | `gemini_search_chats` | Search chat history metadata, optionally scanning turns when explicitly requested |
 | `gemini_read_chat` | Read turns from a specific Gemini Web chat |
 | `gemini_export_chat` | Export one Gemini Web chat as Markdown or JSON |
-| `gemini_delete_chat` | Delete a specific Gemini Web chat |
+| `gemini_delete_chat` | Request deletion of a specific chat and report verified-absent, unverified, still-present, or read-back-error state |
 | `gemini_cleanup_test_artifacts` | Dry-run or delete marked test chats and scheduled actions |
 | `gemini_probe_web_features` | Probe observed read-only RPC reachability for newer Web UI surfaces |
 | `gemini_list_public_links` | List public links returned by Gemini Web sharing surface |
@@ -171,6 +172,12 @@ destructive, idempotent, and open-world hints. `gemini_get_tool_manifest`
 provides a client-readable safety map for planning multi-step workflows, with
 `availability` and `current_enabled` fields so agents can distinguish known
 optional tools from tools enabled in the current `GEMINI_TOOLS` process.
+
+`gemini_list_chats`, `gemini_search_chats`, `gemini_read_chat`,
+`gemini_export_chat`, and `gemini_delete_chat` share the same typed history
+service used by the compact server. Their first text block exposes
+`_meta.domain_result`. Search pagination applies to the source page before
+filtering; deletion is only verified when read-back observes absence.
 
 ### `GEMINI_TOOLS=prompts`
 

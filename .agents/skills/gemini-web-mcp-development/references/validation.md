@@ -121,7 +121,7 @@ Use a dedicated non-personal account and record the exact commit, dependency ver
 5. video and music artifact state, URI/file, MIME, size, and duration when available;
 6. local file and URL analysis;
 7. Deep Research start, terminal/timeout state, preserved IDs, and report retrieval;
-8. history list/search/read/export and a marked temporary delete verification;
+8. history list/search/read/export and a marked temporary delete covering verified-absent versus unverified/error evidence;
 9. one reversible or disposable scheduled/Gem mutation with read-back;
 10. cleanup outcome and no untracked test artifacts.
 

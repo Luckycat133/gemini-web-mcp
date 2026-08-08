@@ -54,7 +54,7 @@ The maintained baseline already includes:
 - official MCP Python SDK v2 adapters and modern/legacy protocol smoke;
 - a profile-based primary server and an eleven-tool compact facade;
 - shared client/session/chat lifecycle services;
-- typed domain results for core chat, session, artifact, and long-operation paths;
+- typed domain results for core chat, session, artifact, long-operation, and shared history list/search/read/export/delete paths;
 - image, video, music, file, URL, and Deep Research workflows;
 - history, Notebook, scheduled-action, account, Gem, prompt, cookie, doctor, and cleanup surfaces;
 - centralized reverse-engineered RPC contracts and pure parsers;

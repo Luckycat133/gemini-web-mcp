@@ -20,7 +20,7 @@ which tools are actually registered in the current process.
 |---|---|---|
 | `gemini_reset_session` | core | Reset a local session and optionally delete its remote chat |
 | `gemini_cleanup_test_artifacts` | history | Find and optionally delete test chats/scheduled actions by marker |
-| `gemini_delete_chat` | history | Delete a remote Gemini Web chat |
+| `gemini_delete_chat` | history | Request remote chat deletion and report read-back evidence |
 | `gemini_delete_scheduled_action` | account | Delete a scheduled action by id |
 | `gemini_manage_gems` | gems | List/create/update/delete Gems (delete is destructive) |
 
@@ -91,6 +91,12 @@ Fewer, broader tools with `action` parameters. Same safety tiers apply.
 | `cookie` | `MUTATES_LOCAL` | `action="profiles"` read-only; `action="get"` writes local cookie file |
 | `doctor` | `READ_ONLY_LOCAL` | local preflight |
 | `cleanup` | `DESTRUCTIVE_REMOTE` | `dry_run=true` is safe; `dry_run=false` deletes |
+
+History list/search/read/export/delete share typed domain data across primary and compact surfaces. For deletion,
+`verified_absent` is the only positive deletion proof; `not_available` is accepted/unverified, while `still_present` and
+`read_back_error` are `VERIFICATION_FAILED` outcomes. Positive absence requires a complete fresh recent/pinned metadata
+read-back; `read_chat(None)` is inconclusive. Browser profile tools never return Cookie values, and macOS
+Keychain timeouts surface as `BROWSER_COOKIE_ACCESS_TIMEOUT`.
 
 ## Tool group selection (`GEMINI_TOOLS`)
 

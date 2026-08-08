@@ -21,9 +21,9 @@ not mean that the current Gemini Web deployment was observed. Live compatibility
 | Packaging and onboarding | Implemented | Wheel, source distribution, runtime skill zip, clean installation, and credential-free `uvx` onboarding are maintained gates. |
 | Agent Skill distribution | Implemented | Runtime and development skills have unique names under the single `.agents/skills` repository source. |
 | Chat, session, and artifact services | Implemented | Primary and compact adapters share core execution and typed results for these workflows. |
-| History typed results | Partial | List and read share one typed service; search, export, delete, and other history actions remain follow-up slices. |
+| History typed results | Partial | Primary/compact list, search, read, export, and delete share one typed service. The primary-only deep source scan remains prose-first. |
 | Account/admin typed results | Partial | Account, prompt, cookie, doctor, cleanup, scheduled, Notebook, and compatibility coverage remains uneven. |
-| Mutation verification | Partial | Gem mutations fail closed and several Notebook/scheduled paths use read-back, but every remote mutation has not completed the same audit. |
+| Mutation verification | Partial | Chat delete, Gem mutations, and several Notebook/scheduled paths now use read-back or explicitly report unverified acceptance, but every remote mutation has not completed the same audit. |
 | Live Gemini compatibility | Not observed for this change | The workflow exists, but the latest scheduled run was skipped; offline or fixture evidence does not establish current Web compatibility. |
 | Delayed cleanup | Partial | Retention and process-local cleanup exist, but delayed work is not durable across server restarts. |
 | Long-running operations | Partial | Media and Deep Research preserve queued/running/timed-out states and identifiers, but no shared `start/status/result/cancel` job API exists. |
@@ -38,8 +38,13 @@ The latest recorded live-canary run at the time of this update was
 - Removed duplicate `.codex/skills` copies and updated CI, release, packaging, and documentation references to use
   `.agents/skills` as the single source.
 - Added shared typed history list/read results with primary/compact parity and object/mapping normalization.
+- Extended that shared history service to search/export/delete. Delete now distinguishes verified absence, unavailable read-back,
+  a still-present chat, and read-back failure instead of equating an accepted call or ambiguous `read_chat(None)` with
+  verified deletion; positive absence requires a complete fresh recent/pinned metadata scan.
 - Made `GEMINI_AUTO_REFRESH=false` avoid starting the Cookie monitor thread.
 - Made offline compact protocol smoke use the auth-free static manifest instead of browser-profile diagnostics.
+- Bounded macOS `browser-cookie3` Keychain waits with `GEMINI_BROWSER_COOKIE_TIMEOUT_SECONDS`; timeout responses are
+  sanitized and the dependency function is restored after each access window.
 - Preserved product version `1.3.0`; no tag or release is part of this change set.
 
 ## Evidence Boundary
@@ -52,12 +57,14 @@ The current change set has local evidence from:
 - pinned Agent Skill validation plus direct repository installation;
 - clean Python 3.12 wheel installation, `pip check`, installed entrypoints, and offline onboarding.
 
-No live Gemini account, private chat content, media entitlement, or current Web RPC response was observed.
+No live Gemini account, private chat content, media entitlement, or current Web RPC response was observed. An authorized,
+local, value-free Chrome profile probe returned `BROWSER_COOKIE_ACCESS_TIMEOUT`; this is local Keychain evidence only and
+does not establish account validity or a dedicated live-canary account.
 
 ## Recommended Next Order
 
 1. Configure a dedicated test account and record a read-only live baseline.
-2. Continue one bounded typed-result slice at a time: remaining history actions, then account, prompt, cookie, doctor, and cleanup.
+2. Continue one bounded typed-result slice at a time: primary deep history scan, then account, prompt, cookie, doctor, and cleanup.
 3. Audit every remote mutation for positive read-back and honest partial states.
 4. Define one long-operation job contract for media and Deep Research.
 5. Decide cleanup durability and the canonical public version/release line.

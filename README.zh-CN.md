@@ -58,7 +58,7 @@
 
 ### 🔧 管理功能
 - Cookie 自动刷新
-- Cookie 浏览器自动获取
+- Cookie 浏览器自动获取；macOS Keychain 等待有超时上限，不会无限挂起
 - 智能错误处理
 
 ### 📦 Skill 分发
@@ -97,6 +97,9 @@ uvx --from git+https://github.com/Luckycat133/gemini-web-mcp@main gemini-mcp-onb
 pip install browser-cookie3
 ```
 然后使用 MCP 工具 `gemini_get_cookie_from_browser(browser="chrome")`
+
+macOS 首次读取可能弹出 Keychain 授权。默认最多等待 15 秒；未授权时返回脱敏错误，
+可通过 `GEMINI_BROWSER_COOKIE_TIMEOUT_SECONDS` 调整等待上限。
 
 ### 2. 配置 (Claude Desktop / 其他 MCP 客户端)
 
@@ -168,6 +171,7 @@ gemini-mcp-skill-server
 | GEMINI_PSIDTS | ❌ | Cookie __Secure-1PSIDTS | - |
 | GEMINI_PROXY | ❌ | 代理地址 | - |
 | GEMINI_AUTO_REFRESH | ❌ | 自动刷新 Cookie | true |
+| GEMINI_BROWSER_COOKIE_TIMEOUT_SECONDS | ❌ | macOS 浏览器 Cookie 读取等待 Keychain 的单次超时（秒） | 15 |
 | GEMINI_TOOLS | ❌ | 加载的工具组 | core |
 | GEMINI_CHAT_RETENTION_SECONDS | ❌ | 默认远端对话保留时间；到期自动删除，设为 0 表示尽快删除 | 1800 |
 
@@ -306,7 +310,7 @@ Gemini Web `学习辅导` 输入模式。
 - `gemini_search_chats`: 分页搜索历史对话标题/ID；显式 `scan_turns=true` 时才读取正文匹配
 - `gemini_read_chat`: 读取指定历史对话内容
 - `gemini_export_chat`: 将单个历史对话导出为 Markdown 或 JSON
-- `gemini_delete_chat`: 删除指定历史对话
+- `gemini_delete_chat`: 请求删除指定历史对话；只有完整刷新 recent/pinned 历史元数据并确认 ID 不可见时才报告 `verified_absent`，无新鲜回读能力时明确标为未验证
 - `gemini_cleanup_test_artifacts`: dry-run 或删除匹配显式 marker 的测试聊天/定时任务；`scan_turns=true` 时才读取正文
 - `gemini_probe_web_features`: 探测 Library、公开链接、用量、个性化、记忆导入等新版 Web 入口的只读 RPC 可达性
 - `gemini_list_public_links`: 列出“你的公开链接”页面返回的公开链接
@@ -328,8 +332,8 @@ Gemini Web `学习辅导` 输入模式。
 ### Cookie 管理
 - `gemini_doctor`: 只读预检工具组、Cookie 状态、浏览器 profile 对齐和媒体校验依赖，不输出 Cookie 值
 - `gemini_get_cookie_status`: 查看 Cookie 状态
-- `gemini_list_browser_cookie_profiles`: 列出本地浏览器 profile 诊断，包括 Chrome 当前选中 profile，不输出 Cookie 值
-- `gemini_get_cookie_from_browser`: 从浏览器或指定 profile 自动获取 Cookie
+- `gemini_list_browser_cookie_profiles`: 列出本地浏览器 profile 诊断，包括 Chrome 当前选中 profile，不输出 Cookie 值；Keychain 超时返回 `BROWSER_COOKIE_ACCESS_TIMEOUT`
+- `gemini_get_cookie_from_browser`: 从浏览器或指定 profile 自动获取 Cookie；受同一 Keychain 超时保护
 
 ### 管理工具
 - `gemini_reset`: 重置客户端
@@ -466,8 +470,9 @@ mcp dev src/server.py
 
 ## 📍 开发状态
 
-当前基线可用，但开发 skill 不是已经全部完成的功能清单。仍需完成当前 Gemini Web 的 live 兼容性证据、
-更多管理动作的 typed result、统一 mutation 读回验证、跨重启持久化 cleanup，以及共享的长任务 job API。
+当前基线可用，但开发 skill 不是已经全部完成的功能清单。history 的 list/search/read/export/delete 已在
+primary/compact 间共享 typed result，删除只有在回读确认后才算已验证。仍需完成当前 Gemini Web 的 live
+兼容性证据、其他管理动作的 typed result、跨重启持久化 cleanup，以及共享的长任务 job API。
 源码版本继续保持 `1.3.0`；由于历史上已经存在更高 tag，下一个公开版本线需要 owner 明确决定。
 
 完整的“已实现 / 部分完成 / 延后 / owner 决策”边界见

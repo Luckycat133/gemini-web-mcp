@@ -5,7 +5,7 @@
 <h1 align="center">Gemini Web MCP</h1>
 
 <p align="center">
-  A layered MCPServer and Codex skill for Gemini Web workflows.
+  An agent-first MCP Python SDK v2 gateway and skills for Gemini Web workflows.
 </p>
 
 <p align="center">
@@ -143,10 +143,11 @@ Use `model` as the primary starting profile for text-only work, `core` for multi
 
 ## Development Status
 
-The maintained baseline is usable, but the development skill is not a completed feature checklist. Remaining work includes
-live Gemini compatibility evidence, typed results for additional management actions, uniform mutation verification, durable
-cleanup, and a shared long-operation job contract. The source version remains `1.3.0`; the next public release line requires
-an explicit owner decision because higher historical tags already exist.
+The maintained baseline is usable, but the development skill is not a completed feature checklist. Primary and compact
+history list/search/read/export/delete now share typed results; a chat deletion is only called verified after positive
+absence evidence from a complete fresh history-metadata read-back. Remaining work includes live Gemini compatibility evidence, typed results for other management actions,
+durable cleanup, and a shared long-operation job contract. The source version remains `1.3.0`; the next public release line
+requires an explicit owner decision because higher historical tags already exist.
 
 See [Development status and next steps](docs/development-status.md) for the implemented, partial, deferred, and owner-decision
 boundaries. Offline CI or package success is not presented as current live Gemini behavior.
@@ -207,4 +208,4 @@ done
 
 ## Security Notes
 
-Do not commit `.env`, `cookies.json`, `prompts.json`, generated media, logs, or browser cookie material. Prefer `GEMINI_TOOLS=core` or narrower profiles unless the workflow requires account-level tools. Treat private chat text and destructive operations as explicit-user-intent actions.
+Do not commit `.env`, `cookies.json`, `prompts.json`, generated media, logs, or browser cookie material. Prefer `GEMINI_TOOLS=core` or narrower profiles unless the workflow requires account-level tools. Treat private chat text and destructive operations as explicit-user-intent actions. On macOS, browser-cookie access is bounded by `GEMINI_BROWSER_COOKIE_TIMEOUT_SECONDS` (15 seconds by default) so an unanswered Keychain request returns a sanitized error instead of hanging the MCP process.

@@ -51,9 +51,9 @@ GEMINI_TOOLS=model python -m src.server
 
 ## Product summary
 
-Gemini Web MCP gives MCP-compatible agents layered access to Gemini Web text, media, files, URLs, Deep Research, history, notebooks, scheduled actions, and account inventory. `model` is the narrow text starting point, `core` adds content and multimodal workflows, the compact server offers a fixed low-token facade, and `all` is reserved for maintenance verification.
+Gemini Web MCP is an agent-first MCP Python SDK v2 gateway and paired skill set for Gemini Web text, media, files, URLs, Deep Research, history, notebooks, scheduled actions, and account inventory. `model` is the narrow text starting point, `core` adds content and multimodal workflows, the compact server offers a fixed low-token facade, and `all` is reserved for maintenance verification.
 
-The runtime skill and development skill are deliberately separate. Media results preserve requested, effective, and observed backend fields and treat a deliverable as local only after file/MIME/size metadata verification.
+The runtime skill and development skill are deliberately separate. Shared history services keep primary and compact typed results aligned, destructive results distinguish accepted requests from positive read-back evidence, and media results preserve requested, effective, and observed backend fields while treating a deliverable as local only after file/MIME/size metadata verification.
 
 ## Copy templates
 
@@ -72,7 +72,7 @@ Repo: https://github.com/Luckycat133/gemini-web-mcp
 ### Show HN body
 
 ```text
-I built Gemini Web MCP, a Python MCPServer plus separate runtime and development skills for Gemini Web workflows.
+I built Gemini Web MCP, an agent-first MCP Python SDK v2 gateway plus separate runtime and development skills for Gemini Web workflows.
 
 The practical design is tool-surface control: model for text, core for multimodal content, a fixed compact facade when token cost matters, and all only for maintenance. Structured media results distinguish expected routing from observed backend evidence and verify local artifacts independently from response prose.
 
