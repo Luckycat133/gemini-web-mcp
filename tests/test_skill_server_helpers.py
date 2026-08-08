@@ -674,16 +674,15 @@ def test_history_search_matches_by_id(monkeypatch):
 def test_history_search_scan_turns_collects_snippets(monkeypatch):
     """scan_turns=True 时读 turn 并匹配 query，命中收集 snippet。"""
     chat_item = SimpleNamespace(title="X", cid="c_1")
-    client = SimpleNamespace(list_chats=lambda: [chat_item], read_chat=AsyncMock())
-
-    async def fake_read_turns(_client, _cid, _limit, _max_chars):
-        return None, [{"role": "user", "text": "findme here"}]
-
-    monkeypatch.setattr(skill_server, "_read_chat_turns", fake_read_turns)
-    monkeypatch.setattr(skill_server, "_chat_to_dict",
-                        lambda c: {"id": getattr(c, "cid", ""), "title": getattr(c, "title", "")})
-    monkeypatch.setattr(skill_server, "_turn_matches_query",
-                        lambda turn, q: "findme" in turn["text"])
+    client = SimpleNamespace(
+        list_chats=lambda: [chat_item],
+        read_chat=AsyncMock(
+            return_value=SimpleNamespace(
+                cid="c_1",
+                turns=[SimpleNamespace(role="user", text="findme here")],
+            )
+        ),
+    )
     _patch_client_seams(monkeypatch, client)
     result = _run(skill_server.history(action="search", query="findme", scan_turns=True))
     assert "turn 1 user" in result[0].text
@@ -746,19 +745,17 @@ def test_history_export_requires_read_chat(monkeypatch):
 
 
 def test_history_export_renders_markdown(monkeypatch):
-    client = SimpleNamespace(read_chat=AsyncMock())
-
-    async def fake_read_turns(_client, _cid, _limit, _max_chars):
-        return None, [{"role": "user", "text": "t1"}]
-
-    monkeypatch.setattr(skill_server, "_read_chat_turns", fake_read_turns)
-    monkeypatch.setattr(skill_server, "_chat_export_payload",
-                        lambda cid, h, t, m, _limit, mc: {"id": cid, "turns": len(t)})
-    monkeypatch.setattr(skill_server, "_format_chat_export_markdown",
-                        lambda p: f"EXPORT {p['id']} turns={p['turns']}")
+    client = SimpleNamespace(
+        read_chat=AsyncMock(
+            return_value=SimpleNamespace(
+                cid="c_1",
+                turns=[SimpleNamespace(role="user", text="t1")],
+            )
+        )
+    )
     _patch_client_seams(monkeypatch, client)
     result = _run(skill_server.history(action="export", chat_id="c_1"))
-    assert result[0].text == "EXPORT c_1 turns=1"
+    assert result[0].text == "## Gemini Chat Export: c_1\nChat ID: c_1\nTurns: 1\n\n### 1. user\nt1"
 
 
 def test_history_delete_requires_chat_id(monkeypatch):
@@ -777,7 +774,7 @@ def test_history_delete_calls_delete_chat(monkeypatch):
     client = SimpleNamespace(delete_chat=AsyncMock())
     _patch_client_seams(monkeypatch, client)
     result = _run(skill_server.history(action="delete", chat_id="c_1"))
-    assert result[0].text == "Deleted: c_1"
+    assert result[0].text == "Delete requested: c_1 (not independently verified)"
     client.delete_chat.assert_awaited_once_with("c_1")
 
 
@@ -1691,24 +1688,20 @@ def test_cleanup_happy_path(monkeypatch):
 
 
 def test_history_export_with_list_chats_match(monkeypatch):
-    """export 时 list_chats 命中 chat_id → 用 _chat_to_dict 作为 metadata（lines 398-401）。"""
+    """export 时 list_chats 命中 chat_id → 共享 service 规范化 metadata。"""
     chat_item = SimpleNamespace(title="Matched", cid="c_1")
-    client = SimpleNamespace(list_chats=lambda: [chat_item], read_chat=AsyncMock())
-
-    async def fake_read_turns(_client, _cid, _limit, _max_chars):
-        return None, [{"role": "user", "text": "t"}]
-
-    monkeypatch.setattr(skill_server, "_read_chat_turns", fake_read_turns)
-    monkeypatch.setattr(skill_server, "_chat_to_dict",
-                        lambda c: {"id": getattr(c, "cid", ""), "title": getattr(c, "title", "")})
-    monkeypatch.setattr(skill_server, "_get_chat_id", lambda c: getattr(c, "cid", ""))
-    monkeypatch.setattr(skill_server, "_chat_export_payload",
-                        lambda cid, h, t, m, _limit, mc: {"meta": m, "turns": len(t)})
-    monkeypatch.setattr(skill_server, "_format_chat_export_markdown",
-                        lambda p: f"meta_title={p['meta']['title']}")
+    client = SimpleNamespace(
+        list_chats=lambda: [chat_item],
+        read_chat=AsyncMock(
+            return_value=SimpleNamespace(
+                cid="c_1",
+                turns=[SimpleNamespace(role="user", text="t")],
+            )
+        ),
+    )
     _patch_client_seams(monkeypatch, client)
     result = _run(skill_server.history(action="export", chat_id="c_1"))
-    assert result[0].text == "meta_title=Matched"
+    assert result[0].text.startswith("## Gemini Chat Export: Matched")
 
 
 def test_cookie_status_happy_path(monkeypatch):
@@ -1753,6 +1746,23 @@ def test_cookie_profiles_empty(monkeypatch):
                         lambda browser, validate: [])
     result = _run(skill_server.cookie(action="profiles"))
     assert result[0].text == "No profiles"
+
+
+def test_cookie_profiles_preserves_sanitized_timeout_code(monkeypatch):
+    monkeypatch.setattr(
+        skill_server,
+        "list_browser_cookie_profiles",
+        lambda browser, validate: [
+            {
+                "error": "Browser cookie access timed out while waiting for macOS Keychain.",
+                "error_code": "BROWSER_COOKIE_ACCESS_TIMEOUT",
+            }
+        ],
+    )
+
+    result = _run(skill_server.cookie(action="profiles"))
+
+    assert "BROWSER_COOKIE_ACCESS_TIMEOUT" in result[0].text
 
 
 def test_cookie_invalid_action(monkeypatch):

@@ -135,11 +135,17 @@ def test_format_doctor_markdown_browser_disabled():
 def test_format_doctor_markdown_error_profile_entry():
     """browser_profiles 含 error → 渲染 'error=...'。"""
     payload = _minimal_payload(browser_profiles=[
-        {"browser": "chrome", "profile": None, "error": "RuntimeError: boom"},
+        {
+            "browser": "chrome",
+            "profile": None,
+            "error": "Keychain timeout",
+            "error_code": "BROWSER_COOKIE_ACCESS_TIMEOUT",
+        },
     ])
     text = _format_doctor_markdown(payload)
     assert "### Browser Profiles" in text
-    assert "chrome: error=RuntimeError: boom" in text
+    assert "chrome: error=Keychain timeout" in text
+    assert "BROWSER_COOKIE_ACCESS_TIMEOUT" in text
 
 
 def test_format_doctor_markdown_account_available_none_renders_unvalidated():

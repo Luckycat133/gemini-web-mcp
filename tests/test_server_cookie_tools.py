@@ -109,7 +109,7 @@ def test_list_browser_cookie_profiles_empty(monkeypatch):
 def test_list_browser_cookie_profiles_with_error_entry(monkeypatch):
     """含 error 的 profile → 渲染 'error: ...' 并 continue。"""
     monkeypatch.setattr(server, "list_browser_cookie_profiles", lambda b, validate=True: [
-        {"error": "Cookie Manager unavailable"},
+        {"error": "Cookie Manager unavailable", "error_code": "BROWSER_COOKIE_ACCESS_TIMEOUT"},
     ])
 
     async def run():
@@ -117,6 +117,7 @@ def test_list_browser_cookie_profiles_with_error_entry(monkeypatch):
 
     result = asyncio.run(run())
     assert "error: Cookie Manager unavailable" in result[0].text
+    assert "BROWSER_COOKIE_ACCESS_TIMEOUT" in result[0].text
 
 
 def test_list_browser_cookie_profiles_normal_entry_renders_all_fields(monkeypatch):

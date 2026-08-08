@@ -577,10 +577,10 @@ def test_delete_chat_top_level_exception(monkeypatch):
 
 
 def test_delete_chat_happy_path(monkeypatch):
-    """delete_chat 成功 → '✅ 已删除聊天: {chat_id}'。"""
+    """delete_chat 返回但无 read-back 能力 → 明确报告已请求但未验证。"""
     client = _DeleteChatClient()
     _patch_seams(monkeypatch, client)
     mcp = _make_mcp()
     result = _run(_call(mcp, "gemini_delete_chat", chat_id="chat_1"))
-    assert result[0].text == "✅ 已删除聊天: chat_1"
+    assert result[0].text == "已请求删除聊天 chat_1；当前客户端无法独立回读验证。"
     assert client.delete_calls == ["chat_1"]

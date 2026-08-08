@@ -1368,7 +1368,7 @@ def test_skill_server_account_and_history_tools(monkeypatch):
         assert "hello" in export_result[0].text
 
         delete_result = await skill_server.history("delete", chat_id="c_1")
-        assert "Deleted: c_1" in delete_result[0].text
+        assert "Deleted and verified absent: c_1" in delete_result[0].text
 
         cleanup_result = await skill_server.cleanup(markers="Chat one", target="chats", dry_run=True)
         assert "Gemini Test Artifact Cleanup" in cleanup_result[0].text
@@ -1628,7 +1628,7 @@ def test_account_and_chat_management_tools_use_current_webapi_contract(monkeypat
         assert "world" in read_text
 
         delete_result = await mcp.call_tool("gemini_delete_chat", {"chat_id": "c_latest"})
-        assert "已删除聊天" in _tool_text(delete_result)
+        assert "已请求删除聊天 c_latest；当前客户端无法独立回读验证。" in _tool_text(delete_result)
 
     asyncio.run(run())
     assert deleted == ["c_latest"]

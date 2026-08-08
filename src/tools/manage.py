@@ -48,8 +48,11 @@ from ..services.gems import (
 )
 from ..services.history import (
     conversation_history_payload as registered_conversation_history_payload,
+    delete_chat_result,
+    export_chat_result,
     list_chats_result,
     read_chat_result,
+    search_chats_result,
 )
 from ..services.manifest import (
     _current_enabled_manifest_groups,
@@ -946,6 +949,7 @@ def _doctor_payload(browser: str = "chrome", validate_browser: bool = False) -> 
                         "account_available": item.get("account_available"),
                         "scheduled_registry_count": item.get("scheduled_registry_count"),
                         "error": item.get("error"),
+                        "error_code": item.get("error_code"),
                     }
                 )
         except Exception as e:
@@ -1069,7 +1073,8 @@ def _format_doctor_markdown(payload: dict[str, Any]) -> str:
         lines.extend(["", "### Browser Profiles"])
         for item in payload["browser_profiles"]:
             if item.get("error"):
-                lines.append(f"- {item.get('profile') or item.get('browser')}: error={item['error']}")
+                error_code = f" [{item['error_code']}]" if item.get("error_code") else ""
+                lines.append(f"- {item.get('profile') or item.get('browser')}: error={item['error']}{error_code}")
                 continue
             selected = "yes" if item.get("chrome_selected_profile") else "no"
             account = item.get("account_available")
@@ -1638,10 +1643,23 @@ def register_manage_tools(mcp: MCPServer, layers: list[str] | set[str] | tuple[s
         await initialize_client()
 
         needle = (query or "").strip()
-        if not needle:
-            return [TextContent(type="text", text="❌ 搜索聊天需要提供 query。")]
-        if scan_turns and not hasattr(client, "read_chat"):
-            return [TextContent(type="text", text="❌ 当前 gemini-webapi 不支持正文搜索需要的 read_chat。")]
+        if not needle or (scan_turns and not hasattr(client, "read_chat")):
+            result = await search_chats_result(
+                client,
+                [],
+                needle,
+                limit,
+                offset,
+                scan_turns=scan_turns,
+                turns_per_chat=turns_per_chat,
+                max_chars_per_turn=max_chars_per_turn,
+            )
+            fallback = (
+                "❌ 搜索聊天需要提供 query。"
+                if not needle
+                else "❌ 当前 gemini-webapi 不支持正文搜索需要的 read_chat。"
+            )
+            return domain_text(result, fallback)
 
         try:
             safe_limit = _clamp_int(limit, default=10, minimum=1, maximum=50)
@@ -1651,68 +1669,26 @@ def register_manage_tools(mcp: MCPServer, layers: list[str] | set[str] | tuple[s
             else:
                 chats = [_chat_to_dict(chat) for chat in client.list_chats() or []]
                 diagnostic = {"source": "client_cache", "fetched_count": len(chats), "has_remote_more": False}
-            page, pagination = _paginate_items(chats, safe_limit, safe_offset, max_limit=50)
-            if diagnostic.get("has_remote_more") and not pagination["has_more"]:
-                pagination["has_more"] = True
-                pagination["next_offset"] = pagination["offset"] + pagination["count"]
             safe_turn_limit = _clamp_int(turns_per_chat, default=20, minimum=1, maximum=50)
             safe_chars = _clamp_int(max_chars_per_turn, default=1000, minimum=100, maximum=4000)
-            matches: list[dict[str, Any]] = []
-            lowered = needle.lower()
-
-            for chat in page:
-                item = chat if isinstance(chat, dict) else _chat_to_dict(chat)
-                fields: list[str] = []
-                snippets: list[dict[str, Any]] = []
-                if lowered in item["title"].lower():
-                    fields.append("title")
-                if item["id"] and lowered in item["id"].lower():
-                    fields.append("id")
-
-                if scan_turns:
-                    try:
-                        _history, turns = await _read_chat_turns(
-                            client,
-                            item["id"],
-                            safe_turn_limit,
-                            safe_chars,
-                        )
-                    except Exception as e:
-                        snippets.append({"error": f"{type(e).__name__}: {e}"})
-                        turns = []
-                    for idx, turn in enumerate(turns, 1):
-                        if _turn_matches_query(turn, needle):
-                            fields.append("turn")
-                            snippets.append(
-                                {
-                                    "turn_index": idx,
-                                    "role": turn["role"],
-                                    "text": _truncate(turn["text"], safe_chars),
-                                }
-                            )
-
-                if fields:
-                    match = {
-                        **item,
-                        "matched_fields": sorted(set(fields)),
-                    }
-                    if snippets:
-                        match["snippets"] = snippets[:5]
-                    matches.append(match)
-
-            payload = {
-                "query": needle,
-                "scan_turns": scan_turns,
-                "scanned_count": len(page),
-                "match_count": len(matches),
-                **pagination,
-                "matches": matches,
-                "diagnostic": diagnostic,
-                "note": "正文搜索只会在 scan_turns=true 时读取当前页聊天内容。",
-            }
+            result = await search_chats_result(
+                client,
+                chats,
+                needle,
+                safe_limit,
+                safe_offset,
+                scan_turns=scan_turns,
+                turns_per_chat=safe_turn_limit,
+                max_chars_per_turn=safe_chars,
+                diagnostic=diagnostic,
+                max_limit=50,
+            )
+            assert result.data is not None
+            payload = result.data
+            matches = payload["matches"]
 
             if response_format == "json":
-                return _json_response(payload)
+                return attach_domain_result(_json_response(payload), result, use_result_data=True)
 
             lines = [
                 "## Gemini 历史搜索",
@@ -1735,7 +1711,7 @@ def register_manage_tools(mcp: MCPServer, layers: list[str] | set[str] | tuple[s
                 lines.append(f"\n下一页: offset={payload['next_offset']}")
             if not scan_turns:
                 lines.append("\n说明: 当前只搜索标题/ID；如需正文匹配，传入 scan_turns=true。")
-            return [TextContent(type="text", text="\n".join(lines))]
+            return domain_text(result, "\n".join(lines), use_result_data=True)
         except Exception as e:
             logger.error(f"搜索聊天失败: {e}")
             return [TextContent(type="text", text=f"❌ 搜索失败: {str(e)}")]
@@ -1752,38 +1728,38 @@ def register_manage_tools(mcp: MCPServer, layers: list[str] | set[str] | tuple[s
         client = get_gemini_client()
         await initialize_client()
 
-        if not chat_id:
-            return [TextContent(type="text", text="❌ 导出聊天需要提供 chat_id。")]
-        if not hasattr(client, "read_chat"):
-            return [TextContent(type="text", text="❌ 当前 gemini-webapi 不支持 read_chat。")]
-
         try:
-            safe_limit = min(max(limit, 1), 200)
-            safe_chars = min(max(max_chars_per_turn, 200), 20000)
-            history, turns = await _read_chat_turns(client, chat_id, safe_limit, safe_chars)
-            if not history:
-                return [TextContent(type="text", text=f"未找到聊天: {chat_id}")]
+            async def _load_export_metadata() -> list[object]:
+                if hasattr(client, "_batch_execute"):
+                    chats, _diagnostic = await _fetch_recent_conversation_metadata(client, 500)
+                    return list(chats)
+                if hasattr(client, "list_chats"):
+                    return list(client.list_chats() or [])
+                return []
 
-            metadata = None
-            if include_metadata:
-                metadata = {"id": chat_id}
-                try:
-                    if hasattr(client, "_batch_execute"):
-                        chats, _diagnostic = await _fetch_recent_conversation_metadata(client, 500)
-                    else:
-                        chats = [_chat_to_dict(chat) for chat in client.list_chats()] if hasattr(client, "list_chats") else []
-                    for chat in chats or []:
-                        item = chat if isinstance(chat, dict) else _chat_to_dict(chat)
-                        if item.get("id") == chat_id:
-                            metadata = item
-                            break
-                except Exception as e:
-                    metadata["metadata_warning"] = f"{type(e).__name__}: {e}"
-
-            payload = _chat_export_payload(chat_id, history, turns, metadata, safe_limit, safe_chars)
+            result = await export_chat_result(
+                client,
+                chat_id,
+                limit,
+                max_chars_per_turn,
+                include_metadata=include_metadata,
+                metadata_loader=_load_export_metadata,
+                max_limit=200,
+            )
+            if not result.ok:
+                fallback = (
+                    "❌ 导出聊天需要提供 chat_id。"
+                    if result.error_code == "INVALID_ARGUMENT"
+                    else "❌ 当前 gemini-webapi 不支持 read_chat。"
+                )
+                return domain_text(result, fallback)
+            assert result.data is not None
+            if not result.meta.details.get("found"):
+                return domain_text(result, f"未找到聊天: {chat_id}", use_result_data=True)
+            payload = result.data
             if response_format == "json":
-                return _json_response(payload)
-            return [TextContent(type="text", text=_format_chat_export_markdown(payload))]
+                return attach_domain_result(_json_response(payload), result, use_result_data=True)
+            return domain_text(result, _format_chat_export_markdown(payload), use_result_data=True)
         except Exception as e:
             logger.error(f"导出聊天失败: {e}")
             return [TextContent(type="text", text=f"❌ 导出失败: {str(e)}")]
@@ -1857,17 +1833,34 @@ def register_manage_tools(mcp: MCPServer, layers: list[str] | set[str] | tuple[s
         client = get_gemini_client()
         await initialize_client()
 
-        if not chat_id:
-            return [TextContent(type="text", text="❌ 删除聊天需要提供 chat_id。")]
-        if not hasattr(client, "delete_chat"):
-            return [TextContent(type="text", text="❌ 当前 gemini-webapi 不支持 delete_chat。")]
-
         try:
-            await client.delete_chat(chat_id)
-            return [TextContent(type="text", text=f"✅ 已删除聊天: {chat_id}")]
+            result = await delete_chat_result(client, chat_id)
+            if not result.ok:
+                if result.error_code == "INVALID_ARGUMENT":
+                    return domain_text(result, "❌ 删除聊天需要提供 chat_id。")
+                if result.error_code == "CAPABILITY_UNAVAILABLE":
+                    return domain_text(result, "❌ 当前 gemini-webapi 不支持 delete_chat。")
+                assert result.data is not None
+                status = result.data["verification"]["status"]
+                if status == "still_present":
+                    text = f"删除未验证：聊天 {result.data['chat_id']} 仍可读取。"
+                else:
+                    text = f"已请求删除聊天 {result.data['chat_id']}，但回读验证失败。"
+                return domain_text(result, text, use_result_data=True)
+            assert result.data is not None
+            if result.data["deleted"] is True:
+                text = f"已删除并回读确认聊天不存在: {result.data['chat_id']}"
+            else:
+                text = f"已请求删除聊天 {result.data['chat_id']}；当前客户端无法独立回读验证。"
+            return domain_text(result, text, use_result_data=True)
         except Exception as e:
-            logger.error(f"删除聊天失败: {e}")
-            return [TextContent(type="text", text=f"❌ 删除失败: {str(e)}")]
+            return exception_text(
+                e,
+                logger=logger,
+                operation="gemini_delete_chat",
+                prefix="❌ 删除失败",
+                preserve_message=True,
+            )
 
     @_tool("gemini_inspect_account", READS_PRIVATE_REMOTE)
     async def gemini_inspect_account(

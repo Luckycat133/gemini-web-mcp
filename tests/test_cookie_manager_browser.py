@@ -24,6 +24,8 @@
 
 import asyncio
 import json
+import subprocess
+import sys
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
@@ -500,6 +502,79 @@ def test_list_browser_cookie_profiles_validate_merges_validation(monkeypatch):
     profiles = CookieManager.list_browser_cookie_profiles("chrome", validate=True)
     assert profiles[0]["account_available"] is True
     assert profiles[0]["scheduled_registry_count"] == 2
+
+
+def test_list_browser_cookie_profiles_bounds_macos_keychain_wait(monkeypatch):
+    """macOS Keychain 无响应时返回脱敏 timeout，不让 profile 诊断无限挂起。"""
+    import browser_cookie3
+
+    original_reader = browser_cookie3._get_osx_keychain_password
+
+    def fake_candidates(*_args, **_kwargs):
+        browser_cookie3._get_osx_keychain_password("Chrome Safe Storage", "Chrome")
+        return []
+
+    monkeypatch.setattr(sys, "platform", "darwin")
+    monkeypatch.setattr(
+        CookieManager,
+        "_browser_cookie_candidates",
+        staticmethod(fake_candidates),
+    )
+    monkeypatch.setattr(
+        subprocess,
+        "run",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            subprocess.TimeoutExpired(args[0], kwargs.get("timeout")),
+        ),
+    )
+
+    profiles = CookieManager.list_browser_cookie_profiles(
+        "chrome",
+        validate=False,
+        timeout_seconds=0.01,
+    )
+
+    assert profiles == [
+        {
+            "browser": "chrome",
+            "error": "Browser cookie access timed out while waiting for macOS Keychain.",
+            "error_code": "BROWSER_COOKIE_ACCESS_TIMEOUT",
+        }
+    ]
+    assert browser_cookie3._get_osx_keychain_password is original_reader
+
+
+def test_get_cookies_from_browser_bounds_macos_keychain_wait(monkeypatch):
+    """Cookie 加载路径使用同一 Keychain timeout，且不会留下依赖 monkeypatch。"""
+    import browser_cookie3
+
+    original_reader = browser_cookie3._get_osx_keychain_password
+
+    def fake_candidates(*_args, **_kwargs):
+        browser_cookie3._get_osx_keychain_password("Chrome Safe Storage", "Chrome")
+        return []
+
+    monkeypatch.setattr(sys, "platform", "darwin")
+    monkeypatch.setattr(
+        CookieManager,
+        "_browser_cookie_candidates",
+        staticmethod(fake_candidates),
+    )
+    monkeypatch.setattr(
+        subprocess,
+        "run",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            subprocess.TimeoutExpired(args[0], kwargs.get("timeout")),
+        ),
+    )
+
+    cookies = CookieManager.get_cookies_from_browser(
+        "chrome",
+        timeout_seconds=0.01,
+    )
+
+    assert cookies == {}
+    assert browser_cookie3._get_osx_keychain_password is original_reader
 
 
 # ---------------------------------------------------------------------------
