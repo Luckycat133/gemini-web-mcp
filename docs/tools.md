@@ -524,6 +524,11 @@ Gemini Web 历史对话只读聚合入口。推荐给 `GEMINI_TOOLS=history` 和
 - `scan_turns`: bool - 是否读取正文查找 marker，默认 false
 - `response_format`: "markdown" | "json"
 
+Gemini 自动生成的聊天标题可能不保留 prompt 中的 marker。创建测试聊天时应立即保存返回的完整远端
+chat ID，并优先用 `gemini_delete_chat(chat_id=...)` 删除到 `verified_absent`。默认 metadata-only marker
+cleanup 只匹配标题/ID，可能对这类聊天返回 0；`scan_turns=true` 会读取最近聊天正文，只能在用户明确授权
+正文扫描时作为兜底。
+
 ### gemini_get_web_capabilities
 
 返回 2026-06-18 在 Pro 账号网页中实测到的模型、思考等级、上传/工具菜单、

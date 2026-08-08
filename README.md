@@ -145,9 +145,12 @@ Use `model` as the primary starting profile for text-only work, `core` for multi
 
 The maintained baseline is usable, but the development skill is not a completed feature checklist. Primary and compact
 history list/search/read/export/delete now share typed results; a chat deletion is only called verified after positive
-absence evidence from a complete fresh history-metadata read-back. Remaining work includes live Gemini compatibility evidence, typed results for other management actions,
-durable cleanup, and a shared long-operation job contract. The source version remains `1.3.0`; the next public release line
-requires an explicit owner decision because higher historical tags already exist.
+absence evidence from a complete fresh history-metadata read-back. An explicitly authorized targeted live run on
+2026-08-08 validated Cookie initialization, temporary and retained text, multi-turn context, primary/compact typed history,
+and verified deletion of every created chat. It was not a dedicated-account full canary and did not cover media, files,
+URLs, Deep Research, or account mutations. Remaining work includes that broader live baseline, typed results for other
+management actions, durable cleanup, and a shared long-operation job contract. The source version remains `1.3.0`; the next
+public release line requires an explicit owner decision because higher historical tags already exist.
 
 See [Development status and next steps](docs/development-status.md) for the implemented, partial, deferred, and owner-decision
 boundaries. Offline CI or package success is not presented as current live Gemini behavior.

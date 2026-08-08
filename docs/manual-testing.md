@@ -37,7 +37,7 @@
    mcp dev src/server.py
    ```
 
-6. **测试 marker 约定**：所有测试产生的聊天/定时任务用 `codex-test-` 或 `manual-test-` 前缀，便于 `gemini_cleanup_test_artifacts` 清理
+6. **测试 marker 与 ID 约定**：所有测试产生的聊天/定时任务用 `codex-test-` 或 `manual-test-` 前缀，同时立即记录工具返回的完整远端 ID。Gemini 自动标题可能不保留 prompt marker，因此 ID 是主清理路径，marker 只用于 bounded fallback
 
 ---
 
@@ -72,7 +72,7 @@
 | 2.8 | `gem_id="<某个 Gem ID>"` | 用指定 Gem 的人格回答 |
 | 2.9 | primary `gemini_chat` 与 compact `chat` 使用同一普通文本/模型调用 | 两者正文均正常，`_meta.domain_result` 的 model/backend/verification 语义一致；允许 request ID 不同 |
 
-**关键校验**：返回里 `Remote chat ID: c_xxx` 必须能解析（用于 cleanup）。`test_parse_response_exposes_remote_chat_id_for_cleanup` 只验了格式，实机要验 ID 真的能在 `gemini_delete_chat` 里删掉。
+**关键校验**：返回里 `Remote chat ID: c_xxx` 必须能解析并立即记录（用于 cleanup）。`test_parse_response_exposes_remote_chat_id_for_cleanup` 只验了格式，实机要验 ID 真的能在 `gemini_delete_chat` 里删掉并得到 `verified_absent`；不要假设 Gemini 自动标题会保留 prompt marker。
 
 ### 3. 多轮会话（`gemini_start_chat` / `gemini_send_message` / 流式版本）
 
@@ -164,6 +164,7 @@
 ### 8. 历史对话（read/search/scan/export/delete）
 
 **前置**：先在 Gemini Web 手动造几条聊天，其中至少一条标题含 marker `manual-test-history`。
+程序化生成的聊天还必须保存返回的 ID；2026-08-08 实机观察中，Gemini 自动标题没有保留 prompt marker。
 
 | # | 步骤 | 预期 |
 |---|---|---|
@@ -239,9 +240,13 @@
 
 | # | 步骤 | 预期 |
 |---|---|---|
-| 12.1 | 先造几条 `codex-test-` 前缀的聊天和定时任务 | 远端确实存在 |
-| 12.2 | `gemini_cleanup_test_artifacts(markers="codex-test-", dry_run=true)` | 列出将被删除的 ID，**不实际删** |
-| 12.3 | `dry_run=false` 重复 | 实际删除；再 `dry_run=true` 应返回空列表 |
+| 12.1 | 先造几条 `codex-test-` 前缀的聊天和定时任务，并记录每个返回 ID | 远端确实存在；ID 不依赖自动标题 |
+| 12.2 | 对已知聊天 ID 调 `gemini_delete_chat` | 每条都返回 `verified_absent`；其他验证状态继续重试或诊断 |
+| 12.3 | `gemini_cleanup_test_artifacts(markers="codex-test-", dry_run=true)` | 预览标题/ID marker leftovers，**不实际删**；自动标题未保留 marker 时允许 0 命中 |
+| 12.4 | 对唯一 marker 显式 `dry_run=false`，再用 dry-run 和 metadata search 复查 | 删除剩余命中项；最终 marker 0 命中且无错误 |
+
+不要为了兜底清理默认开启 `scan_turns=true`。它会读取最近聊天正文，只能在用户明确允许正文扫描且 ID
+路径不足时使用。
 
 ---
 
@@ -334,6 +339,9 @@ secrets 后，可手动确认 `run_live`，也可启用每周 schedule。完整�
 
 P2.2 实现阶段没有可用的专用账号，因此只完成离线 fixture/workflow 契约；不得把这次开发
 记录为真实 Gemini Web 观测。
+
+2026-08-08 后续定向实机结果见 [live-ui-coverage.md](./live-ui-coverage.md#2026-08-08-targeted-live-mcp-evidence)。
+该结果是已授权的 bounded observation，不是专用账号全量 canary。
 
 ---
 

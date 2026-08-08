@@ -73,7 +73,7 @@ def test_development_skill_tracks_current_product_questions() -> None:
 
     for required in (
         "Accepted Is Not Verified",
-        "No Current Live Baseline",
+        "No Dedicated Full Live Baseline",
         "Long Operations Lack a First-Class Job API",
         "Google Drive picker/attachment import",
         "How to Actually Experience the Product",
@@ -116,3 +116,5 @@ def test_development_skill_names_the_maintained_validation_and_experience_paths(
     assert "REVIEWED_SHA=replace-with-reviewed-40-character-commit" in experience
     assert "<reviewed-sha>" not in experience
     assert "Do not encode a volatile passing-test number" in testing
+    assert "Gemini-generated titles may omit" in testing
+    assert "verified_absent" in experience

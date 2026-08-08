@@ -19,6 +19,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Changed chat deletion so an accepted upstream call without read-back evidence is reported as accepted/unverified instead of verified success
 - Stopped treating `read_chat(None)` as deletion proof because the dependency also uses `None` for incomplete or failed reads
 - Updated the GitHub repository description and public launch copy to match the MCP Python SDK v2, agent-first gateway architecture
+- Recorded the 2026-08-08 explicitly authorized targeted live result separately from the still-inactive dedicated-account canary, including primary/compact history parity and verified cleanup evidence
+- Updated test-cleanup guidance to retain every returned remote chat ID because Gemini-generated titles may omit prompt markers; marker cleanup remains a bounded fallback and turn scanning remains opt-in
 
 ### Removed
 - Removed duplicate `.codex/skills` copies that caused clients scanning both discovery roots to list the runtime and development skills twice
@@ -35,8 +37,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Replaced broken fixed wheel onboarding URLs with the current Git source path (and commit-pinning guidance), while retaining version checks for any tagged wheel URL that is documented
 - Separated the runtime and repository-development skills, documented one-command installation for both, and added CI verification that the development skill installs directly from the repository
 - Added clean `uvx` wheel onboarding smoke coverage to CI and tag releases plus offline config, credential-boundary, stdio, artifact, package, and distribution contracts
-- All evidence in this phase is offline/fixture/package based unless a dedicated live-canary report is explicitly cited; no current live Gemini account or backend behavior is inferred from CI
-- For this unreleased change set, no live Gemini account or backend behavior was observed; the Chrome probe only established a local sanitized Keychain timeout
+- CI, fixture, package, and release evidence remains offline unless a dedicated live-canary report is explicitly cited; current Gemini behavior is never inferred from those gates
+- A separate 2026-08-08 authorized local run observed text, session, history, and delete behavior, but it was not recorded as a dedicated-account full canary and made no media, research, or account-mutation claim
 
 ### Live Gemini Web Compatibility Canary
 - Added a separately gated weekly/manual workflow for a dedicated test account; PR, unit, package, protocol, and release gates remain offline

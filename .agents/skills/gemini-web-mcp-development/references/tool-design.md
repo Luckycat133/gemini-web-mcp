@@ -113,6 +113,12 @@ Then use an MCP client to run, in order:
 9. a disposable Gem or scheduled-action mutation with read-back;
 10. cleanup of all marked artifacts.
 
+Record each returned remote resource ID as soon as it is created. Gemini may
+generate a title that omits the prompt marker, so metadata-only marker cleanup
+is a fallback rather than proof that no test chat remains. Delete known chat
+IDs directly and require `verified_absent`; only enable turn scanning with
+explicit permission to read private chat text.
+
 ## 6. What to Inspect, Not Just What to Read
 
 For every result check:
@@ -125,7 +131,7 @@ For every result check:
 - lifecycle and cleanup state;
 - whether text agrees with structured content.
 
-For video/audio, play the artifact. For files, open the saved path. For history or mutations, read back the authoritative state. A chat deletion is verified only when complete fresh history-metadata pagination produces `verification.status=verified_absent` and `data.deleted=true`; `read_chat(None)`, accepted-but-unverified, still-present, and read-back-error results are not proof of deletion. For long operations, verify that a timeout still leaves enough information to recover later.
+For video/audio, play the artifact. For files, open the saved path. For history or mutations, read back the authoritative state. A chat deletion is verified only when complete fresh history-metadata pagination produces `verification.status=verified_absent` and `data.deleted=true`; a zero-result marker search is insufficient when Gemini-generated titles omitted the marker. `read_chat(None)`, accepted-but-unverified, still-present, and read-back-error results are not proof of deletion. For long operations, verify that a timeout still leaves enough information to recover later.
 
 ## 7. Record Friction as Product Evidence
 

@@ -125,6 +125,12 @@ Use a dedicated non-personal account and record the exact commit, dependency ver
 9. one reversible or disposable scheduled/Gem mutation with read-back;
 10. cleanup outcome and no untracked test artifacts.
 
+For every generated chat, retain the returned remote ID immediately and delete
+by ID before relying on marker cleanup. Gemini-generated titles may omit a
+prompt marker. Metadata-only cleanup can therefore return zero even while a
+known test chat exists; `scan_turns=true` reads private turn content and remains
+an explicitly authorized fallback, not the default cleanup plan.
+
 ### P1 — Account/Compatibility Matrix
 
 - at least Codex plus one other MCP client;

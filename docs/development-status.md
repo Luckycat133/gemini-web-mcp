@@ -24,7 +24,7 @@ not mean that the current Gemini Web deployment was observed. Live compatibility
 | History typed results | Partial | Primary/compact list, search, read, export, and delete share one typed service. The primary-only deep source scan remains prose-first. |
 | Account/admin typed results | Partial | Account, prompt, cookie, doctor, cleanup, scheduled, Notebook, and compatibility coverage remains uneven. |
 | Mutation verification | Partial | Chat delete, Gem mutations, and several Notebook/scheduled paths now use read-back or explicitly report unverified acceptance, but every remote mutation has not completed the same audit. |
-| Live Gemini compatibility | Not observed for this change | The workflow exists, but the latest scheduled run was skipped; offline or fixture evidence does not establish current Web compatibility. |
+| Live Gemini compatibility | Partial targeted observation | An authorized 2026-08-08 local run verified text, session, history, and deletion paths; the latest dedicated live-canary run is still skipped, and media/research/account mutation coverage remains unobserved. |
 | Delayed cleanup | Partial | Retention and process-local cleanup exist, but delayed work is not durable across server restarts. |
 | Long-running operations | Partial | Media and Deep Research preserve queued/running/timed-out states and identifiers, but no shared `start/status/result/cancel` job API exists. |
 | Additional Gemini UI workflows | Deferred | Drive import, Canvas mutations, richer Notebook/scheduled/sharing workflows, and other UI parity work require stable evidence and user value. |
@@ -32,6 +32,8 @@ not mean that the current Gemini Web deployment was observed. Live compatibility
 
 The latest recorded live-canary run at the time of this update was
 [skipped](https://github.com/Luckycat133/gemini-web-mcp/actions/runs/30889281960). It is not live evidence.
+The separate 2026-08-08 targeted local run is live evidence only for the bounded workflows listed below; the account was not
+recorded as the repository's dedicated canary account.
 
 ## Current Unreleased Change Set
 
@@ -45,6 +47,8 @@ The latest recorded live-canary run at the time of this update was
 - Made offline compact protocol smoke use the auth-free static manifest instead of browser-profile diagnostics.
 - Bounded macOS `browser-cookie3` Keychain waits with `GEMINI_BROWSER_COOKIE_TIMEOUT_SECONDS`; timeout responses are
   sanitized and the dependency function is restored after each access window.
+- Recorded an explicitly authorized targeted live run at commit `6811a7934d836b54c4d54d184caed321b356ecef` without
+  changing the official dedicated-canary status.
 - Preserved product version `1.3.0`; no tag or release is part of this change set.
 
 ## Evidence Boundary
@@ -57,13 +61,25 @@ The current change set has local evidence from:
 - pinned Agent Skill validation plus direct repository installation;
 - clean Python 3.12 wheel installation, `pip check`, installed entrypoints, and offline onboarding.
 
-No live Gemini account, private chat content, media entitlement, or current Web RPC response was observed. An authorized,
-local, value-free Chrome profile probe returned `BROWSER_COOKIE_ACCESS_TIMEOUT`; this is local Keychain evidence only and
-does not establish account validity or a dedicated live-canary account.
+The explicitly authorized 2026-08-08 targeted run used Python 3.12, `gemini-mcp-server==1.3.0`,
+`gemini-webapi==2.0.0`, `mcp==2.0.0`, `mcp-types==2.0.0`, and MCP protocol `2026-07-28`. It observed:
+
+- successful environment-Cookie doctor/status checks and two reachable read-only history RPC probes;
+- successful primary temporary and retained text calls, with the temporary marker absent from history metadata;
+- successful primary multi-turn context preservation and local session reset;
+- typed primary and compact history list/search data plus successful compact text;
+- four returned remote chat IDs, all deleted with `verification.status=verified_absent` after complete fresh metadata
+  pagination; the final marker search returned zero matches;
+- no turn-text scan, pre-existing chat turn-text read, non-chat remote mutation, local artifact, or Cookie value in server logs.
+
+Gemini-generated titles did not preserve the prompt marker for the retained primary or compact chat, so metadata-only
+marker search did not find those chats before deletion. Explicit returned IDs provided the authoritative cleanup path.
+Account tier, locale, Web build, media, files, URLs, Deep Research, scheduled actions, Gems, and Notebook mutations were not
+recorded. This bounded observation therefore does not establish a dedicated full live baseline.
 
 ## Recommended Next Order
 
-1. Configure a dedicated test account and record a read-only live baseline.
+1. Configure the dedicated canary account and extend the live baseline to media, files, URLs, Deep Research, and disposable account mutations.
 2. Continue one bounded typed-result slice at a time: primary deep history scan, then account, prompt, cookie, doctor, and cleanup.
 3. Audit every remote mutation for positive read-back and honest partial states.
 4. Define one long-operation job contract for media and Deep Research.

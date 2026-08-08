@@ -86,7 +86,9 @@ def test_public_docs_distinguish_expected_routing_from_observation() -> None:
     for field in ("requested_model", "request_model", "effective_backend", "observed_backend"):
         assert f"`{field}`" in client_doc
     assert "not evidence" in client_doc
-    assert "no live Gemini account or backend behavior was observed" in changelog
+    assert "current Gemini behavior is never inferred from those gates" in changelog
+    assert "authorized local run observed text, session, history, and delete behavior" in changelog
+    assert "not recorded as a dedicated-account full canary" in changelog
 
 
 def test_runtime_and_development_skills_have_distinct_roles_and_install_paths() -> None:

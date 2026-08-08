@@ -36,7 +36,8 @@ Use this skill only to operate the installed primary or low-token MCP server. Fo
   - Use `account(action="capabilities")` for the static Web capability map without cookies.
   - Use `account(action="features|links|usage|library|notebooks|scheduled|modes")` for compact account-surface inventory.
   - Use `history(action="list|search|read|export|delete")` for chat history.
-  - Use `cleanup(dry_run=true)` before deleting test chats or scheduled actions by marker.
+  - Record every returned remote test-resource ID; Gemini-generated titles may omit prompt markers.
+  - Use `cleanup(dry_run=true)` as a bounded fallback before deleting test chats or scheduled actions by marker.
   - Use `scheduled(action="list|get|create|delete")` for compact scheduled-action workflows.
   - Use `create(type="music", model="pro")` or primary `gemini_generate_music` for Lyria 3 Pro music requests.
   - Use `doctor(validate_browser=false)` for low-cost local preflight before live account workflows.
@@ -71,6 +72,8 @@ Use this skill only to operate the installed primary or low-token MCP server. Fo
    - Claim deletion only when `_meta.domain_result.data.deleted=true` and
      `verification.status=verified_absent`; this requires a complete fresh history-metadata read-back.
      `not_available` means accepted but unverified, and `read_chat(None)` alone is never absence proof.
+   - For test chats, retain the returned remote ID at creation time. A metadata-only marker search may miss the chat when
+     Gemini generates a title without the prompt marker; use `scan_turns=true` only with explicit permission to read turn text.
 
 ## Web Pro Coverage Rules
 

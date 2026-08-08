@@ -311,7 +311,7 @@ Gemini Web `学习辅导` 输入模式。
 - `gemini_read_chat`: 读取指定历史对话内容
 - `gemini_export_chat`: 将单个历史对话导出为 Markdown 或 JSON
 - `gemini_delete_chat`: 请求删除指定历史对话；只有完整刷新 recent/pinned 历史元数据并确认 ID 不可见时才报告 `verified_absent`，无新鲜回读能力时明确标为未验证
-- `gemini_cleanup_test_artifacts`: dry-run 或删除匹配显式 marker 的测试聊天/定时任务；`scan_turns=true` 时才读取正文
+- `gemini_cleanup_test_artifacts`: dry-run 或删除匹配显式 marker 的测试聊天/定时任务；`scan_turns=true` 时才读取正文。Gemini 自动标题可能不保留 prompt marker，因此测试时还应记录返回的远端 ID
 - `gemini_probe_web_features`: 探测 Library、公开链接、用量、个性化、记忆导入等新版 Web 入口的只读 RPC 可达性
 - `gemini_list_public_links`: 列出“你的公开链接”页面返回的公开链接
 - `gemini_get_usage_limits`: 读取用量限额页面的限额/模型状态结构
@@ -471,8 +471,11 @@ mcp dev src/server.py
 ## 📍 开发状态
 
 当前基线可用，但开发 skill 不是已经全部完成的功能清单。history 的 list/search/read/export/delete 已在
-primary/compact 间共享 typed result，删除只有在回读确认后才算已验证。仍需完成当前 Gemini Web 的 live
-兼容性证据、其他管理动作的 typed result、跨重启持久化 cleanup，以及共享的长任务 job API。
+primary/compact 间共享 typed result，删除只有在回读确认后才算已验证。2026-08-08 的一次显式授权定向实机
+测试已验证 Cookie 初始化、temporary/retained 文本、多轮上下文、两套入口的 typed history，以及所有测试
+聊天的 `verified_absent` 删除；该测试不是专用账号全量 canary，也未覆盖媒体、文件、URL、Deep Research
+或账号 mutation。仍需完成更广的 live 基线、其他管理动作的 typed result、跨重启持久化 cleanup，以及
+共享的长任务 job API。
 源码版本继续保持 `1.3.0`；由于历史上已经存在更高 tag，下一个公开版本线需要 owner 明确决定。
 
 完整的“已实现 / 部分完成 / 延后 / owner 决策”边界见

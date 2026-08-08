@@ -48,9 +48,13 @@ agent-first MCP Python SDK v2 gateway and skill set, matching the checked-in run
 
 ## Remaining High-Priority Engineering Gaps
 
-### 1. No Current Live Baseline
+### 1. No Dedicated Full Live Baseline
 
-Offline, package, protocol, and synthetic canary tests are strong, but the scheduled live canary remains inactive unless repository variables and a dedicated-account environment are configured. The current Gemini Web build, account routing, media generation, and private RPC behavior therefore remain unverified until an authorized live run is recorded.
+Offline, package, protocol, and synthetic canary tests are strong, but the scheduled live canary remains inactive unless
+repository variables and a dedicated-account environment are configured. An explicitly authorized 2026-08-08 targeted
+run verified current Cookie initialization, text/session behavior, two history probes, primary/compact typed history, and
+`verified_absent` cleanup for four created chats. It did not record the account as dedicated or observe Web build, tier,
+media, files, URLs, Deep Research, or account mutations, so it is not a full live baseline.
 
 ### 2. Incomplete Typed-Result Coverage
 
@@ -96,7 +100,7 @@ Theme, help, feedback, location, subscription, and other UI chrome should remain
 
 ## Recommended Priority
 
-1. Run and record a deliberate read-only live baseline.
+1. Configure the dedicated canary account and extend the live baseline to the unobserved P0 workflows.
 2. Continue typed results for the primary deep history scan and account, then prompt/cookie/doctor/cleanup.
 3. Audit every remote mutation for positive read-back and honest presentation.
 4. Introduce a shared long-operation job contract.

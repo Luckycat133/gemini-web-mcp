@@ -95,7 +95,9 @@ Fewer, broader tools with `action` parameters. Same safety tiers apply.
 History list/search/read/export/delete share typed domain data across primary and compact surfaces. For deletion,
 `verified_absent` is the only positive deletion proof; `not_available` is accepted/unverified, while `still_present` and
 `read_back_error` are `VERIFICATION_FAILED` outcomes. Positive absence requires a complete fresh recent/pinned metadata
-read-back; `read_chat(None)` is inconclusive. Browser profile tools never return Cookie values, and macOS
+read-back; `read_chat(None)` is inconclusive. Record returned test-chat IDs because Gemini-generated titles may omit prompt
+markers; metadata-only cleanup is a fallback, and `scan_turns=true` requires explicit permission to read turn text. Browser
+profile tools never return Cookie values, and macOS
 Keychain timeouts surface as `BROWSER_COOKIE_ACCESS_TIMEOUT`.
 
 ## Tool group selection (`GEMINI_TOOLS`)
