@@ -7,6 +7,7 @@ Use this evergreen kit when announcing or redistributing Gemini Web MCP. Do not 
 - Repository and current source: https://github.com/Luckycat133/gemini-web-mcp
 - Release history: https://github.com/Luckycat133/gemini-web-mcp/releases
 - Runtime skill: https://github.com/Luckycat133/gemini-web-mcp/tree/main/.agents/skills/gemini-web-mcp
+- ClawHub runtime skill: https://clawhub.ai/skills/gemini-web-mcp
 - Development skill: https://github.com/Luckycat133/gemini-web-mcp/tree/main/.agents/skills/gemini-web-mcp-development
 - Client examples: https://github.com/Luckycat133/gemini-web-mcp/blob/main/docs/client-examples.md
 
@@ -21,6 +22,12 @@ uvx --from git+https://github.com/Luckycat133/gemini-web-mcp@main gemini-mcp-onb
 Pin `@main` to a reviewed commit SHA for an immutable install. The command above does not forward Gemini Cookies or call Gemini.
 
 Install the runtime skill for agents that operate the server:
+
+```bash
+clawhub install gemini-web-mcp
+```
+
+The ClawHub release starts at `0.1.0`. To install directly from the repository instead:
 
 ```bash
 npx --yes skills@1.5.21 add \
@@ -54,6 +61,8 @@ GEMINI_TOOLS=model python -m src.server
 Gemini Web MCP is an agent-first MCP Python SDK v2 gateway and paired skill set for Gemini Web text, media, files, URLs, Deep Research, history, notebooks, scheduled actions, and account inventory. `model` is the narrow text starting point, `core` adds content and multimodal workflows, the compact server offers a fixed low-token facade, and `all` is reserved for maintenance verification.
 
 The runtime skill and development skill are deliberately separate. Shared history services keep primary and compact typed results aligned, destructive results distinguish accepted requests from positive read-back evidence, and media results preserve requested, effective, and observed backend fields while treating a deliverable as local only after file/MIME/size metadata verification.
+
+The three-file ClawHub runtime bundle is MIT-0. The MCP server source and repository-development skill remain AGPL-3.0-only.
 
 ## Copy templates
 
@@ -90,6 +99,7 @@ Repo: https://github.com/Luckycat133/gemini-web-mcp
 - The one-command onboarding smoke installed the built wheel in a clean `uvx` environment and called the auth-free text tool.
 - Codex, Claude Desktop, Claude Code, and VS Code example files still parse and use the intended profile.
 - Runtime and development skills both validate from the single `.agents/skills` source, and the development skill installs directly from the repository.
+- The ClawHub runtime listing version, source commit, MIT-0 bundle license, categories, topics, and security scan state were checked before announcement.
 - A tag release, if announced, matches `pyproject.toml` and its wheel/sdist/skill asset names.
 - Expected routing is not described as observed Gemini backend behavior.
 - Live account behavior is reported separately from offline CI evidence.

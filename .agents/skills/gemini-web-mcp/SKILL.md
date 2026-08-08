@@ -1,7 +1,36 @@
 ---
 name: gemini-web-mcp
 description: "Operate an installed Gemini Web MCP server safely: inspect the tool manifest, choose the narrowest profile and read-only workflow, manage explicitly selected history/notebook/account tasks, and verify generated media artifacts. Use for MCP tool operation; do not use for repository implementation, tests, CI, packaging, or releases—use gemini-web-mcp-development instead."
+license: MIT-0
 compatibility: "Requires Python 3.11+ and an installed server (verify with uvx --from git+https://github.com/Luckycat133/gemini-web-mcp@main gemini-mcp-onboarding). Live Gemini calls require account Cookies; image verification requires the image or all extra."
+metadata:
+  version: "0.1.0"
+  openclaw:
+    emoji: "♊️"
+    homepage: https://github.com/Luckycat133/gemini-web-mcp
+    requires:
+      bins:
+        - uvx
+    primaryEnv: GEMINI_PSID
+    envVars:
+      - name: GEMINI_PSID
+        required: false
+        description: Optional __Secure-1PSID Cookie for authenticated Gemini Web calls.
+      - name: GEMINI_PSIDTS
+        required: false
+        description: Optional matching __Secure-1PSIDTS Cookie recommended for session stability.
+      - name: GEMINI_PSIDCC
+        required: false
+        description: Optional __Secure-1PSIDCC Cookie forwarded when configured.
+      - name: GEMINI_PROXY
+        required: false
+        description: Optional HTTP or HTTPS proxy used by the MCP server.
+      - name: GEMINI_BROWSER_COOKIE_TIMEOUT_SECONDS
+        required: false
+        description: Optional bounded macOS Keychain wait for browser Cookie discovery.
+      - name: GEMINI_TOOLS
+        required: false
+        description: Optional primary-server tool profile such as model, core, or all.
 ---
 
 # Gemini Web MCP

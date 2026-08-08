@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Prepared the three-file runtime skill for its ClawHub `0.1.0` preview with explicit OpenClaw dependency and optional environment metadata; that ClawHub bundle is MIT-0 while the server source and development skill remain AGPL-3.0-only
 - Added shared typed history list/search/read/export/delete results across primary and compact adapters, including one-time object/mapping normalization while preserving compatibility text
 - Added chat-delete read-back states for verified absence, unavailable verification, still-present records, and read-back errors; only a complete fresh recent/pinned metadata scan can prove absence
 - Added a dated development status page that separates implemented repository contracts, partial work, unobserved live behavior, deferred UI parity, and owner decisions

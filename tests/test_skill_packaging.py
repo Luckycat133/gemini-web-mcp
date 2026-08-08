@@ -13,6 +13,21 @@ def test_project_skill_frontmatter_and_guidance_are_complete():
     assert text.startswith("---\n")
     assert "name: gemini-web-mcp" in text
     assert "description:" in text
+    assert 'version: "0.1.0"' in text
+    assert "license: MIT-0" in text
+    assert "openclaw:" in text
+    assert "bins:" in text
+    assert "- uvx" in text
+    assert "primaryEnv: GEMINI_PSID" in text
+    for optional_env in (
+        "GEMINI_PSID",
+        "GEMINI_PSIDTS",
+        "GEMINI_PSIDCC",
+        "GEMINI_PROXY",
+        "GEMINI_BROWSER_COOKIE_TIMEOUT_SECONDS",
+        "GEMINI_TOOLS",
+    ):
+        assert f"name: {optional_env}" in text
     assert "TODO" not in text
     assert "gemini_get_tool_manifest" in text
     assert "current_enabled" in text

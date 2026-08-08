@@ -37,7 +37,13 @@ The supported runtime is `mcp>=2,<3` plus `mcp-types>=2,<3`. CI exercises both c
 
 ## Install The Runtime Skill
 
-Install the public skill with the cross-agent `skills` CLI:
+Install the `0.1.x` preview from ClawHub:
+
+```bash
+clawhub install gemini-web-mcp
+```
+
+Or install the current repository copy with the cross-agent `skills` CLI:
 
 ```bash
 npx --yes skills@1.5.21 add \
@@ -56,6 +62,8 @@ npx --yes skills@1.5.21 add \
 ```
 
 The two roles are intentionally separate: `gemini-web-mcp` is for tool use; `gemini-web-mcp-development` owns implementation, tests, packaging, compatibility, and releases. `.agents/skills` is the single repository source so clients that scan both `.agents` and `.codex` do not discover duplicate names.
+
+The three-file runtime skill bundle is released on ClawHub under MIT-0. The MCP server source and the repository-development skill remain AGPL-3.0-only.
 
 ## Install The MCP Server
 
