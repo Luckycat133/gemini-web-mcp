@@ -5,14 +5,14 @@
 <h1 align="center">Gemini Web MCP</h1>
 
 <p align="center">
-  A layered MCPServer and Codex skill for Gemini Web workflows.
+  An agent-first MCP Python SDK v2 gateway and skills for Gemini Web workflows.
 </p>
 
 <p align="center">
   <a href="https://github.com/Luckycat133/gemini-web-mcp/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/Luckycat133/gemini-web-mcp/actions/workflows/ci.yml/badge.svg"></a>
   <a href="https://github.com/Luckycat133/gemini-web-mcp/tree/main/.agents/skills/gemini-web-mcp"><img alt="Codex Skill" src="https://img.shields.io/badge/Codex%20Skill-installable-0B6BFF"></a>
   <a href="https://www.gnu.org/licenses/agpl-3.0.html"><img alt="License" src="https://img.shields.io/badge/License-AGPL--3.0--only-blue.svg"></a>
-  <a href="docs/changelog.md"><img alt="Verified" src="https://img.shields.io/badge/tests-1340%20passing-1F8A70"></a>
+  <a href="docs/changelog.md"><img alt="Verified" src="https://img.shields.io/badge/tests-CI%20verified-1F8A70"></a>
 </p>
 
 <p align="center">
@@ -37,7 +37,13 @@ The supported runtime is `mcp>=2,<3` plus `mcp-types>=2,<3`. CI exercises both c
 
 ## Install The Runtime Skill
 
-Install the public skill with the cross-agent `skills` CLI:
+Install the `0.1.x` preview from ClawHub:
+
+```bash
+clawhub install gemini-web-mcp
+```
+
+Or install the current repository copy with the cross-agent `skills` CLI:
 
 ```bash
 npx --yes skills@1.5.21 add \
@@ -55,7 +61,9 @@ npx --yes skills@1.5.21 add \
   --agent codex --copy --yes
 ```
 
-The two roles are intentionally separate: `gemini-web-mcp` is for tool use; `gemini-web-mcp-development` owns implementation, tests, packaging, compatibility, and releases. Both public paths have byte-identical local mirrors enforced by CI.
+The two roles are intentionally separate: `gemini-web-mcp` is for tool use; `gemini-web-mcp-development` owns implementation, tests, packaging, compatibility, and releases. `.agents/skills` is the single repository source so clients that scan both `.agents` and `.codex` do not discover duplicate names.
+
+The three-file runtime skill bundle is released on ClawHub under MIT-0. The MCP server source and the repository-development skill remain AGPL-3.0-only.
 
 ## Install The MCP Server
 
@@ -141,6 +149,20 @@ Use `model` as the primary starting profile for text-only work, `core` for multi
 | Safety Metadata | MCP annotations, tool manifest, privacy/destructive-operation guidance |
 | Distribution | Standalone Codex skill zip, wheel, source distribution, launch kit |
 
+## Development Status
+
+The maintained baseline is usable, but the development skill is not a completed feature checklist. Primary and compact
+history list/search/read/export/delete now share typed results; a chat deletion is only called verified after positive
+absence evidence from a complete fresh history-metadata read-back. An explicitly authorized targeted live run on
+2026-08-08 validated Cookie initialization, temporary and retained text, multi-turn context, primary/compact typed history,
+and verified deletion of every created chat. It was not a dedicated-account full canary and did not cover media, files,
+URLs, Deep Research, or account mutations. Remaining work includes that broader live baseline, typed results for other
+management actions, durable cleanup, and a shared long-operation job contract. The source version remains `0.2.0`; the next
+public release line requires an explicit owner decision because higher historical tags already exist.
+
+See [Development status and next steps](docs/development-status.md) for the implemented, partial, deferred, and owner-decision
+boundaries. Offline CI or package success is not presented as current live Gemini behavior.
+
 ## Distribution Assets
 
 The current supported one-command path installs the reviewed `main` source (or a pinned commit) through `uvx`. GitHub release history may contain older independent version lines; use a wheel only when its tag and filename match the source version you intend to run.
@@ -164,6 +186,7 @@ python scripts/package_release.py --outdir dist
 - [Configuration](docs/configuration.md)
 - [Tool reference](docs/tools.md)
 - [Live UI coverage](docs/live-ui-coverage.md)
+- [Development status and next steps](docs/development-status.md)
 - [Architecture](docs/architecture.md)
 - [MCP SDK and client compatibility](docs/mcp-sdk-compatibility.md)
 - [Opt-in live compatibility canary](docs/live-canary.md)
@@ -189,13 +212,11 @@ Skill packaging check:
 ```bash
 for path in \
   .agents/skills/gemini-web-mcp-development \
-  .codex/skills/gemini-web-mcp-development \
-  .agents/skills/gemini-web-mcp \
-  .codex/skills/gemini-web-mcp; do
+  .agents/skills/gemini-web-mcp; do
   skills-ref validate "$path"
 done
 ```
 
 ## Security Notes
 
-Do not commit `.env`, `cookies.json`, `prompts.json`, generated media, logs, or browser cookie material. Prefer `GEMINI_TOOLS=core` or narrower profiles unless the workflow requires account-level tools. Treat private chat text and destructive operations as explicit-user-intent actions.
+Do not commit `.env`, `cookies.json`, `prompts.json`, generated media, logs, or browser cookie material. Prefer `GEMINI_TOOLS=core` or narrower profiles unless the workflow requires account-level tools. Treat private chat text and destructive operations as explicit-user-intent actions. On macOS, browser-cookie access is bounded by `GEMINI_BROWSER_COOKIE_TIMEOUT_SECONDS` (15 seconds by default) so an unanswered Keychain request returns a sanitized error instead of hanging the MCP process.

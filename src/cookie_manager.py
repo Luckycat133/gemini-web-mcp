@@ -2,19 +2,81 @@
 Cookie 管理模块 - 自动刷新、监控和浏览器Cookie获取
 """
 
-import os
-import sys
-import time
-import threading
-import logging
 import asyncio
+from contextlib import contextmanager
 import json
-from typing import Optional, Dict, Tuple, Callable, Any
+import logging
+import math
+import os
+import subprocess
+import sys
+import threading
+import time
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
+from typing import Any, Callable, Dict, Iterator, Optional, Tuple
 
 logger = logging.getLogger(__name__)
+_BROWSER_COOKIE_ACCESS_LOCK = threading.Lock()
+
+
+class _BrowserCookieAccessTimeout(BaseException):
+    """Stop browser profile enumeration even when the dependency swallows Exception."""
+
+
+def _browser_cookie_timeout_seconds(value: Optional[float] = None) -> float:
+    raw_value: object = value if value is not None else os.environ.get("GEMINI_BROWSER_COOKIE_TIMEOUT_SECONDS", "15")
+    try:
+        timeout = float(raw_value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        timeout = 15.0
+    if not math.isfinite(timeout):
+        timeout = 15.0
+    return min(max(timeout, 0.01), 120.0)
+
+
+@contextmanager
+def _bounded_macos_keychain_reader(browser_cookie3: object, timeout_seconds: float) -> Iterator[None]:
+    """Bound browser-cookie3's unbounded macOS ``security`` subprocess call."""
+    original_reader = getattr(browser_cookie3, "_get_osx_keychain_password", None)
+    if sys.platform != "darwin" or not callable(original_reader):
+        yield
+        return
+
+    default_password = getattr(browser_cookie3, "CHROMIUM_DEFAULT_PASSWORD", b"peanuts")
+
+    def bounded_reader(osx_key_service: object, osx_key_user: object) -> bytes:
+        command = [
+            "/usr/bin/security",
+            "-q",
+            "find-generic-password",
+            "-w",
+            "-a",
+            str(osx_key_user),
+            "-s",
+            str(osx_key_service),
+        ]
+        try:
+            completed = subprocess.run(
+                command,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=False,
+                timeout=timeout_seconds,
+            )
+        except subprocess.TimeoutExpired as error:
+            raise _BrowserCookieAccessTimeout from error
+        if completed.returncode != 0:
+            return default_password
+        return completed.stdout.strip()
+
+    with _BROWSER_COOKIE_ACCESS_LOCK:
+        setattr(browser_cookie3, "_get_osx_keychain_password", bounded_reader)
+        try:
+            yield
+        finally:
+            setattr(browser_cookie3, "_get_osx_keychain_password", original_reader)
 
 
 class CookieStatus(Enum):
@@ -129,7 +191,11 @@ class CookieManager:
         }
 
     @staticmethod
-    def get_cookies_from_browser(browser: str = "chrome", profile: str = "") -> Dict[str, str]:
+    def get_cookies_from_browser(
+        browser: str = "chrome",
+        profile: str = "",
+        timeout_seconds: Optional[float] = None,
+    ) -> Dict[str, str]:
         """从浏览器获取 Gemini 所需的完整 Google 认证 Cookie。"""
         cookie_names = CookieManager._google_cookie_names()
 
@@ -153,22 +219,26 @@ class CookieManager:
             return {}
 
         try:
-            logger.info(f"🔍 正在从 {browser} 浏览器获取 Cookie...")
-            candidates = CookieManager._browser_cookie_candidates(
+            with _bounded_macos_keychain_reader(
                 browser_cookie3,
-                browser,
-                cookie_functions[browser],
-                cookie_names,
-            )
-            if profile and candidates:
-                cookies = CookieManager._select_named_cookie_candidate(candidates, profile)
-            elif not candidates:
-                cookies = CookieManager._read_cookie_jar(
-                    cookie_functions[browser](domain_name="google.com"),
+                _browser_cookie_timeout_seconds(timeout_seconds),
+            ):
+                logger.info(f"🔍 正在从 {browser} 浏览器获取 Cookie...")
+                candidates = CookieManager._browser_cookie_candidates(
+                    browser_cookie3,
+                    browser,
+                    cookie_functions[browser],
                     cookie_names,
                 )
-            else:
-                cookies = CookieManager._select_valid_cookie_candidate(candidates)
+                if profile and candidates:
+                    cookies = CookieManager._select_named_cookie_candidate(candidates, profile)
+                elif not candidates:
+                    cookies = CookieManager._read_cookie_jar(
+                        cookie_functions[browser](domain_name="google.com"),
+                        cookie_names,
+                    )
+                else:
+                    cookies = CookieManager._select_valid_cookie_candidate(candidates)
 
             if not cookies.get("__Secure-1PSID"):
                 logger.warning("⚠️ 未在浏览器中找到有效的 Cookie")
@@ -179,12 +249,19 @@ class CookieManager:
                     logger.info(f"✅ 获取到 {name}")
             logger.info(f"✅ 已获取 {len(cookies)} 个 Google 认证 Cookie")
             return cookies
+        except _BrowserCookieAccessTimeout:
+            logger.error("Browser cookie access timed out while waiting for macOS Keychain")
+            return {}
         except Exception as e:
             logger.error(f"❌ 从浏览器获取 Cookie 失败: {e}")
             return {}
 
     @staticmethod
-    def list_browser_cookie_profiles(browser: str = "chrome", validate: bool = True) -> list[dict[str, object]]:
+    def list_browser_cookie_profiles(
+        browser: str = "chrome",
+        validate: bool = True,
+        timeout_seconds: Optional[float] = None,
+    ) -> list[dict[str, object]]:
         """Return browser cookie profile diagnostics without exposing cookie values."""
         cookie_names = CookieManager._google_cookie_names()
 
@@ -203,22 +280,34 @@ class CookieManager:
         if browser not in cookie_functions:
             return [{"browser": browser, "error": f"unsupported browser: {browser}"}]
 
-        candidates = CookieManager._browser_cookie_candidates(
-            browser_cookie3,
-            browser,
-            cookie_functions[browser],
-            cookie_names,
-            require_psid=False,
-        )
-        if not candidates:
-            try:
-                cookies = CookieManager._read_cookie_jar(
-                    cookie_functions[browser](domain_name="google.com"),
+        try:
+            with _bounded_macos_keychain_reader(
+                browser_cookie3,
+                _browser_cookie_timeout_seconds(timeout_seconds),
+            ):
+                candidates = CookieManager._browser_cookie_candidates(
+                    browser_cookie3,
+                    browser,
+                    cookie_functions[browser],
                     cookie_names,
+                    require_psid=False,
                 )
-            except Exception as e:
-                return [{"browser": browser, "error": str(e)}]
-            candidates = [("auto", cookies)] if cookies else []
+                if not candidates:
+                    cookies = CookieManager._read_cookie_jar(
+                        cookie_functions[browser](domain_name="google.com"),
+                        cookie_names,
+                    )
+                    candidates = [("auto", cookies)] if cookies else []
+        except _BrowserCookieAccessTimeout:
+            return [
+                {
+                    "browser": browser,
+                    "error": "Browser cookie access timed out while waiting for macOS Keychain.",
+                    "error_code": "BROWSER_COOKIE_ACCESS_TIMEOUT",
+                }
+            ]
+        except Exception as e:
+            return [{"browser": browser, "error": str(e)}]
 
         selected_profile = CookieManager._chrome_selected_profile_directory() if browser == "chrome" else ""
         profiles = [

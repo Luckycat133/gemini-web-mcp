@@ -1,160 +1,106 @@
-# Cookie 获取指南
+# Cookie 获取与安全配置
 
-详细介绍如何获取 Gemini Web 的认证 Cookie。
+实时 Gemini Web 调用需要账号 Cookie。离线 onboarding、manifest 和协议验证不需要 Cookie；先运行
+[`gemini-mcp-onboarding`](./quickstart.md)，确认安装与 MCP stdio 正常后再配置账号。
 
----
+> Gemini Web 是逆向接入面。Cookie 等同于账号访问凭据，请优先使用专用测试账号，并自行评估 Google
+> 服务条款和账号风控风险。
 
-## 📋 Cookie 类型
+## 所需 Cookie
 
-| Cookie 认证需要以下 Cookie：
+| 名称 | 要求 | 用途 |
+| --- | --- | --- |
+| `__Secure-1PSID` | 必需 | 主要 Gemini Web 认证 Cookie |
+| `__Secure-1PSIDTS` | 推荐 | 提高会话稳定性；刷新时应与 PSID 一起更新 |
+| `__Secure-1PSIDCC` | 可选 | 作为额外认证 Cookie 传给客户端 |
 
-| Cookie 名称 | 必填 | 说明 |
-|------------|------|------|
-| `__Secure-1PSID` | ✅ | 主要认证 Cookie |
-| `__Secure-1PSIDTS` | 推荐 | 额外稳定性 Cookie |
-| `__Secure-3PSID` | 可选 | 另一种 3PSID 变体 |
+不要在 issue、日志、命令行参数或 Git 仓库中粘贴这些值。
 
----
+## 方法一：手动复制
 
-## 🚀 如何获取 Cookie
+1. 使用目标账号登录 [gemini.google.com](https://gemini.google.com)。
+2. 打开浏览器开发者工具：macOS 使用 `Cmd+Option+I`，Windows/Linux 使用 `F12`。
+3. 进入 Application（Firefox 为 Storage）→ Cookies → `https://gemini.google.com`。
+4. 完整复制 `__Secure-1PSID`，并建议同时复制 `__Secure-1PSIDTS`。
+5. 通过 MCP 客户端的 secret/password 输入或宿主环境变量注入，不要写进共享配置。
 
-### Chrome 浏览器（推荐）
-
-#### macOS / Chrome 浏览器获取：
-
-1. **打开 Gemini** 浏览器（Chrome）
-2. **访问** [gemini.google.com](https://gemini.google.com)
-3. **登录** 您的 Google 账户
-
-4. **打开开发者工具**，按：
-   - macOS: `Cmd + Opt + I
-   - Windows/Linux: `F12` 或 `Ctrl + Shift + I
-
-5. **选择 Application 标签**
-   - 顶部标签栏中找到 Application
-   - 点击 "Application"
-
-6. **找到 Cookies**
-   - 左侧菜单找到 "Cookies"
-   - 展开 "Cookies"
-   - 选择 "https://gemini.google.com"
-
-7. **找到所需 Cookie
-
-8. **复制**值
-
----
-
-#### 快速找到这两个：
-
-- `__Secure-1PSID`（✅必需✅必需的的值值
-   - 值通常以 `g.a000` 开始
-   - 它很长，请完整复制
-  
-- `__Secure-1PSIDTS`（推荐，值
-
----
-
-### Firefox 浏览器
-
-在 Firefox 类似：
-
-1. 访问 gemini.google.com，登录
-2. 打开开发者工具 (F12)
-3. 存储 (Storage) → Cookies
-4. 找到并复制
-
----
-
-## 📋 Cookie格式是什么样子？
-
-### `__Secure-1PSID`
-
-通常长这样：
-
-```
-g.a000...your-cookie-value...
+```bash
+export GEMINI_PSID='REPLACE_LOCALLY'
+export GEMINI_PSIDTS='REPLACE_LOCALLY'
 ```
 
-### `__Secure-1PSIDTS`
+修改客户端配置后，需要完全重启对应 MCP 宿主进程。
 
-通常：
+## 方法二：从本地浏览器加载
 
-```
-sidts-CjEB...your-cookie-value...
-```
+安装 browser extra：
 
-⚠️ 重要：完整复制 Cookie！
-
----
-
-## ⚙️ 如何复制说明
-
-⚠️ ⚠️ ⚠️
-
-**重要提示：
-
-1. **完整复制**：值，不要截断
-2. **不要有空格或尾随空格
-3. **保持原样，不要修改
-4. **不要遗漏最后面部分
-
----
-
-## 💻 配置到环境变量
-
-### Claude Desktop 配置
-
-```json
-{
-  "mcpServers": {
-    "gemini": {
-      "command": "python",
-      "args": ["-m", "uv", "run", "--directory", "/path/to/gemini-mcp-server", "src/server.py"],
-      "env": {
-        "GEMINI_PSID": "g.a000...",
-        "GEMINI_PSIDTS": "sidts-CjEB..."
-      }
-    }
-  }
-}
+```bash
+pip install -e ".[browser]"
 ```
 
-### .env 文件配置
+先列出不含 Cookie 原值的 profile 诊断：
 
-```env
-GEMINI_PSID=<your-psid-cookie-value>
-GEMINI_PSIDTS=<your-psidts-cookie-value>
-GEMINI_PROXY=http://127.0.0.1:7890
-GEMINI_AUTO_REFRESH=true
+```text
+gemini_list_browser_cookie_profiles(browser="chrome", validate=false)
 ```
 
----
+多账号时显式选择目标 profile：
 
-## ❓ Cookie 过期了怎么办？
+```text
+gemini_get_cookie_from_browser(browser="chrome", profile="Profile 1")
+```
 
-### 重新获取 Cookie！Cookie 会过期，如果出现认证错误，按照步骤重新获取。
+`gemini_get_cookie_from_browser` 会把选中的 Cookie 加载到当前 MCP 进程；它不会把原值放进工具响应。
+primary 和 compact 入口也提供对应的 `cookie(action="profiles|get")` 工作流。
 
-### Cookie 过期表现
+## macOS Keychain
 
-### 如何验证？
+`browser-cookie3` 需要通过 macOS Keychain 读取 Chrome Safe Storage 密钥。首次读取可能弹出授权窗口。
+仓库会限制每次 Keychain 等待，避免未响应的授权请求无限挂起：
 
-1. 重新访问 Gemini
-2. 检查是否需要重新登录
-3. 重新获取新的 Cookie
-4. 更新配置
-5. 重启 Claude Desktop
+```bash
+export GEMINI_BROWSER_COOKIE_TIMEOUT_SECONDS=15
+```
 
----
+允许范围为 0.01–120 秒。超时时 profile JSON 会包含
+`error_code="BROWSER_COOKIE_ACCESS_TIMEOUT"`，正文只说明 Keychain 超时；不会返回 Cookie 值。
 
-## 🚨 Cookie？
+如果确实要允许更长时间完成系统授权，可临时提高该值并重试。不要通过脚本绕过 Keychain，也不要把
+Chrome profile 数据库复制进仓库。
 
-### 环境变量更新后：
+## 验证
 
-1. 更新后：
+1. `gemini_get_cookie_status`：确认当前运行时是否已有 Cookie，不访问 Gemini。
+2. `gemini_doctor(validate_browser=false)`：执行本地预检；profile 读取仍可能访问本机 Keychain。
+3. 只有明确允许账号访问时，再调用 temporary chat 或专用账号的只读 live canary。
 
-1. 关闭 Claude Desktop
+浏览器 profile 中存在 PSID 只证明本地凭据可读，不证明 Cookie 仍有效，也不证明这是专用测试账号。
 
-2. 重新打开
+## 常见问题
 
-重启后新的环境变量会生效。
+### 没有找到 profile 或 PSID
+
+- 确认目标账号已在浏览器中登录 Gemini。
+- 关闭 Chrome 后重试，排除 Cookie 数据库锁。
+- macOS 检查终端或 MCP 宿主的完全磁盘访问和 Keychain 授权。
+- 多 profile 场景先用 `gemini_list_browser_cookie_profiles`，再显式传入 `profile`。
+
+### 返回 Keychain timeout
+
+- 查找并处理 macOS 授权提示。
+- 需要时提高 `GEMINI_BROWSER_COOKIE_TIMEOUT_SECONDS`，上限 120 秒。
+- 无法确认授权来源时改用手动 Cookie 注入，不要禁用系统安全机制。
+
+### 认证突然失效
+
+- 同时刷新 `__Secure-1PSID` 与 `__Secure-1PSIDTS`。
+- 重启 MCP 宿主或调用 `gemini_reset` 让客户端使用新凭据。
+- 不要把失败误判成模型或 RPC 漂移；先检查 `gemini_get_cookie_status` 和 `gemini_doctor`。
+
+## 安全清单
+
+- 使用专用、非个人账号进行 live 验证。
+- 永远不要提交 `.env`、Cookie 数据库、`cookies.json` 或日志中的凭据。
+- Cookie 泄露后立即在 Google 账号侧撤销会话并重新登录。
+- 仅在用户明确要求时读取私人聊天或执行远端删除。

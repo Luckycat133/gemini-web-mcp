@@ -38,14 +38,10 @@ jobs:
           python -m ruff check src tests scripts
           python -m mypy src scripts
           python -m pytest -q
-      - name: Validate and compare Agent Skills
+      - name: Validate public Agent Skills
         run: |
           skills-ref validate .agents/skills/gemini-web-mcp-development
-          skills-ref validate .codex/skills/gemini-web-mcp-development
           skills-ref validate .agents/skills/gemini-web-mcp
-          skills-ref validate .codex/skills/gemini-web-mcp
-          diff -ru .agents/skills/gemini-web-mcp-development .codex/skills/gemini-web-mcp-development
-          diff -ru .agents/skills/gemini-web-mcp .codex/skills/gemini-web-mcp
       - name: Snapshot source profiles and MCP protocol
         run: |
           python scripts/smoke_profiles.py

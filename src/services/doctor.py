@@ -112,6 +112,7 @@ def doctor_payload(
                         "account_available": item.get("account_available"),
                         "scheduled_registry_count": item.get("scheduled_registry_count"),
                         "error": item.get("error"),
+                        "error_code": item.get("error_code"),
                     }
                 )
         except Exception as exc:
@@ -234,7 +235,8 @@ def format_doctor_markdown(payload: dict[str, Any]) -> str:
         lines.extend(["", "### Browser Profiles"])
         for item in payload["browser_profiles"]:
             if item.get("error"):
-                lines.append(f"- {item.get('profile') or item.get('browser')}: error={item['error']}")
+                error_code = f" [{item['error_code']}]" if item.get("error_code") else ""
+                lines.append(f"- {item.get('profile') or item.get('browser')}: error={item['error']}{error_code}")
                 continue
             selected = "yes" if item.get("chrome_selected_profile") else "no"
             account = item.get("account_available")

@@ -158,9 +158,9 @@ annotations 定义在 [src/tools/annotations.py](../src/tools/annotations.py)。
 若改动影响 agent 使用流程，同步更新：
 - [`.agents/skills/gemini-web-mcp/SKILL.md`](../.agents/skills/gemini-web-mcp/SKILL.md) —— 公开可安装 skill
 - [`.agents/skills/gemini-web-mcp-development/SKILL.md`](../.agents/skills/gemini-web-mcp-development/SKILL.md) —— 仓库开发 skill
-- [`.codex/skills/gemini-web-mcp/`](../.codex/skills/gemini-web-mcp) —— 本地副本，需与 `.agents` 保持同步
 - [docs/tools.md](./tools.md) —— 工具手册
-- [docs/changelog.md](./changelog.md) —— 在 `## Unreleased` 段追加条目
+- [docs/changelog.md](./changelog.md) —— 在 `## [Unreleased]` 的 Added/Changed/Removed/Fixed 分类追加条目
+- [docs/development-status.md](./development-status.md) —— 当已实现、部分完成或 owner 决策边界变化时同步更新
 
 Skill 遵循 [agentskills.io](https://agentskills.io) 规范：`references/` 目录（复数）、description 含"何时使用"、`compatibility` 字段、SKILL.md < 500 行渐进式披露。
 

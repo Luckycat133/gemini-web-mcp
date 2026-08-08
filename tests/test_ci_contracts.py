@@ -42,6 +42,7 @@ def test_targeted_contract_checklist_covers_stable_architecture_boundaries() -> 
         "tests/test_mcp_sdk_v2.py",
         "tests/test_conversation_lifecycle.py",
         "tests/test_chat_service.py",
+        "tests/test_compact_history_contract.py",
         "tests/test_artifacts.py",
         "tests/test_manage_gem_verification_contract.py",
         "tests/test_rpc_contracts.py",
@@ -103,6 +104,10 @@ def test_profile_snapshot_smoke_passes_from_the_installed_environment() -> None:
 def test_ci_workflow_has_separate_diagnostic_offline_gates() -> None:
     workflow = CI_WORKFLOW.read_text(encoding="utf-8")
 
+    assert 'branches: [main, "agent/**"]' in workflow
+    assert "concurrency:" in workflow
+    assert "group: ${{ github.workflow }}-${{ github.ref }}" in workflow
+    assert "cancel-in-progress: true" in workflow
     for job in ("lint", "type", "test", "contracts", "protocol", "skills", "package"):
         assert re.search(rf"^  {job}:$", workflow, re.MULTILINE)
     for command in (
@@ -122,13 +127,12 @@ def test_ci_workflow_has_separate_diagnostic_offline_gates() -> None:
     assert 'GEMINI_AUTO_REFRESH: "false"' in workflow
 
 
-def test_ci_pins_reference_skill_validator_and_checks_both_mirrors() -> None:
+def test_ci_pins_reference_skill_validator_and_checks_single_public_sources() -> None:
     workflow = CI_WORKFLOW.read_text(encoding="utf-8")
 
     assert SKILLS_REF_SHA in workflow
-    assert workflow.count("skills-ref validate") == 4
-    assert "diff -ru .agents/skills/gemini-web-mcp-development .codex/skills/gemini-web-mcp-development" in workflow
-    assert "diff -ru .agents/skills/gemini-web-mcp .codex/skills/gemini-web-mcp" in workflow
+    assert workflow.count("skills-ref validate") == 2
+    assert ".codex/skills" not in workflow
     assert f"skills@{SKILLS_CLI_VERSION} add \"$GITHUB_WORKSPACE\" --skill gemini-web-mcp-development" in workflow
     assert (
         'diff -ru "$GITHUB_WORKSPACE/.agents/skills/gemini-web-mcp-development" '

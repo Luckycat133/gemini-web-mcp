@@ -101,3 +101,10 @@ python -m pytest -q tests/test_live_canary.py tests/test_ci_contracts.py
 The live canary is reported separately from release and PR gates. A disabled
 workflow is not evidence of compatibility, and a missing live observation must
 remain explicit in release notes.
+
+An explicitly authorized local workflow may record narrower live evidence, but
+it is not an official canary unless the account is documented as dedicated and
+all canary gates are used. Record such runs as bounded observations, list every
+untested workflow, retain generated resource IDs for cleanup, and do not change
+the workflow's skipped/not-run status. The 2026-08-08 example is recorded in
+[live UI coverage](./live-ui-coverage.md#2026-08-08-targeted-live-mcp-evidence).

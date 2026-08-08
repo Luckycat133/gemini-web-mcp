@@ -51,7 +51,7 @@ NotebookLM, help/feedback, and location entries.
 | Chat history search | Covered | `gemini_history(action="search")` searches titles/IDs by default and only scans turn text when `scan_turns=true` |
 | Chat history reading | Covered | `gemini_history(action="read")` reads a specific chat by ID |
 | Chat history export | Covered | `gemini_history(action="export")` exports one selected chat as Markdown or JSON |
-| Chat deletion | Covered | `gemini_delete_chat` maps to the installed client's `delete_chat` |
+| Chat deletion | Covered with explicit evidence state | `gemini_delete_chat` requests deletion, then reports `verified_absent`, `not_available`, `still_present`, or `read_back_error`; only positive absence is verified deletion |
 | Native Gemini Notebooks | Covered in part | `gemini_notebooks(action="list|chats")` is the recommended read-only facade; granular tools remain available in `all/manage`, and `gemini_move_chat_to_notebook` moves existing chats with verification; notebook create/delete/source mutation remains disabled except for observed source helpers |
 | Library capability/templates | Covered in part | `gemini_list_library_capabilities` parses observed `cYRIkd` capability entries |
 | Library assets | Probe covered | `gemini_probe_web_features(surface="library")` checks observed `sJBwce` and `VxUbXb`; no stable asset list wrapper yet |
@@ -137,6 +137,35 @@ Gemini chat, found it by scanning recent turn text, deleted the returned chat
 ID, then searched the marker again. The post-delete search returned
 `match_count=0` across the scanned recent chats, so the temporary verification
 chat was cleaned up.
+
+## 2026-08-08 Targeted Live MCP Evidence
+
+An explicitly authorized local run at commit
+`6811a7934d836b54c4d54d184caed321b356ecef` used Python 3.12,
+`gemini-mcp-server==0.2.0`, `gemini-webapi==2.0.0`, `mcp==2.0.0`,
+`mcp-types==2.0.0`, and MCP protocol `2026-07-28`. It verified environment
+Cookie diagnostics, both registered history RPC probes, primary temporary and
+retained text, primary multi-turn context/reset, compact text, and typed
+primary/compact history list/search results.
+
+The run retained every returned remote chat ID and deleted all four created
+chats. Each deletion completed a fresh recent/pinned history pagination and
+returned `verification.status=verified_absent`; a final metadata-only marker
+search returned zero matches. `scan_turns` stayed false, no pre-existing chat
+turn was read, no non-chat remote resource was created, the temporary workspace
+was removed, and no Cookie value appeared in captured server logs.
+
+Gemini-generated titles did not retain the unique prompt marker for the
+retained primary or compact chat, so metadata-only marker search did not find
+those chats before deletion. Test workflows must therefore record remote IDs
+at creation time and use marker cleanup only as a bounded fallback. Enabling
+`scan_turns=true` can find prompt markers but reads private turn content and
+still requires explicit user intent.
+
+This was a bounded authorized observation, not the repository's
+dedicated-account full canary. It did not record account tier, locale, Web
+build, media, file/URL analysis, Deep Research, scheduled actions, Gems, or
+Notebook mutations.
 
 The 2026-06-19 chat-page pass toggled Canvas and Guided Learning without
 sending a prompt. Both surfaces showed visible chips/placeholders and triggered

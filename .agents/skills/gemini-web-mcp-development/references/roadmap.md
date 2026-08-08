@@ -1,112 +1,113 @@
-# Development Roadmap and Acceptance Criteria
+# Decisions to Discuss With the Owner
 
-Load this reference when choosing the next issue, planning a multi-file change, or deciding whether a maintenance package is complete.
+These choices materially change product contracts. Do not bury them inside an unrelated bug-fix PR.
 
-## Product North Star
+## 1. What Is the Next Public Version?
 
-Deliver a public Gemini Web compatibility gateway that agents can use as a dependable text and multimodal capability provider. Progress is measured by completed workflows, truthful machine-readable state, verifiable artifacts, reproducible installation, and recoverable upstream drift—not tool count.
+Current source metadata is on a `1.x` line while historical Git tags/releases include higher `2.x` versions. A future release must not silently publish a numerically lower “latest” version.
 
-## Completed Foundation
+Options:
 
-The original P0-P2.3 roadmap is implemented:
+- adopt a new version greater than every historical tag, preserving old history;
+- formally document separate historical/rebuilt lines, with one canonical current line;
+- postpone binary releases and support reviewed source-at-SHA installs only.
 
-| Phase | Implemented contract |
-| --- | --- |
-| P0.1 | async-safe initialization, generation-aware reset, deliberate retirement |
-| P0.2 | one cross-adapter `SessionService`, opaque IDs, explicit reset/not-found semantics |
-| P0.3 | typed results/errors/warnings, operation state, diagnostics, MCP metadata |
-| P0.4 | shared chat/session service and parity |
-| P1.1 | unified multimodal artifact identity/state/verification/backend evidence |
-| P1.2 | management services plus centralized RPC registry/parsers/read-back verification |
-| P1.3 | observable conversation cleanup and lifecycle metadata |
-| P1.4 | single persisted version and release metadata validation |
-| P1.5 | direct bounded dependencies, package resources, entrypoints, clean-wheel smoke |
-| P1.6 | lint/type/test/contract/package/profile/protocol/skill/release gates |
-| P1.7 | collected-stream normalization and long-operation state/cancellation |
-| P2.1 | MCP SDK v2 adapter with modern/legacy negotiation and structured output |
-| P2.2 | opt-in live canary, sanitized schema, dependency matrix, issue automation |
-| P2.3 | public onboarding, client examples, isolated install, verified image example |
+Recommended discussion: use one new canonical version greater than `0.2.0`—potentially a new major because the current main includes MCP SDK v2 and substantially different structured contracts—then keep rewritten history on the canonical version line.
 
-## Completed P3.1 Integration Packages
+## 2. Will the Project Operate a Dedicated Live Test Account?
 
-### Compatibility text versus typed errors
+Without it, the repository can prove code, package, and protocol behavior but not current Gemini Web compatibility.
 
-The shared MCP result adapter now prevents an explicit legacy error-code prefix from contradicting `DomainResult`. Compact session chat no longer labels authentication/network/upstream failures as missing sessions.
+Decide:
 
-### Post-development manage/CI stabilization
+- who owns the account and recovery method;
+- account tier/region/locale;
+- whether media and Deep Research entitlements are included;
+- secret rotation and acceptable run cadence;
+- whether the first baseline is read-only only;
+- what live evidence may be retained.
 
-Broad management-handler branch contracts were added, missing Gem helper aliases restored, tests decoupled from an MCP-v1-only FastMCP package through a test-only shim, and the live-canary job-level environment context was repaired.
+Recommended sequence: read-only capability baseline first, then temporary text/image, then disposable mutations with cleanup.
 
-### Gem mutation verification presentation
+## 3. What Should Happen to Delayed Cleanup Across Restarts?
 
-Gem list rendering now supports mapping-backed and object-backed values, required names/IDs reject surrounding-whitespace-only input, and create/update/delete text follows read-back evidence. Only `verified`, matching update evidence, or `verified_deleted` produces a success marker; mismatch, read-back failure, missing ID, or still-present evidence remains explicit and non-successful.
+Options:
 
-# P3 — Active Reliability, Release, and Adoption Work
+- keep best-effort in-memory cleanup and say so explicitly;
+- persist a small local queue and retry state;
+- prefer provider-native temporary chats and use deletion only for workflows that cannot be temporary;
+- make retention fully caller-controlled.
 
-## P3.2 Complete Typed-Result Coverage
+This affects reliability, user expectations, and local state design.
 
-**Goal:** migrate remaining prose-only or inconsistently typed workflows without breaking tool names.
+## 4. Should Long Operations Become First-Class Jobs?
 
-Suggested order:
+Current calls can wait or return queued/running/timed-out state, but recovery is workflow-specific.
 
-1. compact history list/search/read/export/delete;
-2. compact account inventory;
-3. primary management compatibility actions, including Gems;
-4. prompt store actions;
-5. cookie status/profile/get;
-6. doctor and cleanup.
+Recommended contract:
 
-**Acceptance:**
+```text
+start -> operation_id
+status(operation_id)
+result(operation_id)
+cancel(operation_id)
+```
 
-- success, retryability, operation state, verification, and next action are machine-readable;
-- text and structured state agree;
-- runtime objects/raw transport bodies are excluded;
-- collection results expose bounded pagination/truncation;
-- generated output schemas validate actual calls.
+Use one operation model across Deep Research, video, music, and future asynchronous media. Decide whether operation state is process-local, provider-backed, or persisted.
 
-## P3.3 Reduce Adapter Debt
+## 5. What Is the Long-Term Role of the Compact Server?
 
-Migrate one facade family at a time from `skill_server.py` or `tools/manage.py` into a shared service. Preserve compact discoverability and existing public names. Add primary/compact semantic parity before deleting duplicate execution/parsing.
+Options:
 
-## P3.4 Establish the First Live Canary Baseline
+- keep the fixed eleven-tool facade as a first-class low-token product;
+- generate compact facades from shared tool metadata;
+- eventually converge on primary profiles and deprecate the separate entrypoint.
 
-Use a dedicated non-personal account and all explicit opt-in controls. Start with bounded read-only capability probes. Retain one schema-valid report with commit/dependency evidence, distinguish operational setup from provider/parser drift, and state exactly what was observed.
+Recommended direction: keep the compact discovery experience, but move all execution into shared services and test semantic parity rather than maintaining two implementations.
 
-## P3.5 Cut a Coherent Public Release
+## 6. Core Reliability or Gemini UI Parity?
 
-Decide the next semantic version and whether any result/schema changes are additive or breaking. Align `pyproject.toml`, tag, wheel, sdist, skill asset, changelog, docs, and protocol policy. Reinstall downloaded assets and rerun onboarding before publication.
+Possible next feature tracks:
 
-## P3.6 Ecosystem Adoption
+- **Core multimodal reliability:** video/music/file/research onboarding, job recovery, artifact rendering, cross-client tests.
+- **Account workflows:** typed account/admin results, verified remaining mutations, cleanup durability.
+- **UI parity:** Drive picker, Canvas, richer scheduled actions, sharing/settings.
 
-Improve Codex, Claude Desktop, Claude Code, VS Code, and other client setup from reproducible reports. Focus on command/path issues, profile selection, diagnostic quality, artifact discoverability, and long-operation UX.
+Recommended priority: core multimodal reliability and agent task completion before broad UI parity.
 
-## P3.7 Ongoing RPC and Model Compatibility
+## 7. Which Clients and Platforms Are Officially Supported?
 
-For each drift: identify the failing stage, add a sanitized fixture, update centralized registry/parser/routing, preserve explicit unavailable/changed state, run service/tool/canary/package tests, and label the evidence fixture-only or live-observed.
+Current examples cover Codex, Claude Desktop, Claude Code, and VS Code, but public support should specify:
 
-## Immediate Suggested Issue Order
+- required client versions/protocol modes;
+- macOS, Windows, and Linux coverage;
+- browser-cookie support boundaries;
+- artifact path/rendering expectations;
+- timeout recommendations for video/research.
 
-1. `refactor(compact): migrate history facade to typed shared service`
-2. `refactor(compact): migrate account facade result presentation`
-3. `refactor(manage): add typed Gem mutation results while preserving truthful text`
-4. `refactor(compact): type prompts, cookie, doctor, and cleanup results`
-5. `test(integration): audit remaining mutation read-back presentation`
-6. `test(canary): record first deliberate read-only live baseline`
-7. `release: decide and prepare the next public version`
-8. `docs(onboarding): incorporate reproducible client reports`
+Only claim combinations that have been exercised or clearly mark them community-supported.
 
-External marketplace/account work does not block these engineering packages.
+## 8. What Is the Distribution Strategy?
 
-## Definition of Done
+Decide the canonical path among:
 
-- state the contract or defect before implementation;
-- encode acceptance criteria in focused tests;
-- change the lowest shared owner;
-- prove primary/compact impact or non-impact;
-- keep compatibility text, structured result, and verification evidence consistent;
-- synchronize manifest/schema/snapshot/docs/evaluation/skill changes when required;
-- run focused checks before full gates;
-- run installed-product/protocol/workflow checks for affected surfaces;
-- keep development skill mirrors byte-identical;
-- distinguish fixture/package/protocol/workflow evidence from live observation;
-- leave remaining uncertainty with a concrete dependency or issue.
+- reviewed Git commit via `uvx`;
+- immutable GitHub Release wheel;
+- PyPI package;
+- standalone runtime/development skills;
+- Glama or other MCP directories.
+
+A directory listing is useful for discovery, but it should not precede a coherent version line and a reproducible live onboarding story.
+
+## Suggested Owner Conversation
+
+Resolve these in order:
+
+1. version/release line;
+2. dedicated live account and first baseline;
+3. next three user workflows to optimize;
+4. long-operation job model;
+5. cleanup durability;
+6. compact server commitment;
+7. official client/platform matrix;
+8. distribution/listing channels.

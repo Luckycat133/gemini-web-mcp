@@ -3,8 +3,11 @@ Gemini 客户端封装 - 门面模式
 提供统一的向后兼容接口，内部委托给专门的管理类
 """
 
+import inspect
 import logging
 import os
+from collections.abc import Mapping
+from functools import wraps
 from typing import Any, Dict, Optional, Self
 
 from .client_manager import (
@@ -51,6 +54,68 @@ _lifecycle_service = ConversationLifecycleService(
 )
 
 
+class _AttributeMapping(dict[str, Any]):
+    """Keep mapping semantics while exposing fields to legacy attribute readers."""
+
+    def __getattr__(self, name: str) -> Any:
+        try:
+            return self[name]
+        except KeyError as exc:
+            raise AttributeError(name) from exc
+
+
+def _adapt_history_value(value: Any) -> Any:
+    """Recursively adapt mapping-backed history values without changing objects."""
+
+    if isinstance(value, _AttributeMapping):
+        return value
+    if isinstance(value, Mapping):
+        return _AttributeMapping({key: _adapt_history_value(item) for key, item in value.items()})
+    if isinstance(value, list):
+        return [_adapt_history_value(item) for item in value]
+    if isinstance(value, tuple):
+        return tuple(_adapt_history_value(item) for item in value)
+    return value
+
+
+def _install_history_compatibility(client: Any) -> Any:
+    """Normalize only history-return values while preserving the client identity."""
+
+    if getattr(client, "_gemini_mcp_history_compatible", False):
+        return client
+
+    list_chats = getattr(client, "list_chats", None)
+    if callable(list_chats):
+        @wraps(list_chats)
+        def list_chats_compatible(*args: Any, **kwargs: Any) -> Any:
+            return _adapt_history_value(list_chats(*args, **kwargs))
+
+        try:
+            setattr(client, "list_chats", list_chats_compatible)
+        except (AttributeError, TypeError):
+            logger.debug("Could not install list_chats mapping compatibility on %s", type(client).__name__)
+
+    read_chat = getattr(client, "read_chat", None)
+    if callable(read_chat):
+        @wraps(read_chat)
+        async def read_chat_compatible(*args: Any, **kwargs: Any) -> Any:
+            result = read_chat(*args, **kwargs)
+            if inspect.isawaitable(result):
+                result = await result
+            return _adapt_history_value(result)
+
+        try:
+            setattr(client, "read_chat", read_chat_compatible)
+        except (AttributeError, TypeError):
+            logger.debug("Could not install read_chat mapping compatibility on %s", type(client).__name__)
+
+    try:
+        setattr(client, "_gemini_mcp_history_compatible", True)
+    except (AttributeError, TypeError):
+        pass
+    return client
+
+
 class ScheduledCleanupChatId(str):
     """String-compatible chat ID carrying its structured scheduling evidence."""
 
@@ -89,8 +154,8 @@ def _session_data_to_dict(data: Optional[SessionData]) -> Optional[Dict[str, Any
 # ============ 客户端管理接口 ============
 
 def get_gemini_client() -> Any:
-    """获取或初始化 GeminiClient 实例"""
-    return _client_manager.get_client()
+    """获取 GeminiClient，并规范化混合对象/映射历史返回值。"""
+    return _install_history_compatibility(_client_manager.get_client())
 
 
 async def initialize_client() -> Any:
@@ -328,8 +393,9 @@ def init_cookie_manager_integration() -> None:
     if not COOKIE_MANAGER_AVAILABLE:
         return
     auto_refresh = os.environ.get("GEMINI_AUTO_REFRESH", "true").lower() == "true"
-    init_cookie_manager(auto_refresh=auto_refresh, on_cookie_update=_on_cookie_update)
-    get_cookie_manager().start_monitor()
+    cookie_manager = init_cookie_manager(auto_refresh=auto_refresh, on_cookie_update=_on_cookie_update)
+    if auto_refresh:
+        cookie_manager.start_monitor()
     logger.info("✅ Cookie Manager 集成已初始化")
 
 

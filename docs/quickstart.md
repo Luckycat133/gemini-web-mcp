@@ -34,6 +34,8 @@ export GEMINI_PSIDTS='your __Secure-1PSIDTS value'
 ```
 
 详细风险与浏览器获取方式见 [Cookie 获取指南](./cookie-setup.md)。
+如果启用浏览器自动获取，macOS 钥匙串读取默认最多等待 15 秒；可用
+`GEMINI_BROWSER_COOKIE_TIMEOUT_SECONDS` 调整，超时会返回安全的诊断而不会无限挂起。
 
 ## 3. 配置 MCP 客户端
 

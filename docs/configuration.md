@@ -13,6 +13,7 @@
 | GEMINI_PSIDCC | ❌ | Cookie __Secure-1PSIDCC，附加到客户端的 extra cookies | - |
 | GEMINI_PROXY | ❌ | 代理地址 | - |
 | GEMINI_AUTO_REFRESH | ❌ | 自动刷新 Cookie | true |
+| GEMINI_BROWSER_COOKIE_TIMEOUT_SECONDS | ❌ | macOS 浏览器 Cookie 读取等待 Keychain 的单次超时（秒，范围 0.01–120） | 15 |
 | GEMINI_TOOLS | ❌ | 加载的工具组 | core |
 | GEMINI_CHAT_RETENTION_SECONDS | ❌ | 默认远端对话保留时间，0 表示尽快删除 | 1800 |
 | GEMINI_CONFIG_DIR | ❌ | skill_server 读取的本地 prompt 库目录（`prompts.json` 所在） | `.gemini` |
@@ -142,6 +143,10 @@ GEMINI_AUTO_REFRESH=false
 - 24 小时后提醒更新
 - 自动从浏览器获取最新 Cookie（如果安装了 browser-cookie3）
 
+在 macOS 上，`browser-cookie3` 需要通过 Keychain 读取 Chrome Safe Storage 密钥。
+`GEMINI_BROWSER_COOKIE_TIMEOUT_SECONDS` 限制每次 Keychain 等待；超时会返回脱敏的
+`BROWSER_COOKIE_ACCESS_TIMEOUT` 诊断并恢复依赖函数，不会输出 Cookie 值。
+
 ---
 
 ## 📝 完整配置示例
@@ -152,6 +157,7 @@ GEMINI_PSID=xxxxxxxxxxxxxxx
 GEMINI_PSIDTS=xxxxxxxxxxxxxxx
 GEMINI_PROXY=
 GEMINI_AUTO_REFRESH=true
+GEMINI_BROWSER_COOKIE_TIMEOUT_SECONDS=15
 GEMINI_TOOLS=core
 ```
 

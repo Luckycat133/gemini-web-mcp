@@ -8,7 +8,7 @@
   <a href="https://github.com/Luckycat133/gemini-web-mcp/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/Luckycat133/gemini-web-mcp/actions/workflows/ci.yml/badge.svg"></a>
   <a href="https://github.com/Luckycat133/gemini-web-mcp/tree/main/.agents/skills/gemini-web-mcp"><img alt="Codex Skill" src="https://img.shields.io/badge/Codex%20Skill-installable-0B6BFF"></a>
   <a href="https://www.gnu.org/licenses/agpl-3.0.html"><img alt="License" src="https://img.shields.io/badge/License-AGPL--3.0--only-blue.svg"></a>
-  <a href="docs/changelog.md"><img alt="Verified" src="https://img.shields.io/badge/tests-1340%20passing-1F8A70"></a>
+  <a href="docs/changelog.md"><img alt="Verified" src="https://img.shields.io/badge/tests-CI%20verified-1F8A70"></a>
 </p>
 
 <p align="center">
@@ -58,15 +58,19 @@
 
 ### 🔧 管理功能
 - Cookie 自动刷新
-- Cookie 浏览器自动获取
+- Cookie 浏览器自动获取；macOS Keychain 等待有超时上限，不会无限挂起
 - 智能错误处理
 
 ### 📦 Skill 分发
 - 运行时 skill：`.agents/skills/gemini-web-mcp`
 - 仓库开发 skill：`.agents/skills/gemini-web-mcp-development`
-- 两个 skill 都可直接从 GitHub 安装，并在 CI 中校验公开/本地镜像一致
+- ClawHub 预览版从 `0.2.0` 开始，可使用 `clawhub install gemini-web-mcp` 安装
+- `.agents/skills` 是唯一仓库来源，避免同时扫描 `.agents` 与 `.codex` 的客户端重复发现同名 skill
+- 两个 skill 都可直接从 GitHub 安装，并在 CI 中验证
 - Tag release 工作流构建 standalone skill zip、wheel 和源码包
 - `docs/launch-kit.md` 提供社交媒体发布文案和分发清单
+
+ClawHub 上的三文件运行 skill 包按 MIT-0 分发；MCP 服务器源码和仓库开发 skill 继续使用 AGPL-3.0-only。
 
 ---
 
@@ -96,6 +100,9 @@ uvx --from git+https://github.com/Luckycat133/gemini-web-mcp@main gemini-mcp-onb
 pip install browser-cookie3
 ```
 然后使用 MCP 工具 `gemini_get_cookie_from_browser(browser="chrome")`
+
+macOS 首次读取可能弹出 Keychain 授权。默认最多等待 15 秒；未授权时返回脱敏错误，
+可通过 `GEMINI_BROWSER_COOKIE_TIMEOUT_SECONDS` 调整等待上限。
 
 ### 2. 配置 (Claude Desktop / 其他 MCP 客户端)
 
@@ -167,6 +174,7 @@ gemini-mcp-skill-server
 | GEMINI_PSIDTS | ❌ | Cookie __Secure-1PSIDTS | - |
 | GEMINI_PROXY | ❌ | 代理地址 | - |
 | GEMINI_AUTO_REFRESH | ❌ | 自动刷新 Cookie | true |
+| GEMINI_BROWSER_COOKIE_TIMEOUT_SECONDS | ❌ | macOS 浏览器 Cookie 读取等待 Keychain 的单次超时（秒） | 15 |
 | GEMINI_TOOLS | ❌ | 加载的工具组 | core |
 | GEMINI_CHAT_RETENTION_SECONDS | ❌ | 默认远端对话保留时间；到期自动删除，设为 0 表示尽快删除 | 1800 |
 
@@ -305,8 +313,8 @@ Gemini Web `学习辅导` 输入模式。
 - `gemini_search_chats`: 分页搜索历史对话标题/ID；显式 `scan_turns=true` 时才读取正文匹配
 - `gemini_read_chat`: 读取指定历史对话内容
 - `gemini_export_chat`: 将单个历史对话导出为 Markdown 或 JSON
-- `gemini_delete_chat`: 删除指定历史对话
-- `gemini_cleanup_test_artifacts`: dry-run 或删除匹配显式 marker 的测试聊天/定时任务；`scan_turns=true` 时才读取正文
+- `gemini_delete_chat`: 请求删除指定历史对话；只有完整刷新 recent/pinned 历史元数据并确认 ID 不可见时才报告 `verified_absent`，无新鲜回读能力时明确标为未验证
+- `gemini_cleanup_test_artifacts`: dry-run 或删除匹配显式 marker 的测试聊天/定时任务；`scan_turns=true` 时才读取正文。Gemini 自动标题可能不保留 prompt marker，因此测试时还应记录返回的远端 ID
 - `gemini_probe_web_features`: 探测 Library、公开链接、用量、个性化、记忆导入等新版 Web 入口的只读 RPC 可达性
 - `gemini_list_public_links`: 列出“你的公开链接”页面返回的公开链接
 - `gemini_get_usage_limits`: 读取用量限额页面的限额/模型状态结构
@@ -327,8 +335,8 @@ Gemini Web `学习辅导` 输入模式。
 ### Cookie 管理
 - `gemini_doctor`: 只读预检工具组、Cookie 状态、浏览器 profile 对齐和媒体校验依赖，不输出 Cookie 值
 - `gemini_get_cookie_status`: 查看 Cookie 状态
-- `gemini_list_browser_cookie_profiles`: 列出本地浏览器 profile 诊断，包括 Chrome 当前选中 profile，不输出 Cookie 值
-- `gemini_get_cookie_from_browser`: 从浏览器或指定 profile 自动获取 Cookie
+- `gemini_list_browser_cookie_profiles`: 列出本地浏览器 profile 诊断，包括 Chrome 当前选中 profile，不输出 Cookie 值；Keychain 超时返回 `BROWSER_COOKIE_ACCESS_TIMEOUT`
+- `gemini_get_cookie_from_browser`: 从浏览器或指定 profile 自动获取 Cookie；受同一 Keychain 超时保护
 
 ### 管理工具
 - `gemini_reset`: 重置客户端
@@ -463,6 +471,21 @@ mcp dev src/server.py
 
 ---
 
+## 📍 开发状态
+
+当前基线可用，但开发 skill 不是已经全部完成的功能清单。history 的 list/search/read/export/delete 已在
+primary/compact 间共享 typed result，删除只有在回读确认后才算已验证。2026-08-08 的一次显式授权定向实机
+测试已验证 Cookie 初始化、temporary/retained 文本、多轮上下文、两套入口的 typed history，以及所有测试
+聊天的 `verified_absent` 删除；该测试不是专用账号全量 canary，也未覆盖媒体、文件、URL、Deep Research
+或账号 mutation。仍需完成更广的 live 基线、其他管理动作的 typed result、跨重启持久化 cleanup，以及
+共享的长任务 job API。
+源码与重写后的 tag 统一为 `0.2.0`；任何未来版本升级都必须同步更新全部版本源。
+
+完整的“已实现 / 部分完成 / 延后 / owner 决策”边界见
+[开发状态与下一步](docs/development-status.md)。离线 CI 和打包通过不等于已经观察到当前 Gemini Web 行为。
+
+---
+
 ## ⚠️ 限制与注意事项
 
 - AI Plus 功能需要订阅 (Pro 模型)
@@ -481,4 +504,4 @@ mcp dev src/server.py
 
 ## 📄 许可证
 
-AGPL-3.0
+MCP 服务器源码与仓库开发 skill 使用 AGPL-3.0-only。ClawHub 上的三文件运行 skill 包使用 MIT-0。
