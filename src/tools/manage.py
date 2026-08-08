@@ -7,6 +7,7 @@ import os
 import shutil
 import sys
 from datetime import datetime, timezone
+from ..adapters import attach_domain_result, domain_text, exception_text
 from ..adapters.mcp_sdk import MCPServer, TextContent
 from typing import Any, Callable, Literal, Optional, TypeVar
 import logging
@@ -45,7 +46,11 @@ from ..services.gems import (
     iter_gem_values as registered_iter_gems,
     update_gem as update_gem_service,
 )
-from ..services.history import conversation_history_payload as registered_conversation_history_payload
+from ..services.history import (
+    conversation_history_payload as registered_conversation_history_payload,
+    list_chats_result,
+    read_chat_result,
+)
 from ..services.manifest import (
     _current_enabled_manifest_groups,
     format_tool_manifest_markdown as format_registered_tool_manifest,
@@ -1363,23 +1368,17 @@ def register_manage_tools(mcp: MCPServer, layers: list[str] | set[str] | tuple[s
                 items, diagnostic = await _fetch_recent_conversation_metadata(client, target_count)
             else:
                 chats = client.list_chats() or []
-                items = [_chat_to_dict(chat) for chat in chats]
+                items = list(chats)
                 diagnostic = {"source": "client_cache", "fetched_count": len(items), "has_remote_more": False}
-            if not items:
-                return [TextContent(type="text", text="暂无历史对话。")]
-
-            page, pagination = _paginate_items(items, limit, offset, max_limit=50)
-            if diagnostic.get("has_remote_more") and not pagination["has_more"]:
-                pagination["has_more"] = True
-                pagination["next_offset"] = pagination["offset"] + pagination["count"]
-            payload = {
-                **pagination,
-                "items": page,
-                "diagnostic": diagnostic,
-            }
+            result = list_chats_result(items, limit, offset, diagnostic=diagnostic, max_limit=50)
+            assert result.data is not None
+            payload = result.data
+            page = payload["items"]
+            if not page:
+                return domain_text(result, "暂无历史对话。", use_result_data=True)
 
             if response_format == "json":
-                return _json_response(payload)
+                return attach_domain_result(_json_response(payload), result, use_result_data=True)
 
             chat_list = [
                 "## 📜 历史对话",
@@ -1391,11 +1390,16 @@ def register_manage_tools(mcp: MCPServer, layers: list[str] | set[str] | tuple[s
                 chat_list.append(f"{i}. {chat['title']}{pin} (ID: {chat['id']}){time_text}")
             if payload["has_more"]:
                 chat_list.append(f"\n下一页: offset={payload['next_offset']}")
-            return [TextContent(type="text", text="\n".join(chat_list))]
+            return domain_text(result, "\n".join(chat_list), use_result_data=True)
 
         except Exception as e:
-            logger.error(f"获取聊天列表失败: {e}")
-            return [TextContent(type="text", text=f"❌ 获取失败: {str(e)}")]
+            return exception_text(
+                e,
+                logger=logger,
+                operation="gemini_list_chats",
+                prefix="❌ 获取失败",
+                preserve_message=True,
+            )
 
     @_tool("gemini_scan_chat_history_sources", READS_PRIVATE_REMOTE)
     async def gemini_scan_chat_history_sources(
@@ -1587,36 +1591,33 @@ def register_manage_tools(mcp: MCPServer, layers: list[str] | set[str] | tuple[s
         client = get_gemini_client()
         await initialize_client()
 
-        if not chat_id:
-            return [TextContent(type="text", text="❌ 读取聊天需要提供 chat_id。")]
-        if not hasattr(client, "read_chat"):
-            return [TextContent(type="text", text="❌ 当前 gemini-webapi 不支持 read_chat。")]
-
         try:
-            safe_limit = min(max(limit, 1), 100)
             safe_chars = min(max(max_chars_per_turn, 200), 20000)
-            history = await client.read_chat(chat_id, limit=safe_limit)
-            if not history:
-                return [TextContent(type="text", text=f"未找到聊天: {chat_id}")]
-            turns = getattr(history, "turns", []) or []
-            items = [_turn_to_dict(turn, safe_chars) for turn in turns[:safe_limit]]
-            payload = {
-                "chat_id": getattr(history, "cid", chat_id),
-                "count": len(items),
-                "limit": safe_limit,
-                "turns": items,
-            }
+            result = await read_chat_result(client, chat_id, limit, safe_chars, max_limit=100)
+            if not result.ok:
+                if result.error_code == "INVALID_ARGUMENT":
+                    return domain_text(result, "❌ 读取聊天需要提供 chat_id。")
+                return domain_text(result, "❌ 当前 gemini-webapi 不支持 read_chat。")
+            assert result.data is not None
+            payload = result.data
+            if not result.meta.details.get("found"):
+                return domain_text(result, f"未找到聊天: {chat_id}", use_result_data=True)
 
             if response_format == "json":
-                return _json_response(payload)
+                return attach_domain_result(_json_response(payload), result, use_result_data=True)
 
             lines = [f"## 💬 聊天记录: {payload['chat_id']}", f"返回 {payload['count']} 条 turn"]
-            for idx, turn in enumerate(items, 1):
+            for idx, turn in enumerate(payload["turns"], 1):
                 lines.extend(["", f"### {idx}. {turn['role']}", turn["text"]])
-            return [TextContent(type="text", text="\n".join(lines))]
+            return domain_text(result, "\n".join(lines), use_result_data=True)
         except Exception as e:
-            logger.error(f"读取聊天失败: {e}")
-            return [TextContent(type="text", text=f"❌ 读取失败: {str(e)}")]
+            return exception_text(
+                e,
+                logger=logger,
+                operation="gemini_read_chat",
+                prefix="❌ 读取失败",
+                preserve_message=True,
+            )
 
     @_tool("gemini_search_chats", READS_PRIVATE_REMOTE)
     async def gemini_search_chats(

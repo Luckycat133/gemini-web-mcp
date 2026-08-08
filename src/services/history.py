@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from datetime import datetime, timezone
 from typing import Any
 
+from ..domain import DomainErrorCode, DomainResult
 from ..infrastructure.rpc_contracts import get_contract
 
 
@@ -86,11 +88,92 @@ def chat_to_dict(chat: object) -> dict[str, Any]:
     }
 
 
+def normalize_chat_item(chat: object) -> dict[str, Any]:
+    """Normalize object/mapping history records while preserving observed fields."""
+    normalized = dict(chat) if isinstance(chat, dict) and "id" in chat else {}
+    normalized.update(chat_to_dict(chat))
+    return normalized
+
+
+def list_chats_result(
+    chats: Sequence[object],
+    limit: int,
+    offset: int,
+    *,
+    diagnostic: dict[str, Any] | None = None,
+    max_limit: int = 50,
+) -> DomainResult[dict[str, Any]]:
+    """Build the shared typed list payload used by primary and compact adapters."""
+    items = [normalize_chat_item(chat) for chat in chats]
+    page, pagination = paginate_items(items, limit, offset, max_limit=max_limit)
+    observed = dict(
+        diagnostic
+        or {
+            "source": "client_cache",
+            "fetched_count": len(items),
+            "has_remote_more": False,
+        }
+    )
+    if observed.get("has_remote_more") and not pagination["has_more"]:
+        pagination["has_more"] = True
+        pagination["next_offset"] = pagination["offset"] + pagination["count"]
+    payload = {**pagination, "items": page, "diagnostic": observed}
+    return DomainResult.success(
+        payload,
+        verification_status="observed",
+        details={"source": observed.get("source") or observed.get("source_rpc") or "unknown"},
+    )
+
+
 def turn_to_dict(turn: object, max_chars: int) -> dict[str, str]:
     return {
         "role": str(get_attr(turn, "role", "unknown") or "unknown"),
         "text": truncate(get_attr(turn, "text", ""), max_chars),
     }
+
+
+async def read_chat_result(
+    client: object,
+    chat_id: str,
+    limit: int,
+    max_chars: int,
+    *,
+    max_limit: int = 100,
+) -> DomainResult[dict[str, Any]]:
+    """Read and normalize one history record into a stable typed payload."""
+    normalized_chat_id = str(chat_id or "").strip()
+    if not normalized_chat_id:
+        return DomainResult.failure(
+            DomainErrorCode.INVALID_ARGUMENT,
+            "chat_id is required.",
+            suggested_action="Provide the chat ID returned by a history listing.",
+            verification_status="input_rejected",
+        )
+    if not hasattr(client, "read_chat"):
+        return DomainResult.failure(
+            DomainErrorCode.CAPABILITY_UNAVAILABLE,
+            "The current Gemini Web client does not support read_chat.",
+            suggested_action="Upgrade gemini-webapi or use a client profile that supports history reads.",
+            verification_status="capability_unavailable",
+        )
+
+    safe_limit = clamp_int(limit, default=10, minimum=1, maximum=max_limit)
+    safe_chars = clamp_int(max_chars, default=4000, minimum=1, maximum=20000)
+    history = await client.read_chat(normalized_chat_id, limit=safe_limit)  # type: ignore[attr-defined]
+    turns_raw = get_attr(history, "turns", []) if history else []
+    turns = turns_raw if isinstance(turns_raw, list) else []
+    items = [turn_to_dict(turn, safe_chars) for turn in turns[:safe_limit]]
+    payload = {
+        "chat_id": str(get_attr(history, "cid", normalized_chat_id) or normalized_chat_id),
+        "count": len(items),
+        "limit": safe_limit,
+        "turns": items,
+    }
+    return DomainResult.success(
+        payload,
+        verification_status="observed",
+        details={"found": history is not None, "source": "client_read_chat"},
+    )
 
 
 async def read_chat_turns(

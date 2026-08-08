@@ -100,6 +100,8 @@ from .services.history import (
     _paginate_items,
     _read_chat_turns,
     _turn_matches_query,
+    list_chats_result as _list_chats_result,
+    read_chat_result as _read_chat_result,
 )
 from .services.manifest import (
     format_tool_manifest_markdown as _format_tool_manifest_markdown,
@@ -479,17 +481,17 @@ async def history(
         if action == "list":
             chats = client.list_chats() if hasattr(client, "list_chats") else []
             chats = chats or []
-            page, pagination = _paginate_items(chats, limit, offset, max_limit=50)
+            result = _list_chats_result(chats, limit, offset, max_limit=50)
+            assert result.data is not None
+            page = result.data["items"]
             if not page:
-                return [TextContent(type="text", text="No chats")]
+                return domain_text(result, "No chats", use_result_data=True)
             lines = []
-            for i, item in enumerate(page, pagination["offset"] + 1):
-                title = getattr(item, "title", "Untitled")
-                cid = getattr(item, "cid", "") or getattr(item, "id", "")
-                lines.append(f"{i}. {title} ({cid})")
-            if pagination["has_more"]:
-                lines.append(f"next_offset={pagination['next_offset']}")
-            return [TextContent(type="text", text="\n".join(lines))]
+            for i, item in enumerate(page, result.data["offset"] + 1):
+                lines.append(f"{i}. {item['title']} ({item['id']})")
+            if result.data["has_more"]:
+                lines.append(f"next_offset={result.data['next_offset']}")
+            return domain_text(result, "\n".join(lines), use_result_data=True)
 
         if action == "search":
             needle = (query or "").strip()
@@ -520,21 +522,16 @@ async def history(
             return [TextContent(type="text", text="\n".join(lines) if lines else "No matches")]
 
         if action == "read":
-            if not chat_id:
-                return [TextContent(type="text", text="chat_id required")]
-            if not hasattr(client, "read_chat"):
-                return [TextContent(type="text", text="read_chat unavailable")]
-            read_limit = _paginate_items([], limit, 0, max_limit=50)[1]["limit"]
-            chat = await client.read_chat(chat_id, limit=read_limit)
-            turns = getattr(chat, "turns", []) if chat else []
-            if not turns:
-                return [TextContent(type="text", text="No turns")]
-            lines = []
-            for turn in turns[:read_limit]:
-                role = getattr(turn, "role", "unknown")
-                text = _truncate_text(getattr(turn, "text", ""))
-                lines.append(f"{role}: {text}")
-            return [TextContent(type="text", text="\n\n".join(lines))]
+            result = await _read_chat_result(client, chat_id or "", limit, 2000, max_limit=50)
+            if not result.ok:
+                if result.error_code == DomainErrorCode.INVALID_ARGUMENT.value:
+                    return domain_text(result, "chat_id required")
+                return domain_text(result, "read_chat unavailable")
+            assert result.data is not None
+            if not result.data["turns"]:
+                return domain_text(result, "No turns", use_result_data=True)
+            lines = [f"{turn['role']}: {turn['text']}" for turn in result.data["turns"]]
+            return domain_text(result, "\n\n".join(lines), use_result_data=True)
 
         if action == "export":
             if not chat_id:
