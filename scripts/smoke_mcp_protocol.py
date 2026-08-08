@@ -65,10 +65,14 @@ async def _handshake(
         async with Client(stdio_client(parameters), mode=mode, cache=None) as client:
             listed = await client.list_tools()
             actual_tools = frozenset(tool.name for tool in listed.tools)
-            representative_name = "gemini_get_tool_manifest" if "gemini_get_tool_manifest" in actual_tools else "doctor"
-            representative_arguments = (
-                {"response_format": "json"} if representative_name == "gemini_get_tool_manifest" else {}
-            )
+            if "gemini_get_tool_manifest" in actual_tools:
+                representative_name = "gemini_get_tool_manifest"
+                representative_arguments = {"response_format": "json"}
+            elif "account" in actual_tools:
+                representative_name = "account"
+                representative_arguments = {"action": "manifest"}
+            else:
+                raise RuntimeError(f"{command} exposes no auth-free static representative tool")
             representative = await client.call_tool(representative_name, representative_arguments)
             protocol_version = client.protocol_version
             server_name = client.server_info.name if client.server_info is not None else None

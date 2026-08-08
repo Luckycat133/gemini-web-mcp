@@ -1172,6 +1172,7 @@ def test_skill_server_create_routes_current_media_backends(monkeypatch):
 
 def test_skill_server_account_and_history_tools(monkeypatch):
     import src.skill_server as skill_server
+    from src.services.doctor import doctor_payload
 
     deleted = []
 
@@ -1274,6 +1275,16 @@ def test_skill_server_account_and_history_tools(monkeypatch):
 
     monkeypatch.setattr(skill_server, "get_gemini_client", lambda: FakeClient())
     monkeypatch.setattr(skill_server, "initialize_client", noop_initialize)
+    monkeypatch.setattr(
+        skill_server,
+        "_doctor_payload",
+        lambda browser, validate_browser: doctor_payload(
+            browser=browser,
+            validate_browser=validate_browser,
+            cookie_status_provider=lambda: {"available": True, "has_cookie": False},
+            profile_provider=lambda *_args, **_kwargs: [],
+        ),
+    )
 
     async def run():
         account_result = await skill_server.account("status")

@@ -393,8 +393,9 @@ def init_cookie_manager_integration() -> None:
     if not COOKIE_MANAGER_AVAILABLE:
         return
     auto_refresh = os.environ.get("GEMINI_AUTO_REFRESH", "true").lower() == "true"
-    init_cookie_manager(auto_refresh=auto_refresh, on_cookie_update=_on_cookie_update)
-    get_cookie_manager().start_monitor()
+    cookie_manager = init_cookie_manager(auto_refresh=auto_refresh, on_cookie_update=_on_cookie_update)
+    if auto_refresh:
+        cookie_manager.start_monitor()
     logger.info("✅ Cookie Manager 集成已初始化")
 
 

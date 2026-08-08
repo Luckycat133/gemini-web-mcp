@@ -582,6 +582,7 @@ def test_init_cookie_manager_integration_auto_refresh_false_when_env_disabled(mo
     monkeypatch.setattr(cw, "get_cookie_manager", lambda: monitor)
     cw.init_cookie_manager_integration()
     assert ("init", {"auto_refresh": False, "on_cookie_update": cw._on_cookie_update}) in init_calls
+    assert "monitor" not in init_calls
 
 
 # ---------------------------------------------------------------------------
