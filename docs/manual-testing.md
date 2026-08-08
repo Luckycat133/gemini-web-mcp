@@ -297,7 +297,7 @@
 | 18.1 | `skills-ref validate .agents/skills/gemini-web-mcp` | 通过 |
 | 18.2 | `skills-ref validate .agents/skills/mcp-builder` | 通过 |
 | 18.3 | `skills-ref validate .agents/skills/python-mcp-server-generator` | 通过 |
-| 18.4 | `.codex/skills/gemini-web-mcp` 与 `.agents/skills/gemini-web-mcp` 内容一致 | `test_public_repo_skill_matches_local_project_skill` 通过 |
+| 18.4 | `.agents/skills` 中的仓库 skill 名称唯一，无 `.codex` 重复来源 | `test_project_skill_names_are_unique_across_discovery_roots` 通过 |
 
 ### 19. 打包
 

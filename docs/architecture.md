@@ -82,8 +82,7 @@ gemini-mcp-server/
 ├── compatibility/         # Live canary 报告 schema 与上游依赖矩阵
 ├── scripts/               # 打包/发布、协议 smoke 与 opt-in canary CLI
 ├── .github/workflows/     # 离线 CI/release 与隔离的 live-canary workflow
-├── .agents/skills/        # 公开分发用 Codex skill 副本
-├── .codex/skills/         # 本地开发用 Codex skill 副本
+├── .agents/skills/        # 唯一的可安装 Agent Skill 来源
 └── docs/                  # 完整文档系统
     ├── README.md          # 文档中心
     ├── quickstart.md      # 快速开始
@@ -93,6 +92,7 @@ gemini-mcp-server/
     ├── faq.md             # 常见问题
     ├── architecture.md    # 技术架构
     ├── changelog.md       # 更新历史
+    ├── development-status.md # 已实现、部分完成与 owner 决策
     ├── troubleshooting.md # 故障排查
     ├── contributing.md    # 贡献指南
     ├── manual-testing.md  # 实机测试清单

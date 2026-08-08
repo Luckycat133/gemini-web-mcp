@@ -91,13 +91,10 @@ uvx --from <wheel-or-reviewed-git-sha> gemini-mcp-onboarding
 
 ```bash
 skills-ref validate .agents/skills/gemini-web-mcp-development
-skills-ref validate .codex/skills/gemini-web-mcp-development
-diff -ru .agents/skills/gemini-web-mcp-development \
-  .codex/skills/gemini-web-mcp-development
 python -m pytest -q tests/test_development_skill.py tests/test_skill_packaging.py
 ```
 
-Then install the development skill from the repository and byte-compare it with the source copy.
+Then install the development skill from the repository and byte-compare it with the single `.agents` source.
 
 ## Workflow Changes
 

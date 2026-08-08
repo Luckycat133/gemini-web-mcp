@@ -89,7 +89,7 @@ Repo: https://github.com/Luckycat133/gemini-web-mcp
 - The source or commit being announced passed CI and CodeQL.
 - The one-command onboarding smoke installed the built wheel in a clean `uvx` environment and called the auth-free text tool.
 - Codex, Claude Desktop, Claude Code, and VS Code example files still parse and use the intended profile.
-- Runtime and development skills both validate, their mirrors match, and the development skill installs directly from the repository.
+- Runtime and development skills both validate from the single `.agents/skills` source, and the development skill installs directly from the repository.
 - A tag release, if announced, matches `pyproject.toml` and its wheel/sdist/skill asset names.
 - Expected routing is not described as observed Gemini backend behavior.
 - Live account behavior is reported separately from offline CI evidence.

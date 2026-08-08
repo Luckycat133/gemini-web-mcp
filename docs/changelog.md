@@ -2,12 +2,26 @@
 
 All notable changes to this project are documented in this file.
 
-The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
 ## [Unreleased]
+
+### Added
+- Added shared typed history list/read results across primary and compact adapters, including one-time object/mapping normalization while preserving existing compatibility text
+- Added a dated development status page that separates implemented repository contracts, partial work, unobserved live behavior, deferred UI parity, and owner decisions
+
+### Changed
+- Made `.agents/skills` the single repository skill source and updated CI, release, packaging, and documentation checks to install and validate that source directly
+
+### Removed
+- Removed duplicate `.codex/skills` copies that caused clients scanning both discovery roots to list the runtime and development skills twice
+
+### Fixed
+- Made the compact stdio protocol smoke call the auth-free static account manifest instead of browser-profile doctor diagnostics, preventing macOS Keychain prompts in offline verification
+- Made `GEMINI_AUTO_REFRESH=false` skip the Cookie monitor thread instead of starting an idle background monitor during offline and CI runs
 
 ### Public Distribution and Onboarding
 - Added `gemini-mcp-onboarding`: its default command installs/runs cleanly without Gemini credentials, launches the real stdio server, negotiates MCP, and calls the static text manifest; live chat and image examples require `--allow-live-account`
@@ -39,14 +53,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added stateful delta/cumulative/mixed chunk normalization so repeated or stale cumulative text is not duplicated, with public chunk and deduplication diagnostics
 - Added Deep Research `wait_for_completion`, typed queued/running/completed/timed_out results, preserved research/chat continuation IDs, and running state for plan-only fallback responses
 - Added strict cancellation/deadline handling that propagates caller cancellation and prevents a cancellation-suppressing late result from replacing a timed-out state
-- Updated both public skill mirrors so agents consume collected stream metadata and resumable Deep Research states correctly
+- Updated the canonical public skills so agents consume collected stream metadata and resumable Deep Research states correctly
 - Added offline stream, cancellation, late-completion, continuation-ID, and long-operation state regression coverage; the full offline suite now passes 1293 tests
 
 ### CI and Release Gates
 - Split CI into separate Ruff, Mypy, Python 3.11/3.12 test, targeted contract, protocol smoke, Agent Skill, and installed-package jobs with pip caching and focused failure steps
 - Added a stable architecture contract checklist plus exact tool-name snapshots for six primary profiles and the compact surface
 - Added real MCP stdio `initialize`/`tools/list` smoke checks for both console entrypoints without Gemini credentials or live model calls
-- Added pinned `skills-ref` validation and byte parity checks for both development and user skill mirrors
+- Added pinned `skills-ref` validation for both public skills and direct-install byte-parity checks against the single development-skill source
 - Added clean-wheel resource/entrypoint/profile/protocol verification and a tag workflow that revalidates downloaded assets before creating a GitHub Release
 
 ### Dependency and Package Integrity

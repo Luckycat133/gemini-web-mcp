@@ -64,7 +64,8 @@
 ### 📦 Skill 分发
 - 运行时 skill：`.agents/skills/gemini-web-mcp`
 - 仓库开发 skill：`.agents/skills/gemini-web-mcp-development`
-- 两个 skill 都可直接从 GitHub 安装，并在 CI 中校验公开/本地镜像一致
+- `.agents/skills` 是唯一仓库来源，避免同时扫描 `.agents` 与 `.codex` 的客户端重复发现同名 skill
+- 两个 skill 都可直接从 GitHub 安装，并在 CI 中验证
 - Tag release 工作流构建 standalone skill zip、wheel 和源码包
 - `docs/launch-kit.md` 提供社交媒体发布文案和分发清单
 
@@ -460,6 +461,17 @@ python -m build
 pip install "mcp[cli]"
 mcp dev src/server.py
 ```
+
+---
+
+## 📍 开发状态
+
+当前基线可用，但开发 skill 不是已经全部完成的功能清单。仍需完成当前 Gemini Web 的 live 兼容性证据、
+更多管理动作的 typed result、统一 mutation 读回验证、跨重启持久化 cleanup，以及共享的长任务 job API。
+源码版本继续保持 `1.3.0`；由于历史上已经存在更高 tag，下一个公开版本线需要 owner 明确决定。
+
+完整的“已实现 / 部分完成 / 延后 / owner 决策”边界见
+[开发状态与下一步](docs/development-status.md)。离线 CI 和打包通过不等于已经观察到当前 Gemini Web 行为。
 
 ---
 

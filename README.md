@@ -55,7 +55,7 @@ npx --yes skills@1.5.21 add \
   --agent codex --copy --yes
 ```
 
-The two roles are intentionally separate: `gemini-web-mcp` is for tool use; `gemini-web-mcp-development` owns implementation, tests, packaging, compatibility, and releases. Both public paths have byte-identical local mirrors enforced by CI.
+The two roles are intentionally separate: `gemini-web-mcp` is for tool use; `gemini-web-mcp-development` owns implementation, tests, packaging, compatibility, and releases. `.agents/skills` is the single repository source so clients that scan both `.agents` and `.codex` do not discover duplicate names.
 
 ## Install The MCP Server
 
@@ -141,6 +141,16 @@ Use `model` as the primary starting profile for text-only work, `core` for multi
 | Safety Metadata | MCP annotations, tool manifest, privacy/destructive-operation guidance |
 | Distribution | Standalone Codex skill zip, wheel, source distribution, launch kit |
 
+## Development Status
+
+The maintained baseline is usable, but the development skill is not a completed feature checklist. Remaining work includes
+live Gemini compatibility evidence, typed results for additional management actions, uniform mutation verification, durable
+cleanup, and a shared long-operation job contract. The source version remains `1.3.0`; the next public release line requires
+an explicit owner decision because higher historical tags already exist.
+
+See [Development status and next steps](docs/development-status.md) for the implemented, partial, deferred, and owner-decision
+boundaries. Offline CI or package success is not presented as current live Gemini behavior.
+
 ## Distribution Assets
 
 The current supported one-command path installs the reviewed `main` source (or a pinned commit) through `uvx`. GitHub release history may contain older independent version lines; use a wheel only when its tag and filename match the source version you intend to run.
@@ -164,6 +174,7 @@ python scripts/package_release.py --outdir dist
 - [Configuration](docs/configuration.md)
 - [Tool reference](docs/tools.md)
 - [Live UI coverage](docs/live-ui-coverage.md)
+- [Development status and next steps](docs/development-status.md)
 - [Architecture](docs/architecture.md)
 - [MCP SDK and client compatibility](docs/mcp-sdk-compatibility.md)
 - [Opt-in live compatibility canary](docs/live-canary.md)
@@ -189,9 +200,7 @@ Skill packaging check:
 ```bash
 for path in \
   .agents/skills/gemini-web-mcp-development \
-  .codex/skills/gemini-web-mcp-development \
-  .agents/skills/gemini-web-mcp \
-  .codex/skills/gemini-web-mcp; do
+  .agents/skills/gemini-web-mcp; do
   skills-ref validate "$path"
 done
 ```

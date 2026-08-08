@@ -10,7 +10,7 @@ The project already has a broad usable surface:
 - compact eleven-tool facade for low-token discovery;
 - one-shot and session chat, thinking levels, guided-learning modes, temporary chats, and Gem-backed chat;
 - image generation/editing, video, music, local-file analysis, URL analysis, and Deep Research;
-- typed artifact state for remote/local/queued/empty/failed outcomes;
+- typed artifact state for remote/local/queued/empty/failed outcomes, plus shared typed results for history list/read;
 - history list/scan/search/read/export/delete, native Notebook reads and chat moves;
 - account inventory, usage, public-link reads, model/mode discovery, scheduled-action daily create/get/list/delete, and Gem CRUD;
 - prompts, cookie diagnostics, doctor, cleanup, onboarding, package/release automation, and an opt-in live canary;
@@ -26,6 +26,12 @@ The compact `history` list/read paths previously assumed upstream records were a
 
 A hardcoded numeric test badge drifted behind the real suite. Public badges should report CI verification rather than a manually maintained test count.
 
+### History List/Read Adapter Duplication
+
+Primary and compact history list/read now normalize object- and mapping-backed records in the shared history service and
+return the same typed domain result while preserving their existing compatibility text. Search, export, delete, and other
+history actions remain separate follow-up slices.
+
 ## Remaining Confirmed Metadata Drift
 
 The GitHub repository description still calls the project a “FastMCP server,” while the runtime has migrated to the official `MCPServer`/MCP Python SDK v2 boundary. Update the repository description after merge; this requires repository-settings access rather than a source-code patch.
@@ -38,11 +44,11 @@ Offline, package, protocol, and synthetic canary tests are strong, but the sched
 
 ### 2. Incomplete Typed-Result Coverage
 
-Core chat/session/artifact/research paths are structured, but many history, account, prompt, cookie, doctor, cleanup, scheduled, Notebook, and compatibility tools still expose prose-first results. Agents should not need to parse phrases or emoji to determine success, retryability, pagination, or verification.
+Core chat/session/artifact/research paths and history list/read are structured, but the remaining history actions plus many account, prompt, cookie, doctor, cleanup, scheduled, Notebook, and compatibility tools still expose prose-first results. Agents should not need to parse phrases or emoji to determine success, retryability, pagination, or verification.
 
 ### 3. Primary/Compact Facade Duplication
 
-The compact history, account, scheduled, prompt, cookie, doctor, and cleanup facades retain adapter-owned execution and formatting. Migrate one action family at a time to shared services; keep compactness as a discovery/presentation property, not a separate business implementation.
+Compact history list/read now use the shared history service. History search/export/delete and the compact account, scheduled, prompt, cookie, doctor, and cleanup facades still retain adapter-owned execution and formatting. Migrate one bounded action family at a time; keep compactness as a discovery/presentation property, not a separate business implementation.
 
 ### 4. Mutation Verification Is Uneven
 
@@ -81,7 +87,7 @@ Theme, help, feedback, location, subscription, and other UI chrome should remain
 ## Recommended Priority
 
 1. Run and record a deliberate read-only live baseline.
-2. Complete typed results for compact history/account, then prompt/cookie/doctor/cleanup.
+2. Continue typed results for the remaining compact history actions and account, then prompt/cookie/doctor/cleanup.
 3. Audit every remote mutation for positive read-back and honest presentation.
 4. Introduce a shared long-operation job contract.
 5. Decide cleanup durability and release/version strategy.
