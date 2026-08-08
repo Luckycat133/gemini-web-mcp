@@ -2,33 +2,34 @@
 """
 Gemini Web 逆向 MCP 服务器
 支持: 文本对话、Deep Research、媒体生成、文件分析
-版本: 0.2.0 (2026.7)
 """
 
+import json
 import logging
 import os
-import json
-from mcp.server.fastmcp import FastMCP
-from mcp.types import TextContent
+from typing import Literal
 
-from .tools import groups_enable_manage, register_tools
-from .tools.annotations import MUTATES_LOCAL, READ_ONLY_LOCAL
-from .tools.manage import (
-    ManifestScope,
-    ResponseFormat,
-    _doctor_payload,
-    _format_doctor_markdown,
-    _format_tool_manifest_markdown,
-    _tool_manifest_payload,
-)
+from . import __version__
+from .adapters import MCPServer, TextContent, domain_error_boundary, domain_text
 from .client_wrapper import (
-    reset_client,
     get_cookie_from_browser,
     get_cookie_status,
+    init_cookie_manager_integration,
     list_browser_cookie_profiles,
-    init_cookie_manager_integration
+    reset_client_async,
 )
-from .error_handler import handle_error, format_error_response
+from .domain import DomainResult
+from .error_handler import format_error_response, handle_error
+from .services.doctor import doctor_payload as _doctor_payload, format_doctor_markdown as _format_doctor_markdown
+from .services.manifest import (
+    ManifestScope,
+    format_tool_manifest_markdown as _format_tool_manifest_markdown,
+    tool_manifest_payload as _tool_manifest_payload,
+)
+from .tools import groups_enable_manage, register_tools
+from .tools.annotations import MUTATES_LOCAL, READ_ONLY_LOCAL
+
+ResponseFormat = Literal["markdown", "json"]
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -36,10 +37,11 @@ logger = logging.getLogger(__name__)
 # 根据环境变量选择加载的工具组
 TOOL_GROUPS = os.environ.get("GEMINI_TOOLS", "core").split(",")
 
-mcp = FastMCP(
-    "Gemini Web MCP Server",
-    instructions="""
-# Gemini Web MCP Server (v0.2.0)
+mcp = MCPServer(
+    name="Gemini Web MCP Server",
+    version=__version__,
+    instructions=f"""
+# Gemini Web MCP Server (v{__version__})
 
 ## 可用模型
 - flash-lite → Web UI 3.1 Flash-Lite
@@ -101,10 +103,18 @@ if not _tool_groups_include_manage():
 
 
 @mcp.tool(annotations=MUTATES_LOCAL)
+@domain_error_boundary("gemini_reset", logger)
 async def gemini_reset() -> list[TextContent]:
     """重置客户端"""
-    reset_client()
-    return [TextContent(type="text", text="✅ 客户端已重置")]
+    await reset_client_async()
+    return domain_text(
+        DomainResult.success(
+            {"client_state": "reset"},
+            verification_status="local_state_reset",
+        ),
+        "✅ 客户端已重置",
+        use_result_data=True,
+    )
 
 
 @mcp.tool(annotations=READ_ONLY_LOCAL)
@@ -195,7 +205,7 @@ async def gemini_get_cookie_from_browser(browser: str = "chrome", profile: str =
 
 def main():
     """启动服务器"""
-    logger.info("🚀 启动 Gemini Web MCP Server (v0.2.0)")
+    logger.info("🚀 启动 Gemini Web MCP Server (v%s)", __version__)
     logger.info(f"🔧 加载工具组: {', '.join(TOOL_GROUPS)}")
     init_cookie_manager_integration()
     mcp.run()

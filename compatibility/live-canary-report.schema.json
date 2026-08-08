@@ -1,0 +1,185 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/Luckycat133/gemini-web-mcp/compatibility/live-canary-report.schema.json",
+  "title": "Gemini Web compatibility canary report",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "matrix_version",
+    "generated_at",
+    "repository_commit",
+    "trigger",
+    "status",
+    "terminal_state",
+    "dependencies",
+    "web",
+    "summary",
+    "capabilities",
+    "failure",
+    "privacy"
+  ],
+  "properties": {
+    "schema_version": {"const": 1},
+    "matrix_version": {"type": "integer", "minimum": 0},
+    "generated_at": {"type": "string", "maxLength": 40},
+    "repository_commit": {
+      "type": "string",
+      "pattern": "^(unknown|[0-9a-f]{7,64})$"
+    },
+    "trigger": {
+      "enum": ["schedule", "workflow_dispatch", "manual", "test", "unknown"]
+    },
+    "status": {
+      "enum": ["healthy", "degraded", "drift", "failed", "not_run"]
+    },
+    "terminal_state": {"enum": ["completed", "failed"]},
+    "dependencies": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["python", "gemini-mcp-server", "gemini-webapi", "mcp", "mcp-types"],
+      "properties": {
+        "python": {"$ref": "#/$defs/dependency"},
+        "gemini-mcp-server": {"$ref": "#/$defs/dependency"},
+        "gemini-webapi": {"$ref": "#/$defs/dependency"},
+        "mcp": {"$ref": "#/$defs/dependency"},
+        "mcp-types": {"$ref": "#/$defs/dependency"}
+      }
+    },
+    "web": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["locale", "build_label"],
+      "properties": {
+        "locale": {
+          "type": ["string", "null"],
+          "pattern": "^[A-Za-z]{2,3}(?:[-_][A-Za-z0-9]{2,8})*$",
+          "maxLength": 40
+        },
+        "build_label": {
+          "type": ["string", "null"],
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/+\\-]{0,127}$",
+          "maxLength": 128
+        }
+      }
+    },
+    "summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["total", "available", "empty", "unavailable", "drift", "failed"],
+      "properties": {
+        "total": {"type": "integer", "minimum": 0},
+        "available": {"type": "integer", "minimum": 0},
+        "empty": {"type": "integer", "minimum": 0},
+        "unavailable": {"type": "integer", "minimum": 0},
+        "drift": {"type": "integer", "minimum": 0},
+        "failed": {"type": "integer", "minimum": 0}
+      }
+    },
+    "capabilities": {
+      "type": "array",
+      "maxItems": 100,
+      "items": {"$ref": "#/$defs/capability"}
+    },
+    "failure": {
+      "oneOf": [
+        {"type": "null"},
+        {"$ref": "#/$defs/failure"}
+      ]
+    },
+    "privacy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["raw_responses_included", "account_content_included", "credentials_included"],
+      "properties": {
+        "raw_responses_included": {"const": false},
+        "account_content_included": {"const": false},
+        "credentials_included": {"const": false}
+      }
+    }
+  },
+  "$defs": {
+    "dependency": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["installed", "supported"],
+      "properties": {
+        "installed": {"type": "string", "minLength": 1, "maxLength": 80},
+        "supported": {"type": "string", "minLength": 1, "maxLength": 80}
+      }
+    },
+    "failure": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["stage", "error_code", "error_type"],
+      "properties": {
+        "stage": {"type": "string", "pattern": "^[a-z_]{1,40}$"},
+        "error_code": {"type": "string", "pattern": "^[A-Z][A-Z0-9_]{1,79}$"},
+        "error_type": {"type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,79}$"}
+      }
+    },
+    "capability": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "capability",
+        "surface",
+        "name",
+        "rpc_id",
+        "source_path",
+        "parser",
+        "stability",
+        "expected_dependency",
+        "compatibility",
+        "capability_state",
+        "outcome",
+        "terminal_state",
+        "parser_stage",
+        "status_code",
+        "reject_code",
+        "response_parts",
+        "body_count",
+        "warning_count",
+        "error_code",
+        "error_type"
+      ],
+      "properties": {
+        "capability": {"type": "string", "pattern": "^[a-z0-9_.-]{1,80}$"},
+        "surface": {"type": "string", "pattern": "^[a-z0-9_.-]{1,40}$"},
+        "name": {"type": "string", "pattern": "^[a-z0-9_.-]{1,80}$"},
+        "rpc_id": {"type": "string", "pattern": "^[A-Za-z0-9_-]{1,24}$"},
+        "source_path": {"type": "string", "pattern": "^/[A-Za-z0-9_{}./-]{0,127}$"},
+        "parser": {"type": "string", "pattern": "^[a-z0-9_]{1,80}$"},
+        "stability": {"enum": ["stable", "preview", "experimental"]},
+        "expected_dependency": {"type": "string", "minLength": 1, "maxLength": 80},
+        "compatibility": {"enum": ["compatible", "unavailable", "drift", "failed"]},
+        "capability_state": {"enum": ["available", "empty", "unavailable", "unknown"]},
+        "outcome": {
+          "enum": [
+            "available",
+            "empty",
+            "unavailable",
+            "transport_failed",
+            "envelope_drift",
+            "parser_drift"
+          ]
+        },
+        "terminal_state": {"enum": ["completed", "rejected", "failed"]},
+        "parser_stage": {"enum": ["transport", "envelope", "rpc", "parser", "complete"]},
+        "status_code": {"type": ["integer", "null"], "minimum": 100, "maximum": 599},
+        "reject_code": {"type": ["integer", "null"]},
+        "response_parts": {"type": "integer", "minimum": 0},
+        "body_count": {"type": "integer", "minimum": 0},
+        "warning_count": {"type": "integer", "minimum": 0},
+        "error_code": {
+          "type": ["string", "null"],
+          "pattern": "^[A-Z][A-Z0-9_]{1,79}$"
+        },
+        "error_type": {
+          "type": ["string", "null"],
+          "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,79}$"
+        }
+      }
+    }
+  }
+}

@@ -85,6 +85,113 @@
 
 ---
 
+## 结构化结果元数据（P0.3）
+
+聊天、会话和客户端重置工具会继续返回原有 `TextContent.text`，同时在第一条内容的
+`_meta.domain_result` 中提供稳定、机器可读的结果。旧客户端可继续读取正文；新客户端
+不应再根据 emoji 或自然语言判断成功与失败。
+
+```json
+{
+  "ok": false,
+  "data": null,
+  "error": {
+    "code": "SESSION_NOT_FOUND",
+    "message": "The requested session does not exist.",
+    "retryable": false,
+    "suggested_action": "Create a session and use the returned ID.",
+    "diagnostic_id": null
+  },
+  "warnings": [],
+  "meta": {
+    "request_id": "req_<uuid>",
+    "operation_state": "failed",
+    "observed_at": "2026-08-02T00:00:00+00:00",
+    "requested_backend": null,
+    "effective_backend": null,
+    "verification_status": "local_state_absent",
+    "diagnostic_id": null,
+    "details": {}
+  }
+}
+```
+
+- `ok`：业务操作是否成功。
+- `data`：工具相关的公开数据；不会包含客户端、Cookie、上游 session 对象或锁。
+- `error.code`：稳定错误码。首批分类包括 `INVALID_ARGUMENT`、`AUTH_REQUIRED`、
+  `AUTH_EXPIRED`、`SESSION_NOT_FOUND`、`CAPABILITY_UNAVAILABLE`、`UPSTREAM_REJECTED`、
+  `UPSTREAM_CHANGED`、`NETWORK_ERROR`、`RATE_LIMITED`、`TIMED_OUT`、`CANCELLED`、
+  `ARTIFACT_NOT_RETURNED`、`ARTIFACT_SAVE_FAILED`、`VERIFICATION_FAILED` 和 `INTERNAL_ERROR`。
+- `error.retryable` / `error.suggested_action`：调用方是否应重试，以及建议的下一步。
+- `warnings`：成功或部分成功时的非致命告警。
+- `meta.operation_state`：`accepted`、`queued`、`running`、`completed`、`partial`、
+  `timed_out`、`cancelled`、`failed` 或 `unavailable`。
+- `meta.observed_at`：UTC ISO-8601 观测时间；backend 与 verification 字段记录请求、实际后端和验证状态。
+- `meta.request_id`：每个结构化结果都有；`meta.diagnostic_id` 只在需要关联服务端异常日志时生成。
+
+当前覆盖 primary 的 `gemini_chat*`、`gemini_start_chat`、`gemini_send_message*`、
+`gemini_list_sessions`、`gemini_reset_session`、`gemini_reset`、媒体、文件/URL 分析和 research
+report 本地产物，以及 compact 的 `chat`、`session`、`create`、`edit`。未迁移工具仍以现有文本
+契约为准。
+
+从 P0.4 起，primary 与 compact 的聊天、创建会话和会话发送都调用同一个应用服务。
+工具名、参数和原有正文保持兼容；两个入口的差别（例如 compact 不向上游传 `gem` / `temporary`）
+由适配器配置明确表达，不再维护两份聊天业务实现。
+
+### 统一 artifact 元数据（P1.1）
+
+媒体、文件/URL 和 research report 工具在保留原有正文的同时，把统一 artifact 数据放在
+`_meta.domain_result.data`：
+
+```json
+{
+  "state": "local",
+  "artifacts": [
+    {
+      "id": "artifact_<stable-hash>",
+      "kind": "image",
+      "state": "local",
+      "uri": "https://.../generated.png",
+      "local_path": "/absolute/path/generated.png",
+      "mime_type": "image/png",
+      "size_bytes": 12345,
+      "width": 1024,
+      "height": 1024,
+      "duration_seconds": null,
+      "requested_backend": "pro",
+      "request_model": "gemini-3-flash",
+      "effective_backend": "Nano Banana 2",
+      "observed_backend": null,
+      "verification": {
+        "status": "verified",
+        "methods": ["file_exists", "size_checked", "size_nonzero", "image_dimensions"]
+      }
+    }
+  ],
+  "input_artifacts": [],
+  "requested_model": "pro",
+  "request_model": "gemini-3-flash",
+  "effective_backend": "Nano Banana 2",
+  "observed_backend": null,
+  "source_chat_id": "c_...",
+  "media_type": "image"
+}
+```
+
+- `state=remote`：响应含可用 URI，但尚未验证远端内容；artifact 的 verification 是 `unverified`。
+- `state=local`：本地文件存在且非零；记录大小和可推断的 MIME，尺寸和时长在探针可用时填写。
+- `state=queued`：上游明确返回 pending/processing/queued 等状态，操作结果仍为 `ok=true`、
+  `operation_state=queued`。
+- `state=empty`：请求完成但没有可用产物，返回 `ARTIFACT_NOT_RETURNED`，不把普通文本当作媒体成功。
+- `state=failed`：保存或验证失败；完全失败使用 `ARTIFACT_SAVE_FAILED`/`VERIFICATION_FAILED`，
+  远端 URI 仍可用但本地保存失败时使用 `operation_state=partial` 和 `ARTIFACT_SAVE_PARTIAL` 告警。
+
+`artifacts` 是输出，`input_artifacts` 是本地文件、URL 或参考图。相同类型和 URI 的 artifact ID
+在 primary 与 compact 表面一致。`response_format="json"` 的 research report 正文仍保持合法 JSON；
+统一契约只放在 `TextContent._meta`，不会拼进 JSON 字符串。
+
+---
+
 ## 对话工具
 
 ### gemini_chat
@@ -104,7 +211,8 @@
 
 ### gemini_chat_stream
 
-单次流式对话。
+兼容名称保持不变：工具会收集 Gemini Web 的上游流，归一化 delta、累计文本或混合片段，
+再把正文作为一个 MCP 结果返回；它不声明 MCP 客户端会收到增量内容。
 
 **参数：**
 - `message`: str - 要发送的消息
@@ -114,6 +222,10 @@
 - `image_paths`: list[str] - 可选图片路径
 - `gem_id`: str - 可选 Gem ID
 - `temporary`: bool - 是否使用 Temporary chat
+
+**结构化结果：** `_meta.domain_result.data.stream.delivery="collected"`，并提供
+`chunk_semantics`、`chunk_count`、`emitted_piece_count`、`duplicate_chunk_count` 和
+`text_length`。累计或重复片段不会让最终正文重复。
 
 ### gemini_start_chat
 
@@ -126,11 +238,13 @@
 - `gem_id`: str - 可选 Gem ID
 - `temporary`: bool - 后续会话消息默认沿用的 Temporary chat 状态
 
-**返回：** 会话 ID，用于后续消息
+**返回：** `sess_<uuid>` 形式的不透明本地会话 ID，用于后续消息。primary 与 compact 入口共享同一份会话状态；调用方不应自行构造或按顺序猜测 ID。
 
 ### gemini_send_message
 
 会话消息。
+
+未知 `session_id` 会明确返回 `SESSION_NOT_FOUND`，不会退化为单次对话或创建新会话。
 
 **参数：**
 - `session_id`: str - 会话 ID
@@ -141,7 +255,8 @@
 
 ### gemini_send_message_stream
 
-会话流式消息。
+收集现有会话的 Gemini Web 上游流并一次性返回 MCP 结果；归一化和结构化 `stream`
+元数据与 `gemini_chat_stream` 相同。
 
 **参数：**
 - `session_id`: str - 会话 ID
@@ -174,6 +289,8 @@
 **参数：**
 - `session_id`: str - 会话 ID
 
+只删除指定会话；未知 ID 返回 `SESSION_NOT_FOUND`，不会影响其他会话。会话未设置 `retain_chat=true` 时，还会尝试立即删除对应远端聊天。
+
 ---
 
 ## 媒体工具
@@ -193,6 +310,9 @@
 - `image`: 首轮生成始终走 `Nano Banana 2`
 - `music`: `flash` 系列走 `Lyria 3`，`pro` 走 `Lyria 3 Pro`
 - `image + model=pro` 不会直接切换首轮图像后端；Pro redo 是网页生成后的二次操作
+
+**artifact 行为：** 成功响应会公开远端 URI；指定输出目录后，实际写入的文件会再检查存在性、
+非零大小、MIME，以及可用的尺寸/时长。排队、空响应和保存失败有独立结构化状态。
 
 ### gemini_generate_music
 
@@ -215,6 +335,9 @@
 上传本地文件并分析。代码文件也走这个本地文件路径；它不等同于
 Gemini Web 的 Google Drive 选择器。
 
+本地来源记录在 `input_artifacts`，并验证绝对路径、MIME 和大小；Gemini 响应中的图片记录为
+`artifacts`。请求别名、实际模型与观测后端也随结果返回。
+
 **关键参数：**
 - `model`: str - MCP 别名或运行时模型名
 - `thinking_level`: str - `standard` / `extended` (默认: `standard`)
@@ -222,6 +345,9 @@ Gemini Web 的 Google Drive 选择器。
 ### gemini_analyze_url
 
 让 Gemini 分析网页或视频 URL。
+
+输入 URL 作为 `kind=webpage,state=remote` 的 `input_artifacts` 返回；这只证明调用方提供了该 URI，
+不表示 MCP 已自行抓取并验证页面内容。
 
 **关键参数：**
 - `model`: str - MCP 别名或运行时模型名
@@ -238,6 +364,14 @@ Gemini Web 的 Google Drive 选择器。
 **关键参数：**
 - `model`: str - MCP 别名或运行时模型名
 - `thinking_level`: str - `standard` / `extended` (默认: `extended`)
+- `timeout_seconds`: int - 等待最终报告的时间上限（默认: `600`）
+- `poll_interval_seconds`: int - 轮询间隔，最小 3 秒
+- `wait_for_completion`: bool - 默认 `true`；设为 `false` 时只完成 plan/start 阶段并立即返回
+
+**结构化状态：** 第一条正文的 `_meta.domain_result` 会明确给出 `queued`、`running`、
+`completed` 或 `timed_out`。`data.upstream_operation_id` 和 `data.upstream_chat_id` 在上游
+已提供时会保留；因此超时不等于上游任务失败，`continuation_possible=true` 时可稍后用
+chat ID 读取报告。fallback 客户端只返回研究计划时，状态是 `running`，不会误报完成。
 
 ### gemini_list_research_report_actions
 
@@ -255,6 +389,10 @@ Gemini Web 的 Google Drive 选择器。
 自定义应用描述入口 `custom_app`。当前 MCP 工具生成本地等价产物，不直接调用未稳定观测到的
 Gemini 私有 mutation RPC。
 
+写入完成后会重新检查文件存在、非零大小和 MIME；Markdown 模式附带可读 artifact 块，JSON 模式
+保持原 payload 不变并通过 `_meta.domain_result` 返回同一份类型化 artifact。写入异常使用
+`ARTIFACT_SAVE_FAILED` 和 diagnostic ID，不会把原始文件系统错误放入稳定错误消息。
+
 **关键参数：**
 - `chat_id`: str - Deep Research 所在的 Gemini Web chat ID
 - `artifact_type`: str - 要创建的产物类型
@@ -263,6 +401,12 @@ Gemini 私有 mutation RPC。
 ---
 
 ## 账户和 Gems
+
+管理类工具的 RPC ID、source path 和 payload builder 统一来自
+`src/infrastructure/rpc_contracts.py`；handler 不再内嵌私有 RPC 常量。history、account、Notebook、
+scheduled、Gem、manifest 和 doctor 分别由 `src/services/` 中的模块承载，primary 与 compact
+只保留参数/文本适配。上游 body parser 会显式区分 `success`、`empty`、`rejected` 和
+`changed_shape`，避免把空响应或网页结构变化误报为正常结果。
 
 ### gemini_history
 
@@ -490,6 +634,8 @@ JSON 输出包含 `visible_in_registry`、`readable_by_id_after_create` 和
 JSON 输出包含 `verification_status`、`visible_after_delete`、`readable_by_id_after_delete`
 和 `deleted_by_id_after_delete`。Gemini 的 `GetTask` 在删除后可能仍返回 tombstone 对象；
 只有按 ID 读到 `task_state=deleted` 时，工具才把删除标记为已校验。
+如果 mutation 响应没有可解析 body，`verification_status="rpc_unconfirmed"`；调用方不能把它当作
+已删除。
 这个工具是 destructive 远端操作。只删除用户明确指定或当前验证流程刚创建的任务。
 
 ### gemini_get_tool_mode_status
@@ -581,6 +727,10 @@ JSON 输出包含 `verification_status`、`visible_after_delete`、`readable_by_
 
 列出、创建、更新或删除 Gems。
 
+create/update/delete 都会再次读取 Gem 列表。返回文本包含 `读回校验`；可能值包括 `verified`、
+`verified_deleted`、`read_back_not_observed`、`read_back_mismatch`、`still_present` 和
+`read_back_error`。mutation 方法返回不再单独作为“已验证成功”的证据。
+
 ---
 
 ## Cookie 管理
@@ -653,11 +803,16 @@ JSON 输出包含 `verification_status`、`visible_after_delete`、`readable_by_
 | `cookie` | Cookie 状态、浏览器 profile 诊断和浏览器获取 |
 | `doctor` | 只读预检工具组、Cookie 状态、浏览器 profile 对齐和媒体校验依赖，不输出 Cookie 值 |
 
+compact `session` 支持 `create` / `send` / `list` / `reset`（或 `reset_one`）/ `reset_all`。`reset` 与 `reset_one` 都必须提供 `session_id`，且只删除该会话；只有显式 `reset_all` 才会清空全部会话并重置客户端。旧的 `action="reset"` 保留为单会话别名，不再把缺少 ID 解释为全量重置。
+
+compact 的 history/account/scheduled/doctor/cleanup 直接导入共享 service 和 RPC parser；加载
+`src.skill_server` 不再初始化 4k 行的 `src.tools.manage` 兼容适配器。
+
 ---
 
-## 🛡️ 智能错误处理 (0.2.0 新增)
+## 🛡️ 智能错误处理
 
-0.2.0 新增智能错误处理，遇到问题时会自动提供解决方案。
+智能错误处理会在遇到问题时自动提供解决方案。
 
 ### 错误响应格式
 

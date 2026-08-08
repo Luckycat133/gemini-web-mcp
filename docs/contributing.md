@@ -8,6 +8,15 @@
 
 ## 开发环境
 
+先把仓库开发 skill 安装到 Codex；它与仅用于操作 MCP 工具的运行时 skill 分离：
+
+```bash
+npx --yes skills@1.5.21 add \
+  https://github.com/Luckycat133/gemini-web-mcp \
+  --skill gemini-web-mcp-development \
+  --agent codex --copy --yes
+```
+
 ```bash
 # 1. 克隆并进入 venv
 python -m venv .venv && . .venv/bin/activate
@@ -16,11 +25,20 @@ python -m venv .venv && . .venv/bin/activate
 pip install -e ".[all,dev]"
 
 # 3. 验证安装
-pytest -q                                   # 测试套件
-python -m py_compile src/server.py src/skill_server.py src/client_wrapper.py src/thinking_client.py src/constants.py src/tools/*.py
+python -m ruff check src tests scripts       # 语法、导入与未定义名称
+python -m mypy src scripts                   # 运行时与维护脚本类型检查
+python -m pytest -q                          # 全量离线测试套件
+python scripts/run_contract_checklist.py     # 稳定架构契约清单
+python scripts/check_dependency_contract.py  # 直接依赖 / optional extra 契约
+python scripts/smoke_profiles.py             # 代表 profile 完整工具名快照
+python scripts/snapshot_mcp_v2_contract.py    # v2 工具名/schema/annotation golden 候选
+python scripts/smoke_mcp_protocol.py          # 两个 stdio 入口 auto/legacy 真实 list/call
+gemini-mcp-onboarding                         # 无 Cookie 的安装后 stdio + 文本工具预检
 
 # 4. 本地跑服务（默认 core 工具面）
 GEMINI_TOOLS=core python -m src.server
+# 或安装后的 console entrypoint：GEMINI_TOOLS=core gemini-mcp-server
+# 低 token facade：gemini-mcp-skill-server
 
 # 5. 用 MCP Inspector 交互式调试
 pip install "mcp[cli]"
@@ -35,17 +53,18 @@ mcp dev src/server.py
 
 | 项 | 约定 |
 |---|---|
-| Python 版本 | 3.10+（`pyproject.toml` 锁定 `target-version = "py310"`） |
+| Python 版本 | 3.11+（`pyproject.toml` 锁定 `target-version = "py311"`） |
 | 缩进 | 4 空格 |
 | 行宽 | 120 列（Ruff 配置） |
 | 命名 | `snake_case` 函数/变量；工具名前缀 `gemini_` |
-| 类型 | 鼓励类型标注；Mypy 配 `python_version = "3.10"` |
+| 类型 | 鼓励类型标注；Mypy 配 `python_version = "3.11"` |
 | 模块组织 | 按工具域分组（`chat.py` / `media.py` / `file.py` / `research.py` / `manage.py` / `prompts.py`） |
 | 共享逻辑 | 放 `src/tools/utils.py`，不要在多个工具里复制粘贴 |
 
 核心运行时代码在 `src/`：
 - `server.py` —— 主 MCP 入口
 - `skill_server.py` —— 低 token skill surface
+- `onboarding.py` —— 公开安装预检、显式实时文本示例和本地图像产物验证
 - `client_wrapper.py` / `client_manager.py` / `cookie_manager.py` / `session_manager.py` —— 客户端/会话/Cookie
 - `src/tools/` —— 工具实现
 - `src/tools/manifest_data.py` —— 纯数据（`WEB_UI_CAPABILITIES` / `WEB_FEATURE_PROBES` / `TOOL_MANIFEST`）
@@ -59,12 +78,20 @@ mcp dev src/server.py
 - 测试文件放 `tests/test_*.py`，名字描述被测行为
 - 工具面变更要同时断言**工具注册**和 **MCP annotations**（`readOnlyHint` / `destructiveHint` / `openWorldHint` 等）
 - 用户可见能力或安全元数据变更时，同步更新 [evaluations/gemini_web_mcp_contract.xml](../evaluations/gemini_web_mcp_contract.xml)（当前 17 个只读 QA）
+- `scripts/run_contract_checklist.py` 是快速、可诊断的架构契约门禁；它不替代 Python 3.11/3.12 上的全量测试
 - 交付前必跑：
 
 ```bash
-pytest -q
-# 入口或 import 敏感变更额外跑：
-python -m py_compile src/server.py src/skill_server.py src/client_wrapper.py src/thinking_client.py src/constants.py src/tools/*.py
+python -m ruff check src tests scripts
+python -m mypy src scripts
+python -m pytest -q
+python scripts/run_contract_checklist.py
+# 入口、profile、打包或协议敏感变更额外跑：
+python scripts/smoke_profiles.py
+python scripts/snapshot_mcp_v2_contract.py
+python scripts/smoke_mcp_protocol.py
+# 构建后还要从源码目录外，以隔离 uvx 环境调用 dist wheel：
+uvx --from "$PWD"/dist/*.whl gemini-mcp-onboarding
 ```
 
 ---
@@ -101,6 +128,12 @@ PR 描述请包含：
 
 > 工具名、参数、annotations 和用户可见的输出文本应保持稳定。重构时优先"dispatcher + handler"模式，逐字保留输出文本，避免破坏依赖文本匹配的 agent。
 
+涉及 Gemini Web RPC、parser 或 `gemini-webapi` 依赖时，先运行完全离线的
+`tests/test_live_canary.py`。真实兼容性验证只能使用
+[`live-canary.yml`](../.github/workflows/live-canary.yml) 和专用测试账号；不要把 Cookie 放入
+PR、测试参数或本地输出。canary 配置与诊断 allowlist 见
+[live-canary.md](./live-canary.md)。
+
 ---
 
 ## 安全注意事项
@@ -124,6 +157,7 @@ annotations 定义在 [src/tools/annotations.py](../src/tools/annotations.py)。
 
 若改动影响 agent 使用流程，同步更新：
 - [`.agents/skills/gemini-web-mcp/SKILL.md`](../.agents/skills/gemini-web-mcp/SKILL.md) —— 公开可安装 skill
+- [`.agents/skills/gemini-web-mcp-development/SKILL.md`](../.agents/skills/gemini-web-mcp-development/SKILL.md) —— 仓库开发 skill
 - [`.codex/skills/gemini-web-mcp/`](../.codex/skills/gemini-web-mcp) —— 本地副本，需与 `.agents` 保持同步
 - [docs/tools.md](./tools.md) —— 工具手册
 - [docs/changelog.md](./changelog.md) —— 在 `## Unreleased` 段追加条目
@@ -136,10 +170,12 @@ Skill 遵循 [agentskills.io](https://agentskills.io) 规范：`references/` 目
 
 发布流程（仅维护者）：
 
-1. `pyproject.toml` 的 `version` 和 `src/__init__.py` 的 `__version__` **都要改**（曾经不同步过）
-2. `docs/changelog.md`：`## Unreleased` → `## vX.Y.Z (YYYY-MM-DD)`
-3. `git tag -a vX.Y.Z -m "vX.Y.Z"` 并推送
-4. PR 合并后打 tag
+1. 只修改 `pyproject.toml` 的 `project.version`；运行时版本从已安装包元数据读取
+2. 更新 README、客户端示例和 Launch Kit；固定 release URL 若存在必须匹配版本，公开 `uvx` 示例必须保留规范 Git 源，然后运行 `python scripts/check_version_consistency.py`
+3. `docs/changelog.md`：`## Unreleased` → `## vX.Y.Z (YYYY-MM-DD)`
+4. 运行 `python scripts/package_release.py --tag vX.Y.Z`，校验 tag、wheel 元数据和所有资产名
+5. PR 合并后执行 `git tag -a vX.Y.Z -m "vX.Y.Z"` 并推送
+6. `.github/workflows/release.yml` 会重新执行静态检查、全量离线测试、skill 校验、profile/协议 smoke 和 clean-wheel 安装；只有下载后的资产再次通过 tag/名称/wheel 元数据校验，才创建 GitHub Release
 
 遵循 [SemVer](https://semver.org/)：破坏性工具面变更升 major，新工具/功能升 minor，bug 修复升 patch。
 

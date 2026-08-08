@@ -35,7 +35,7 @@ import json
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
-from mcp.server.fastmcp import FastMCP
+from tests._fastmcp_shim import FastMCP
 
 import src.tools.manage as manage_tools
 

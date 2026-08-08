@@ -1,0 +1,16 @@
+# Copy this table into ~/.codex/config.toml or a trusted project's .codex/config.toml.
+# Export GEMINI_PSID (and optionally GEMINI_PSIDTS/GEMINI_PSIDCC) in the Codex host environment.
+[mcp_servers.gemini]
+command = "uvx"
+args = [
+  "--from",
+  "git+https://github.com/Luckycat133/gemini-web-mcp@main",
+  "gemini-mcp-server",
+]
+env_vars = ["GEMINI_PSID", "GEMINI_PSIDTS", "GEMINI_PSIDCC"]
+startup_timeout_sec = 60
+tool_timeout_sec = 720
+
+[mcp_servers.gemini.env]
+GEMINI_TOOLS = "model"
+GEMINI_AUTO_REFRESH = "false"

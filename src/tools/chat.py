@@ -2,34 +2,79 @@
 对话相关 MCP 工具
 """
 
-from mcp.server.fastmcp import FastMCP
-from mcp.types import TextContent
-from typing import Optional
-import uuid
 import logging
+from typing import Optional
 
+from ..adapters.mcp_sdk import MCPServer, TextContent
+
+from ..adapters import attach_domain_result, domain_error_boundary, domain_text
 from ..client_wrapper import (
     cleanup_due_remote_chats,
-    delete_remote_chat,
+    create_session,
     get_gemini_client,
     initialize_client,
-    store_session,
-    get_session,
-    pop_session,
     list_sessions,
+    lookup_session,
+    reset_session,
     schedule_remote_chat_cleanup,
     schedule_remote_chat_cleanup_from_response,
+    send_session_message,
+    send_session_message_stream,
 )
 from ..constants import describe_model_name, resolve_model_name
+from ..domain import DomainErrorCode, DomainResult
+from ..services import (
+    ChatRequest,
+    ChatService,
+    ChatServiceDependencies,
+    CleanupStrategy,
+    SessionMessageRequest,
+    StartSessionRequest,
+)
 from .annotations import DESTRUCTIVE_REMOTE, MUTATES_REMOTE, READ_ONLY_LOCAL
-from .utils import get_stream_text_piece, parse_response, validate_image_paths
+from .utils import parse_response, validate_image_paths
 
 logger = logging.getLogger(__name__)
 
 
-def register_chat_tools(mcp: FastMCP):
+def _invalid_argument(message: str) -> DomainResult[None]:
+    return DomainResult.failure(
+        DomainErrorCode.INVALID_ARGUMENT,
+        message,
+        suggested_action="Correct the arguments and retry.",
+        verification_status="input_rejected",
+    )
+
+
+def _build_chat_service() -> ChatService:
+    """Bind the shared service to this adapter's patchable compatibility seams."""
+    return ChatService(
+        ChatServiceDependencies(
+            client_provider=lambda: get_gemini_client(),
+            client_initializer=lambda: initialize_client(),
+            cleanup_due_remote_chats=lambda client: cleanup_due_remote_chats(client),
+            create_session=lambda *args, **kwargs: create_session(*args, **kwargs),
+            lookup_session=lambda session_id: lookup_session(session_id),
+            send_session_message=lambda *args, **kwargs: send_session_message(
+                *args,
+                **kwargs,
+            ),
+            send_session_message_stream=lambda *args, **kwargs: send_session_message_stream(*args, **kwargs),
+            schedule_response_cleanup=lambda *args, **kwargs: schedule_remote_chat_cleanup_from_response(
+                *args, **kwargs
+            ),
+            schedule_chat_cleanup=lambda *args, **kwargs: schedule_remote_chat_cleanup(*args, **kwargs),
+            normalize_model=lambda model: model,
+            resolve_model=lambda model: resolve_model_name(model),
+        )
+    )
+
+
+def register_chat_tools(mcp: MCPServer):
+    chat_service = _build_chat_service()
 
     @mcp.tool(annotations=MUTATES_REMOTE)
+    @domain_error_boundary("gemini_chat", logger)
     async def gemini_chat(
         message: str,
         model: str = "flash",
@@ -44,33 +89,41 @@ def register_chat_tools(mcp: FastMCP):
         """单次对话"""
         valid_images, safe_image_paths, image_error = validate_image_paths(image_paths)
         if not valid_images:
-            return [TextContent(type="text", text=f"❌ {image_error}")]
+            return domain_text(
+                _invalid_argument(image_error or "Invalid image paths."),
+                f"❌ {image_error}",
+            )
 
-        client = get_gemini_client()
-        await initialize_client()
-        await cleanup_due_remote_chats(client)
-        model_name = resolve_model_name(model)
-        logger.info(f"正在使用 {model_name} 生成响应...")
-        request_kwargs = {
-            "prompt": message,
-            "files": safe_image_paths or None,
-            "model": model_name,
-            "thinking_level": thinking_level,
-            "gem": gem_id,
-            "temporary": temporary,
-        }
-        if learning_mode:
-            request_kwargs["learning_mode"] = learning_mode
-        response = await client.generate_content(**request_kwargs)
-        schedule_remote_chat_cleanup_from_response(
-            response,
-            retain_chat=retain_chat,
-            delete_after_seconds=delete_after_seconds,
-            source="gemini_chat",
+        result = await chat_service.generate(
+            ChatRequest(
+                message=message,
+                model=model,
+                thinking_level=thinking_level,
+                learning_mode=learning_mode,
+                files=tuple(safe_image_paths or ()),
+                gem_id=gem_id,
+                temporary=temporary,
+                retain_chat=retain_chat,
+                delete_after_seconds=delete_after_seconds,
+                cleanup_source="gemini_chat",
+                include_gem_argument=True,
+            )
         )
-        return parse_response(response, model)
+        assert result.data is not None
+        logger.info(f"正在使用 {result.data.effective_model} 生成响应...")
+        return attach_domain_result(
+            parse_response(result.data.response, model),
+            result,
+            data={
+                "model": result.data.requested_model,
+                "resolved_model": result.data.effective_model,
+                "temporary": result.data.temporary,
+                "lifecycle": result.data.lifecycle,
+            },
+        )
 
     @mcp.tool(annotations=MUTATES_REMOTE)
+    @domain_error_boundary("gemini_start_chat", logger)
     async def gemini_start_chat(
         model: str = "flash",
         thinking_level: str = "standard",
@@ -80,29 +133,35 @@ def register_chat_tools(mcp: FastMCP):
         retain_chat: bool = False,
         delete_after_seconds: Optional[int] = None,
     ) -> list[TextContent]:
-        """创建多轮会话"""
-        client = get_gemini_client()
-        await initialize_client()
-        await cleanup_due_remote_chats(client)
-        model_name = resolve_model_name(model)
-        session = client.start_chat(model=model_name, gem=gem_id)
-        session_id = str(uuid.uuid4())[:8]
-        store_session(
-            session_id,
-            session,
-            model,
-            thinking_level=thinking_level,
-            learning_mode=learning_mode,
-            temporary=temporary,
-            retain_chat=retain_chat,
-            delete_after_seconds=delete_after_seconds,
+        """创建共享多轮会话，返回不可预测的 sess_<uuid> 本地 ID。"""
+        result = await chat_service.start_session(
+            StartSessionRequest(
+                model=model,
+                thinking_level=thinking_level,
+                learning_mode=learning_mode,
+                gem_id=gem_id,
+                temporary=temporary,
+                retain_chat=retain_chat,
+                delete_after_seconds=delete_after_seconds,
+                include_gem_argument=True,
+            )
         )
-        return [TextContent(
-            type="text",
-            text=f"✅ 会话创建成功！\nID: {session_id}\n模型: {model_name}\n使用 gemini_send_message 继续对话"
-        )]
+        if not result.ok or result.data is None:
+            return domain_text(result, "❌ 会话创建失败")
+        session_id = result.data.session_id or ""
+        return domain_text(
+            result,
+            f"✅ 会话创建成功！\nID: {session_id}\n模型: {result.data.effective_model}\n使用 gemini_send_message 继续对话",
+            data={
+                "session_id": session_id,
+                "model": result.data.requested_model,
+                "resolved_model": result.data.effective_model,
+                "lifecycle": result.data.lifecycle,
+            },
+        )
 
     @mcp.tool(annotations=MUTATES_REMOTE)
+    @domain_error_boundary("gemini_send_message", logger)
     async def gemini_send_message(
         session_id: str,
         message: str,
@@ -112,58 +171,94 @@ def register_chat_tools(mcp: FastMCP):
         retain_chat: Optional[bool] = None,
         delete_after_seconds: Optional[int] = None,
     ) -> list[TextContent]:
-        """会话消息"""
+        """向现有共享会话发送消息；未知 ID 明确返回 SESSION_NOT_FOUND。"""
         valid_images, safe_image_paths, image_error = validate_image_paths(image_paths)
         if not valid_images:
-            return [TextContent(type="text", text=f"❌ {image_error}")]
+            return domain_text(
+                _invalid_argument(image_error or "Invalid image paths."),
+                f"❌ {image_error}",
+            )
 
-        session_data = get_session(session_id)
-        if not session_data:
-            return [TextContent(type="text", text=f"❌ 会话 {session_id} 不存在")]
-        use_temporary = session_data.get("temporary", False) if temporary is None else temporary
-        request_kwargs = {
-            "prompt": message,
-            "files": safe_image_paths or None,
-            "temporary": use_temporary,
-            "thinking_level": session_data.get("thinking_level", "standard"),
-        }
-        use_learning_mode = learning_mode or session_data.get("learning_mode")
-        if use_learning_mode:
-            request_kwargs["learning_mode"] = use_learning_mode
-        response = await session_data["session"].send_message(**request_kwargs)
-        keep_chat = session_data.get("retain_chat", False) if retain_chat is None else retain_chat
-        ttl = delete_after_seconds
-        if ttl is None:
-            ttl = session_data.get("delete_after_seconds")
-        schedule_remote_chat_cleanup(
-            getattr(session_data["session"], "cid", None),
-            retain_chat=keep_chat,
-            delete_after_seconds=ttl,
-            source="gemini_send_message",
+        result = await chat_service.send_session(
+            SessionMessageRequest(
+                session_id=session_id,
+                message=message,
+                files=tuple(safe_image_paths or ()),
+                learning_mode=learning_mode,
+                temporary=temporary,
+                retain_chat=retain_chat,
+                delete_after_seconds=delete_after_seconds,
+                prepare_client=False,
+                include_temporary=True,
+                fallback_empty_thinking_level=False,
+                cleanup_strategy=CleanupStrategy.SESSION,
+                cleanup_source="gemini_send_message",
+            )
         )
-        return [TextContent(type="text", text=response.text)]
+        if not result.ok or result.data is None:
+            return domain_text(
+                result,
+                f"❌ SESSION_NOT_FOUND: 会话 {session_id} 不存在",
+            )
+        return domain_text(
+            result,
+            result.data.response.text,
+            data={
+                "session_id": session_id,
+                "model": result.data.requested_model,
+                "lifecycle": result.data.lifecycle,
+            },
+        )
 
     @mcp.tool(annotations=DESTRUCTIVE_REMOTE)
+    @domain_error_boundary("gemini_reset_session", logger)
     async def gemini_reset_session(session_id: str) -> list[TextContent]:
-        """重置会话"""
-        session_data = pop_session(session_id)
-        if session_data and not session_data.get("retain_chat", False):
-            await delete_remote_chat(getattr(session_data["session"], "cid", None))
-        return [TextContent(type="text", text=f"✅ 会话 {session_id} 已重置")]
+        """只重置指定会话；未知 ID 不影响其他会话并返回 SESSION_NOT_FOUND。"""
+        result = await reset_session(session_id)
+        if not result.ok:
+            return domain_text(
+                result,
+                f"❌ SESSION_NOT_FOUND: 会话 {session_id} 不存在",
+            )
+        return domain_text(
+            result,
+            f"✅ 会话 {session_id} 已重置",
+            data={
+                "session_id": session_id,
+                "lifecycle": result.meta.details.get("lifecycle"),
+            },
+        )
 
     @mcp.tool(annotations=READ_ONLY_LOCAL)
+    @domain_error_boundary("gemini_list_sessions", logger)
     async def gemini_list_sessions() -> list[TextContent]:
-        """列出会话"""
+        """列出 primary 与 compact 入口共享的本地会话。"""
         sessions = list_sessions()
+        public_sessions = [
+            {
+                "session_id": sid,
+                "model": data["model"],
+                "retain_chat": data.get("retain_chat", False),
+                "lifecycle_state": data.get("lifecycle_state", "active"),
+            }
+            for sid, data in sessions.items()
+        ]
+        result = DomainResult.success(
+            {
+                "count": len(public_sessions),
+                "sessions": public_sessions,
+            }
+        )
         if not sessions:
-            return [TextContent(type="text", text="暂无活跃会话")]
+            return domain_text(result, "暂无活跃会话", use_result_data=True)
         session_list = ["活跃会话:"]
         for i, (sid, data) in enumerate(sessions.items(), 1):
             retain_text = "保留" if data.get("retain_chat", False) else "自动清理"
             session_list.append(f"{i}. {sid} - {describe_model_name(data['model'])} ({retain_text})")
-        return [TextContent(type="text", text="\n".join(session_list))]
+        return domain_text(result, "\n".join(session_list), use_result_data=True)
 
     @mcp.tool(annotations=MUTATES_REMOTE)
+    @domain_error_boundary("gemini_chat_stream", logger)
     async def gemini_chat_stream(
         message: str,
         model: str = "flash",
@@ -175,45 +270,60 @@ def register_chat_tools(mcp: FastMCP):
         retain_chat: bool = False,
         delete_after_seconds: Optional[int] = None,
     ) -> list[TextContent]:
-        """流式对话"""
+        """收集 Gemini 上游流后一次性返回；不表示 MCP 增量推送。"""
         valid_images, safe_image_paths, image_error = validate_image_paths(image_paths)
         if not valid_images:
-            return [TextContent(type="text", text=f"❌ {image_error}")]
+            return domain_text(
+                _invalid_argument(image_error or "Invalid image paths."),
+                f"❌ {image_error}",
+            )
 
-        client = get_gemini_client()
-        await initialize_client()
-        await cleanup_due_remote_chats(client)
-        model_name = resolve_model_name(model)
-        full_text = ""
-        final_response = None
-        request_kwargs = {
-            "prompt": message,
-            "files": safe_image_paths or None,
-            "model": model_name,
-            "thinking_level": thinking_level,
-            "gem": gem_id,
-            "temporary": temporary,
-        }
-        if learning_mode:
-            request_kwargs["learning_mode"] = learning_mode
-        async for response in client.generate_content_stream(**request_kwargs):
-            full_text += get_stream_text_piece(response)
-            final_response = response
-        if final_response:
-            schedule_remote_chat_cleanup_from_response(
-                final_response,
+        result = await chat_service.generate_stream(
+            ChatRequest(
+                message=message,
+                model=model,
+                thinking_level=thinking_level,
+                learning_mode=learning_mode,
+                files=tuple(safe_image_paths or ()),
+                gem_id=gem_id,
+                temporary=temporary,
                 retain_chat=retain_chat,
                 delete_after_seconds=delete_after_seconds,
-                source="gemini_chat_stream",
+                cleanup_source="gemini_chat_stream",
+                include_gem_argument=True,
+            ),
+        )
+        assert result.data is not None
+        if result.data.response is not None:
+            return attach_domain_result(
+                parse_response(
+                    result.data.response,
+                    model,
+                    text_override=(result.data.stream_text or getattr(result.data.response, "text", "")),
+                ),
+                result,
+                data={
+                    "model": result.data.requested_model,
+                    "resolved_model": result.data.effective_model,
+                    "temporary": result.data.temporary,
+                    "stream": result.data.stream,
+                    "lifecycle": result.data.lifecycle,
+                },
             )
-            return parse_response(
-                final_response,
-                model,
-                text_override=full_text or getattr(final_response, "text", ""),
-            )
-        return [TextContent(type="text", text=full_text)]
+        return domain_text(
+            result,
+            result.data.stream_text,
+            data={
+                "model": result.data.requested_model,
+                "resolved_model": result.data.effective_model,
+                "temporary": result.data.temporary,
+                "stream": result.data.stream,
+                "lifecycle": result.data.lifecycle,
+            },
+        )
 
     @mcp.tool(annotations=MUTATES_REMOTE)
+    @domain_error_boundary("gemini_send_message_stream", logger)
     async def gemini_send_message_stream(
         session_id: str,
         message: str,
@@ -223,37 +333,42 @@ def register_chat_tools(mcp: FastMCP):
         retain_chat: Optional[bool] = None,
         delete_after_seconds: Optional[int] = None,
     ) -> list[TextContent]:
-        """会话流式消息"""
+        """收集现有会话的 Gemini 上游流后一次返回；未知 ID 返回 SESSION_NOT_FOUND。"""
         valid_images, safe_image_paths, image_error = validate_image_paths(image_paths)
         if not valid_images:
-            return [TextContent(type="text", text=f"❌ {image_error}")]
+            return domain_text(
+                _invalid_argument(image_error or "Invalid image paths."),
+                f"❌ {image_error}",
+            )
 
-        session_data = get_session(session_id)
-        if not session_data:
-            return [TextContent(type="text", text=f"❌ 会话 {session_id} 不存在")]
-        full_text = ""
-        final_response = None
-        use_temporary = session_data.get("temporary", False) if temporary is None else temporary
-        request_kwargs = {
-            "prompt": message,
-            "files": safe_image_paths or None,
-            "temporary": use_temporary,
-            "thinking_level": session_data.get("thinking_level", "standard"),
-        }
-        use_learning_mode = learning_mode or session_data.get("learning_mode")
-        if use_learning_mode:
-            request_kwargs["learning_mode"] = use_learning_mode
-        async for response in session_data["session"].send_message_stream(**request_kwargs):
-            full_text += get_stream_text_piece(response)
-            final_response = response
-        keep_chat = session_data.get("retain_chat", False) if retain_chat is None else retain_chat
-        ttl = delete_after_seconds
-        if ttl is None:
-            ttl = session_data.get("delete_after_seconds")
-        schedule_remote_chat_cleanup_from_response(
-            final_response,
-            retain_chat=keep_chat,
-            delete_after_seconds=ttl,
-            source="gemini_send_message_stream",
+        result = await chat_service.send_session_stream(
+            SessionMessageRequest(
+                session_id=session_id,
+                message=message,
+                files=tuple(safe_image_paths or ()),
+                learning_mode=learning_mode,
+                temporary=temporary,
+                retain_chat=retain_chat,
+                delete_after_seconds=delete_after_seconds,
+                prepare_client=False,
+                include_temporary=True,
+                fallback_empty_thinking_level=False,
+                cleanup_strategy=CleanupStrategy.RESPONSE,
+                cleanup_source="gemini_send_message_stream",
+            ),
         )
-        return [TextContent(type="text", text=full_text)]
+        if not result.ok or result.data is None:
+            return domain_text(
+                result,
+                f"❌ SESSION_NOT_FOUND: 会话 {session_id} 不存在",
+            )
+        return domain_text(
+            result,
+            result.data.stream_text,
+            data={
+                "session_id": session_id,
+                "model": result.data.requested_model,
+                "stream": result.data.stream,
+                "lifecycle": result.data.lifecycle,
+            },
+        )

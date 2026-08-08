@@ -5,10 +5,10 @@
 <h1 align="center">Gemini Web MCP Server (v0.2.0)</h1>
 
 <p align="center">
-  <a href="https://github.com/Luckycat133/gemini-web-mcp/releases/latest"><img alt="Release" src="https://img.shields.io/github/v/release/Luckycat133/gemini-web-mcp?label=release"></a>
+  <a href="https://github.com/Luckycat133/gemini-web-mcp/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/Luckycat133/gemini-web-mcp/actions/workflows/ci.yml/badge.svg"></a>
   <a href="https://github.com/Luckycat133/gemini-web-mcp/tree/main/.agents/skills/gemini-web-mcp"><img alt="Codex Skill" src="https://img.shields.io/badge/Codex%20Skill-installable-0B6BFF"></a>
   <a href="https://www.gnu.org/licenses/agpl-3.0.html"><img alt="License" src="https://img.shields.io/badge/License-AGPL--3.0--only-blue.svg"></a>
-  <a href="docs/changelog.md"><img alt="Verified" src="https://img.shields.io/badge/tests-1121%20passing-1F8A70"></a>
+  <a href="docs/changelog.md"><img alt="Verified" src="https://img.shields.io/badge/tests-1340%20passing-1F8A70"></a>
 </p>
 
 <p align="center">
@@ -21,7 +21,15 @@
 
 ---
 
-## ✨ 主要功能 (v2.2)
+## MCP 协议兼容性
+
+本服务器通过专用 `MCPServer` 适配层，把 discovery、版本协商、JSON-RPC 帧、旧式 `initialize` 握手、结果校验和结构化协议错误委托给官方 `mcp` Python SDK v2。仓库不自建协议栈；`error_handler.py` 里的 `NO_COOKIE` / `INVALID_COOKIE` / `SESSION_NOT_FOUND` 等是工具结果中的应用层错误，不是 JSON-RPC 协议错误。
+
+当前运行时支持范围是 `mcp>=2,<3` 与 `mcp-types>=2,<3`。CI 同时覆盖协议 `2026-07-28` 的 `server/discover` 客户端，以及通过 `2025-11-25` initialize 路径接入的兼容客户端。每个工具都声明 `outputSchema`，返回经过校验的 `structuredContent`，并保留现有文本。SDK v1 的维护截止日期和完整客户端兼容边界见 [兼容政策](docs/mcp-sdk-compatibility.md)。
+
+---
+
+## ✨ 主要功能
 
 ### 🤖 模型支持
 - **flash-lite** → Web UI `3.1 Flash-Lite`
@@ -37,8 +45,8 @@
 - **音乐**: `flash` 系列 → Lyria 3，`pro` → Lyria 3 Pro
 
 ### 💬 对话功能
-- 单次对话 (支持流式输出 + 图片输入)
-- 多轮会话 (支持流式输出)
+- 单次对话（支持图片输入，并可收集 Gemini 上游流）
+- 多轮会话（可收集 Gemini 上游流）
 - Temporary chat (不进入 Gemini 历史记录)
 - 使用已保存 Gem 进行对话
 - 学习模式 (`learning_mode=quiz` / `flashcards` / `practice_test` / `study_guide`)
@@ -54,16 +62,28 @@
 - 智能错误处理
 
 ### 📦 Skill 分发
-- 公开 Codex skill: `.agents/skills/gemini-web-mcp`
-- 直接从 GitHub 安装 skill
-- Release 附带 standalone skill zip、wheel 和源码包
+- 运行时 skill：`.agents/skills/gemini-web-mcp`
+- 仓库开发 skill：`.agents/skills/gemini-web-mcp-development`
+- 两个 skill 都可直接从 GitHub 安装，并在 CI 中校验公开/本地镜像一致
+- Tag release 工作流构建 standalone skill zip、wheel 和源码包
 - `docs/launch-kit.md` 提供社交媒体发布文案和分发清单
 
 ---
 
 ## 🚀 快速开始
 
-### 1. 获取 Cookie
+### 0. 先做无需 Cookie 的一条命令验证
+
+安装 [uv](https://docs.astral.sh/uv/) 后运行：
+
+```bash
+uvx --from git+https://github.com/Luckycat133/gemini-web-mcp@main gemini-mcp-onboarding
+```
+
+这条命令会在隔离环境中安装当前 `main` 源码、启动真实 stdio 服务器，并调用静态文本工具
+`gemini_get_tool_manifest`。它会从子进程移除 Gemini Cookie，不会向 Gemini 发请求。需要不可变安装时，请把 `@main` 换成已审核的 commit SHA。
+
+### 1. 获取 Cookie（仅实时 Gemini 调用需要）
 
 #### 方法 1: 手动获取
 1. 打开 Chrome，访问 [gemini.google.com](https://gemini.google.com) 并登录
@@ -91,24 +111,19 @@ pip install browser-cookie3
       "command": "uvx",
       "args": [
         "--from",
-        "https://github.com/Luckycat133/gemini-web-mcp/releases/download/v0.2.0/gemini_mcp_server-0.2.0-py3-none-any.whl",
+        "git+https://github.com/Luckycat133/gemini-web-mcp@main",
         "gemini-mcp-server"
       ],
       "env": {
-        "GEMINI_TOOLS": "core"
+        "GEMINI_TOOLS": "model"
       }
     }
   }
 }
 ```
 
-需要先安装 [uv](https://docs.astral.sh/uv/)。也可以直接验证最小模型调用层：
-
-```bash
-GEMINI_TOOLS=model uvx \
-  --from https://github.com/Luckycat133/gemini-web-mcp/releases/download/v0.2.0/gemini_mcp_server-0.2.0-py3-none-any.whl \
-  gemini-mcp-server
-```
+Codex、Claude Desktop、Claude Code 和 VS Code 的完整可复制配置见
+[客户端安装与验证](docs/client-examples.md)。
 
 ### 3. 从源码开发（可选）
 
@@ -117,7 +132,7 @@ git clone https://github.com/Luckycat133/gemini-web-mcp.git
 cd gemini-web-mcp
 python -m venv .venv
 . .venv/bin/activate
-pip install -e ".[all]"
+pip install -e ".[all,dev]"
 ```
 
 ### 4. 启动服务器
@@ -134,6 +149,12 @@ GEMINI_TOOLS=core python -m src.server
 
 # 完整维护/验证工具面
 GEMINI_TOOLS=all python -m src.server
+
+# 安装后的主入口（等价于 python -m src.server）
+GEMINI_TOOLS=core gemini-mcp-server
+
+# 安装后的低 token facade 入口
+gemini-mcp-skill-server
 ```
 
 ---
@@ -164,6 +185,9 @@ GEMINI_TOOLS=all python -m src.server
 | `manage` | 聚合入口 + 历史、账号、scheduled、Gems 颗粒工具 | 兼容旧配置；普通 agent 不建议默认使用 | 高 |
 | `prompts` | 本地提示词库存取 | 可选附加能力 | 低 |
 | `all` | `core` + `manage` | 完整维护/验证工具面 | 高 |
+
+文本调用优先从 `model` 开始；图片、视频、音乐、文件、URL 或 Deep Research 使用 `core`；
+需要固定十一工具、低 token facade 时使用 `gemini-mcp-skill-server`；`all` 只适合维护验证，不是通用默认值。
 
 ---
 
@@ -246,10 +270,10 @@ GEMINI_TOOLS=all python -m src.server
 
 ### 对话工具
 - `gemini_chat`: 单次对话
-- `gemini_chat_stream`: 单次流式对话
+- `gemini_chat_stream`: 收集单次对话的 Gemini 上游流，归一化后一次性返回 MCP 结果
 - `gemini_start_chat`: 创建多轮会话，可指定 Gem 和 Temporary chat
 - `gemini_send_message`: 会话消息，可沿用或覆盖 Temporary chat
-- `gemini_send_message_stream`: 会话流式消息，可沿用或覆盖 Temporary chat
+- `gemini_send_message_stream`: 收集会话的 Gemini 上游流，归一化后一次性返回 MCP 结果
 - `gemini_list_sessions`: 列会话
 - `gemini_reset_session`: 重置会话
 
@@ -268,7 +292,7 @@ Gemini Web `学习辅导` 输入模式。
 - `gemini_analyze_url`: 分析网页或 YouTube 等 URL
 
 ### Deep Research
-- `gemini_deep_research`: 创建研究计划、启动研究，并轮询最终报告或返回清晰进度状态
+- `gemini_deep_research`: 创建研究计划、启动研究，并返回结构化的 `queued` / `running` / `completed` / `timed_out` 状态；`wait_for_completion=false` 可只启动不等待
 
 ### 账户和内容管理
 - `gemini_history`: 历史对话只读聚合入口，支持 `action=list|scan|search|read|export`
@@ -312,6 +336,9 @@ Gemini Web `学习辅导` 输入模式。
 ### 低 token Skill 入口
 `src.skill_server` 提供更短工具名的 skills 兼容入口，适合希望减少工具描述 token 的客户端：
 
+安装 wheel 或 editable package 后可直接运行 `gemini-mcp-skill-server`；
+`python -m src.skill_server` 仍保持兼容。
+
 - `chat`: 对话
 - `create`: 图片/视频/音乐生成
 - `edit`: 图片编辑
@@ -323,36 +350,36 @@ Gemini Web `学习辅导` 输入模式。
 - `prompts`: 本地提示词库
 - `cookie`: Cookie 状态和浏览器获取
 
-### Codex Skill
-`.agents/skills/gemini-web-mcp` 是公开分发用 Codex skill，符合 Codex repo skill
-发现约定；`.codex/skills/gemini-web-mcp` 保留为本仓库本地开发副本。这个 skill
-指导 agent 先读取 `gemini_get_tool_manifest`，按隐私/destructive 边界选择工具，
-并使用 `evaluations/gemini_web_mcp_contract.xml` 验证 MCP contract。
+### 运行时 Skill 与开发 Skill
+`.agents/skills/gemini-web-mcp` 只指导 agent 安全操作已安装的 MCP 工具；
+`.agents/skills/gemini-web-mcp-development` 用于修改本仓库的架构、测试、打包、兼容性和发布。
+不要用运行时 skill 指导开发工作。
 
 使用跨 agent 的 `skills` CLI 从 GitHub 一行安装：
 
 ```bash
-npx skills add https://github.com/Luckycat133/gemini-web-mcp/tree/main/.agents/skills/gemini-web-mcp
+npx --yes skills@1.5.21 add \
+  https://github.com/Luckycat133/gemini-web-mcp \
+  --skill gemini-web-mcp \
+  --agent codex --copy --yes
 ```
 
-安装器支持 Codex、Claude Code、Gemini CLI、Cline 等多种 agent；按提示选择目标即可。
-
-手动安装：
+仓库贡献者安装开发 skill：
 
 ```bash
-git clone https://github.com/Luckycat133/gemini-web-mcp.git
-mkdir -p ~/.codex/skills
-cp -R gemini-web-mcp/.agents/skills/gemini-web-mcp ~/.codex/skills/gemini-web-mcp
+npx --yes skills@1.5.21 add \
+  https://github.com/Luckycat133/gemini-web-mcp \
+  --skill gemini-web-mcp-development \
+  --agent codex --copy --yes
 ```
 
-Skill 只负责告诉 agent 如何安全、分层地使用 Gemini Web MCP；MCP server 本体仍按上面的
-安装和客户端配置步骤运行。
+两个 skill 都不安装 MCP server 本体；服务器仍按上面的 `uvx` 或源码步骤运行。
 
 ---
 
 ## 🛡️ 智能错误处理
 
-0.2.0 新增智能错误处理，让 AI 可以自主解决常见问题：
+内置智能错误处理，让 AI 可以自主解决常见问题：
 
 | 错误类型 | 自动解决方案 | 建议工具 |
 |---------|-------------|---------|
@@ -377,19 +404,20 @@ gemini-mcp-server/
 │   ├── __init__.py
 │   ├── server.py           # MCP 服务器主入口（primary surface）
 │   ├── skill_server.py     # 低 token skill 服务器（facade surface）
+│   ├── onboarding.py       # 公开安装、文本调用与本地图像产物验证客户端
 │   ├── client_wrapper.py   # Gemini 客户端封装
 │   ├── client_manager.py   # 客户端生命周期管理
 │   ├── cookie_manager.py   # Cookie 管理模块
 │   ├── session_manager.py  # 本地会话管理
 │   ├── thinking_client.py  # Thinking/Learning 模式传输层
-│   ├── error_handler.py    # 智能错误处理 (0.2.0 新增)
+│   ├── error_handler.py    # 智能错误处理
 │   ├── constants.py        # 模型常量、配置
 │   ├── remote_chat_cleanup_manager.py  # 远程聊天清理
 │   └── tools/              # 工具集
-│       ├── __init__.py     # 分层加载入口 (0.2.0 新增)
+│       ├── __init__.py     # 分层加载入口
 │       ├── annotations.py  # MCP 工具安全/隐私注解常量
 │       ├── manifest_data.py # 静态 manifest 数据（UI 能力/RPC probe/工具清单）
-│       ├── utils.py        # 共享工具函数 (0.2.0 新增)
+│       ├── utils.py        # 共享工具函数
 │       ├── chat.py         # 对话工具
 │       ├── media.py        # 媒体生成
 │       ├── image.py        # media.py 向后兼容别名

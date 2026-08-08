@@ -1,37 +1,69 @@
 #!/usr/bin/env python3
 """
-Gemini Skill - Optimized MCP Server (v3.0)
+Gemini Skill - Optimized MCP Server
 Low-token, production-ready.
 """
 
-import os
-import json
 import asyncio
-import shutil
+import json
 import logging
+import os
 import threading
 from pathlib import Path
-from typing import Optional, Literal, Any, Callable, Awaitable
+from typing import Any, Awaitable, Callable, Literal, Optional
 
 try:
-    from mcp.server.fastmcp import FastMCP
-    from mcp.types import TextContent
+    from src.adapters.mcp_sdk import MCPServer, TextContent
 except ImportError:
-    print("Error: mcp package required. Install with: pip install mcp fastmcp")
+    print('Error: MCP SDK v2 required. Install with: pip install "mcp>=2,<3"')
     exit(1)
 
+from . import __version__
+from .adapters import append_artifact_block, attach_domain_result, domain_text, exception_text
 from .client_wrapper import (
     cleanup_due_remote_chats,
+    create_session,
+    get_cookie_from_browser,
+    get_cookie_status,
     get_gemini_client,
     initialize_client,
-    reset_client,
-    get_cookie_status,
-    get_cookie_from_browser,
     list_browser_cookie_profiles,
+    list_sessions,
+    lookup_session,
+    reset_client_async,
+    reset_session,
     schedule_remote_chat_cleanup,
     schedule_remote_chat_cleanup_from_response,
+    send_session_message,
+    send_session_message_stream,
 )
 from .constants import resolve_media_request, resolve_model_name
+from .domain import (
+    Artifact,
+    ArtifactKind,
+    ArtifactResultData,
+    ArtifactState,
+    CleanupObservation,
+    ConversationLifecycleMetadata,
+    DomainErrorCode,
+    DomainResult,
+    SessionLifecycleState,
+)
+from .services import (
+    ChatRequest,
+    ChatService,
+    ChatServiceDependencies,
+    CleanupStrategy,
+    SessionMessageRequest,
+    StartSessionRequest,
+    artifact_exception_result,
+    artifact_from_local_path,
+    artifact_result,
+    classify_artifact_state,
+    extract_response_artifacts,
+    observed_backend_from_response,
+    response_chat_id,
+)
 from .tools.annotations import (
     DESTRUCTIVE_LOCAL,
     DESTRUCTIVE_REMOTE,
@@ -40,40 +72,52 @@ from .tools.annotations import (
     READ_ONLY_LOCAL,
     READS_PRIVATE_REMOTE,
 )
-from .tools.utils import extract_remote_chat_id, validate_optional_image_path
-from .tools.manage import (
-    WEB_FEATURE_PROBES,
-    _RawRPCData,
+from .infrastructure.rpc_contracts import WEB_FEATURE_PROBES, RawRPCData as _RawRPCData
+from .infrastructure.rpc_parsers import extract_rpc_bodies as _extract_rpc_bodies
+from .resources import default_prompts_resource
+from .services.account import (
+    execute_observed_rpc as _execute_observed_rpc,
+    get_probe as _get_probe,
+    parse_library_capability as _parse_library_capability,
+    parse_public_link_entry as _parse_public_link_entry,
+    parse_tool_mode_entry as _parse_tool_mode_entry,
+    parse_usage_entry as _parse_usage_entry,
+    summarize_rpc_response as _summarize_probe_response,
+)
+from .services.cleanup import (
+    cleanup_test_artifacts_payload as _cleanup_test_artifacts_payload,
+    format_cleanup_markdown as _format_cleanup_markdown,
+)
+from .services.doctor import (
+    doctor_payload as _doctor_payload,
+    format_doctor_markdown as _format_doctor_markdown,
+)
+from .services.history import (
     _chat_export_payload,
     _chat_to_dict,
-    _execute_observed_rpc,
-    _fetch_native_notebooks,
-    _extract_rpc_bodies,
-    _fetch_scheduled_registry,
-    _fetch_scheduled_task_by_id,
-    _cleanup_test_artifacts_payload,
-    _doctor_payload,
-    _format_cleanup_markdown,
     _format_chat_export_markdown,
-    _format_doctor_markdown,
-    _format_web_capabilities_markdown,
     _get_chat_id,
-    _get_probe,
+    _paginate_items,
     _read_chat_turns,
     _turn_matches_query,
-    _parse_library_capability,
-    _parse_public_link_entry,
-    _parse_scheduled_action_create_body,
-    _parse_scheduled_action_task_entry,
-    _parse_tool_mode_entry,
-    _parse_usage_entry,
-    _paginate_items,
-    _scheduled_daily_payload,
-    _format_tool_manifest_markdown,
-    _summarize_probe_response,
-    _tool_manifest_payload,
-    _web_capabilities_payload,
 )
+from .services.manifest import (
+    format_tool_manifest_markdown as _format_tool_manifest_markdown,
+    format_web_capabilities_markdown as _format_web_capabilities_markdown,
+    tool_manifest_payload as _tool_manifest_payload,
+    web_capabilities_payload as _web_capabilities_payload,
+)
+from .services.notebooks import fetch_native_notebooks as _fetch_native_notebooks
+from .services.scheduled import (
+    create_daily_action as _create_daily_action_service,
+    delete_action as _delete_scheduled_action_service,
+    fetch_scheduled_registry as _fetch_scheduled_registry,
+    fetch_scheduled_task_by_id as _fetch_scheduled_task_by_id,
+    parse_scheduled_action_create_body as _parse_scheduled_action_create_body,
+    parse_scheduled_action_task_entry as _parse_scheduled_action_task_entry,
+    scheduled_daily_payload as _scheduled_daily_payload,
+)
+from .tools.utils import extract_remote_chat_id, validate_optional_image_path
 
 logging.basicConfig(
     level=logging.WARNING,
@@ -83,7 +127,7 @@ logger = logging.getLogger(__name__)
 
 CONFIG_DIR = Path(os.environ.get("GEMINI_CONFIG_DIR", ".gemini"))
 PROMPTS_FILE = CONFIG_DIR / "prompts.json"
-DEFAULT_PROMPTS_FILE = Path(__file__).parent.parent / "prompts_default.json"
+DEFAULT_PROMPTS_FILE = default_prompts_resource()
 
 MODEL_ALIASES = {
     "l": "flash-lite",
@@ -96,10 +140,11 @@ MODEL_ALIASES = {
 
 MEDIA_TYPES = {"img": "image", "picture": "image", "photo": "image"}
 
-mcp = FastMCP(
-    "Gemini",
-    instructions="""
-# Gemini Skill
+mcp = MCPServer(
+    name="Gemini",
+    version=__version__,
+    instructions=f"""
+# Gemini Skill (v{__version__})
 
 ## Tools
 - **chat**: conversation
@@ -107,7 +152,8 @@ mcp = FastMCP(
 - **edit**: modify images
 - **session**: conversation history
 - **history**: remote Gemini chat history
-- **account**: account, models, tool manifest, web capabilities, feature probes, links, usage, library, native notebooks, scheduled actions, modes
+- **account**: account, models, manifest, capabilities, feature probes, links,
+  usage, library, native notebooks, scheduled actions, modes
 - **scheduled**: list, get by id, create daily, or delete scheduled actions
 - **cookie**: authentication helper
 - **doctor**: local preflight diagnostics
@@ -146,8 +192,8 @@ def _ensure_config_dir() -> None:
 def _init_default_prompts() -> None:
     """Initialize with default prompts if none exist."""
     _ensure_config_dir()
-    if not PROMPTS_FILE.exists() and DEFAULT_PROMPTS_FILE.exists():
-        shutil.copy(DEFAULT_PROMPTS_FILE, PROMPTS_FILE)
+    if not PROMPTS_FILE.exists() and DEFAULT_PROMPTS_FILE.is_file():
+        PROMPTS_FILE.write_text(DEFAULT_PROMPTS_FILE.read_text(encoding="utf-8"), encoding="utf-8")
         logger.info("Initialized default prompts")
 
 
@@ -230,10 +276,6 @@ def get_prompts() -> PromptManager:
         return _prompt_manager
 
 
-_sessions: dict[str, dict[str, Any]] = {}
-_sessions_lock = threading.Lock()
-
-
 def _truncate_text(text: Any, max_chars: int = 2000) -> str:
     value = str(text or "")
     if len(value) <= max_chars:
@@ -247,11 +289,94 @@ def _error_text(e: Exception, tool_name: str) -> list[TextContent]:
     return [TextContent(type="text", text=f"Error: {e}")]
 
 
+def _invalid_argument_result(message: str) -> DomainResult[None]:
+    return DomainResult.failure(
+        DomainErrorCode.INVALID_ARGUMENT,
+        message,
+        suggested_action="Correct the arguments and retry.",
+        verification_status="input_rejected",
+    )
+
+
+def _session_not_found_result() -> DomainResult[None]:
+    return DomainResult.failure(
+        DomainErrorCode.SESSION_NOT_FOUND,
+        "The requested session does not exist.",
+        suggested_action="Create a session and use the returned ID.",
+        verification_status="local_state_absent",
+        details={
+            "lifecycle": ConversationLifecycleMetadata(
+                session_state=SessionLifecycleState.ABSENT,
+            )
+        },
+    )
+
+
 def _schedule_skill_response_cleanup(response: Any, source: str, session: Any = None) -> None:
     """Mirror the primary MCP server's default remote-chat cleanup behavior."""
     cid = schedule_remote_chat_cleanup_from_response(response, source=source)
     if not cid and session is not None:
         schedule_remote_chat_cleanup(getattr(session, "cid", None), source=source)
+
+
+def _schedule_compact_response_cleanup(
+    response: Any,
+    *,
+    retain_chat: bool,
+    delete_after_seconds: int | None,
+    source: str,
+) -> str | None:
+    """Apply the same retention policy as the primary adapter."""
+    return schedule_remote_chat_cleanup_from_response(
+        response,
+        retain_chat=retain_chat,
+        delete_after_seconds=delete_after_seconds,
+        source=source,
+    )
+
+
+def _schedule_compact_chat_cleanup(
+    chat_id: str | None,
+    *,
+    retain_chat: bool,
+    delete_after_seconds: int | None,
+    source: str,
+) -> CleanupObservation | None:
+    """Apply the same retention policy as the primary adapter."""
+    return schedule_remote_chat_cleanup(
+        chat_id,
+        retain_chat=retain_chat,
+        delete_after_seconds=delete_after_seconds,
+        source=source,
+    )
+
+
+def _build_chat_service() -> ChatService:
+    """Bind compact presentation behavior to the shared chat service."""
+    return ChatService(
+        ChatServiceDependencies(
+            client_provider=lambda: get_gemini_client(),
+            client_initializer=lambda: initialize_client(),
+            cleanup_due_remote_chats=lambda client: cleanup_due_remote_chats(client),
+            create_session=lambda *args, **kwargs: create_session(*args, **kwargs),
+            lookup_session=lambda session_id: lookup_session(session_id),
+            send_session_message=lambda *args, **kwargs: send_session_message(
+                *args,
+                **kwargs,
+            ),
+            send_session_message_stream=lambda *args, **kwargs: send_session_message_stream(
+                *args,
+                **kwargs,
+            ),
+            schedule_response_cleanup=_schedule_compact_response_cleanup,
+            schedule_chat_cleanup=_schedule_compact_chat_cleanup,
+            normalize_model=lambda model: _normalize_model(model),
+            resolve_model=lambda model: resolve_model_name(model),
+        )
+    )
+
+
+_chat_service = _build_chat_service()
 
 
 @mcp.tool(annotations=MUTATES_REMOTE)
@@ -267,49 +392,74 @@ async def chat(
     try:
         valid_image, safe_image_path, image_error = validate_optional_image_path(image_path)
         if not valid_image:
-            return [TextContent(type="text", text=f"Error: {image_error}")]
+            return domain_text(
+                _invalid_argument_result(image_error or "Invalid image path."),
+                f"Error: {image_error}",
+            )
 
-        client = get_gemini_client()
-        await initialize_client()
-        await cleanup_due_remote_chats(client)
-
-        model = _normalize_model(model)
-        model_name = resolve_model_name(model)
-        files = [safe_image_path] if safe_image_path else None
+        files = (safe_image_path,) if safe_image_path else ()
 
         if session_id:
-            with _sessions_lock:
-                session_entry = _sessions.get(session_id)
+            result = await _chat_service.send_session(
+                SessionMessageRequest(
+                    session_id=session_id,
+                    message=message,
+                    files=files,
+                    learning_mode=learning_mode,
+                    thinking_level=thinking_level,
+                    prepare_client=True,
+                    include_temporary=False,
+                    fallback_empty_thinking_level=True,
+                    cleanup_strategy=CleanupStrategy.RESPONSE_THEN_SESSION,
+                    cleanup_source="skill_chat:session",
+                )
+            )
+            if not result.ok or result.data is None:
+                return domain_text(
+                    result,
+                    f"SESSION_NOT_FOUND: Invalid session: {session_id}",
+                )
         else:
-            session_entry = None
+            result = await _chat_service.generate(
+                ChatRequest(
+                    message=message,
+                    model=model,
+                    thinking_level=thinking_level,
+                    learning_mode=learning_mode,
+                    files=files,
+                    cleanup_source="skill_chat",
+                    include_gem_argument=False,
+                    include_temporary_argument=False,
+                )
+            )
 
-        if session_id and session_entry:
-            request_kwargs = {
-                "prompt": message,
-                "files": files,
-                "thinking_level": thinking_level,
-            }
-            use_learning_mode = learning_mode or session_entry.get("learning_mode")
-            if use_learning_mode:
-                request_kwargs["learning_mode"] = use_learning_mode
-            response = await session_entry["session"].send_message(**request_kwargs)
-            _schedule_skill_response_cleanup(response, "skill_chat:session", session_entry["session"])
-        else:
-            request_kwargs = {
-                "prompt": message,
-                "files": files,
-                "model": model_name,
-                "thinking_level": thinking_level,
-            }
-            if learning_mode:
-                request_kwargs["learning_mode"] = learning_mode
-            response = await client.generate_content(**request_kwargs)
-            _schedule_skill_response_cleanup(response, "skill_chat")
+        assert result.data is not None
 
-        return _format_response(response)
+        return attach_domain_result(
+            _format_response(result.data.response),
+            result,
+            data=(
+                {
+                    "session_id": session_id,
+                    "model": result.data.requested_model,
+                    "lifecycle": result.data.lifecycle,
+                }
+                if session_id
+                else {
+                    "model": result.data.normalized_model,
+                    "resolved_model": result.data.effective_model,
+                    "lifecycle": result.data.lifecycle,
+                }
+            ),
+        )
 
     except Exception as e:
-        return _error_text(e, "Chat")
+        return exception_text(
+            e,
+            logger=logger,
+            operation="chat",
+            preserve_message=True,
+        )
 
 
 @mcp.tool(annotations=DESTRUCTIVE_REMOTE)
@@ -496,7 +646,8 @@ async def _account_usage(client: Any) -> list[TextContent]:
             if isinstance(first, list):
                 entries = [_parse_usage_entry(item) for item in first]
         return [
-            f"{probe_name}: key={item.get('key')} limit={item.get('limit_value')} remaining={item.get('remaining_value')}"
+            f"{probe_name}: key={item.get('key')} limit={item.get('limit_value')} "
+            f"remaining={item.get('remaining_value')}"
             for item in entries
         ]
 
@@ -564,7 +715,8 @@ async def _account_modes(client: Any) -> list[TextContent]:
     if not entries:
         return [TextContent(type="text", text="No mode status entries")]
     lines = [
-        f"mode_id={item.get('mode_id')} available={item.get('available')} quota={item.get('quota_value')} state={item.get('state')}"
+        f"mode_id={item.get('mode_id')} available={item.get('available')} "
+        f"quota={item.get('quota_value')} state={item.get('state')}"
         for item in entries
     ]
     return [TextContent(type="text", text="\n".join(lines))]
@@ -603,7 +755,19 @@ _ACCOUNT_CLIENT_ACTIONS: dict[str, Callable[[Any], Awaitable[list[TextContent]]]
 
 @mcp.tool(annotations=READS_PRIVATE_REMOTE)
 async def account(
-    action: Literal["status", "models", "manifest", "capabilities", "features", "links", "usage", "library", "notebooks", "scheduled", "modes"] = "status",
+    action: Literal[
+        "status",
+        "models",
+        "manifest",
+        "capabilities",
+        "features",
+        "links",
+        "usage",
+        "library",
+        "notebooks",
+        "scheduled",
+        "modes",
+    ] = "status",
 ) -> list[TextContent]:
     """Inspect Gemini account status and available models."""
     try:
@@ -665,36 +829,23 @@ async def _scheduled_create(
         return [TextContent(type="text", text="instructions required")]
     if hour < 0 or hour > 23:
         return [TextContent(type="text", text="hour must be 0..23")]
-    payload = _scheduled_daily_payload(clean_title, clean_instructions, hour, clean_timezone or "Asia/Shanghai", "zh-CN")
-    response = await client._batch_execute(
-        [_RawRPCData("Jba3ib", payload)],
-        source_path="/scheduled",
-        close_on_error=False,
+    result = await _create_daily_action_service(
+        client,
+        title=clean_title,
+        instructions=clean_instructions,
+        hour=hour,
+        timezone_name=clean_timezone or "Asia/Shanghai",
+        locale="zh-CN",
+        max_chars=200,
+        fetch_registry=_fetch_scheduled_registry,
+        fetch_by_id=_fetch_scheduled_task_by_id,
+        extract_bodies=_extract_rpc_bodies,
+        parse_create=_parse_scheduled_action_create_body,
+        payload_builder=_scheduled_daily_payload,
     )
-    bodies = _extract_rpc_bodies(response.text, "Jba3ib")
-    body = bodies[0] if bodies else []
-    if isinstance(body, list) and body and isinstance(body[0], list):
-        body = body[0]
-    created = _parse_scheduled_action_create_body(body)
-    created_id = created.get("id", "")
-    visible = False
-    readable_by_id = None
-    verification_status = "not_attempted"
-    if created_id:
-        registry_entries, _ = await _fetch_scheduled_registry(client, 200)
-        visible = any(item.get("id") == created_id for item in registry_entries)
-        if visible:
-            verification_status = "visible_in_registry"
-        elif registry_entries:
-            verification_status = "not_visible_in_nonempty_registry"
-        else:
-            verification_status = "registry_empty_unverified"
-        task_by_id, _ = await _fetch_scheduled_task_by_id(client, created_id, 200)
-        readable_by_id = task_by_id is not None
-        if readable_by_id and verification_status == "registry_empty_unverified":
-            verification_status = "readable_by_id_registry_empty"
-        elif readable_by_id and verification_status == "not_visible_in_nonempty_registry":
-            verification_status = "readable_by_id_not_visible_in_registry"
+    created_id = result.get("id", "")
+    visible = bool(result.get("visible_in_registry"))
+    verification_status = result.get("verification_status", "not_attempted")
     suffix = "" if visible else f" ({verification_status}; verify account context)"
     return [TextContent(type="text", text=f"Created: {created_id or clean_title}{suffix}")]
 
@@ -703,39 +854,15 @@ async def _scheduled_delete(client: Any, action_id: str) -> list[TextContent]:
     clean_id = action_id.strip()
     if not clean_id:
         return [TextContent(type="text", text="action_id required")]
-    payload = json.dumps([None, [clean_id]], ensure_ascii=False, separators=(",", ":"))
-    response = await client._batch_execute(
-        [_RawRPCData("Q4Gw3c", payload)],
-        source_path="/scheduled",
-        close_on_error=False,
+    result = await _delete_scheduled_action_service(
+        client,
+        action_id=clean_id,
+        max_chars=200,
+        fetch_registry=_fetch_scheduled_registry,
+        fetch_by_id=_fetch_scheduled_task_by_id,
+        extract_bodies=_extract_rpc_bodies,
     )
-    bodies = _extract_rpc_bodies(response.text, "Q4Gw3c")
-    verification_status = "rpc_accepted" if bodies else "rpc_unconfirmed"
-    readable_by_id = None
-    deleted_by_id = None
-    if bodies:
-        registry_entries, _ = await _fetch_scheduled_registry(client, 200)
-        visible = any(item.get("id") == clean_id for item in registry_entries)
-        if visible:
-            verification_status = "still_visible_in_registry"
-        elif registry_entries:
-            verification_status = "not_visible_in_nonempty_registry"
-        else:
-            verification_status = "registry_empty_unverified"
-        task_after_delete, _ = await _fetch_scheduled_task_by_id(client, clean_id, 200)
-        readable_by_id = task_after_delete is not None
-        deleted_by_id = bool(task_after_delete and task_after_delete.get("task_state_id") == 6)
-        if deleted_by_id:
-            verification_status = "deleted_state_by_id"
-        elif readable_by_id:
-            if verification_status == "registry_empty_unverified":
-                verification_status = "registry_empty_active_or_unknown_by_id"
-            elif verification_status == "not_visible_in_nonempty_registry":
-                verification_status = "not_visible_active_or_unknown_by_id"
-        elif verification_status == "registry_empty_unverified":
-            verification_status = "registry_empty_not_readable_by_id"
-        elif verification_status == "not_visible_in_nonempty_registry":
-            verification_status = "not_visible_not_readable_by_id"
+    verification_status = result.get("verification_status", "not_attempted")
     return [TextContent(type="text", text=f"Delete requested: {clean_id} ({verification_status})")]
 
 
@@ -777,19 +904,27 @@ async def create(
     image_path: Optional[str] = None,
 ) -> list[TextContent]:
     """Generate image/video/music."""
+    requested_model = model
+    media_type = _normalize_media_type(type)
+    request_model: str | None = None
+    effective_backend: str | None = None
+    input_artifacts: tuple[Artifact, ...] = ()
     try:
         valid_image, safe_image_path, image_error = validate_optional_image_path(image_path)
         if not valid_image:
-            return [TextContent(type="text", text=f"Error: {image_error}")]
+            return domain_text(
+                _invalid_argument_result(image_error or "Invalid image path."),
+                f"Error: {image_error}",
+            )
 
         client = get_gemini_client()
         await initialize_client()
         await cleanup_due_remote_chats(client)
 
         model = _normalize_model(model)
-        media_type = _normalize_media_type(type)
         media_request = resolve_media_request(model, media_type, thinking_level)
-        model_name = media_request["request_model"]
+        request_model = media_request["request_model"]
+        effective_backend = media_request["backend_label"]
 
         prefixes = {
             "image": "Generate image: ",
@@ -798,24 +933,92 @@ async def create(
         }
         media_prompt = prefixes.get(media_type, "") + prompt
         files = [safe_image_path] if safe_image_path else None
+        if safe_image_path:
+            input_artifacts = (
+                artifact_from_local_path(
+                    ArtifactKind.IMAGE,
+                    safe_image_path,
+                    title=Path(safe_image_path).name,
+                    requested_backend=requested_model,
+                    request_model=request_model,
+                    effective_backend=effective_backend,
+                ),
+            )
 
         response = await client.generate_content(
             prompt=media_prompt,
             files=files,
-            model=model_name,
+            model=request_model,
             thinking_level=thinking_level,
         )
         _schedule_skill_response_cleanup(response, f"skill_create:{media_type}")
-
-        return _format_response(
+        observed_backend = observed_backend_from_response(response)
+        artifacts = extract_response_artifacts(
+            response,
+            media_type=media_type,
+            requested_backend=requested_model,
+            request_model=request_model,
+            effective_backend=effective_backend,
+            observed_backend=observed_backend,
+        )
+        if safe_image_path:
+            input_artifacts = (
+                artifact_from_local_path(
+                    ArtifactKind.IMAGE,
+                    safe_image_path,
+                    title=Path(safe_image_path).name,
+                    requested_backend=requested_model,
+                    request_model=request_model,
+                    effective_backend=effective_backend,
+                    observed_backend=observed_backend,
+                    source_chat_id=response_chat_id(response),
+                ),
+            )
+        data = ArtifactResultData(
+            state=classify_artifact_state(response, artifacts),
+            artifacts=artifacts,
+            input_artifacts=input_artifacts,
+            requested_model=requested_model,
+            request_model=request_model,
+            effective_backend=effective_backend,
+            observed_backend=observed_backend,
+            source_chat_id=response_chat_id(response),
+            media_type=media_type,
+        )
+        result = artifact_result(data)
+        content = _format_response(
             response,
             media_type,
-            backend_label=media_request["backend_label"],
+            backend_label=effective_backend,
             backend_note=media_request["note"],
         )
+        if data.state == ArtifactState.EMPTY:
+            content[0].text += "\n\nArtifact state: empty (no usable media URI was returned)."
+        elif data.state == ArtifactState.QUEUED:
+            content[0].text += "\n\nArtifact state: queued (no completed media is available yet)."
+        content = append_artifact_block(content, data.artifacts)
+        return attach_domain_result(content, result, use_result_data=True)
 
     except Exception as e:
-        return _error_text(e, "Create")
+        data = ArtifactResultData(
+            state=ArtifactState.FAILED,
+            requested_model=requested_model,
+            request_model=request_model,
+            effective_backend=effective_backend,
+            input_artifacts=input_artifacts,
+            media_type=media_type,
+        )
+        result = artifact_exception_result(
+            e,
+            data,
+            logger=logger,
+            operation=f"skill_create:{media_type}",
+        )
+        return attach_domain_result(
+            _error_text(e, "Create"),
+            result,
+            use_result_data=True,
+        )
 
 
 @mcp.tool(annotations=MUTATES_REMOTE)
@@ -826,30 +1029,98 @@ async def edit(
     thinking_level: str = "standard",
 ) -> list[TextContent]:
     """Edit existing image."""
+    requested_model = model
+    request_model: str | None = None
+    input_artifacts: tuple[Artifact, ...] = ()
     try:
         valid_image, safe_image_path, image_error = validate_optional_image_path(image_path)
         if not valid_image:
-            return [TextContent(type="text", text=f"Error: {image_error}")]
+            return domain_text(
+                _invalid_argument_result(image_error or "Invalid image path."),
+                f"Error: {image_error}",
+            )
 
         client = get_gemini_client()
         await initialize_client()
         await cleanup_due_remote_chats(client)
 
         model = _normalize_model(model)
-        model_name = resolve_model_name(model)
+        request_model = resolve_model_name(model)
+        input_artifacts = (
+            artifact_from_local_path(
+                ArtifactKind.IMAGE,
+                safe_image_path or image_path,
+                title=Path(safe_image_path or image_path).name,
+                requested_backend=requested_model,
+                request_model=request_model,
+                effective_backend=request_model,
+            ),
+        )
 
         response = await client.generate_content(
             prompt=f"Edit this image: {prompt}",
             files=[safe_image_path],
-            model=model_name,
+            model=request_model,
             thinking_level=thinking_level,
         )
         _schedule_skill_response_cleanup(response, "skill_edit")
-
-        return _format_response(response, "image")
+        observed_backend = observed_backend_from_response(response)
+        artifacts = extract_response_artifacts(
+            response,
+            media_type="image",
+            requested_backend=requested_model,
+            request_model=request_model,
+            effective_backend=request_model,
+            observed_backend=observed_backend,
+        )
+        input_artifacts = (
+            artifact_from_local_path(
+                ArtifactKind.IMAGE,
+                safe_image_path or image_path,
+                title=Path(safe_image_path or image_path).name,
+                requested_backend=requested_model,
+                request_model=request_model,
+                effective_backend=request_model,
+                observed_backend=observed_backend,
+                source_chat_id=response_chat_id(response),
+            ),
+        )
+        data = ArtifactResultData(
+            state=classify_artifact_state(response, artifacts),
+            artifacts=artifacts,
+            input_artifacts=input_artifacts,
+            requested_model=requested_model,
+            request_model=request_model,
+            effective_backend=request_model,
+            observed_backend=observed_backend,
+            source_chat_id=response_chat_id(response),
+            media_type="image_edit",
+        )
+        result = artifact_result(data)
+        content = _format_response(response, "image")
+        content = append_artifact_block(content, data.artifacts)
+        return attach_domain_result(content, result, use_result_data=True)
 
     except Exception as e:
-        return _error_text(e, "Edit")
+        data = ArtifactResultData(
+            state=ArtifactState.FAILED,
+            requested_model=requested_model,
+            request_model=request_model,
+            effective_backend=request_model,
+            input_artifacts=input_artifacts,
+            media_type="image_edit",
+        )
+        result = artifact_exception_result(
+            e,
+            data,
+            logger=logger,
+            operation="skill_edit",
+        )
+        return attach_domain_result(
+            _error_text(e, "Edit"),
+            result,
+            use_result_data=True,
+        )
 
 
 async def _session_create(
@@ -857,20 +1128,31 @@ async def _session_create(
     thinking_level: str,
     learning_mode: Optional[str],
 ) -> list[TextContent]:
-    client = get_gemini_client()
-    await initialize_client()
-    await cleanup_due_remote_chats(client)
-    normalized = _normalize_model(model)
-    sess = client.start_chat(model=resolve_model_name(normalized))
-    with _sessions_lock:
-        sid = f"sess_{len(_sessions) + 1}"
-        _sessions[sid] = {
-            "session": sess,
-            "model": normalized,
-            "thinking_level": thinking_level,
-            "learning_mode": learning_mode,
-        }
-    return [TextContent(type="text", text=f"Session created: {sid}")]
+    result = await _chat_service.start_session(
+        StartSessionRequest(
+            model=model,
+            thinking_level=thinking_level,
+            learning_mode=learning_mode,
+            include_gem_argument=False,
+        )
+    )
+    sid = result.data.session_id if result.data is not None else ""
+    normalized_model = result.data.normalized_model if result.data is not None else _normalize_model(model)
+    effective_model = (
+        result.data.effective_model if result.data is not None else resolve_model_name(normalized_model)
+    )
+    return domain_text(
+        result,
+        f"Session created: {sid}",
+        data={
+            "session_id": sid,
+            "model": normalized_model,
+            "resolved_model": effective_model,
+            "lifecycle": (
+                result.data.lifecycle if result.data is not None else None
+            ),
+        },
+    )
 
 
 async def _session_send(
@@ -881,57 +1163,102 @@ async def _session_send(
     safe_image_path: Optional[str],
     model: str,
 ) -> list[TextContent]:
-    with _sessions_lock:
-        session_entry = _sessions.get(session_id) if session_id else None
-    if not session_id or not session_entry:
-        return [TextContent(type="text", text=f"Invalid session: {session_id}")]
-
-    client = get_gemini_client()
-    await initialize_client()
-    await cleanup_due_remote_chats(client)
-    _normalize_model(model)  # normalize for side-effect consistency
-
-    request_kwargs = {
-        "prompt": message or "",
-        "files": [safe_image_path] if safe_image_path else None,
-        "thinking_level": session_entry.get("thinking_level", thinking_level),
-    }
-    use_learning_mode = learning_mode or session_entry.get("learning_mode")
-    if use_learning_mode:
-        request_kwargs["learning_mode"] = use_learning_mode
-    response = await session_entry["session"].send_message(**request_kwargs)
-    _schedule_skill_response_cleanup(response, "skill_session:send", session_entry["session"])
-    return _format_response(response)
+    if not session_id:
+        return domain_text(
+            _session_not_found_result(),
+            f"SESSION_NOT_FOUND: Invalid session: {session_id}",
+        )
+    result = await _chat_service.send_session(
+        SessionMessageRequest(
+            session_id=session_id,
+            message=message or "",
+            files=(safe_image_path,) if safe_image_path else (),
+            learning_mode=learning_mode,
+            thinking_level=thinking_level,
+            prepare_client=True,
+            include_temporary=False,
+            fallback_empty_thinking_level=True,
+            cleanup_strategy=CleanupStrategy.RESPONSE_THEN_SESSION,
+            cleanup_source="skill_session:send",
+        )
+    )
+    if not result.ok or result.data is None:
+        return domain_text(
+            result,
+            f"SESSION_NOT_FOUND: Invalid session: {session_id}",
+        )
+    return attach_domain_result(
+        _format_response(result.data.response),
+        result,
+        data={
+            "session_id": session_id,
+            "model": result.data.requested_model,
+            "lifecycle": result.data.lifecycle,
+        },
+    )
 
 
 def _session_list() -> list[TextContent]:
-    with _sessions_lock:
-        items = [
-            f"{i}. {sid} ({data['model']})"
-            for i, (sid, data) in enumerate(_sessions.items(), 1)
-        ]
+    sessions = list_sessions()
+    items = [f"{i}. {sid} ({data['model']})" for i, (sid, data) in enumerate(sessions.items(), 1)]
+    result = DomainResult.success(
+        {
+            "count": len(sessions),
+            "sessions": [
+                {
+                    "session_id": sid,
+                    "model": data["model"],
+                    "retain_chat": data.get("retain_chat", False),
+                    "lifecycle_state": data.get("lifecycle_state", "active"),
+                }
+                for sid, data in sessions.items()
+            ],
+        }
+    )
     if not items:
-        return [TextContent(type="text", text="No active sessions")]
-    return [TextContent(type="text", text="\n".join(items))]
+        return domain_text(result, "No active sessions", use_result_data=True)
+    return domain_text(result, "\n".join(items), use_result_data=True)
 
 
-def _session_reset(session_id: Optional[str]) -> list[TextContent]:
-    with _sessions_lock:
-        if session_id and session_id in _sessions:
-            del _sessions[session_id]
-            cleared_all = False
-        else:
-            _sessions.clear()
-            cleared_all = True
-    if cleared_all:
-        reset_client()
-        return [TextContent(type="text", text="All sessions reset")]
-    return [TextContent(type="text", text=f"Session deleted: {session_id}")]
+async def _session_reset(session_id: Optional[str], *, reset_all: bool = False) -> list[TextContent]:
+    if reset_all:
+        reset_result = await reset_client_async()
+        if isinstance(reset_result, DomainResult):
+            return domain_text(
+                reset_result,
+                "All sessions reset",
+                use_result_data=True,
+            )
+        return domain_text(
+            DomainResult.success({"scope": "all"}),
+            "All sessions reset",
+            use_result_data=True,
+        )
+    if not session_id:
+        message = "session_id is required; use action='reset_all'"
+        return domain_text(
+            _invalid_argument_result(message),
+            f"INVALID_ARGUMENT: {message}",
+        )
+    result = await reset_session(session_id)
+    if not result.ok:
+        return domain_text(
+            result,
+            f"SESSION_NOT_FOUND: Invalid session: {session_id}",
+        )
+    return domain_text(
+        result,
+        f"Session deleted: {session_id}",
+        data={
+            "session_id": session_id,
+            "lifecycle": result.meta.details.get("lifecycle"),
+        },
+    )
 
 
 @mcp.tool(annotations=DESTRUCTIVE_REMOTE)
 async def session(
-    action: Literal["create", "send", "list", "reset"],
+    action: Literal["create", "send", "list", "reset", "reset_one", "reset_all"],
     session_id: Optional[str] = None,
     message: Optional[str] = None,
     model: str = "flash",
@@ -939,11 +1266,14 @@ async def session(
     learning_mode: Optional[str] = None,
     image_path: Optional[str] = None,
 ) -> list[TextContent]:
-    """Manage conversation sessions."""
+    """Manage shared sessions; reset/reset_one need an ID and only reset_all clears all."""
     try:
         valid_image, safe_image_path, image_error = validate_optional_image_path(image_path)
         if not valid_image:
-            return [TextContent(type="text", text=f"Error: {image_error}")]
+            return domain_text(
+                _invalid_argument_result(image_error or "Invalid image path."),
+                f"Error: {image_error}",
+            )
 
         if action == "create":
             return await _session_create(model, thinking_level, learning_mode)
@@ -951,12 +1281,22 @@ async def session(
             return await _session_send(session_id, message, thinking_level, learning_mode, safe_image_path, model)
         if action == "list":
             return _session_list()
-        if action == "reset":
-            return _session_reset(session_id)
-        return [TextContent(type="text", text="Invalid action")]
+        if action in {"reset", "reset_one"}:
+            return await _session_reset(session_id)
+        if action == "reset_all":
+            return await _session_reset(None, reset_all=True)
+        return domain_text(
+            _invalid_argument_result(f"Unsupported session action: {action}"),
+            "Invalid action",
+        )
 
     except Exception as e:
-        return _error_text(e, "Session")
+        return exception_text(
+            e,
+            logger=logger,
+            operation="session",
+            preserve_message=True,
+        )
 
 
 @mcp.tool(annotations=DESTRUCTIVE_LOCAL)

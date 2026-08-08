@@ -34,7 +34,7 @@ import json
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
-from mcp.server.fastmcp import FastMCP
+from tests._fastmcp_shim import FastMCP
 
 import src.tools.manage as manage_tools
 
@@ -280,7 +280,7 @@ def test_probe_web_features_markdown_error_suffix(monkeypatch):
     text = result[0].text
     assert "## Gemini Web 功能探测" in text
     assert "可用: 0/1" in text
-    assert "- fake_history_probe (rpcA): 不可达, error=ValueError: boom" in text
+    assert "- fake_history_probe (rpcA): 不可达, error=CONFIGURATION_ERROR (ValueError)" in text
 
 
 def test_probe_web_features_json_response(monkeypatch):

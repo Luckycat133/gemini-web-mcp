@@ -8,6 +8,8 @@ RPC probes, and the agent-facing tool manifest with safety/privacy metadata.
 
 from typing import Any
 
+from ..infrastructure.rpc_contracts import WEB_FEATURE_PROBES as RPC_WEB_FEATURE_PROBES
+
 WEB_UI_CAPABILITIES = {
     "observed_at": "2026-06-18",
     "account_tier": "Gemini Web Pro",
@@ -91,176 +93,9 @@ WEB_UI_CAPABILITIES = {
 }
 
 
-WEB_FEATURE_PROBES = [
-    {
-        "surface": "remy",
-        "name": "conversation_history_recent",
-        "rpcid": "MaZiqc",
-        "payload": "[13,null,[false,null,true]]",
-        "source_path": "/app",
-        "observed": "2026-07-04 Pro UI / Conversation history recent bucket",
-    },
-    {
-        "surface": "history",
-        "name": "conversation_history_pinned",
-        "rpcid": "MaZiqc",
-        "payload": "[13,null,[true,null,true]]",
-        "source_path": "/app",
-        "observed": "2026-07-04 Pro UI / Conversation history pinned bucket",
-    },
-    {
-        "surface": "history",
-        "name": "remy_goals",
-        "rpcid": "GS7W1",
-        "payload": "[13]",
-        "source_path": "/app",
-        "observed": "2026-07-04 Pro UI / Remy goals with conversation references",
-    },
-    {
-        "surface": "library",
-        "name": "library_index",
-        "rpcid": "sJBwce",
-        "payload": "[[1,2]]",
-        "source_path": "/app/library",
-        "observed": "2026-06-18 Pro UI / Library",
-    },
-    {
-        "surface": "library",
-        "name": "library_assets",
-        "rpcid": "VxUbXb",
-        "payload": "[]",
-        "source_path": "/app/library",
-        "observed": "2026-06-18 Pro UI / Library",
-    },
-    {
-        "surface": "library",
-        "name": "library_locale_capabilities",
-        "rpcid": "cYRIkd",
-        "payload": '["zh-CN"]',
-        "source_path": "/app/library",
-        "observed": "2026-06-18 Pro UI / Library",
-    },
-    {
-        "surface": "notebooks",
-        "name": "native_notebooks_list",
-        "rpcid": "CNgdBe",
-        "payload": '[2,["zh-CN"],false,null,[2]]',
-        "source_path": "/notebooks/view",
-        "observed": "2026-07-04 Pro UI / Native Gemini Notebooks",
-    },
-    {
-        "surface": "sharing",
-        "name": "public_links_index",
-        "rpcid": "K4WWud",
-        "payload": '[[1],["zh-CN"]]',
-        "source_path": "/app/sharing",
-        "observed": "2026-06-18 Pro UI / Your public links",
-    },
-    {
-        "surface": "sharing",
-        "name": "sharing_state",
-        "rpcid": "GPRiHf",
-        "payload": "[]",
-        "source_path": "/app/sharing",
-        "observed": "2026-06-18 Pro UI / Your public links",
-    },
-    {
-        "surface": "sharing",
-        "name": "sharing_preferences",
-        "rpcid": "maGuAc",
-        "payload": "[1]",
-        "source_path": "/app/sharing",
-        "observed": "2026-06-18 Pro UI / Your public links",
-    },
-    {
-        "surface": "usage",
-        "name": "usage_quota",
-        "rpcid": "qpEbW",
-        "payload": "[[[1,11],[2,11],[6,11]]]",
-        "source_path": "/app/usage",
-        "observed": "2026-06-18 Pro UI / Usage limits",
-    },
-    {
-        "surface": "usage",
-        "name": "usage_model_state",
-        "rpcid": "qpEbW",
-        "payload": "[[[1,4],[6,6],[1,15]]]",
-        "source_path": "/app/usage",
-        "observed": "2026-06-18 Pro UI / Usage limits",
-    },
-    {
-        "surface": "personalization",
-        "name": "personalization_state",
-        "rpcid": "GPRiHf",
-        "payload": "[]",
-        "source_path": "/app/personalization-settings",
-        "observed": "2026-06-18 Pro UI / Personalization settings",
-    },
-    {
-        "surface": "personalization",
-        "name": "personalization_preferences",
-        "rpcid": "maGuAc",
-        "payload": "[1]",
-        "source_path": "/app/personalization-settings",
-        "observed": "2026-06-18 Pro UI / Personalization settings",
-    },
-    {
-        "surface": "personalization",
-        "name": "personalization_labels",
-        "rpcid": "Te6DCf",
-        "payload": '[["zh-CN"],[1]]',
-        "source_path": "/app/personalization-settings",
-        "observed": "2026-06-18 Pro UI / Personalization settings",
-    },
-    {
-        "surface": "import",
-        "name": "memory_import_state",
-        "rpcid": "Te6DCf",
-        "payload": '[["zh-CN"],[1]]',
-        "source_path": "/app/import",
-        "observed": "2026-06-18 Pro UI / Memory import",
-    },
-    {
-        "surface": "scheduled",
-        "name": "scheduled_actions_registry",
-        "rpcid": "XPSWpd",
-        "payload": "[]",
-        "source_path": "/scheduled",
-        "observed": "2026-06-19 Pro UI / Scheduled actions registry",
-    },
-    {
-        "surface": "scheduled",
-        "name": "scheduled_actions_state",
-        "rpcid": "otAQ7b",
-        "payload": "[]",
-        "source_path": "/scheduled",
-        "observed": "2026-06-18 Pro UI / Scheduled actions",
-    },
-    {
-        "surface": "scheduled",
-        "name": "scheduled_actions_active",
-        "rpcid": "MaZiqc",
-        "payload": "[13,null,[1,null,1]]",
-        "source_path": "/scheduled",
-        "observed": "2026-06-18 Pro UI / Scheduled actions",
-    },
-    {
-        "surface": "scheduled",
-        "name": "scheduled_actions_inactive",
-        "rpcid": "MaZiqc",
-        "payload": "[13,null,[0,null,1]]",
-        "source_path": "/scheduled",
-        "observed": "2026-06-18 Pro UI / Scheduled actions",
-    },
-    {
-        "surface": "tool_modes",
-        "name": "tool_mode_status",
-        "rpcid": "MyzX6c",
-        "payload": "[]",
-        "source_path": "/app",
-        "observed": "2026-06-19 Pro UI / Canvas and Guided Learning tool mode toggles",
-    },
-]
+
+# Compatibility export backed by the executable RPC registry.
+WEB_FEATURE_PROBES = list(RPC_WEB_FEATURE_PROBES)
 
 
 TOOL_MANIFEST: list[dict[str, Any]] = [
@@ -285,7 +120,7 @@ TOOL_MANIFEST: list[dict[str, Any]] = [
     {
         "name": "gemini_start_chat",
         "group": "core",
-        "purpose": "Create a local multi-turn session backed by Gemini Web; can retain or schedule cleanup of the remote chat.",
+        "purpose": "Create a shared local multi-turn session with an opaque ID; can retain or schedule cleanup of the remote chat.",
         "read_only": False,
         "destructive": False,
         "privacy": "sends_user_prompt_when_initial_message_is_provided",
@@ -294,7 +129,7 @@ TOOL_MANIFEST: list[dict[str, Any]] = [
     {
         "name": "gemini_send_message",
         "group": "core",
-        "purpose": "Send a message to an existing local session.",
+        "purpose": "Send a message to an existing shared session; unknown IDs return SESSION_NOT_FOUND.",
         "read_only": False,
         "destructive": False,
         "privacy": "sends_user_prompt_and_optional_files",
@@ -303,7 +138,7 @@ TOOL_MANIFEST: list[dict[str, Any]] = [
     {
         "name": "gemini_send_message_stream",
         "group": "core",
-        "purpose": "Stream a response from an existing local session.",
+        "purpose": "Stream a response from an existing shared session; unknown IDs return SESSION_NOT_FOUND.",
         "read_only": False,
         "destructive": False,
         "privacy": "sends_user_prompt_and_optional_files",
@@ -312,7 +147,7 @@ TOOL_MANIFEST: list[dict[str, Any]] = [
     {
         "name": "gemini_list_sessions",
         "group": "core",
-        "purpose": "List local in-process sessions only.",
+        "purpose": "List shared local in-process sessions visible to primary and compact adapters.",
         "read_only": True,
         "destructive": False,
         "privacy": "local_session_metadata",
@@ -321,7 +156,7 @@ TOOL_MANIFEST: list[dict[str, Any]] = [
     {
         "name": "gemini_reset_session",
         "group": "core",
-        "purpose": "Reset a local session and optionally delete its remote Gemini Web chat.",
+        "purpose": "Reset exactly one shared local session; unknown IDs preserve all state; optionally delete its remote Gemini Web chat.",
         "read_only": False,
         "destructive": True,
         "privacy": "local_session_metadata",

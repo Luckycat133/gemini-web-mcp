@@ -4,7 +4,7 @@
 函数体（此前仅有注解形状测试，零行为覆盖）：
 
 - `gemini_get_tool_manifest`（lines 97-100）：scope 透传 + json/markdown 双格式
-- `gemini_reset`（lines 106-107）：调 reset_client + 返回固定文本
+- `gemini_reset`（lines 106-107）：等待 reset_client_async + 返回固定文本
 - `gemini_doctor`（lines 117-120）：browser/validate_browser 透传 + json/markdown 双格式
 
 剩余 6 miss（lines 198-201, 205）为 `main()` / `__main__` 阻塞入口，不可测试。
@@ -22,8 +22,7 @@ import src.server as server
 
 async def _call_tool(name, **kwargs):
     """通过 server.mcp.call_tool 调用工具，返回 TextContent 列表。"""
-    content, _structured = await server.mcp.call_tool(name, kwargs)
-    return content
+    return (await server.mcp.call_tool(name, kwargs)).content
 
 
 # ---------------------------------------------------------------------------
@@ -76,10 +75,14 @@ def test_get_tool_manifest_passes_scope(monkeypatch):
 # ---------------------------------------------------------------------------
 
 
-def test_gemini_reset_calls_reset_client(monkeypatch):
-    """gemini_reset 调 reset_client 并返回固定文本（lines 106-107）。"""
+def test_gemini_reset_awaits_reset_client_async(monkeypatch):
+    """gemini_reset 等待旧客户端退休后返回固定文本。"""
     called = {"n": 0}
-    monkeypatch.setattr(server, "reset_client", lambda: called.__setitem__("n", called["n"] + 1))
+
+    async def fake_reset_client_async():
+        called["n"] += 1
+
+    monkeypatch.setattr(server, "reset_client_async", fake_reset_client_async)
 
     result = asyncio.run(_call_tool("gemini_reset"))
     assert len(result) == 1

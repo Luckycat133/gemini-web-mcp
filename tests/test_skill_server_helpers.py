@@ -28,7 +28,7 @@ mock 边界：
   `_parse_scheduled_action_task_entry` / `_parse_tool_mode_entry` /
   `_get_probe` / `_execute_observed_rpc`
 - 模块全局：`CONFIG_DIR` / `PROMPTS_FILE` / `DEFAULT_PROMPTS_FILE` /
-  `_prompt_manager` / `_sessions`
+  `_prompt_manager`；会话测试改走共享 SessionService 接缝
 - constants：`resolve_model_name` / `resolve_media_request`
 - tools.utils：`validate_optional_image_path` / `extract_remote_chat_id`
 """
@@ -39,6 +39,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import src.skill_server as skill_server
+from src.session_manager import SessionService
 from src.skill_server import (
     PromptManager,
     _account_features,
@@ -68,6 +69,47 @@ from src.skill_server import (
 
 def _run(coro):
     return asyncio.run(coro)
+
+
+def _patch_shared_sessions(monkeypatch, entries=None):
+    """Give compact-adapter tests one real shared lifecycle service."""
+    service = SessionService()
+    for sid, entry in (entries or {}).items():
+        service.store_session(
+            sid,
+            entry["session"],
+            model=entry.get("model", "flash"),
+            thinking_level=entry.get("thinking_level", "standard"),
+            learning_mode=entry.get("learning_mode"),
+            temporary=entry.get("temporary", False),
+            retain_chat=entry.get("retain_chat", False),
+            delete_after_seconds=entry.get("delete_after_seconds"),
+        )
+
+    def list_shared_sessions():
+        return {
+            sid: {
+                "session": data.session,
+                "session_id": data.session_id,
+                "model": data.model,
+                "thinking_level": data.thinking_level,
+                "learning_mode": data.learning_mode,
+                "temporary": data.temporary,
+                "retain_chat": data.retain_chat,
+                "delete_after_seconds": data.delete_after_seconds,
+            }
+            for sid, data in service.list_sessions().items()
+        }
+
+    async def reset_shared_session(session_id):
+        return service.reset_one(session_id)
+
+    monkeypatch.setattr(skill_server, "create_session", service.create_session)
+    monkeypatch.setattr(skill_server, "lookup_session", service.lookup_session)
+    monkeypatch.setattr(skill_server, "send_session_message", service.send_message)
+    monkeypatch.setattr(skill_server, "list_sessions", list_shared_sessions)
+    monkeypatch.setattr(skill_server, "reset_session", reset_shared_session)
+    return service
 
 
 # ---------------------------------------------------------------------------
@@ -454,7 +496,7 @@ def test_chat_generates_content_without_session(monkeypatch):
     monkeypatch.setattr(skill_server, "validate_optional_image_path",
                         lambda _p: (True, None, None))
     monkeypatch.setattr(skill_server, "schedule_remote_chat_cleanup_from_response",
-                        lambda _r, source: None)
+                        lambda _r, source, **_kwargs: None)
     result = _run(skill_server.chat(message="hi", model="flash", learning_mode="quiz"))
     assert "response text" in result[0].text
     # learning_mode 注入
@@ -470,23 +512,23 @@ def test_chat_omits_learning_mode_when_none(monkeypatch):
     monkeypatch.setattr(skill_server, "validate_optional_image_path",
                         lambda _p: (True, None, None))
     monkeypatch.setattr(skill_server, "schedule_remote_chat_cleanup_from_response",
-                        lambda _r, source: None)
+                        lambda _r, source, **_kwargs: None)
     _run(skill_server.chat(message="hi", learning_mode=None))
     kwargs = client.generate_content.call_args.kwargs
     assert "learning_mode" not in kwargs
 
 
 def test_chat_session_path_uses_session_send_message(monkeypatch):
-    """session_id 命中 _sessions 时走 session.send_message，learning_mode 从 session 回退。"""
+    """session_id 命中共享服务时沿用该会话的 thinking/learning 配置。"""
     fake_session = SimpleNamespace(
         send_message=AsyncMock(return_value=_ns(text="session response")),
         cid="c_sess",
     )
-    monkeypatch.setattr(skill_server, "_sessions", {
+    _patch_shared_sessions(monkeypatch, {
         "sess_1": {
             "session": fake_session,
             "model": "flash",
-            "thinking_level": "standard",
+            "thinking_level": "extended",
             "learning_mode": "default_quiz",
         },
     })
@@ -494,12 +536,13 @@ def test_chat_session_path_uses_session_send_message(monkeypatch):
     monkeypatch.setattr(skill_server, "validate_optional_image_path",
                         lambda _p: (True, None, None))
     monkeypatch.setattr(skill_server, "schedule_remote_chat_cleanup_from_response",
-                        lambda _r, source: None)
+                        lambda _r, source, **_kwargs: None)
     monkeypatch.setattr(skill_server, "schedule_remote_chat_cleanup",
-                        lambda _cid, source: None)
+                        lambda _cid, source, **_kwargs: None)
     result = _run(skill_server.chat(message="hi", session_id="sess_1"))
     assert "session response" in result[0].text
     kwargs = fake_session.send_message.call_args.kwargs
+    assert kwargs["thinking_level"] == "extended"
     # learning_mode 从 session_entry 回退
     assert kwargs["learning_mode"] == "default_quiz"
 
@@ -510,7 +553,7 @@ def test_chat_session_path_explicit_learning_mode_overrides_session(monkeypatch)
         send_message=AsyncMock(return_value=_ns(text="t")),
         cid="c_sess",
     )
-    monkeypatch.setattr(skill_server, "_sessions", {
+    _patch_shared_sessions(monkeypatch, {
         "sess_1": {"session": fake_session, "model": "flash",
                    "thinking_level": "standard", "learning_mode": "default"},
     })
@@ -518,9 +561,9 @@ def test_chat_session_path_explicit_learning_mode_overrides_session(monkeypatch)
     monkeypatch.setattr(skill_server, "validate_optional_image_path",
                         lambda _p: (True, None, None))
     monkeypatch.setattr(skill_server, "schedule_remote_chat_cleanup_from_response",
-                        lambda _r, source: None)
+                        lambda _r, source, **_kwargs: None)
     monkeypatch.setattr(skill_server, "schedule_remote_chat_cleanup",
-                        lambda _cid, source: None)
+                        lambda _cid, source, **_kwargs: None)
     _run(skill_server.chat(message="hi", session_id="sess_1", learning_mode="explicit"))
     kwargs = fake_session.send_message.call_args.kwargs
     assert kwargs["learning_mode"] == "explicit"
@@ -532,7 +575,7 @@ def test_chat_session_path_no_learning_mode_anywhere_omits_kwarg(monkeypatch):
         send_message=AsyncMock(return_value=_ns(text="t")),
         cid="c_sess",
     )
-    monkeypatch.setattr(skill_server, "_sessions", {
+    _patch_shared_sessions(monkeypatch, {
         "sess_1": {"session": fake_session, "model": "flash",
                    "thinking_level": "standard", "learning_mode": None},
     })
@@ -540,9 +583,9 @@ def test_chat_session_path_no_learning_mode_anywhere_omits_kwarg(monkeypatch):
     monkeypatch.setattr(skill_server, "validate_optional_image_path",
                         lambda _p: (True, None, None))
     monkeypatch.setattr(skill_server, "schedule_remote_chat_cleanup_from_response",
-                        lambda _r, source: None)
+                        lambda _r, source, **_kwargs: None)
     monkeypatch.setattr(skill_server, "schedule_remote_chat_cleanup",
-                        lambda _cid, source: None)
+                        lambda _cid, source, **_kwargs: None)
     _run(skill_server.chat(message="hi", session_id="sess_1", learning_mode=None))
     kwargs = fake_session.send_message.call_args.kwargs
     assert "learning_mode" not in kwargs
@@ -1277,11 +1320,11 @@ def test_edit_top_level_exception(monkeypatch):
 
 
 def test_session_send_invalid_session_returns_error(monkeypatch):
-    """session_id 不命中 _sessions → 'Invalid session: {id}'。"""
-    monkeypatch.setattr(skill_server, "_sessions", {})
+    """session_id 不命中共享服务 → 显式 SESSION_NOT_FOUND。"""
+    _patch_shared_sessions(monkeypatch)
     _patch_client_seams(monkeypatch, SimpleNamespace())
     result = _run(_session_send("sess_missing", "msg", "standard", None, None, "flash"))
-    assert result[0].text == "Invalid session: sess_missing"
+    assert result[0].text == "SESSION_NOT_FOUND: Invalid session: sess_missing"
 
 
 def test_session_send_injects_learning_mode_from_session(monkeypatch):
@@ -1290,15 +1333,15 @@ def test_session_send_injects_learning_mode_from_session(monkeypatch):
         send_message=AsyncMock(return_value=_ns(text="t")),
         cid="c_s",
     )
-    monkeypatch.setattr(skill_server, "_sessions", {
+    _patch_shared_sessions(monkeypatch, {
         "s1": {"session": fake_session, "model": "flash",
                "thinking_level": "standard", "learning_mode": "default_quiz"},
     })
     _patch_client_seams(monkeypatch, SimpleNamespace())
     monkeypatch.setattr(skill_server, "schedule_remote_chat_cleanup_from_response",
-                        lambda _r, source: None)
+                        lambda _r, source, **_kwargs: None)
     monkeypatch.setattr(skill_server, "schedule_remote_chat_cleanup",
-                        lambda _cid, source: None)
+                        lambda _cid, source, **_kwargs: None)
     _run(_session_send("s1", "msg", "standard", None, None, "flash"))
     kwargs = fake_session.send_message.call_args.kwargs
     assert kwargs["learning_mode"] == "default_quiz"
@@ -1309,15 +1352,15 @@ def test_session_send_explicit_learning_mode_overrides(monkeypatch):
         send_message=AsyncMock(return_value=_ns(text="t")),
         cid="c_s",
     )
-    monkeypatch.setattr(skill_server, "_sessions", {
+    _patch_shared_sessions(monkeypatch, {
         "s1": {"session": fake_session, "model": "flash",
                "thinking_level": "standard", "learning_mode": "default"},
     })
     _patch_client_seams(monkeypatch, SimpleNamespace())
     monkeypatch.setattr(skill_server, "schedule_remote_chat_cleanup_from_response",
-                        lambda _r, source: None)
+                        lambda _r, source, **_kwargs: None)
     monkeypatch.setattr(skill_server, "schedule_remote_chat_cleanup",
-                        lambda _cid, source: None)
+                        lambda _cid, source, **_kwargs: None)
     _run(_session_send("s1", "msg", "standard", "explicit", None, "flash"))
     kwargs = fake_session.send_message.call_args.kwargs
     assert kwargs["learning_mode"] == "explicit"
@@ -1329,15 +1372,15 @@ def test_session_send_uses_session_thinking_level_when_default(monkeypatch):
         send_message=AsyncMock(return_value=_ns(text="t")),
         cid="c_s",
     )
-    monkeypatch.setattr(skill_server, "_sessions", {
+    _patch_shared_sessions(monkeypatch, {
         "s1": {"session": fake_session, "model": "flash",
                "thinking_level": "extended", "learning_mode": None},
     })
     _patch_client_seams(monkeypatch, SimpleNamespace())
     monkeypatch.setattr(skill_server, "schedule_remote_chat_cleanup_from_response",
-                        lambda _r, source: None)
+                        lambda _r, source, **_kwargs: None)
     monkeypatch.setattr(skill_server, "schedule_remote_chat_cleanup",
-                        lambda _cid, source: None)
+                        lambda _cid, source, **_kwargs: None)
     _run(_session_send("s1", "msg", "standard", None, None, "flash"))
     kwargs = fake_session.send_message.call_args.kwargs
     assert kwargs["thinking_level"] == "extended"
@@ -1536,7 +1579,7 @@ def test_edit_happy_path(monkeypatch):
 
 
 def test_session_create_happy_path(monkeypatch):
-    """_session_create 创建 session 并存入 _sessions，返回 'Session created: sess_N'。"""
+    """_session_create 创建 session 并存入共享服务，返回统一 UUID ID。"""
     fake_session = SimpleNamespace(cid="c_new")
     client = SimpleNamespace(start_chat=lambda model: fake_session)
     _patch_client_seams(monkeypatch, client)
@@ -1544,15 +1587,17 @@ def test_session_create_happy_path(monkeypatch):
                         lambda _r, source: None)
     monkeypatch.setattr(skill_server, "schedule_remote_chat_cleanup",
                         lambda _cid, source: None)
-    monkeypatch.setattr(skill_server, "_sessions", {})
+    service = _patch_shared_sessions(monkeypatch)
     result = _run(skill_server.session(action="create", model="flash",
                                         thinking_level="standard", learning_mode="quiz"))
-    assert "Session created: sess_1" in result[0].text
-    assert "sess_1" in skill_server._sessions
+    session_id = result[0].text.removeprefix("Session created: ")
+    assert session_id.startswith("sess_")
+    assert len(session_id) == 37
+    assert session_id in service.list_sessions()
 
 
 def test_session_list_empty(monkeypatch):
-    monkeypatch.setattr(skill_server, "_sessions", {})
+    _patch_shared_sessions(monkeypatch)
     monkeypatch.setattr(skill_server, "validate_optional_image_path",
                         lambda _p: (True, None, None))
     result = _run(skill_server.session(action="list"))
@@ -1560,7 +1605,7 @@ def test_session_list_empty(monkeypatch):
 
 
 def test_session_list_renders(monkeypatch):
-    monkeypatch.setattr(skill_server, "_sessions", {
+    _patch_shared_sessions(monkeypatch, {
         "sess_1": {"session": SimpleNamespace(), "model": "flash",
                    "thinking_level": "standard", "learning_mode": None},
         "sess_2": {"session": SimpleNamespace(), "model": "pro",
@@ -1574,31 +1619,44 @@ def test_session_list_renders(monkeypatch):
 
 
 def test_session_reset_specific(monkeypatch):
-    """reset 单个 session → 'Session deleted: {id}'，不调 reset_client。"""
-    monkeypatch.setattr(skill_server, "_sessions", {"sess_1": {"session": SimpleNamespace()}})
+    """reset 单个 session → 'Session deleted: {id}'，不调 reset_client_async。"""
+    service = _patch_shared_sessions(monkeypatch, {"sess_1": {"session": SimpleNamespace()}})
     monkeypatch.setattr(skill_server, "validate_optional_image_path",
                         lambda _p: (True, None, None))
     reset_called = []
-    monkeypatch.setattr(skill_server, "reset_client", lambda: reset_called.append(1))
+
+    async def fake_reset_client_async():
+        reset_called.append(1)
+
+    monkeypatch.setattr(skill_server, "reset_client_async", fake_reset_client_async)
     result = _run(skill_server.session(action="reset", session_id="sess_1"))
     assert result[0].text == "Session deleted: sess_1"
-    assert "sess_1" not in skill_server._sessions
+    assert "sess_1" not in service.list_sessions()
     assert reset_called == []  # 单个删除不调 reset_client
 
 
 def test_session_reset_all(monkeypatch):
-    """reset 无 session_id → 清空所有 + 调 reset_client。"""
-    monkeypatch.setattr(skill_server, "_sessions", {
+    """只有显式 reset_all 才清空所有并等待 reset_client_async。"""
+    service = _patch_shared_sessions(monkeypatch, {
         "sess_1": {"session": SimpleNamespace()},
         "sess_2": {"session": SimpleNamespace()},
     })
     monkeypatch.setattr(skill_server, "validate_optional_image_path",
                         lambda _p: (True, None, None))
     reset_called = []
-    monkeypatch.setattr(skill_server, "reset_client", lambda: reset_called.append(1))
-    result = _run(skill_server.session(action="reset"))
+
+    async def fake_reset_client_async():
+        reset_called.append(1)
+        service.reset_all()
+
+    monkeypatch.setattr(skill_server, "reset_client_async", fake_reset_client_async)
+    rejected = _run(skill_server.session(action="reset"))
+    assert rejected[0].text.startswith("INVALID_ARGUMENT")
+    assert len(service.list_sessions()) == 2
+
+    result = _run(skill_server.session(action="reset_all"))
     assert result[0].text == "All sessions reset"
-    assert skill_server._sessions == {}
+    assert service.list_sessions() == {}
     assert reset_called == [1]
 
 
@@ -1762,7 +1820,7 @@ def test_session_main_dispatches_send(monkeypatch):
         send_message=AsyncMock(return_value=_ns(text="sent")),
         cid="c_s",
     )
-    monkeypatch.setattr(skill_server, "_sessions", {
+    _patch_shared_sessions(monkeypatch, {
         "s1": {"session": fake_session, "model": "flash",
                "thinking_level": "standard", "learning_mode": None},
     })
@@ -1770,8 +1828,8 @@ def test_session_main_dispatches_send(monkeypatch):
     monkeypatch.setattr(skill_server, "validate_optional_image_path",
                         lambda _p: (True, None, None))
     monkeypatch.setattr(skill_server, "schedule_remote_chat_cleanup_from_response",
-                        lambda _r, source: None)
+                        lambda _r, source, **_kwargs: None)
     monkeypatch.setattr(skill_server, "schedule_remote_chat_cleanup",
-                        lambda _cid, source: None)
+                        lambda _cid, source, **_kwargs: None)
     result = _run(skill_server.session(action="send", session_id="s1", message="hello"))
     assert "sent" in result[0].text
