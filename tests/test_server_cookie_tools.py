@@ -27,8 +27,7 @@ import src.server as server
 
 async def _call_tool(name, **kwargs):
     """通过 server.mcp.call_tool 调用工具，返回 TextContent 列表。"""
-    content, _structured = await server.mcp.call_tool(name, kwargs)
-    return content
+    return (await server.mcp.call_tool(name, kwargs)).content
 
 
 # ---------------------------------------------------------------------------

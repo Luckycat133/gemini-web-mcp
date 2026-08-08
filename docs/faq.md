@@ -133,7 +133,9 @@
 **A:** 不可以，需要重启服务器。可以使用 `gemini_reset` 重置连接。
 
 ### Q: 支持流式响应吗？
-**A:** 支持。使用 `gemini_chat_stream` 或 `gemini_send_message_stream`。
+**A:** Gemini Web 上游流可通过 `gemini_chat_stream` 或 `gemini_send_message_stream` 使用。
+当前 MCP 工具会归一化并收集所有片段，然后一次性返回正文；兼容名称中的 `_stream`
+不表示 MCP 客户端能收到增量 chunk。结构化结果的 `stream.delivery` 会明确标为 `collected`。
 
 ---
 

@@ -1,0 +1,119 @@
+{
+  "conversation_page": {
+    "contract_key": "history.page",
+    "cases": {
+      "success": {"body": [null, null, [["chat-1", "Title", false, null, null, [1700000000, 0]]]]},
+      "empty": {"body": [null, null, []]},
+      "rejected": {"body": [], "reject_code": 7},
+      "changed_shape": {"body": {"unexpected": true}}
+    }
+  },
+  "remy_goals_page": {
+    "contract_key": "history.remy_goals",
+    "cases": {
+      "success": {"body": [[[null, "Goal", 1, null, "remy", null, null, null, null, null, null, null, null, "goal-1"]]]},
+      "empty": {"body": [[]]},
+      "rejected": {"body": [], "reject_code": 7},
+      "changed_shape": {"body": {"unexpected": true}}
+    }
+  },
+  "notebook_list": {
+    "contract_key": "notebooks.list",
+    "cases": {
+      "success": {"body": [null, null, [["notebook-1", ["Notebook"]]], []]},
+      "empty": {"body": [null, null, [], []]},
+      "rejected": {"body": [], "reject_code": 7},
+      "changed_shape": {"body": {"unexpected": true}}
+    }
+  },
+  "notebook_move": {
+    "contract_key": "notebooks.move_chat",
+    "cases": {
+      "success": {"body": [null, ["chat-1", "Title"]]},
+      "empty": {"body": []},
+      "rejected": {"body": [], "reject_code": 7},
+      "changed_shape": {"body": {"unexpected": true}}
+    }
+  },
+  "scheduled_registry": {
+    "contract_key": "scheduled.registry",
+    "cases": {
+      "success": {"body": [[[["task-1", [], []]]]]},
+      "empty": {"body": [[]]},
+      "rejected": {"body": [], "reject_code": 7},
+      "changed_shape": {"body": {"unexpected": true}}
+    }
+  },
+  "scheduled_get": {
+    "contract_key": "scheduled.get",
+    "cases": {
+      "success": {"body": [["task-1", [], []]]},
+      "empty": {"body": []},
+      "rejected": {"body": [], "reject_code": 7},
+      "changed_shape": {"body": {"unexpected": true}}
+    }
+  },
+  "scheduled_create": {
+    "contract_key": "scheduled.create_daily",
+    "cases": {
+      "success": {"body": ["task-1", []]},
+      "empty": {"body": []},
+      "rejected": {"body": [], "reject_code": 7},
+      "changed_shape": {"body": {"unexpected": true}}
+    }
+  },
+  "public_links": {
+    "contract_key": "sharing.public_links",
+    "cases": {
+      "success": {"body": [[[["link-1", "Title", false, null, "https://example.com"]]]]},
+      "empty": {"body": [[]]},
+      "rejected": {"body": [], "reject_code": 7},
+      "changed_shape": {"body": {"unexpected": true}}
+    }
+  },
+  "usage_entries": {
+    "contract_key": "usage.quota",
+    "cases": {
+      "success": {"body": [[[1, 2, 3]]]},
+      "empty": {"body": [[]]},
+      "rejected": {"body": [], "reject_code": 7},
+      "changed_shape": {"body": {"unexpected": true}}
+    }
+  },
+  "library_capabilities": {
+    "contract_key": "library.locale_capabilities",
+    "cases": {
+      "success": {"body": [[["alias"], "Name", "Description", "Details"]]},
+      "empty": {"body": [[]]},
+      "rejected": {"body": [], "reject_code": 7},
+      "changed_shape": {"body": {"unexpected": true}}
+    }
+  },
+  "tool_modes": {
+    "contract_key": "tool_modes.status",
+    "cases": {
+      "success": {"body": [false, [[1, true]]]},
+      "empty": {"body": [false, []]},
+      "rejected": {"body": [], "reject_code": 7},
+      "changed_shape": {"body": {"unexpected": true}}
+    }
+  },
+  "opaque": {
+    "contract_key": "library.index",
+    "cases": {
+      "success": {"body": ["value"]},
+      "empty": {"body": []},
+      "rejected": {"body": [], "reject_code": 7},
+      "changed_shape": {"body": {"unexpected": true}}
+    }
+  },
+  "mutation_ack": {
+    "contract_key": "scheduled.delete",
+    "cases": {
+      "success": {"body": ["ok"]},
+      "empty": {"body": []},
+      "rejected": {"body": [], "reject_code": 7},
+      "changed_shape": {"body": {"unexpected": true}}
+    }
+  }
+}

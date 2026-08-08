@@ -3,8 +3,7 @@
 支持提示词的 CRUD 操作和分类管理
 """
 
-from mcp.server.fastmcp import FastMCP
-from mcp.types import TextContent
+from ..adapters.mcp_sdk import MCPServer, TextContent
 from typing import Literal, Optional, Dict, List
 import json
 import os
@@ -126,7 +125,7 @@ def get_prompt_manager() -> PromptManager:
         return _prompt_manager
 
 
-def register_prompts_tools(mcp: FastMCP):
+def register_prompts_tools(mcp: MCPServer):
 
     @mcp.tool(annotations=DESTRUCTIVE_LOCAL)
     async def gemini_manage_prompts(

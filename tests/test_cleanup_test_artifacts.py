@@ -27,7 +27,7 @@ import json
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
-from mcp.server.fastmcp import FastMCP
+from src.adapters.mcp_sdk import MCPServer
 
 import src.tools.manage as manage_tools
 from src.tools.manage import (
@@ -538,15 +538,14 @@ def test_payload_max_chats_limits_scan_window():
 
 def _register_cleanup_tool():
     """注册 manage 工具（layers=all 确保 cleanup 工具被注册），返回 mcp。"""
-    mcp = FastMCP("test")
+    mcp = MCPServer("test")
     register_manage_tools(mcp, layers=["all"])
     return mcp
 
 
 async def _call_tool(mcp, name, **kwargs):
     """通过 mcp.call_tool 调用工具，返回 TextContent 列表。"""
-    content, _structured = await mcp.call_tool(name, kwargs)
-    return content
+    return (await mcp.call_tool(name, kwargs)).content
 
 
 def test_cleanup_tool_registered_with_destructive_annotation():
@@ -555,7 +554,7 @@ def test_cleanup_tool_registered_with_destructive_annotation():
     tools = asyncio.run(mcp.list_tools())
     tool = next(t for t in tools if t.name == "gemini_cleanup_test_artifacts")
     assert tool.annotations is not None
-    assert tool.annotations.destructiveHint is True
+    assert tool.annotations.destructive_hint is True
 
 
 def test_cleanup_tool_call_dry_run(monkeypatch):

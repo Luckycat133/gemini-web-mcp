@@ -2,6 +2,8 @@
 客户端管理器 - 负责 Gemini 客户端的初始化、生命周期管理和配置验证
 """
 
+import asyncio
+import inspect
 import os
 import socket
 import tempfile
@@ -104,14 +106,21 @@ def prepare_browser_cookie_cache(force: bool = False) -> None:
     os.environ["GEMINI_COOKIE_PATH"] = str(cache_dir)
 
 
+class ClientInitializationResetError(RuntimeError):
+    """Raised when a reset supersedes an in-flight client initialization."""
+
+
 class ClientManager:
-    """Gemini 客户端管理器 - 线程安全的客户端生命周期管理"""
+    """Gemini 客户端管理器 - 线程和异步任务安全的客户端生命周期管理"""
 
     def __init__(self):
         self._client: Optional[Any] = None
         self._initialized: bool = False
         self._lock = threading.Lock()
-        self._init_lock = threading.Lock()
+        self._generation = 0
+        self._init_task: Optional[asyncio.Task[Any]] = None
+        self._client_loop: Optional[asyncio.AbstractEventLoop] = None
+        self._retirement_tasks: set[asyncio.Task[None]] = set()
 
     def get_client(self) -> Any:
         """获取或初始化 GeminiClient 实例"""
@@ -121,20 +130,60 @@ class ClientManager:
         return self._client
 
     async def initialize(self) -> Any:
-        """完成客户端初始化（线程安全：防止并发重复 init）"""
-        client = self.get_client()
-        with self._init_lock:
-            if self._initialized:
-                return client
+        """Initialize one current client and share the attempt across callers."""
+        loop = asyncio.get_running_loop()
+
+        while True:
+            client = self.get_client()
+            with self._lock:
+                if self._client is not client:
+                    continue
+                if self._initialized:
+                    return client
+
+                generation = self._generation
+                init_task = self._init_task
+                if init_task is not None and not init_task.done():
+                    if init_task.get_loop() is not loop:
+                        raise RuntimeError("client initialization is already running on another event loop")
+                else:
+                    init_task = loop.create_task(
+                        self._initialize_generation(client, generation),
+                        name=f"gemini-client-init-{generation}",
+                    )
+                    self._init_task = init_task
+
+            # A cancelled caller must not cancel the shared initialization used by
+            # other requests. Reset explicitly cancels the underlying task.
+            return await asyncio.shield(init_task)
+
+    async def _initialize_generation(self, client: Any, generation: int) -> Any:
+        """Initialize one client generation without publishing stale state."""
+        current_task = asyncio.current_task()
+        try:
             logger.info("正在调用 client.init()...")
             await client.init(
                 timeout=30,
                 auto_close=False,
-                auto_refresh=os.environ.get("GEMINI_AUTO_REFRESH", "true").lower() == "true"
+                auto_refresh=os.environ.get("GEMINI_AUTO_REFRESH", "true").lower() == "true",
             )
             with self._lock:
+                if self._generation != generation or self._client is not client:
+                    raise ClientInitializationResetError("client reset during initialization")
                 self._initialized = True
-        return client
+                self._client_loop = asyncio.get_running_loop()
+            logger.info("✅ GeminiClient 初始化完成！")
+            return client
+        except asyncio.CancelledError:
+            with self._lock:
+                reset_superseded = self._generation != generation or self._client is not client
+            if reset_superseded:
+                raise ClientInitializationResetError("client reset during initialization") from None
+            raise
+        finally:
+            with self._lock:
+                if self._init_task is current_task:
+                    self._init_task = None
 
     def _create_client(self) -> None:
         """创建新的客户端实例"""
@@ -157,11 +206,105 @@ class ClientManager:
             self._client.cookies = extra_cookies
             logger.info(f"已加载 {len(extra_cookies)} 个完整认证 Cookie")
 
-    # initialize 方法定义在上方（带 _init_lock 的线程安全版本）
-
     def reset(self) -> None:
-        """重置客户端"""
+        """Invalidate the current client and retire it without blocking the caller."""
+        client, init_task, owner_loop = self._detach_current_client()
+        self._schedule_retirement(client, init_task, owner_loop)
+        logger.info("✅ 客户端已重置")
+
+    async def reset_async(self) -> None:
+        """Invalidate the current client and wait until it is retired."""
+        client, init_task, owner_loop = self._detach_current_client()
+        if client is not None:
+            current_loop = asyncio.get_running_loop()
+            if owner_loop is not None and owner_loop is not current_loop and owner_loop.is_running():
+                retirement = asyncio.run_coroutine_threadsafe(
+                    self._retire_client(client, init_task),
+                    owner_loop,
+                )
+                await asyncio.wrap_future(retirement)
+            else:
+                await self._retire_client(client, init_task)
+        logger.info("✅ 客户端已重置")
+
+    def _detach_current_client(
+        self,
+    ) -> tuple[Optional[Any], Optional[asyncio.Task[Any]], Optional[asyncio.AbstractEventLoop]]:
+        """Atomically detach one generation so stale initialization cannot publish."""
         with self._lock:
+            client = self._client
+            init_task = self._init_task
+            owner_loop = init_task.get_loop() if init_task is not None else self._client_loop
+            self._generation += 1
             self._client = None
             self._initialized = False
-        logger.info("✅ 客户端已重置")
+            self._init_task = None
+            self._client_loop = None
+        return client, init_task, owner_loop
+
+    def _schedule_retirement(
+        self,
+        client: Optional[Any],
+        init_task: Optional[asyncio.Task[Any]],
+        owner_loop: Optional[asyncio.AbstractEventLoop],
+    ) -> None:
+        if client is None:
+            return
+
+        try:
+            current_loop = asyncio.get_running_loop()
+        except RuntimeError:
+            current_loop = None
+
+        target_loop = owner_loop if owner_loop is not None and owner_loop.is_running() else current_loop
+        if target_loop is None:
+            asyncio.run(self._retire_client(client, init_task))
+            return
+
+        if target_loop is current_loop:
+            self._start_retirement_task(client, init_task)
+        else:
+            target_loop.call_soon_threadsafe(self._start_retirement_task, client, init_task)
+
+    def _start_retirement_task(self, client: Any, init_task: Optional[asyncio.Task[Any]]) -> None:
+        task = asyncio.create_task(self._retire_client(client, init_task), name="gemini-client-retire")
+        with self._lock:
+            self._retirement_tasks.add(task)
+        task.add_done_callback(self._retirement_done)
+
+    def _retirement_done(self, task: asyncio.Task[None]) -> None:
+        with self._lock:
+            self._retirement_tasks.discard(task)
+        if task.cancelled():
+            return
+        error = task.exception()
+        if error is not None:
+            logger.warning("关闭旧 GeminiClient 失败: %s", error)
+
+    async def _retire_client(self, client: Any, init_task: Optional[asyncio.Task[Any]]) -> None:
+        if init_task is not None and init_task is not asyncio.current_task():
+            if not init_task.done():
+                init_task.cancel()
+                try:
+                    await init_task
+                except (asyncio.CancelledError, ClientInitializationResetError):
+                    pass
+                except Exception as error:
+                    logger.debug("被重置的 GeminiClient 初始化已失败: %s", error)
+            else:
+                try:
+                    init_task.result()
+                except (asyncio.CancelledError, ClientInitializationResetError):
+                    pass
+                except Exception as error:
+                    logger.debug("被重置的 GeminiClient 初始化已失败: %s", error)
+
+        close = getattr(client, "close", None)
+        if not callable(close):
+            return
+        try:
+            result = close()
+            if inspect.isawaitable(result):
+                await result
+        except Exception as error:
+            logger.warning("关闭旧 GeminiClient 失败: %s", error)

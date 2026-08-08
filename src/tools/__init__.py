@@ -2,15 +2,7 @@
 工具模块初始化 - 支持分层加载
 """
 
-from mcp.server.fastmcp import FastMCP
-
-from .chat import register_chat_tools
-from .media import register_media_tools
-from .image import register_image_tools
-from .prompts import register_prompts_tools
-from .manage import register_manage_tools
-from .file import register_file_tools
-from .research import register_research_tools
+from ..adapters.mcp_sdk import MCPServer
 
 TOOL_GROUPS = {
     # Intent-focused profiles for agent configuration.
@@ -62,12 +54,12 @@ def groups_enable_manage(groups: list | None = None) -> bool:
     selected, _manage_layers = _resolve_tool_selection(groups)
     return "manage" in selected
 
-def register_tools(mcp: FastMCP, groups: list[str] | None = None) -> None:
+def register_tools(mcp: MCPServer, groups: list[str] | None = None) -> None:
     """
     选择性注册工具组
 
     Args:
-        mcp: FastMCP 实例
+        mcp: MCPServer 实例
         groups: 要加载的工具组列表
 
     Example:
@@ -80,22 +72,36 @@ def register_tools(mcp: FastMCP, groups: list[str] | None = None) -> None:
     selected, manage_layers = _resolve_tool_selection(groups)
 
     if "chat" in selected:
+        from .chat import register_chat_tools
+
         register_chat_tools(mcp)
 
     if "media" in selected:
+        from .media import register_media_tools
+
         register_media_tools(mcp)
 
     if "image" in selected and "media" not in selected:
+        from .image import register_image_tools
+
         register_image_tools(mcp)
 
     if "prompts" in selected:
+        from .prompts import register_prompts_tools
+
         register_prompts_tools(mcp)
 
     if "manage" in selected:
+        from .manage import register_manage_tools
+
         register_manage_tools(mcp, sorted(manage_layers) or None)
 
     if "file" in selected:
+        from .file import register_file_tools
+
         register_file_tools(mcp)
 
     if "research" in selected:
+        from .research import register_research_tools
+
         register_research_tools(mcp)

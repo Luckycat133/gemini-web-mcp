@@ -103,6 +103,7 @@ mcp dev src/server.py
 3. 确认账号有 **AI Plus** 订阅——免费账号无法用 Deep Research
 4. 缩小研究主题范围，避免一轮要跑几十次搜索
 5. 看 `gemini_deep_research` 返回的错误文本，它会区分"超时"和"功能不可用"
+6. 检查 `_meta.domain_result.data.upstream_chat_id`；若 `continuation_possible=true`，上游研究可能仍在运行，可稍后读取（建议启动时用 `retain_chat=true`）
 
 ### 媒体生成失败
 
@@ -120,8 +121,10 @@ mcp dev src/server.py
 
 ### 会话相关
 
-- `session_id` 是 `gemini_start_chat` 返回的本地 ID（`sess_N`），不是 Gemini 的 `cid`
-- `gemini_reset_session` 只清本地会话状态；要重置底层连接用 `gemini_reset`
+- `session_id` 是 `gemini_start_chat` 返回的不透明本地 ID（`sess_<uuid>`），不是 Gemini 的 `cid`；不要自行拼接或按顺序猜测
+- primary 与 compact 入口共享同一份会话状态；不存在的 ID 会返回 `SESSION_NOT_FOUND`，不会自动创建会话
+- `gemini_reset_session(session_id)` 只重置指定会话；compact 的 `session(action="reset")` 也必须带 ID。只有显式 `session(action="reset_all")` 或 primary 的 `gemini_reset` 才会清空全部状态并重置底层连接
+- 单会话 reset 在 `retain_chat=false` 时会尝试删除对应远端聊天；创建会话时设置 `retain_chat=true` 可保留远端聊天
 - 多轮会话的图片/文件在上传后用 upload 返回的 ID 引用
 
 ---
@@ -143,6 +146,23 @@ mcp dev src/server.py
 ## 日志与调试
 
 服务端日志默认走 stderr。MCP 客户端（Claude Desktop）会把 stderr 写进 `mcp*.log`。
+
+### 用结构化错误和诊断 ID 定位问题
+
+聊天、会话和客户端重置工具会在第一条 `TextContent` 的 `_meta.domain_result` 中返回
+结构化状态。排错时优先检查：
+
+1. `ok` 和 `meta.operation_state`：区分普通失败、超时和取消。
+2. `error.code`：按稳定错误码分流，不要匹配正文或 emoji。
+3. `error.retryable`：只有为 `true` 时才自动重试，并配合退避。
+4. `error.suggested_action`：认证、参数或能力问题通常需要先执行这里的动作。
+5. `meta.request_id` / `meta.diagnostic_id`：用来关联服务端日志。
+
+参数校验、未知会话等已知失败通常只有 `request_id`；捕获到上游或内部异常时会同时生成
+`diag_<uuid>`。原始异常和两个 ID 会写入服务端日志，结构化错误只保留可公开的分类和说明。
+compact 入口的旧 `Error: ...` 正文为兼容现有客户端暂时保留，可能仍含上游消息，因此不要把
+兼容正文当成稳定接口或公开转发。提交 issue 时请附工具名、错误码和 diagnostic ID，不要附
+Cookie。若 MCP 客户端暂不显示 `_meta`，仍可用兼容正文和 stderr 日志排查。
 
 调试技巧：
 - 设 `GEMINI_TOOLS=core python -m src.server` 直接在前台跑，看实时输出

@@ -1,0 +1,106 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+env:
+  GEMINI_AUTO_REFRESH: "false"
+  PIP_DISABLE_PIP_VERSION_CHECK: "1"
+
+jobs:
+  verify-and-build:
+    name: Verify tag and build release assets
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout tagged source
+        uses: actions/checkout@v7
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install release gates and pinned skill validator
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[all,dev]"
+          python -m pip install "skills-ref @ git+https://github.com/agentskills/agentskills.git@38a2ff82958afee88dadf4831509e6f7e9d8ef4e#subdirectory=skills-ref"
+      - name: Verify tag, repository metadata, and dependency intent
+        run: |
+          python scripts/check_version_consistency.py --tag "$GITHUB_REF_NAME"
+          python scripts/check_dependency_contract.py
+      - name: Run static and offline release gates
+        run: |
+          python -m ruff check src tests scripts
+          python -m mypy src scripts
+          python -m pytest -q
+      - name: Validate and compare Agent Skills
+        run: |
+          skills-ref validate .agents/skills/gemini-web-mcp-development
+          skills-ref validate .codex/skills/gemini-web-mcp-development
+          skills-ref validate .agents/skills/gemini-web-mcp
+          skills-ref validate .codex/skills/gemini-web-mcp
+          diff -ru .agents/skills/gemini-web-mcp-development .codex/skills/gemini-web-mcp-development
+          diff -ru .agents/skills/gemini-web-mcp .codex/skills/gemini-web-mcp
+      - name: Snapshot source profiles and MCP protocol
+        run: |
+          python scripts/smoke_profiles.py
+          python scripts/smoke_mcp_protocol.py
+      - name: Build versioned release assets
+        run: python scripts/package_release.py --outdir dist --tag "$GITHUB_REF_NAME"
+      - name: Verify generated asset names and wheel metadata
+        run: python scripts/check_version_consistency.py --tag "$GITHUB_REF_NAME" --artifacts-dir dist
+      - name: Set up pinned uv
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+      - name: Verify one-command release onboarding in an isolated uv environment
+        working-directory: ${{ runner.temp }}
+        run: uvx --from "$GITHUB_WORKSPACE"/dist/*.whl gemini-mcp-onboarding
+      - name: Install release wheel in a clean environment
+        run: |
+          python -m venv "$RUNNER_TEMP/gemini-release-smoke"
+          "$RUNNER_TEMP/gemini-release-smoke/bin/python" -m pip install --upgrade pip
+          "$RUNNER_TEMP/gemini-release-smoke/bin/python" -m pip install dist/*.whl
+          "$RUNNER_TEMP/gemini-release-smoke/bin/python" -m pip check
+      - name: Smoke the installed release product
+        run: |
+          cd "$RUNNER_TEMP"
+          "$RUNNER_TEMP/gemini-release-smoke/bin/python" "$GITHUB_WORKSPACE/scripts/smoke_installed_wheel.py"
+          "$RUNNER_TEMP/gemini-release-smoke/bin/python" "$GITHUB_WORKSPACE/scripts/smoke_profiles.py"
+          "$RUNNER_TEMP/gemini-release-smoke/bin/python" "$GITHUB_WORKSPACE/scripts/smoke_mcp_protocol.py"
+      - name: Stage verified release assets
+        uses: actions/upload-artifact@v4
+        with:
+          name: verified-release-assets
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    name: Publish verified GitHub Release
+    needs: verify-and-build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout tagged source
+        uses: actions/checkout@v7
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - name: Download verified release assets
+        uses: actions/download-artifact@v4
+        with:
+          name: verified-release-assets
+          path: dist
+      - name: Re-verify downloaded assets before publishing
+        run: python scripts/check_version_consistency.py --tag "$GITHUB_REF_NAME" --artifacts-dir dist
+      - name: Create immutable GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" dist/* --verify-tag --generate-notes

@@ -1,6 +1,6 @@
 # Gemini MCP Server 文档中心
 
-欢迎使用 Gemini MCP Server v2.2.0 文档！
+欢迎使用 Gemini MCP Server v1.3.0 文档！
 
 ---
 
@@ -12,6 +12,7 @@
 
 ### 快速入门
 - [快速开始](./quickstart.md) - 5分钟上手指南
+- [客户端安装与验证](./client-examples.md) - 一条命令预检、Codex/Claude/VS Code 配置和图像产物验证
 - [Cookie 获取指南](./cookie-setup.md) - 获取认证 Cookie
 - [环境变量配置](./configuration.md) - 环境变量详解
 
@@ -25,10 +26,13 @@
 
 ### 技术文档
 - [技术架构](./architecture.md) - 系统设计
+- [MCP SDK 与客户端兼容性](./mcp-sdk-compatibility.md) - v2 运行时、协议路径与 SDK v1 维护截止日期
+- [Gemini Web Live Canary](./live-canary.md) - 专用账号 opt-in 探测、脱敏报告与漂移 issue 流程
 - [API 参考](./api-reference.md) - 内部 API 文档
 - [环境变量配置](./configuration.md) - 环境变量与常量说明
 - [MCP Contract Evaluation](../evaluations/gemini_web_mcp_contract.xml) - 只读工具选择与安全元数据评估
-- [Codex Skill](../.agents/skills/gemini-web-mcp/SKILL.md) - 可公开安装的 agent 使用流程
+- [运行时 Skill](../.agents/skills/gemini-web-mcp/SKILL.md) - 操作已安装 MCP 工具的 agent 使用流程
+- [开发 Skill](../.agents/skills/gemini-web-mcp-development/SKILL.md) - 仓库架构、测试、打包和发布流程
 
 ### 参考资料
 - [常见问题 FAQ](./faq.md)
@@ -56,11 +60,11 @@
 |------|------|
 | 模型 | 旧别名 + 运行时模型发现 |
 | 媒体生成 | 图像(Nano Banana 2), 视频(Veo 3.1), 音乐(Lyria 3 / Lyria 3 Pro) |
-| 推荐工具面 | `core` 默认，`manage` / `prompts` 按需附加 |
+| 推荐工具面 | 文本从 `model` 开始，多模态用 `core`，低 token 用 compact，`all` 仅维护验证 |
 | Deep Research | ✅ AI Plus 支持 |
 | Gem 管理 | ✅ 自定义助手管理 |
 | MCP 评估 | ✅ 17 个只读 contract-level QA |
-| Codex Skill | ✅ 公开 `.agents/skills/gemini-web-mcp` + 本地 `.codex/skills/gemini-web-mcp` |
+| Agent Skills | ✅ 运行时/开发 skill 分离，公开 `.agents` 与本地 `.codex` 镜像一致 |
 | 分发资料 | ✅ `docs/launch-kit.md` |
 
 ---

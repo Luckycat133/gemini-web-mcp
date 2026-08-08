@@ -1,162 +1,107 @@
 # 快速开始指南
 
-本指南将帮助您在 5 分钟内开始使用 Gemini MCP Server v2.1。
+先用一条无需 Cookie 的命令证明安装、真实 MCP stdio 握手和文本工具调用都正常，再配置 Gemini 账号。
 
----
+## 前置条件
 
-## 📋 前置条件
+- 已安装 [uv](https://docs.astral.sh/uv/)
+- 需要实时调用时：一个已登录 Gemini Web 的账号
+- 需要接入桌面/编辑器时：Codex、Claude Desktop、Claude Code、VS Code 或其他 MCP 客户端
 
-- Python 3.10+
-- Claude Desktop 或支持 MCP 的应用
-- Google 账户（免费或 AI Plus）
-
----
-
-## 🚀 步骤 1：获取 Cookie
-
-1. 打开 Chrome 浏览器
-2. 访问 [gemini.google.com](https://gemini.google.com)
-3. 登录您的 Google 账户
-4. 按 F12 打开开发者工具
-5. 选择 "Application" → "Cookies" → "https://gemini.google.com"
-6. 复制以下两个 Cookie 的值：
-   - `__Secure-1PSID` (必填)
-   - `__Secure-1PSIDTS` (可选，但推荐)
-
-详细说明请查看 [Cookie 获取指南](./cookie-setup.md)。
-
----
-
-## 📦 步骤 2：安装项目
+## 1. 无账号预检
 
 ```bash
-# 克隆或下载项目
-cd gemini-mcp-server
-
-# 安装依赖
-pip install "gemini-webapi>=2.0.0" mcp fastmcp
-
-# 或使用 uv（推荐）
-uv pip install "gemini-webapi>=2.0.0" mcp fastmcp
+uvx --from git+https://github.com/Luckycat133/gemini-web-mcp@main gemini-mcp-onboarding
 ```
 
----
+`uvx` 会创建隔离环境并运行 `gemini-mcp-onboarding`。该客户端启动真实
+`gemini-mcp-server`，协商 MCP 协议，然后调用静态文本工具
+`gemini_get_tool_manifest`。预检会移除 `GEMINI_PSID`、`GEMINI_PSIDTS` 和
+`GEMINI_PSIDCC`，并输出 `mode=offline`、`credentials_accessed=false`；它不会访问 Gemini。
 
-## ⚙️ 步骤 3：配置环境变量
+公开文档使用 `@main` 指向当前已审核源码。生产或可复现实验应把它替换为已审核 commit SHA。
 
-### 方法 A：使用 Claude Desktop 配置
+## 2. 配置实时账号
 
-编辑您的 Claude Desktop 配置文件：
+1. 登录 [gemini.google.com](https://gemini.google.com)。
+2. 在浏览器开发者工具的 Application → Cookies 中复制 `__Secure-1PSID`；
+   `__Secure-1PSIDTS` 可选但推荐。
+3. 把 Cookie 放入客户端的密码输入或宿主环境变量，不要写入命令行、仓库或日志。
 
-**macOS**:
-```
-~/Library/Application Support/Claude/claude_desktop_config.json
-```
-
-**Windows**:
-```
-%APPDATA%\Claude\claude_desktop_config.json
-```
-
-**Linux**:
-```
-~/.config/Claude/claude_desktop_config.json
+```bash
+export GEMINI_PSID='your __Secure-1PSID value'
+export GEMINI_PSIDTS='your __Secure-1PSIDTS value'
 ```
 
-添加以下内容：
+详细风险与浏览器获取方式见 [Cookie 获取指南](./cookie-setup.md)。
+
+## 3. 配置 MCP 客户端
+
+Claude Desktop 最小配置如下；请仅在本机替换占位符：
 
 ```json
 {
   "mcpServers": {
     "gemini": {
-      "command": "python",
-      "args": ["-m", "uv", "run", "--directory", "/path/to/gemini-mcp-server", "src/server.py"],
+      "type": "stdio",
+      "command": "uvx",
+      "args": [
+        "--from",
+        "git+https://github.com/Luckycat133/gemini-web-mcp@main",
+        "gemini-mcp-server"
+      ],
       "env": {
-        "GEMINI_PSID": "your___Secure-1PSID_value",
-        "GEMINI_PSIDTS": "your___Secure-1PSIDTS_value",
-        "GEMINI_TOOLS": "core"
+        "GEMINI_PSID": "REPLACE_WITH_SECURE_1PSID",
+        "GEMINI_PSIDTS": "REPLACE_OR_REMOVE_IF_UNAVAILABLE",
+        "GEMINI_TOOLS": "model",
+        "GEMINI_AUTO_REFRESH": "false"
       }
     }
   }
 }
 ```
 
-### 方法 B：使用环境变量文件
+Codex、Claude Desktop、Claude Code 和 VS Code 的逐文件示例见
+[客户端安装与验证](./client-examples.md)。
 
-复制 `.env.example` 为 `.env`：
+## 4. 选择工具面
+
+| 工具面 | 使用场景 |
+| --- | --- |
+| `GEMINI_TOOLS=model` | 文本/模型调用的首选起点 |
+| `GEMINI_TOOLS=core` | 图片、视频、音乐、文件、URL 或 Deep Research |
+| `gemini-mcp-skill-server` | 需要固定十一工具、低 token facade |
+| `GEMINI_TOOLS=all` | 维护者验证账号、历史和管理能力；不适合作为通用默认 |
+
+## 5. 显式实时验证
+
+文本验证使用 temporary chat，必须显式允许账号访问：
 
 ```bash
-cp .env.example .env
+uvx --from git+https://github.com/Luckycat133/gemini-web-mcp@main \
+  gemini-mcp-onboarding chat \
+  --allow-live-account \
+  --prompt 'Reply with exactly: Gemini MCP is connected'
 ```
 
-编辑 `.env` 文件，填入您的 Cookie 值：
+图像验证安装 `image` extra，并要求返回位于指定目录内的真实文件、非零大小、
+`image/*` MIME、正数尺寸和 `verification=verified`：
 
-```env
-GEMINI_PSID=<your-psid-cookie-value>
-GEMINI_PSIDTS=<your-psidts-cookie-value>
-GEMINI_PROXY=  # 可选：代理地址
-GEMINI_AUTO_REFRESH=true
+```bash
+uvx \
+  --from 'gemini-mcp-server[image] @ git+https://github.com/Luckycat133/gemini-web-mcp@main' \
+  gemini-mcp-onboarding image \
+  --allow-live-account \
+  --prompt 'A two-color geometric cat icon on a plain background' \
+  --output-dir ./gemini-artifacts \
+  --filename onboarding-cat
 ```
 
----
+文档和 PR CI 只验证离线 fixture/协议/打包路径；没有专用测试账号时，不应把预期路由写成已观察到的 Gemini 后端行为。
 
-## 🔄 步骤 4：重启 Claude Desktop
+## 下一步
 
-1. 完全关闭 Claude Desktop
-2. 重新启动
-3. 在 Claude 中您应该会看到 Gemini MCP Server 可用
-
----
-
-## 🎉 步骤 5：开始使用！
-
-### 基础对话
-
-尝试发送以下消息：
-
-```
-使用 gemini 快速回答：什么是量子计算？
-```
-
-### 图像生成
-
-```
-请用 Gemini 生成一张猫咪的卡通图片
-```
-
-图像首轮始终走 Nano Banana 2；如果后续网页支持 Pro redo，那是生成后的二次操作。
-
-### 多轮对话
-
-```
-gemini_start_chat
-```
-
-然后继续发送消息。
-
----
-
-## 💡 下一步
-
-- 查看 [工具使用手册](./tools.md) 了解所有可用工具（含媒体生成：图像/视频/音乐）
-- 阅读 [模型选择指南](./models.md) 选择合适的模型
-
----
-
-## ⚠️ 常见问题
-
-**问题：Claude 无法连接到 MCP 服务器**
-
-解决：
-1. 检查路径是否正确
-2. 确认环境变量是否正确设置
-3. 查看 Claude 的错误日志
-
-**问题：Gemini 响应错误**
-
-解决：
-1. 检查 Cookie 是否过期
-2. 确认 Cookie 格式正确
-3. 查看网络连接
-
-更多问题请查看 [FAQ](./faq.md)。
+- [工具使用手册](./tools.md)
+- [模型选择指南](./models.md)
+- [客户端安装与验证](./client-examples.md)
+- [常见问题](./faq.md)

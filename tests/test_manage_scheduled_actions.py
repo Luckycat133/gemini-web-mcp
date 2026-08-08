@@ -31,7 +31,7 @@ import json
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
-from mcp.server.fastmcp import FastMCP
+from src.adapters.mcp_sdk import MCPServer
 
 import src.tools.manage as manage_tools
 
@@ -82,14 +82,13 @@ def _patch_seams(monkeypatch, client):
 
 
 def _make_mcp():
-    mcp = FastMCP("test")
+    mcp = MCPServer("test")
     manage_tools.register_manage_tools(mcp, layers=["all"])
     return mcp
 
 
 async def _call(mcp, name, **kwargs):
-    content, _structured = await mcp.call_tool(name, kwargs)
-    return content
+    return (await mcp.call_tool(name, kwargs)).content
 
 
 def _remy_entry(item_id, title="title"):
@@ -889,7 +888,7 @@ def test_delete_scheduled_action_json_empty_bodies(monkeypatch):
                         action_id="a_1", response_format="json"))
     payload = json.loads(result[0].text)
     assert payload["ok"] is False
-    assert payload["verification_status"] == "not_attempted"
+    assert payload["verification_status"] == "rpc_unconfirmed"
 
 
 def test_delete_scheduled_action_batch_execute_exception(monkeypatch):

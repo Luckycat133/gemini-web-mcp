@@ -33,8 +33,7 @@ from types import SimpleNamespace
 
 import src.client_wrapper as cw
 from src.remote_chat_cleanup_manager import CleanupTask
-from src.session_manager import SessionData
-
+from src.session_manager import SessionData, SessionOperationResult
 
 # ---------------------------------------------------------------------------
 # 辅助
@@ -84,7 +83,7 @@ def test_session_data_to_dict_returns_none_for_none():
     assert cw._session_data_to_dict(None) is None
 
 
-def test_session_data_to_dict_maps_all_eight_fields():
+def test_session_data_to_dict_maps_all_fields():
     data = SessionData(
         session="sess-obj",
         model="pro",
@@ -97,13 +96,17 @@ def test_session_data_to_dict_maps_all_eight_fields():
     result = cw._session_data_to_dict(data)
     assert result == {
         "session": "sess-obj",
+        "session_id": "",
         "model": "pro",
         "thinking_level": "extended",
         "learning_mode": "quiz",
         "temporary": True,
         "created_at": data.created_at,
+        "updated_at": data.updated_at,
+        "upstream_chat_id": None,
         "retain_chat": True,
         "delete_after_seconds": 120,
+        "lifecycle_state": "active",
     }
 
 
@@ -137,9 +140,156 @@ def test_reset_client_resets_client_manager_and_clears_sessions(monkeypatch):
     assert session_fake.calls == [("clear_sessions", (), {})]
 
 
+def test_reset_client_async_waits_for_retirement_and_clears_sessions(monkeypatch):
+    client_fake = _RecordingFake(_async_methods={"reset_async"})
+    session_fake = _RecordingFake()
+    monkeypatch.setattr(cw, "_client_manager", client_fake)
+    monkeypatch.setattr(cw, "_session_manager", session_fake)
+
+    _run(cw.reset_client_async())
+
+    assert client_fake.calls == [("reset_async", (), {})]
+    assert session_fake.calls == [("clear_sessions", (), {})]
+
+
 # ---------------------------------------------------------------------------
 # 会话管理门面
 # ---------------------------------------------------------------------------
+
+
+def test_create_session_forwards_all_args_to_shared_service(monkeypatch):
+    expected = SessionOperationResult.success(SessionData(session="s", session_id="sess_x"))
+    fake = _RecordingFake(create_session=expected)
+    monkeypatch.setattr(cw, "_session_manager", fake)
+
+    result = cw.create_session(
+        "session-obj",
+        "pro",
+        thinking_level="extended",
+        learning_mode="quiz",
+        temporary=True,
+        retain_chat=True,
+        delete_after_seconds=300,
+    )
+
+    assert result is expected
+    assert fake.calls == [(
+        "create_session",
+        ("session-obj", "pro"),
+        {
+            "thinking_level": "extended",
+            "learning_mode": "quiz",
+            "temporary": True,
+            "retain_chat": True,
+            "delete_after_seconds": 300,
+        },
+    )]
+
+
+def test_lookup_session_preserves_typed_result(monkeypatch):
+    expected = SessionOperationResult.not_found()
+    fake = _RecordingFake(lookup_session=expected)
+    monkeypatch.setattr(cw, "_session_manager", fake)
+
+    assert cw.lookup_session("missing") is expected
+    assert fake.calls == [("lookup_session", ("missing",), {})]
+
+
+def test_send_session_message_delegates_to_shared_service(monkeypatch):
+    expected = SessionOperationResult.success(response="reply")
+    fake = _RecordingFake(send_message=expected, _async_methods={"send_message"})
+    monkeypatch.setattr(cw, "_session_manager", fake)
+
+    result = _run(cw.send_session_message("sess_x", prompt="hello"))
+
+    assert result is expected
+    assert fake.calls == [("send_message", ("sess_x",), {"prompt": "hello"})]
+
+
+def test_send_session_message_stream_delegates_to_shared_service(monkeypatch):
+    expected = SessionOperationResult.success(response=["chunk"])
+    fake = _RecordingFake(
+        send_message_stream=expected,
+        _async_methods={"send_message_stream"},
+    )
+    monkeypatch.setattr(cw, "_session_manager", fake)
+
+    result = _run(cw.send_session_message_stream("sess_x", prompt="hello"))
+
+    assert result is expected
+    assert fake.calls == [("send_message_stream", ("sess_x",), {"prompt": "hello"})]
+
+
+def test_reset_session_deletes_unretained_remote_chat(monkeypatch):
+    data = SessionData(
+        session=SimpleNamespace(cid="c_remote"),
+        session_id="sess_x",
+        retain_chat=False,
+    )
+    expected = SessionOperationResult.success(data)
+    fake = _RecordingFake(reset_one_async=expected, _async_methods={"reset_one_async"})
+    deleted = []
+
+    async def fake_delete(cid):
+        deleted.append(cid)
+        return True
+
+    monkeypatch.setattr(cw, "_session_manager", fake)
+    monkeypatch.setattr(cw, "delete_remote_chat", fake_delete)
+
+    result = _run(cw.reset_session("sess_x"))
+    assert result.session is data
+    assert result.meta.details["lifecycle"].cleanup.state.value == "completed"
+    assert result.meta.details["lifecycle"].session_state.value == "removed"
+    assert fake.calls == [("reset_one_async", ("sess_x",), {})]
+    assert deleted == ["c_remote"]
+
+
+def test_reset_session_preserves_retained_chat(monkeypatch):
+    data = SessionData(session=object(), session_id="sess_x", retain_chat=True)
+    expected = SessionOperationResult.success(data)
+    fake = _RecordingFake(reset_one_async=expected, _async_methods={"reset_one_async"})
+
+    async def explode(_cid):
+        raise AssertionError("retained chat must not be deleted")
+
+    monkeypatch.setattr(cw, "_session_manager", fake)
+    monkeypatch.setattr(cw, "delete_remote_chat", explode)
+
+    result = _run(cw.reset_session("sess_x"))
+    assert result.session is data
+    assert result.meta.details["lifecycle"].retain_chat is True
+    assert result.meta.details["lifecycle"].session_state.value == "removed"
+
+
+def test_reset_session_without_remote_id_has_no_client_side_effect(monkeypatch):
+    data = SessionData(session=object(), session_id="sess_x", retain_chat=False)
+    expected = SessionOperationResult.success(data)
+    fake = _RecordingFake(reset_one_async=expected, _async_methods={"reset_one_async"})
+
+    async def explode(_cid):
+        raise AssertionError("missing remote ID must not initialize a client or attempt deletion")
+
+    monkeypatch.setattr(cw, "_session_manager", fake)
+    monkeypatch.setattr(cw, "delete_remote_chat", explode)
+
+    result = _run(cw.reset_session("sess_x"))
+    assert result.session is data
+    assert result.meta.details["lifecycle"].cleanup.state.value == "not_applicable"
+    assert result.meta.details["lifecycle"].session_state.value == "removed"
+
+
+def test_reset_session_unknown_id_has_no_remote_side_effect(monkeypatch):
+    expected = SessionOperationResult.not_found()
+    fake = _RecordingFake(reset_one_async=expected, _async_methods={"reset_one_async"})
+
+    async def explode(_cid):
+        raise AssertionError("unknown session must not trigger remote deletion")
+
+    monkeypatch.setattr(cw, "_session_manager", fake)
+    monkeypatch.setattr(cw, "delete_remote_chat", explode)
+
+    assert _run(cw.reset_session("missing")) is expected
 
 
 def test_store_session_forwards_all_args_to_session_manager(monkeypatch):
@@ -340,8 +490,18 @@ def test_list_pending_remote_chat_cleanup_maps_cleanup_tasks(monkeypatch):
     monkeypatch.setattr(cw, "_cleanup_manager", fake)
     result = cw.list_pending_remote_chat_cleanup()
     assert result == {
-        "c_1": {"delete_at": now, "source": "src1"},
-        "c_2": {"delete_at": now + 10, "source": "src2"},
+        "c_1": {
+            "delete_at": now,
+            "source": "src1",
+            "attempts": 0,
+            "diagnostic_id": None,
+        },
+        "c_2": {
+            "delete_at": now + 10,
+            "source": "src2",
+            "attempts": 0,
+            "diagnostic_id": None,
+        },
     }
 
 
@@ -374,7 +534,7 @@ def test_on_cookie_update_skips_psidts_when_falsy(monkeypatch):
     reset_calls = []
     monkeypatch.setattr(cw, "reset_client", lambda: reset_calls.append("reset"))
     monkeypatch.delenv("GEMINI_PSID", raising=False)
-    monkeypatch.delenv("GEMINI_PSIDTS", raising=False)
+    monkeypatch.setenv("GEMINI_PSIDTS", "stale-value")
 
     cookie_data = SimpleNamespace(psid="psid-val", psidts="")
     cw._on_cookie_update(cookie_data)
