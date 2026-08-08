@@ -127,13 +127,12 @@ def test_ci_workflow_has_separate_diagnostic_offline_gates() -> None:
     assert 'GEMINI_AUTO_REFRESH: "false"' in workflow
 
 
-def test_ci_pins_reference_skill_validator_and_checks_both_mirrors() -> None:
+def test_ci_pins_reference_skill_validator_and_checks_single_public_sources() -> None:
     workflow = CI_WORKFLOW.read_text(encoding="utf-8")
 
     assert SKILLS_REF_SHA in workflow
-    assert workflow.count("skills-ref validate") == 4
-    assert "diff -ru .agents/skills/gemini-web-mcp-development .codex/skills/gemini-web-mcp-development" in workflow
-    assert "diff -ru .agents/skills/gemini-web-mcp .codex/skills/gemini-web-mcp" in workflow
+    assert workflow.count("skills-ref validate") == 2
+    assert ".codex/skills" not in workflow
     assert f"skills@{SKILLS_CLI_VERSION} add \"$GITHUB_WORKSPACE\" --skill gemini-web-mcp-development" in workflow
     assert (
         'diff -ru "$GITHUB_WORKSPACE/.agents/skills/gemini-web-mcp-development" '

@@ -8,7 +8,6 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 PUBLIC_SKILL = ROOT / ".agents" / "skills" / "gemini-web-mcp-development"
-CODEX_SKILL = ROOT / ".codex" / "skills" / "gemini-web-mcp-development"
 EXPECTED_FILES = {
     Path("SKILL.md"),
     Path("agents/openai.yaml"),
@@ -30,14 +29,9 @@ def _all_text(root: Path) -> str:
     )
 
 
-def test_development_skill_copies_are_complete_and_identical() -> None:
+def test_development_skill_has_one_complete_public_source() -> None:
     assert _files(PUBLIC_SKILL) == EXPECTED_FILES
-    assert _files(CODEX_SKILL) == EXPECTED_FILES
-
-    for relative_path in EXPECTED_FILES:
-        assert (PUBLIC_SKILL / relative_path).read_bytes() == (
-            CODEX_SKILL / relative_path
-        ).read_bytes()
+    assert not (ROOT / ".codex" / "skills" / "gemini-web-mcp-development" / "SKILL.md").exists()
 
 
 def test_development_skill_frontmatter_and_progressive_disclosure() -> None:
