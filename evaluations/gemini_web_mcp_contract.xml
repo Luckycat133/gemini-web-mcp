@@ -12,6 +12,10 @@
     <answer>gemini_delete_chat</answer>
   </qa_pair>
   <qa_pair>
+    <question>When may an agent claim that gemini_delete_chat verified the selected remote chat is gone? Answer with the exact verification status and data flag.</question>
+    <answer>verification.status=verified_absent and data.deleted=true</answer>
+  </qa_pair>
+  <qa_pair>
     <question>Inspect the manifest workflows. Which workflow should an agent use to dry-run, review, and then delete marked test chats or scheduled actions? Answer with the workflow name.</question>
     <answer>test_artifact_cleanup</answer>
   </qa_pair>

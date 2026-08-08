@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import tomllib
 from pathlib import Path
 
@@ -85,7 +86,9 @@ def test_public_docs_distinguish_expected_routing_from_observation() -> None:
     for field in ("requested_model", "request_model", "effective_backend", "observed_backend"):
         assert f"`{field}`" in client_doc
     assert "not evidence" in client_doc
-    assert "no live Gemini account or backend behavior was observed" in changelog
+    assert "current Gemini behavior is never inferred from those gates" in changelog
+    assert "authorized local run observed text, session, history, and delete behavior" in changelog
+    assert "not recorded as a dedicated-account full canary" in changelog
 
 
 def test_runtime_and_development_skills_have_distinct_roles_and_install_paths() -> None:
@@ -120,3 +123,10 @@ def test_public_onboarding_docs_do_not_depend_on_the_broken_release_url() -> Non
     assert "releases/download/v1.3.0" not in combined
     assert combined.count(CANONICAL_GIT_SOURCE) >= len(paths)
     assert "commit SHA" in combined
+
+
+def test_public_readme_badges_do_not_hardcode_volatile_test_counts() -> None:
+    for path in (PROJECT_ROOT / "README.md", PROJECT_ROOT / "README.zh-CN.md"):
+        text = path.read_text(encoding="utf-8")
+        assert "tests-CI%20verified" in text
+        assert re.search(r"tests-[0-9]+", text) is None

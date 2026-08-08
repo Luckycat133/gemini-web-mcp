@@ -93,13 +93,12 @@ from .services.doctor import (
     format_doctor_markdown as _format_doctor_markdown,
 )
 from .services.history import (
-    _chat_export_payload,
-    _chat_to_dict,
     _format_chat_export_markdown,
-    _get_chat_id,
-    _paginate_items,
-    _read_chat_turns,
-    _turn_matches_query,
+    delete_chat_result as _delete_chat_result,
+    export_chat_result as _export_chat_result,
+    list_chats_result as _list_chats_result,
+    read_chat_result as _read_chat_result,
+    search_chats_result as _search_chats_result,
 )
 from .services.manifest import (
     format_tool_manifest_markdown as _format_tool_manifest_markdown,
@@ -479,86 +478,124 @@ async def history(
         if action == "list":
             chats = client.list_chats() if hasattr(client, "list_chats") else []
             chats = chats or []
-            page, pagination = _paginate_items(chats, limit, offset, max_limit=50)
+            result = _list_chats_result(chats, limit, offset, max_limit=50)
+            assert result.data is not None
+            page = result.data["items"]
             if not page:
-                return [TextContent(type="text", text="No chats")]
+                return domain_text(result, "No chats", use_result_data=True)
             lines = []
-            for i, item in enumerate(page, pagination["offset"] + 1):
-                title = getattr(item, "title", "Untitled")
-                cid = getattr(item, "cid", "") or getattr(item, "id", "")
-                lines.append(f"{i}. {title} ({cid})")
-            if pagination["has_more"]:
-                lines.append(f"next_offset={pagination['next_offset']}")
-            return [TextContent(type="text", text="\n".join(lines))]
+            for i, item in enumerate(page, result.data["offset"] + 1):
+                lines.append(f"{i}. {item['title']} ({item['id']})")
+            if result.data["has_more"]:
+                lines.append(f"next_offset={result.data['next_offset']}")
+            return domain_text(result, "\n".join(lines), use_result_data=True)
 
         if action == "search":
             needle = (query or "").strip()
-            if not needle:
-                return [TextContent(type="text", text="query required")]
-            if scan_turns and not hasattr(client, "read_chat"):
-                return [TextContent(type="text", text="read_chat unavailable")]
+            if not needle or (scan_turns and not hasattr(client, "read_chat")):
+                result = await _search_chats_result(
+                    client,
+                    [],
+                    needle,
+                    limit,
+                    offset,
+                    scan_turns=scan_turns,
+                )
+                fallback = "query required" if not needle else "read_chat unavailable"
+                return domain_text(result, fallback)
             chats = client.list_chats() if hasattr(client, "list_chats") else []
             chats = chats or []
-            page, pagination = _paginate_items(chats, limit, offset, max_limit=50)
-            lowered = needle.lower()
+            result = await _search_chats_result(
+                client,
+                chats,
+                needle,
+                limit,
+                offset,
+                scan_turns=scan_turns,
+                turns_per_chat=min(max(limit, 1), 20),
+                max_chars_per_turn=1000,
+                max_limit=50,
+            )
+            assert result.data is not None
             lines = []
-            for item in page:
-                chat = _chat_to_dict(item)
-                matched = lowered in chat["title"].lower() or lowered in chat["id"].lower()
-                snippets = []
-                if scan_turns and chat["id"]:
-                    _history, turns = await _read_chat_turns(client, chat["id"], min(pagination["limit"], 20), 1000)
-                    for idx, turn in enumerate(turns, 1):
-                        if _turn_matches_query(turn, needle):
-                            matched = True
-                            snippets.append(f"turn {idx} {turn['role']}: {_truncate_text(turn['text'], 240)}")
-                if matched:
-                    lines.append(f"{chat['title']} ({chat['id']})")
-                    lines.extend(f"  {snippet}" for snippet in snippets[:3])
-            if pagination["has_more"]:
-                lines.append(f"next_offset={pagination['next_offset']}")
-            return [TextContent(type="text", text="\n".join(lines) if lines else "No matches")]
+            for match in result.data["matches"]:
+                lines.append(f"{match['title']} ({match['id']})")
+                for snippet in match.get("snippets", [])[:3]:
+                    if snippet.get("error"):
+                        lines.append(f"  read error: {snippet['error']}")
+                    else:
+                        lines.append(
+                            f"  turn {snippet.get('turn_index')} {snippet.get('role')}: "
+                            f"{_truncate_text(snippet.get('text', ''), 240)}"
+                        )
+            if result.data["has_more"]:
+                lines.append(f"next_offset={result.data['next_offset']}")
+            return domain_text(result, "\n".join(lines) if lines else "No matches", use_result_data=True)
 
         if action == "read":
-            if not chat_id:
-                return [TextContent(type="text", text="chat_id required")]
-            if not hasattr(client, "read_chat"):
-                return [TextContent(type="text", text="read_chat unavailable")]
-            read_limit = _paginate_items([], limit, 0, max_limit=50)[1]["limit"]
-            chat = await client.read_chat(chat_id, limit=read_limit)
-            turns = getattr(chat, "turns", []) if chat else []
-            if not turns:
-                return [TextContent(type="text", text="No turns")]
-            lines = []
-            for turn in turns[:read_limit]:
-                role = getattr(turn, "role", "unknown")
-                text = _truncate_text(getattr(turn, "text", ""))
-                lines.append(f"{role}: {text}")
-            return [TextContent(type="text", text="\n\n".join(lines))]
+            result = await _read_chat_result(client, chat_id or "", limit, 2000, max_limit=50)
+            if not result.ok:
+                if result.error_code == DomainErrorCode.INVALID_ARGUMENT.value:
+                    return domain_text(result, "chat_id required")
+                return domain_text(result, "read_chat unavailable")
+            assert result.data is not None
+            if not result.data["turns"]:
+                return domain_text(result, "No turns", use_result_data=True)
+            lines = [f"{turn['role']}: {turn['text']}" for turn in result.data["turns"]]
+            return domain_text(result, "\n\n".join(lines), use_result_data=True)
 
         if action == "export":
-            if not chat_id:
-                return [TextContent(type="text", text="chat_id required")]
-            if not hasattr(client, "read_chat"):
-                return [TextContent(type="text", text="read_chat unavailable")]
-            safe_export_limit = min(max(limit, 1), 200)
-            history, turns = await _read_chat_turns(client, chat_id, safe_export_limit, 20000)
-            metadata = {"id": chat_id}
-            if hasattr(client, "list_chats"):
-                for item in client.list_chats() or []:
-                    if _get_chat_id(item) == chat_id:
-                        metadata = _chat_to_dict(item)
-                        break
-            payload = _chat_export_payload(chat_id, history, turns, metadata, safe_export_limit, 20000)
-            return [TextContent(type="text", text=_format_chat_export_markdown(payload))]
+            async def _load_export_metadata() -> list[object]:
+                if not hasattr(client, "list_chats"):
+                    return []
+                return list(client.list_chats() or [])
+
+            result = await _export_chat_result(
+                client,
+                chat_id or "",
+                limit,
+                20000,
+                metadata_loader=_load_export_metadata,
+                max_limit=200,
+            )
+            if not result.ok:
+                fallback = (
+                    "chat_id required"
+                    if result.error_code == DomainErrorCode.INVALID_ARGUMENT.value
+                    else "read_chat unavailable"
+                )
+                return domain_text(result, fallback)
+            assert result.data is not None
+            if not result.meta.details.get("found"):
+                return domain_text(result, f"No chat: {chat_id}", use_result_data=True)
+            return domain_text(
+                result,
+                _format_chat_export_markdown(result.data),
+                use_result_data=True,
+            )
 
         if action == "delete":
-            if not chat_id:
-                return [TextContent(type="text", text="chat_id required")]
-            if not hasattr(client, "delete_chat"):
-                return [TextContent(type="text", text="delete_chat unavailable")]
-            await client.delete_chat(chat_id)
-            return [TextContent(type="text", text=f"Deleted: {chat_id}")]
+            result = await _delete_chat_result(client, chat_id or "")
+            if not result.ok:
+                if result.error_code == DomainErrorCode.INVALID_ARGUMENT.value:
+                    return domain_text(result, "chat_id required")
+                if result.error_code == DomainErrorCode.CAPABILITY_UNAVAILABLE.value:
+                    return domain_text(result, "delete_chat unavailable")
+                assert result.data is not None
+                status = result.data["verification"]["status"]
+                if status == "still_present":
+                    return domain_text(result, f"Delete not verified: {result.data['chat_id']} is still present", use_result_data=True)
+                return domain_text(
+                    result,
+                    f"Delete requested: {result.data['chat_id']} (read-back verification failed)",
+                    use_result_data=True,
+                )
+            assert result.data is not None
+            if result.data["deleted"] is True:
+                text = f"Deleted and verified absent: {result.data['chat_id']}"
+            else:
+                text = f"Delete requested: {result.data['chat_id']} (not independently verified)"
+            return domain_text(result, text, use_result_data=True)
 
         return [TextContent(type="text", text="Invalid action")]
 
@@ -1373,7 +1410,8 @@ async def cookie(
             lines = []
             for item in profiles:
                 if item.get("error"):
-                    lines.append(f"error: {item['error']}")
+                    error_code = f" [{item['error_code']}]" if item.get("error_code") else ""
+                    lines.append(f"error: {item['error']}{error_code}")
                     continue
                 available = "yes" if item.get("account_available") is True else "no"
                 selected = "yes" if item.get("chrome_selected_profile") else "no"

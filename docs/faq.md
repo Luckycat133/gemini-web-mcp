@@ -7,7 +7,7 @@
 ## 🚀 安装与配置
 
 ### Q: 支持哪些 Python 版本？
-**A:** Python 3.10 或更高版本。
+**A:** Python 3.11 或更高版本。
 
 ### Q: pip 安装失败怎么办？
 **A:** 
@@ -127,10 +127,13 @@
 **A:** 主服务当前没有独立的 `system_instruction` 参数。需要稳定复用指令时，使用 Gem 或提示词管理工具。
 
 ### Q: 支持多个 Cookie 切换吗？
-**A:** 当前版本不支持，但您可以手动更改环境变量重启服务器。
+**A:** 支持本地浏览器 profile 选择。先调用 `gemini_list_browser_cookie_profiles`，再用
+`gemini_get_cookie_from_browser(profile="...")` 加载目标 profile；也可以修改环境变量后重启。
 
 ### Q: 可以在服务器运行时更新 Cookie 吗？
-**A:** 不可以，需要重启服务器。可以使用 `gemini_reset` 重置连接。
+**A:** 可以。`gemini_get_cookie_from_browser` 会更新当前运行时 Cookie 并重置客户端；手动修改宿主
+环境变量后仍需重启 MCP 进程。macOS Keychain 超时可用
+`GEMINI_BROWSER_COOKIE_TIMEOUT_SECONDS` 调整。
 
 ### Q: 支持流式响应吗？
 **A:** Gemini Web 上游流可通过 `gemini_chat_stream` 或 `gemini_send_message_stream` 使用。

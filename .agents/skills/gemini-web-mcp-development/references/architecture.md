@@ -1,101 +1,108 @@
-# Architecture and Remaining Debt
+# Current State, Missing Work, and Known Defects
 
-Load this reference for repository audits, refactors, service extraction, adapter parity, workflow repairs, or release planning.
+Use this reference when auditing the repository or choosing the next engineering task. Verify every statement against the current checkout and recent CI before acting.
 
-## Product Boundary
+## What Is Already Implemented
 
-Gemini Web MCP is a local compatibility gateway for agents. Its durable product is the stable MCP/domain contract, not any individual reverse-engineered payload.
+The project already has a broad usable surface:
 
-```text
-MCP clients
-  |
-  +-- src.server -------- primary granular/profile adapter
-  +-- src.skill_server -- compact low-token facade adapter
-  +-- src.onboarding ---- installed-product preflight/examples
-          |
-          v
-  adapters -> domain results/artifacts -> shared services
-          -> infrastructure RPC/model adapters -> Gemini Web client
-```
+- primary MCP server with narrow `model`, `history`, `history-organize`, `account-read`, `scheduled-read`, `scheduled-admin`, `core`, and `all` profiles;
+- compact eleven-tool facade for low-token discovery;
+- one-shot and session chat, thinking levels, guided-learning modes, temporary chats, and Gem-backed chat;
+- image generation/editing, video, music, local-file analysis, URL analysis, and Deep Research;
+- typed artifact state for remote/local/queued/empty/failed outcomes, plus shared typed results for history list/search/read/export/delete;
+- history list/scan/search/read/export/delete, native Notebook reads and chat moves;
+- account inventory, usage, public-link reads, model/mode discovery, scheduled-action daily create/get/list/delete, and Gem CRUD;
+- prompts, cookie diagnostics, doctor, cleanup, onboarding, package/release automation, and an opt-in live canary;
+- official MCP SDK v2 discovery, structured content, generated output schemas, and compatibility negotiation.
 
-## Implemented Foundation
+## Confirmed Defects Fixed in the Current Audit Package
 
-### Runtime lifecycle
+### Compact History Mapping Compatibility
 
-`ClientManager` coordinates one asynchronous initialization attempt, shields it from unrelated caller cancellation, prevents stale reset generations from publishing, and retires old clients deliberately. `SessionService` owns opaque IDs, per-session send serialization, explicit not-found state, expiry, reset-one, and reset-all.
+The compact `history` list/read paths previously assumed upstream records were attribute objects. Mapping-backed chats could render as `Untitled` with blank IDs, and mapping-backed turns could render as `unknown` with empty text. The client facade now adapts mapping-backed history values once while preserving mapping semantics and the original client identity.
 
-### Typed contracts
+### Volatile README Test Count
 
-`src/domain/` defines `DomainResult`, stable error codes, warnings, operation state, lifecycle/cleanup metadata, stream collection metadata, and multimodal artifacts. Runtime objects stay outside serialization.
+A hardcoded numeric test badge drifted behind the real suite. Public badges should report CI verification rather than a manually maintained test count.
 
-### Shared services
+### History Adapter Duplication
 
-`src/services/` owns chat/session execution, stream normalization, artifacts, history helpers, account inventory, Notebooks, scheduled actions, Gems, cleanup, manifests, and compatibility probing. Primary and compact adapters should differ in granularity/defaults/presentation rather than business semantics.
+Primary and compact history list/search/read/export/delete now normalize object- and mapping-backed records in the shared
+history service and return the same typed domain data while preserving surface-specific compatibility text. Search retains
+source-page-before-filter pagination. Delete reports accepted/unverified unless read-back positively observes absence, and
+fails closed when the chat remains visible or read-back errors. Positive absence requires complete fresh pagination across
+the canonical recent/pinned metadata buckets; the dependency's ambiguous `read_chat(None)` result is never deletion proof.
 
-### Reverse-engineered infrastructure
+### Unbounded macOS Keychain Wait
 
-`src/infrastructure/rpc_contracts.py` and parser modules centralize observed RPC identifiers, payload builders, source paths, parsers, observation metadata, and mutation verification strategies. Changed shapes should become explicit parser state rather than silent emptiness.
+`browser-cookie3` previously called macOS `security ... find-generic-password` with an unbounded `communicate()`, so even
+`validate=false` profile diagnostics could hang the MCP process. The repository now installs a locked, reversible reader
+only around browser-cookie access, applies `GEMINI_BROWSER_COOKIE_TIMEOUT_SECONDS`, restores the dependency function, and
+returns a sanitized timeout code without exposing Cookie values.
 
-### MCP, package, and product verification
+### Repository Description Drift
 
-`src/adapters/mcp_sdk.py` is the MCP SDK v2 boundary. CI covers modern/legacy negotiation, generated output schemas, representative profiles, wheel/sdist resources, all console entrypoints, isolated onboarding, skill parity/installation, and release assets.
+The GitHub repository description previously called the project a “FastMCP server.” It now identifies the project as an
+agent-first MCP Python SDK v2 gateway and skill set, matching the checked-in runtime and public documentation.
 
-### Compatibility adapter testing
+## Remaining High-Priority Engineering Gaps
 
-Recent development added broad branch tests for `tools/manage.py`. These tests use `tests._fastmcp_shim` only as a minimal registration/dispatch double because standalone FastMCP is incompatible with the project's MCP SDK v2 dependency line. The shim is not product evidence; real `MCPServer` and stdio smoke remain mandatory.
+### 1. No Dedicated Full Live Baseline
 
-## Remaining Debt
+Offline, package, protocol, and synthetic canary tests are strong, but the scheduled live canary remains inactive unless
+repository variables and a dedicated-account environment are configured. An explicitly authorized 2026-08-08 targeted
+run verified current Cookie initialization, text/session behavior, two history probes, primary/compact typed history, and
+`verified_absent` cleanup for four created chats. It did not record the account as dedicated or observe Web build, tier,
+media, files, URLs, Deep Research, or account mutations, so it is not a full live baseline.
 
-### 1. Prose-only management surfaces
+### 2. Incomplete Typed-Result Coverage
 
-A significant portion of `tools/manage.py` and `skill_server.py` still returns untyped prose. Failures, pagination, partial results, and mutation verification may therefore require text parsing. Migrate one action family at a time to shared services and `DomainResult`.
+Core chat/session/artifact/research paths and shared history list/search/read/export/delete are structured, but the primary-only deep history scan plus many account, prompt, cookie, doctor, cleanup, scheduled, Notebook, and compatibility tools still expose prose-first results. Agents should not need to parse phrases or emoji to determine success, retryability, pagination, or verification.
 
-### 2. Mutation presentation drift
+### 3. Primary/Compact Facade Duplication
 
-Services already return read-back evidence, but adapters can still overstate it. Every remote write must map verification state to truthful text and structured state. `accepted` is not equivalent to `verified`; `still_present`, mismatch, read-back failure, or missing mutation ID must not receive a success marker.
+All compact history actions now use the shared history service. Compact account, prompt, cookie, doctor, cleanup, and parts of scheduled presentation still retain adapter-owned execution or formatting. Migrate one bounded action family at a time; keep compactness as a discovery/presentation property, not a separate business implementation.
 
-### 3. Compatibility monolith size
+### 4. Mutation Verification Is Uneven
 
-`tools/manage.py` remains large because it preserves many public tool names and formatting paths. Do not rewrite it wholesale. Extract bounded workflows, route both adapters through the service, add parity tests, then remove obsolete helper aliases.
+Gem mutations and chat deletion now fail closed without positive read-back evidence; Notebook moves and scheduled actions also preserve several read-back states. Apply the same review to cleanup, prompt storage, remaining scheduled/Notebook branches, and any future sharing/settings mutation. Define which source is authoritative and which ambiguous states are partial rather than successful.
 
-### 4. Live evidence gap
+### 5. Cleanup Is Process-Local
 
-The canary machinery is extensively fixture/workflow tested, but a deliberate dedicated-account baseline is still required before making current live compatibility claims. Keep live observation separate from offline correctness.
+Pending remote-chat cleanup and its observations live in memory. A server restart can lose delayed deletion work. Choose between best-effort process-local cleanup, a durable local queue, or using provider-native temporary conversations wherever possible.
 
-### 5. Release accumulation
+### 6. Long Operations Lack a First-Class Job API
 
-Substantial additive and behavioral changes remain under `Unreleased` while the package version is still 1.3.0. The next release needs an explicit semantic-version decision, protocol compatibility statement, migration notes, and downloaded-asset revalidation.
+Deep Research and media can report queued/running/timed-out states and preserve identifiers, but agents do not have a uniform `start / status / result / cancel` contract. A dedicated operation service would make timeout recovery and cross-client UX substantially clearer.
 
-### 6. Workflow expression regressions
+### 7. Search Pagination Semantics Need a Contract
 
-GitHub Actions can fail before creating jobs when a context is invalid at a YAML location. Repository contracts should lock every repaired expression, especially job-level `env`, permissions, and conditional contexts.
+Current history search treats `offset`/`limit` as the source page to scan, not necessarily the match page to return. That is bounded and predictable but can surprise users who expect global match pagination. Decide and document whether search pagination applies before or after filtering, especially when `scan_turns=true` could require many remote reads.
 
-### 7. Skill and documentation freshness
+## Gemini UI Workflows Not Yet Implemented
 
-The development skill is a routing layer, not an independent architecture source. Update both mirrors whenever the implemented baseline, active priorities, maintained gates, or evidence rules materially change.
+These are real missing capabilities, but should only be added when they improve agent workflows and have stable evidence:
 
-## Incremental Migration Pattern
+- Google Drive picker/attachment import;
+- Canvas document create/read/update/export;
+- scheduled-action edit, enable/disable, weekly, and richer recurrence;
+- Notebook create, rename, delete, and source management;
+- public-link create, update, revoke, and sharing management;
+- history rename, pin/unpin, archive, and share workflows;
+- personalization/settings and memory-import mutations;
+- Library asset listing beyond capability/probe surfaces;
+- first-class media/research job polling and cancellation;
+- genuine client-visible incremental progress rather than collected upstream streams;
+- onboarding commands for video, music, file, URL, and Deep Research.
 
-For one workflow:
+Theme, help, feedback, location, subscription, and other UI chrome should remain out of scope unless a concrete agent workflow requires them.
 
-1. characterize current names, schema, text, metadata, and side effects;
-2. add a regression for the defect or ambiguity;
-3. define typed service input/output;
-4. route the primary adapter;
-5. route the compact adapter where applicable;
-6. compare semantic parity;
-7. remove duplicate execution/parsing;
-8. update manifest/schema/docs/evaluations;
-9. run installed-product and protocol checks when registration changes.
+## Recommended Priority
 
-## Target Runtime Flow
-
-```text
-MCP adapter
-  -> normalize/validate adapter input
-  -> shared application service
-  -> Gemini Web capability/RPC adapter
-  -> pure parser
-  -> DomainResult + artifacts + verification evidence
-  -> structured MCP output + non-contradictory compatibility text
-```
+1. Configure the dedicated canary account and extend the live baseline to the unobserved P0 workflows.
+2. Continue typed results for the primary deep history scan and account, then prompt/cookie/doctor/cleanup.
+3. Audit every remote mutation for positive read-back and honest presentation.
+4. Introduce a shared long-operation job contract.
+5. Decide cleanup durability and release/version strategy.
+6. Improve end-to-end video, music, file, URL, and research onboarding before pursuing broad UI parity.

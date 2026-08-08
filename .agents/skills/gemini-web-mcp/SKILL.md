@@ -1,7 +1,36 @@
 ---
 name: gemini-web-mcp
 description: "Operate an installed Gemini Web MCP server safely: inspect the tool manifest, choose the narrowest profile and read-only workflow, manage explicitly selected history/notebook/account tasks, and verify generated media artifacts. Use for MCP tool operation; do not use for repository implementation, tests, CI, packaging, or releases—use gemini-web-mcp-development instead."
+license: MIT-0
 compatibility: "Requires Python 3.11+ and an installed server (verify with uvx --from git+https://github.com/Luckycat133/gemini-web-mcp@main gemini-mcp-onboarding). Live Gemini calls require account Cookies; image verification requires the image or all extra."
+metadata:
+  version: "0.1.0"
+  openclaw:
+    emoji: "♊️"
+    homepage: https://github.com/Luckycat133/gemini-web-mcp
+    requires:
+      bins:
+        - uvx
+    primaryEnv: GEMINI_PSID
+    envVars:
+      - name: GEMINI_PSID
+        required: false
+        description: Optional __Secure-1PSID Cookie for authenticated Gemini Web calls.
+      - name: GEMINI_PSIDTS
+        required: false
+        description: Optional matching __Secure-1PSIDTS Cookie recommended for session stability.
+      - name: GEMINI_PSIDCC
+        required: false
+        description: Optional __Secure-1PSIDCC Cookie forwarded when configured.
+      - name: GEMINI_PROXY
+        required: false
+        description: Optional HTTP or HTTPS proxy used by the MCP server.
+      - name: GEMINI_BROWSER_COOKIE_TIMEOUT_SECONDS
+        required: false
+        description: Optional bounded macOS Keychain wait for browser Cookie discovery.
+      - name: GEMINI_TOOLS
+        required: false
+        description: Optional primary-server tool profile such as model, core, or all.
 ---
 
 # Gemini Web MCP
@@ -36,7 +65,8 @@ Use this skill only to operate the installed primary or low-token MCP server. Fo
   - Use `account(action="capabilities")` for the static Web capability map without cookies.
   - Use `account(action="features|links|usage|library|notebooks|scheduled|modes")` for compact account-surface inventory.
   - Use `history(action="list|search|read|export|delete")` for chat history.
-  - Use `cleanup(dry_run=true)` before deleting test chats or scheduled actions by marker.
+  - Record every returned remote test-resource ID; Gemini-generated titles may omit prompt markers.
+  - Use `cleanup(dry_run=true)` as a bounded fallback before deleting test chats or scheduled actions by marker.
   - Use `scheduled(action="list|get|create|delete")` for compact scheduled-action workflows.
   - Use `create(type="music", model="pro")` or primary `gemini_generate_music` for Lyria 3 Pro music requests.
   - Use `doctor(validate_browser=false)` for low-cost local preflight before live account workflows.
@@ -68,6 +98,11 @@ Use this skill only to operate the installed primary or low-token MCP server. Fo
    - `gemini_notebooks(action="chats", notebook_id=...)`
 6. Delete only with explicit confirmation:
    - `gemini_delete_chat(chat_id=...)`
+   - Claim deletion only when `_meta.domain_result.data.deleted=true` and
+     `verification.status=verified_absent`; this requires a complete fresh history-metadata read-back.
+     `not_available` means accepted but unverified, and `read_chat(None)` alone is never absence proof.
+   - For test chats, retain the returned remote ID at creation time. A metadata-only marker search may miss the chat when
+     Gemini generates a title without the prompt marker; use `scan_turns=true` only with explicit permission to read turn text.
 
 ## Web Pro Coverage Rules
 
@@ -91,6 +126,7 @@ Use this skill only to operate the installed primary or low-token MCP server. Fo
 
 - Use observed daily create, registry list, by-id get, and explicit delete by id through `gemini_create_scheduled_action`, `gemini_list_scheduled_actions`, `gemini_get_scheduled_action`, and `gemini_delete_scheduled_action`.
 - Refresh Chrome cookies first when account context matters. If the registry is unexpectedly empty, call `gemini_list_browser_cookie_profiles`, then `gemini_get_cookie_from_browser(profile="...")` for the profile with Gemini cookies or scheduled registry entries.
+- On macOS, treat `BROWSER_COOKIE_ACCESS_TIMEOUT` as a local Keychain authorization/timeout problem, not an invalid-account result. Adjust `GEMINI_BROWSER_COOKIE_TIMEOUT_SECONDS` only when the user controls that host; never request or print Cookie values.
 - After create/delete, check `verification_status`; after create also check `readable_by_id_after_create`, and after delete check `deleted_by_id_after_delete` or `task_state_after_delete=deleted` before claiming the task is gone.
 
 ## Operational Verification

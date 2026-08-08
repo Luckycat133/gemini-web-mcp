@@ -16,6 +16,7 @@ CONTRACT_TESTS = (
     "tests/test_mcp_sdk_v2.py",
     "tests/test_conversation_lifecycle.py",
     "tests/test_chat_service.py",
+    "tests/test_compact_history_contract.py",
     "tests/test_artifacts.py",
     "tests/test_manage_gem_verification_contract.py",
     "tests/test_rpc_contracts.py",

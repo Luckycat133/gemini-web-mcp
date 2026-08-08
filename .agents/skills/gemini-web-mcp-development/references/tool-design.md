@@ -1,148 +1,150 @@
-# Agent-First Tool and Result Design
+# How to Actually Experience the Product
 
-Load this reference when adding or changing tools, facades, schemas, models, media, files, Deep Research, or remote mutations.
+This is the shortest path from “the repository builds” to “an agent can really use it.” Use a reviewed commit SHA when reproducibility matters.
 
-## Design Goal
+## 1. Prove Installation and MCP Stdio Without Credentials
 
-A tool exists to help an agent complete a workflow. It should make the intended action discoverable, constrain inputs, bound output, and return enough evidence for the agent to know what actually happened.
+Replace the example value before running:
 
-## Tool Levels
+```bash
+REVIEWED_SHA=replace-with-reviewed-40-character-commit
+SOURCE="git+https://github.com/Luckycat133/gemini-web-mcp@${REVIEWED_SHA}"
+uvx --from "$SOURCE" gemini-mcp-onboarding
+```
 
-Use three layers deliberately:
+Expected result: JSON reporting `status=ok`, `mode=offline`, `credentials_accessed=false`, a negotiated protocol version, server version, and a non-zero `model` profile tool count.
 
-1. composable primitive tools for stable operations;
-2. compact facade/workflow tools where a bounded action enum saves meaningful context;
-3. diagnostic tools for manifests, capabilities, installation, compatibility, and drift.
+This proves installation, entrypoint resolution, stdio transport, MCP negotiation, and a real tool call. It does not prove Gemini authentication or model access.
 
-Compactness must not merge unrelated semantics or force the agent to guess the result.
+## 2. Prove Live Text Explicitly
 
-## Input Rules
+Configure the account cookies in the shell or client environment, replace the example SHA, then run:
 
-- Use enums/Literals for actions, models, media types, formats, and stability values.
-- Bound limits, offsets, scan depth, characters, and timeouts.
-- Normalize aliases once and preserve requested versus normalized values.
-- Strip identifiers and names where surrounding whitespace has no semantic value.
-- Reject whitespace-only required values before client initialization.
-- Distinguish omitted values from explicit empty values for partial updates.
-- Accept continuation identifiers for resumable operations.
+```bash
+REVIEWED_SHA=replace-with-reviewed-40-character-commit
+SOURCE="git+https://github.com/Luckycat133/gemini-web-mcp@${REVIEWED_SHA}"
+uvx --from "$SOURCE" gemini-mcp-onboarding chat \
+  --allow-live-account \
+  --prompt "Reply with exactly: gemini-mcp-live-ok" \
+  --model flash \
+  --thinking-level standard
+```
 
-## Result Contract
+Inspect both returned text and the structured domain result. Confirm the request was temporary or that its cleanup/retention state is visible.
 
-Prefer a typed result plus concise compatibility text:
+## 3. Prove a Verifiable Local Image
+
+```bash
+REVIEWED_SHA=replace-with-reviewed-40-character-commit
+SOURCE="git+https://github.com/Luckycat133/gemini-web-mcp@${REVIEWED_SHA}"
+mkdir -p /tmp/gemini-mcp-images
+uvx --from "$SOURCE" gemini-mcp-onboarding image \
+  --allow-live-account \
+  --prompt "A clean blue circle on a white background" \
+  --output-dir /tmp/gemini-mcp-images
+```
+
+The command should fail unless it receives a local image inside the requested directory with non-zero size, image MIME type, positive dimensions, and `verification.status=verified`.
+
+## 4. Connect a Real Agent Client
+
+Start with the smallest profile. Replace `REVIEWED_COMMIT_SHA` with the reviewed 40-character commit before copying the configuration into the client:
 
 ```json
 {
-  "ok": true,
-  "data": {},
-  "warnings": [],
-  "error": null,
-  "meta": {
-    "request_id": "req_...",
-    "operation_state": "completed",
-    "requested_backend": "pro",
-    "effective_backend": "Lyria 3 Pro",
-    "verification_status": "artifact_saved_and_verified"
+  "mcpServers": {
+    "gemini": {
+      "command": "uvx",
+      "args": [
+        "--from",
+        "git+https://github.com/Luckycat133/gemini-web-mcp@REVIEWED_COMMIT_SHA",
+        "gemini-mcp-server"
+      ],
+      "env": {
+        "GEMINI_TOOLS": "model"
+      }
+    }
   }
 }
 ```
 
-The first text block and structured result must agree. An agent must not need emoji matching or exception-string parsing to determine success.
+Use `core` for images, video, music, files, URLs, and research. Use `gemini-mcp-skill-server` when the fixed compact facade is the desired discovery experience. Use `all` only for maintainer verification.
 
-## Error Taxonomy
-
-Use stable codes such as `INVALID_ARGUMENT`, `AUTH_REQUIRED`, `AUTH_EXPIRED`, `SESSION_NOT_FOUND`, `CAPABILITY_UNAVAILABLE`, `UPSTREAM_REJECTED`, `UPSTREAM_CHANGED`, `NETWORK_ERROR`, `RATE_LIMITED`, `TIMED_OUT`, `CANCELLED`, `ARTIFACT_NOT_RETURNED`, `ARTIFACT_SAVE_FAILED`, `VERIFICATION_FAILED`, and `INTERNAL_ERROR`.
-
-Include retryability, a public-safe message, optional suggested action, and a diagnostic ID for logged raw evidence.
-
-## Mutation Evidence
-
-A mutation has at least two stages:
+Good client prompts:
 
 ```text
-request accepted -> target state observed
+Use Gemini to critique this answer, then summarize where the two models disagree.
 ```
-
-Only the second stage proves success.
-
-### Positive terminal evidence
-
-Examples:
-
-- created object is visible or readable by returned ID;
-- updated fields match the requested values on read-back;
-- deleted object is explicitly in a deleted state or is absent from an authoritative non-empty registry and unreadable by ID.
-
-These may receive a success marker and completed state.
-
-### Ambiguous or contradictory evidence
-
-The following must not be presented as success:
-
-- `missing_mutation_id`;
-- `read_back_not_observed`;
-- `read_back_error`;
-- `read_back_mismatch`;
-- `still_present`;
-- empty-registry-only absence without corroboration;
-- RPC acceptance with no authoritative state observation.
-
-Return warning/partial/failed state as appropriate, preserve the verification code, and tell the agent which read/list operation can resolve the uncertainty.
-
-Test each mutation with verified, ambiguous, and contradictory read-back states.
-
-## Collection Rendering
-
-Services may return mapping-backed or object-backed entries. Presentation must use shared field adapters instead of assuming attributes. Preserve stable IDs, pagination, source diagnostics, and truncation metadata.
-
-## Artifact Model
-
-Use one representation across image, video, audio, file, report, webpage, and data artifacts:
 
 ```text
-id, kind, state, title, uri, local_path, mime_type, size_bytes,
-width, height, duration_seconds, source_chat_id,
-requested_backend, request_model, effective_backend, observed_backend,
-verification {status, methods}
+Ask Gemini to generate an image, save it locally, and report the verified artifact path and dimensions.
 ```
 
-A local deliverable is successful only after relevant file and metadata checks. A remote URI can be useful but remains separately identified and normally unverified.
+```text
+Start Deep Research without waiting. Return the operation/chat identifiers and tell me how the result can be recovered.
+```
 
-## Requested, Effective, and Observed Backends
+Observe whether the client discovers the intended tool without needing repository-specific coaching, displays artifacts usefully, and preserves structured errors.
 
-Keep separate:
+## 5. Experience the Full Multimodal Surface From Source
 
-- requested alias selected by the caller;
-- request model sent upstream;
-- effective backend inferred from routing;
-- observed backend parsed from response/artifact evidence.
+```bash
+git clone https://github.com/Luckycat133/gemini-web-mcp.git
+cd gemini-web-mcp
+python -m venv .venv
+. .venv/bin/activate
+pip install -e ".[all,dev]"
 
-Never repeat an expected label as observed fact.
+python scripts/smoke_profiles.py
+python scripts/smoke_mcp_protocol.py
+GEMINI_TOOLS=core gemini-mcp-server
+```
 
-## Long Operations
+Then use an MCP client to run, in order:
 
-- use modality-specific timeouts;
-- return queued/running/completed/timed-out explicitly;
-- retain upstream continuation IDs;
-- propagate cancellation;
-- describe current streams as collected unless MCP clients receive real incremental progress.
+1. text and a multi-turn session;
+2. image generation and image editing with a reference file;
+3. video generation;
+4. music generation;
+5. local file analysis;
+6. URL analysis;
+7. Deep Research with both wait and start-only modes;
+8. history list/search/read/export, followed by a marked temporary chat deletion when authorized;
+9. a disposable Gem or scheduled-action mutation with read-back;
+10. cleanup of all marked artifacts.
 
-## Primary and Compact Parity
+Record each returned remote resource ID as soon as it is created. Gemini may
+generate a title that omits the prompt marker, so metadata-only marker cleanup
+is a fallback rather than proof that no test chat remains. Delete known chat
+IDs directly and require `verified_absent`; only enable turn scanning with
+explicit permission to read private chat text.
 
-Both adapters should call the same service and compare:
+## 6. What to Inspect, Not Just What to Read
 
-- error code and retryability;
-- operation state;
-- lifecycle/cleanup metadata;
-- normalized model/backend evidence;
-- artifact identity and verification;
-- pagination/truncation;
-- mutation verification status.
+For every result check:
 
-Text verbosity may differ; semantic state may not.
+- `ok`, error code, retryability, and operation state;
+- requested, request, effective, and observed backend fields;
+- session/operation/continuation IDs;
+- artifact state, path/URI, MIME, size, dimensions or duration;
+- mutation verification status;
+- lifecycle and cleanup state;
+- whether text agrees with structured content.
 
-## Compatibility Rules
+For video/audio, play the artifact. For files, open the saved path. For history or mutations, read back the authoritative state. A chat deletion is verified only when complete fresh history-metadata pagination produces `verification.status=verified_absent` and `data.deleted=true`; a zero-result marker search is insufficient when Gemini-generated titles omitted the marker. `read_chat(None)`, accepted-but-unverified, still-present, and read-back-error results are not proof of deletion. For long operations, verify that a timeout still leaves enough information to recover later.
 
-- Keep established public names within a major version unless intentionally breaking.
-- Add optional fields rather than silently changing existing meanings.
-- Fix accidental behavior with a release note and regression.
-- Update manifest, schema snapshots, docs, examples, evaluations, and skills together when the public contract changes.
+## 7. Record Friction as Product Evidence
+
+During actual use, note:
+
+- installation time and first successful call;
+- client-specific configuration failures;
+- tools the agent did not discover naturally;
+- ambiguous arguments or result fields;
+- artifacts the client could not render or locate;
+- long operations that needed a poll/resume workflow;
+- account/profile mismatches;
+- Gemini Web drift or parser failures;
+- whether cleanup and retention behaved as expected.
+
+Convert reproducible friction into a focused issue with client version, commit SHA, profile, tool arguments without secrets, structured result, diagnostic ID, and expected behavior.

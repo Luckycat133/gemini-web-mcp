@@ -2,9 +2,13 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, "agent/**"]
   pull_request:
     branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
@@ -120,7 +124,7 @@ jobs:
         run: python scripts/smoke_mcp_protocol.py
 
   skills:
-    name: Agent Skill validation and mirror parity
+    name: Agent Skill validation and repository install
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -136,16 +140,10 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -e ".[all,dev]"
           python -m pip install "skills-ref @ git+https://github.com/agentskills/agentskills.git@38a2ff82958afee88dadf4831509e6f7e9d8ef4e#subdirectory=skills-ref"
-      - name: Validate public and Codex skill copies
+      - name: Validate public Agent Skills
         run: |
           skills-ref validate .agents/skills/gemini-web-mcp-development
-          skills-ref validate .codex/skills/gemini-web-mcp-development
           skills-ref validate .agents/skills/gemini-web-mcp
-          skills-ref validate .codex/skills/gemini-web-mcp
-      - name: Compare mirrored skill bytes
-        run: |
-          diff -ru .agents/skills/gemini-web-mcp-development .codex/skills/gemini-web-mcp-development
-          diff -ru .agents/skills/gemini-web-mcp .codex/skills/gemini-web-mcp
       - name: Install development skill directly from the repository
         run: |
           mkdir -p "$RUNNER_TEMP/development-skill-install"

@@ -291,7 +291,7 @@ TOOL_MANIFEST: list[dict[str, Any]] = [
     {
         "name": "gemini_delete_chat",
         "group": "history",
-        "purpose": "Delete a selected remote Gemini Web chat.",
+        "purpose": "Request deletion of a selected remote Gemini Web chat and report read-back verification evidence.",
         "read_only": False,
         "destructive": True,
         "privacy": "uses_private_chat_id",

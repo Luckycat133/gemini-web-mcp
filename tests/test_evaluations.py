@@ -14,7 +14,7 @@ def _qa_pairs():
 def test_gemini_web_mcp_contract_evaluation_shape():
     pairs = _qa_pairs()
 
-    assert len(pairs) == 17
+    assert len(pairs) == 18
     for pair in pairs:
         question = pair.findtext("question")
         answer = pair.findtext("answer")
@@ -44,6 +44,7 @@ def test_gemini_web_mcp_contract_answers_match_static_manifest():
 
     assert history_tools["gemini_delete_chat"]["destructive"] is True
     assert pairs["gemini_delete_chat"]
+    assert pairs["verification.status=verified_absent and data.deleted=true"]
     assert history_tools["gemini_cleanup_test_artifacts"]["destructive"] is True
 
     assert history_tools["gemini_export_chat"]["privacy"] == "reads_private_chat_text"

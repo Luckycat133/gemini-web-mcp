@@ -52,7 +52,7 @@ mcp = MCPServer(
 
 ## 工具组（可配置）
 - model/chat: 只调用 Gemini 模型
-- history: 只读历史 list/search/read/export
+- history: 只读历史 list/scan/search/read/export
 - history-organize: 历史整理 + native Notebook 移动
 - account-read: 账号 Web surface 只读盘点
 - scheduled-admin: 明确授权后管理定时操作
@@ -165,7 +165,8 @@ async def gemini_list_browser_cookie_profiles(
             lines.append("- No profiles found")
         for item in profiles:
             if item.get("error"):
-                lines.append(f"- error: {item['error']}")
+                error_code = f" [{item['error_code']}]" if item.get("error_code") else ""
+                lines.append(f"- error: {item['error']}{error_code}")
                 continue
             profile = item.get("profile", "unknown")
             psid = "yes" if item.get("has_psid") else "no"

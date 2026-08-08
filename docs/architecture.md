@@ -82,8 +82,7 @@ gemini-mcp-server/
 ├── compatibility/         # Live canary 报告 schema 与上游依赖矩阵
 ├── scripts/               # 打包/发布、协议 smoke 与 opt-in canary CLI
 ├── .github/workflows/     # 离线 CI/release 与隔离的 live-canary workflow
-├── .agents/skills/        # 公开分发用 Codex skill 副本
-├── .codex/skills/         # 本地开发用 Codex skill 副本
+├── .agents/skills/        # 唯一的可安装 Agent Skill 来源
 └── docs/                  # 完整文档系统
     ├── README.md          # 文档中心
     ├── quickstart.md      # 快速开始
@@ -93,6 +92,7 @@ gemini-mcp-server/
     ├── faq.md             # 常见问题
     ├── architecture.md    # 技术架构
     ├── changelog.md       # 更新历史
+    ├── development-status.md # 已实现、部分完成与 owner 决策
     ├── troubleshooting.md # 故障排查
     ├── contributing.md    # 贡献指南
     ├── manual-testing.md  # 实机测试清单
@@ -186,7 +186,7 @@ MODEL_CONFIG = {
 - URL 分析
 
 #### Management Services and Adapter
-- `services/history.py`：历史记录的共享分页、读取、导出 helper
+- `services/history.py`：历史 list/search/read/export/delete 的共享规范化、分页、typed result，以及基于完整 fresh recent/pinned 元数据分页的删除回读验证；`read_chat(None)` 不被当作缺失证据
 - `services/account.py`：账号 inventory parser 与只读 feature probe
 - `services/notebooks.py`：原生 Notebook 读取及带读回校验的 chat move
 - `services/scheduled.py`：定时操作读取、创建、删除与 registry/GetTask 双读回
@@ -232,7 +232,13 @@ compact: src/skill_server.py┘
 
 适配器差异是显式配置：primary 继续传递 `gem` / `temporary`，compact 继续保持原有精简请求形状；
 两边共享同一类型化 `DomainResult[ChatOperationData]`。迁移后的聊天处理器不再复制上游请求与清理逻辑。
-`skill_server.py` 中仍有其他管理域对 `tools.manage` 私有 helper 的历史依赖，将在后续服务迁移阶段处理。
+history 的 list/search/read/export/delete 也由 `src/services/history.py` 统一执行；primary 与 compact
+只保留展示差异。`skill_server.py` 中仍有 account、prompt、cookie、doctor、cleanup 等管理域的
+adapter-owned 逻辑，将在后续 bounded slice 中处理。
+
+`cookie_manager.py` 在 macOS 调用 `browser-cookie3` 时临时安装带锁、可恢复的 Keychain reader，
+用 `GEMINI_BROWSER_COOKIE_TIMEOUT_SECONDS` 限制依赖中原本无界的 `security` 子进程等待。超时结果只保留
+脱敏错误码，退出上下文后恢复依赖函数，不序列化 Cookie 值。
 
 ### 7. 统一 Artifact 模型
 

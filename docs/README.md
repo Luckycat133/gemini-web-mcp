@@ -26,6 +26,7 @@
 
 ### 技术文档
 - [技术架构](./architecture.md) - 系统设计
+- [开发状态与下一步](./development-status.md) - 已实现、部分完成、live 证据和 owner 决策边界
 - [MCP SDK 与客户端兼容性](./mcp-sdk-compatibility.md) - v2 运行时、协议路径与 SDK v1 维护截止日期
 - [Gemini Web Live Canary](./live-canary.md) - 专用账号 opt-in 探测、脱敏报告与漂移 issue 流程
 - [API 参考](./api-reference.md) - 内部 API 文档
@@ -64,8 +65,12 @@
 | Deep Research | ✅ AI Plus 支持 |
 | Gem 管理 | ✅ 自定义助手管理 |
 | MCP 评估 | ✅ 17 个只读 contract-level QA |
-| Agent Skills | ✅ 运行时/开发 skill 分离，公开 `.agents` 与本地 `.codex` 镜像一致 |
+| Agent Skills | ✅ 运行时/开发 skill 分离，`.agents/skills` 为唯一仓库来源 |
+| History 结果 | ✅ primary/compact 的 list/search/read/export/delete 共用 typed service；delete 区分已验证与仅接受 |
+| 浏览器 Cookie | ✅ 不输出 Cookie 值；macOS Keychain 等待有可配置超时 |
 | 分发资料 | ✅ `docs/launch-kit.md` |
+
+路线图不是全部完成状态；当前剩余边界见 [开发状态与下一步](./development-status.md)。
 
 ---
 
