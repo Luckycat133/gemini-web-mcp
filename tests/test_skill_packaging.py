@@ -36,6 +36,20 @@ def test_project_skill_frontmatter_and_guidance_are_complete():
     assert "evaluations/gemini_web_mcp_contract.xml" in text
 
 
+def test_clawhub_security_audit_findings_are_addressed():
+    skill = (PUBLIC_SKILL_DIR / "SKILL.md").read_text(encoding="utf-8")
+    tool_surface = (PUBLIC_SKILL_DIR / "references" / "tool_surface.md").read_text(encoding="utf-8")
+    published_text = f"{skill}\n{tool_surface}"
+
+    assert "sensitive account-authentication material" in published_text
+    assert "explicit user approval" in published_text
+    assert "restrict file access" in published_text
+    assert "agent memory or agent instructions" in published_text
+    assert "arbitrary credential files" in published_text
+    assert "reset state" not in published_text.lower()
+    assert "Keychain" not in published_text
+
+
 def test_project_skill_openai_metadata_points_to_skill():
     metadata = (PUBLIC_SKILL_DIR / "agents" / "openai.yaml").read_text(encoding="utf-8")
 

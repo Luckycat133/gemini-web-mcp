@@ -9,7 +9,7 @@ which tools are actually registered in the current process.
 ## Annotation legend
 
 - `read_only` — does not mutate remote/local state
-- `destructive` — can delete or reset state; treat as explicit-user-intent
+- `destructive` — can delete remote resources or clear MCP/Gemini session data; treat as explicit-user-intent
 - `privacy` — what private data the tool reads or sends (see tiers below)
 
 ## Safety tiers
@@ -18,7 +18,7 @@ which tools are actually registered in the current process.
 
 | Tool | Group | Purpose |
 |---|---|---|
-| `gemini_reset_session` | core | Reset a local session and optionally delete its remote chat |
+| `gemini_reset_session` | core | Clear an MCP/Gemini session and optionally delete its remote chat; never changes agent memory or agent instructions |
 | `gemini_cleanup_test_artifacts` | history | Find and optionally delete test chats/scheduled actions by marker |
 | `gemini_delete_chat` | history | Request remote chat deletion and report read-back evidence |
 | `gemini_delete_scheduled_action` | account | Delete a scheduled action by id |
@@ -76,7 +76,7 @@ which tools are actually registered in the current process.
 | `gemini_list_scheduled_actions` / `gemini_get_scheduled_action` | account | `reads_private_scheduled_action_*` |
 | `gemini_create_scheduled_action` | account | `creates_private_scheduled_action` (mutates) |
 | `gemini_get_tool_mode_status` | account | `reads_mode_status_only` |
-| `gemini_get_cookie_from_browser` | cookie | writes local cookie file (mutates local) |
+| `gemini_get_cookie_from_browser` | cookie | With explicit user approval, caches sensitive account-authentication material locally; restrict file access and never log, back up, or share it |
 
 ## Low-token skill server facade (`src.skill_server`)
 
@@ -88,7 +88,7 @@ Fewer, broader tools with `action` parameters. Same safety tiers apply.
 | `history` | `DESTRUCTIVE_REMOTE` | `action="list\|search\|read\|export"` read-only; `action="delete"` destructive |
 | `scheduled` | `DESTRUCTIVE_REMOTE` | `action="list\|get"` read-only; `action="create\|delete"` mutate/destroy |
 | `create` | `MUTATES_REMOTE` | media/music creation |
-| `cookie` | `MUTATES_LOCAL` | `action="profiles"` read-only; `action="get"` writes local cookie file |
+| `cookie` | `MUTATES_LOCAL` | `action="profiles"` read-only; `action="get"` requires explicit user approval because it caches sensitive account-authentication material locally; restrict file access and remove the cache when no longer needed |
 | `doctor` | `READ_ONLY_LOCAL` | local preflight |
 | `cleanup` | `DESTRUCTIVE_REMOTE` | `dry_run=true` is safe; `dry_run=false` deletes |
 
@@ -97,8 +97,9 @@ History list/search/read/export/delete share typed domain data across primary an
 `read_back_error` are `VERIFICATION_FAILED` outcomes. Positive absence requires a complete fresh recent/pinned metadata
 read-back; `read_chat(None)` is inconclusive. Record returned test-chat IDs because Gemini-generated titles may omit prompt
 markers; metadata-only cleanup is a fallback, and `scan_turns=true` requires explicit permission to read turn text. Browser
-profile tools never return Cookie values, and macOS
-Keychain timeouts surface as `BROWSER_COOKIE_ACCESS_TIMEOUT`.
+profile tools never return Cookie values. On macOS, the system browser-credential prompt only unlocks the browser Cookie
+store for `browser-cookie3`; the workflow does not inspect arbitrary credential files. Authorization timeouts surface as
+`BROWSER_COOKIE_ACCESS_TIMEOUT`.
 
 ## Tool group selection (`GEMINI_TOOLS`)
 

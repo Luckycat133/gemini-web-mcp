@@ -27,7 +27,7 @@ Install the runtime skill for agents that operate the server:
 clawhub install gemini-web-mcp
 ```
 
-The ClawHub release starts at `0.2.0`. To install directly from the repository instead:
+The unified ClawHub release line is `0.2.0`, including the security-audit wording and disclosure contract. To install directly from the repository instead:
 
 ```bash
 npx --yes skills@1.5.21 add \

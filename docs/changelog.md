@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Prepared the unified ClawHub `0.2.0` release after its security audit: explicitly classified locally cached browser Cookies as sensitive account-authentication material, required approval and secure cache handling, scoped session clearing away from agent memory/instructions, and clarified that macOS browser authorization does not scan arbitrary credential files
 - Prepared the three-file runtime skill for the unified ClawHub `0.2.0` release with explicit OpenClaw dependency and optional environment metadata; that ClawHub bundle is MIT-0 while the server source and development skill remain AGPL-3.0-only
 - Added shared typed history list/search/read/export/delete results across primary and compact adapters, including one-time object/mapping normalization while preserving compatibility text
 - Added chat-delete read-back states for verified absence, unavailable verification, still-present records, and read-back errors; only a complete fresh recent/pinned metadata scan can prove absence
