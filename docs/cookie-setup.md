@@ -51,28 +51,30 @@ gemini_list_browser_cookie_profiles(browser="chrome", validate=false)
 gemini_get_cookie_from_browser(browser="chrome", profile="Profile 1")
 ```
 
-`gemini_get_cookie_from_browser` 会把选中的 Cookie 加载到当前 MCP 进程；它不会把原值放进工具响应。
-primary 和 compact 入口也提供对应的 `cookie(action="profiles|get")` 工作流。
+`gemini_get_cookie_from_browser` 会把选中的 Cookie 加载到当前 MCP 进程，并可能通过依赖管理的本地缓存
+保存敏感账号认证材料；它不会把原值放进工具响应。调用前必须取得用户明确授权，缓存目录应只允许当前
+用户访问，不得进入日志、备份、同步目录或版本控制，并应在不再需要时删除。primary 和 compact 入口也
+提供对应的 `cookie(action="profiles|get")` 工作流。
 
-## macOS Keychain
+## macOS 系统授权
 
-`browser-cookie3` 需要通过 macOS Keychain 读取 Chrome Safe Storage 密钥。首次读取可能弹出授权窗口。
-仓库会限制每次 Keychain 等待，避免未响应的授权请求无限挂起：
+`browser-cookie3` 需要通过 macOS 系统凭据服务解锁 Chrome Safe Storage。首次读取可能弹出系统授权窗口；
+该流程只解锁浏览器 Cookie 存储，不会扫描任意凭据文件。仓库会限制每次授权等待，避免未响应的请求无限挂起：
 
 ```bash
 export GEMINI_BROWSER_COOKIE_TIMEOUT_SECONDS=15
 ```
 
 允许范围为 0.01–120 秒。超时时 profile JSON 会包含
-`error_code="BROWSER_COOKIE_ACCESS_TIMEOUT"`，正文只说明 Keychain 超时；不会返回 Cookie 值。
+`error_code="BROWSER_COOKIE_ACCESS_TIMEOUT"`，正文只说明系统授权超时；不会返回 Cookie 值。
 
-如果确实要允许更长时间完成系统授权，可临时提高该值并重试。不要通过脚本绕过 Keychain，也不要把
+如果确实要允许更长时间完成系统授权，可临时提高该值并重试。不要通过脚本绕过系统安全机制，也不要把
 Chrome profile 数据库复制进仓库。
 
 ## 验证
 
 1. `gemini_get_cookie_status`：确认当前运行时是否已有 Cookie，不访问 Gemini。
-2. `gemini_doctor(validate_browser=false)`：执行本地预检；profile 读取仍可能访问本机 Keychain。
+2. `gemini_doctor(validate_browser=false)`：执行本地预检；profile 读取仍可能触发本机系统授权。
 3. 只有明确允许账号访问时，再调用 temporary chat 或专用账号的只读 live canary。
 
 浏览器 profile 中存在 PSID 只证明本地凭据可读，不证明 Cookie 仍有效，也不证明这是专用测试账号。
@@ -83,10 +85,10 @@ Chrome profile 数据库复制进仓库。
 
 - 确认目标账号已在浏览器中登录 Gemini。
 - 关闭 Chrome 后重试，排除 Cookie 数据库锁。
-- macOS 检查终端或 MCP 宿主的完全磁盘访问和 Keychain 授权。
+- macOS 检查终端或 MCP 宿主的完全磁盘访问和系统凭据授权。
 - 多 profile 场景先用 `gemini_list_browser_cookie_profiles`，再显式传入 `profile`。
 
-### 返回 Keychain timeout
+### 返回系统授权 timeout
 
 - 查找并处理 macOS 授权提示。
 - 需要时提高 `GEMINI_BROWSER_COOKIE_TIMEOUT_SECONDS`，上限 120 秒。

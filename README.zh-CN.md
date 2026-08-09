@@ -64,7 +64,7 @@
 ### 📦 Skill 分发
 - 运行时 skill：`.agents/skills/gemini-web-mcp`
 - 仓库开发 skill：`.agents/skills/gemini-web-mcp-development`
-- ClawHub 预览版从 `0.1.0` 开始，可使用 `clawhub install gemini-web-mcp` 安装
+- ClawHub 预览版从 `0.1.0` 开始，当前安全补丁为 `0.1.1`，可使用 `clawhub install gemini-web-mcp` 安装
 - `.agents/skills` 是唯一仓库来源，避免同时扫描 `.agents` 与 `.codex` 的客户端重复发现同名 skill
 - 两个 skill 都可直接从 GitHub 安装，并在 CI 中验证
 - Tag release 工作流构建 standalone skill zip、wheel 和源码包
@@ -101,7 +101,7 @@ pip install browser-cookie3
 ```
 然后使用 MCP 工具 `gemini_get_cookie_from_browser(browser="chrome")`
 
-macOS 首次读取可能弹出 Keychain 授权。默认最多等待 15 秒；未授权时返回脱敏错误，
+浏览器 Cookie 导出可能在本地缓存敏感的账号认证材料，只能在用户明确授权后执行；应限制文件访问，禁止写入日志、备份或共享，并在不再需要时清理。macOS 首次读取可能弹出系统授权提示。默认最多等待 15 秒；未授权时返回脱敏错误，
 可通过 `GEMINI_BROWSER_COOKIE_TIMEOUT_SECONDS` 调整等待上限。
 
 ### 2. 配置 (Claude Desktop / 其他 MCP 客户端)

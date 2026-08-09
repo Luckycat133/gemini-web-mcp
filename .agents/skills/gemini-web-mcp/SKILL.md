@@ -4,7 +4,7 @@ description: "Operate an installed Gemini Web MCP server safely: inspect the too
 license: MIT-0
 compatibility: "Requires Python 3.11+ and an installed server (verify with uvx --from git+https://github.com/Luckycat133/gemini-web-mcp@main gemini-mcp-onboarding). Live Gemini calls require account Cookies; image verification requires the image or all extra."
 metadata:
-  version: "0.1.0"
+  version: "0.1.1"
   openclaw:
     emoji: "♊️"
     homepage: https://github.com/Luckycat133/gemini-web-mcp
@@ -27,7 +27,7 @@ metadata:
         description: Optional HTTP or HTTPS proxy used by the MCP server.
       - name: GEMINI_BROWSER_COOKIE_TIMEOUT_SECONDS
         required: false
-        description: Optional bounded macOS Keychain wait for browser Cookie discovery.
+        description: Optional bounded macOS browser-credential authorization wait for Cookie discovery.
       - name: GEMINI_TOOLS
         required: false
         description: Optional primary-server tool profile such as model, core, or all.
@@ -46,6 +46,7 @@ Use this skill only to operate the installed primary or low-token MCP server. Fo
 5. Prefer read-only discovery first: `gemini_doctor`, manifest/capabilities, `gemini_probe_web_features`, metadata-only history search, profile diagnostics, and inventory/list tools.
 6. Treat `privacy=reads_private_chat_text` and other private text tools as explicit-user-intent tools: `gemini_read_chat`, `gemini_export_chat`, `gemini_search_chats(scan_turns=true)`, and research-report create actions that read chat text.
 7. Treat destructive tools as requiring explicit user intent: `gemini_delete_chat`, `gemini_cleanup_test_artifacts(dry_run=false)`, `gemini_delete_scheduled_action`, `gemini_reset_session`, `gemini_manage_gems(action="delete")`, and prompt deletion.
+8. `gemini_reset_session` changes only MCP/Gemini conversation state; it never changes agent memory or agent instructions.
 
 > Need the full tool/group/privacy/destructive map? See [references/tool_surface.md](references/tool_surface.md). Load it on demand — the live `gemini_get_tool_manifest` remains the source of truth.
 
@@ -71,6 +72,7 @@ Use this skill only to operate the installed primary or low-token MCP server. Fo
   - Use `create(type="music", model="pro")` or primary `gemini_generate_music` for Lyria 3 Pro music requests.
   - Use `doctor(validate_browser=false)` for low-cost local preflight before live account workflows.
   - Use `cookie(action="profiles")` before `cookie(action="get", profile="...")` when Chrome has multiple signed-in profiles.
+  - `cookie(action="get")` and primary `gemini_get_cookie_from_browser` can materialize sensitive account-authentication material in a local cache. Obtain explicit user approval, restrict file access, never log/back up/share the cache, and remove it when it is no longer needed.
 
 ## Stream And Long-Operation Results
 
@@ -126,7 +128,7 @@ Use this skill only to operate the installed primary or low-token MCP server. Fo
 
 - Use observed daily create, registry list, by-id get, and explicit delete by id through `gemini_create_scheduled_action`, `gemini_list_scheduled_actions`, `gemini_get_scheduled_action`, and `gemini_delete_scheduled_action`.
 - Refresh Chrome cookies first when account context matters. If the registry is unexpectedly empty, call `gemini_list_browser_cookie_profiles`, then `gemini_get_cookie_from_browser(profile="...")` for the profile with Gemini cookies or scheduled registry entries.
-- On macOS, treat `BROWSER_COOKIE_ACCESS_TIMEOUT` as a local Keychain authorization/timeout problem, not an invalid-account result. Adjust `GEMINI_BROWSER_COOKIE_TIMEOUT_SECONDS` only when the user controls that host; never request or print Cookie values.
+- On macOS, treat `BROWSER_COOKIE_ACCESS_TIMEOUT` as a local browser-credential authorization timeout, not an invalid-account result. This workflow does not read arbitrary credential files. Adjust `GEMINI_BROWSER_COOKIE_TIMEOUT_SECONDS` only when the user controls that host; never request or print Cookie values.
 - After create/delete, check `verification_status`; after create also check `readable_by_id_after_create`, and after delete check `deleted_by_id_after_delete` or `task_state_after_delete=deleted` before claiming the task is gone.
 
 ## Operational Verification
