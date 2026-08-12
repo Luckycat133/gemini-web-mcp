@@ -58,6 +58,26 @@ def _write_valid_release_artifacts(tmp_path: Path, metadata) -> None:
     (tmp_path / metadata.skill_filename).touch()
 
 
+def _write_active_version_consumers(tmp_path: Path, metadata) -> None:
+    for relative_path in (
+        ".agents/skills/gemini-web-mcp/SKILL.md",
+        ".agents/skills/gemini-web-mcp-development/SKILL.md",
+    ):
+        target = tmp_path / relative_path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(
+            f'---\nmetadata:\n  version: "{metadata.version}"\n---\n',
+            encoding="utf-8",
+        )
+
+    changelog = tmp_path / "docs/changelog.md"
+    changelog.parent.mkdir(parents=True, exist_ok=True)
+    changelog.write_text(
+        f"# Changelog\n\n## [Unreleased]\n\n## [{metadata.version}] - 2026-08-13\n",
+        encoding="utf-8",
+    )
+
+
 def test_pyproject_is_the_runtime_and_distribution_version_source():
     metadata = load_release_metadata(PROJECT_ROOT)
 
@@ -95,6 +115,7 @@ def test_public_onboarding_surfaces_use_the_canonical_source_install(tmp_path):
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_bytes(source.read_bytes())
     (tmp_path / "pyproject.toml").write_bytes((PROJECT_ROOT / "pyproject.toml").read_bytes())
+    _write_active_version_consumers(tmp_path, metadata)
     for relative_path in ("src/__init__.py", "src/server.py", "src/skill_server.py"):
         source = PROJECT_ROOT / relative_path
         target = tmp_path / relative_path
@@ -129,6 +150,7 @@ def test_versioned_wheel_url_is_optional_but_must_match_when_present(tmp_path):
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(CANONICAL_GIT_SOURCE, encoding="utf-8")
     (tmp_path / "pyproject.toml").write_bytes((PROJECT_ROOT / "pyproject.toml").read_bytes())
+    _write_active_version_consumers(tmp_path, metadata)
     for relative_path in ("src/__init__.py", "src/server.py", "src/skill_server.py"):
         source = PROJECT_ROOT / relative_path
         target = tmp_path / relative_path
@@ -155,6 +177,48 @@ def test_product_version_scan_detects_stale_non_historical_reference():
     )
 
     assert errors == [f"docs/example.md:1: product version v9.8.7 != v{metadata.version}"]
+
+
+def test_skill_and_changelog_versions_must_match_package(tmp_path):
+    metadata = load_release_metadata(PROJECT_ROOT)
+    for relative_path in (
+        "README.md",
+        "README.zh-CN.md",
+        "docs/quickstart.md",
+        "docs/launch-kit.md",
+        "docs/client-examples.md",
+        "examples/clients/codex.config.toml",
+        "examples/clients/claude-desktop.json",
+        "examples/clients/claude-code.mcp.json",
+        "examples/clients/vscode.mcp.json",
+    ):
+        target = tmp_path / relative_path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(CANONICAL_GIT_SOURCE, encoding="utf-8")
+    (tmp_path / "pyproject.toml").write_bytes((PROJECT_ROOT / "pyproject.toml").read_bytes())
+    _write_active_version_consumers(tmp_path, metadata)
+    for relative_path in ("src/__init__.py", "src/server.py", "src/skill_server.py"):
+        source = PROJECT_ROOT / relative_path
+        target = tmp_path / relative_path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(source.read_bytes())
+
+    runtime_skill = tmp_path / ".agents/skills/gemini-web-mcp/SKILL.md"
+    runtime_skill.write_text(
+        runtime_skill.read_text(encoding="utf-8").replace(metadata.version, "9.8.7"),
+        encoding="utf-8",
+    )
+    changelog = tmp_path / "docs/changelog.md"
+    changelog.write_text(
+        changelog.read_text(encoding="utf-8").replace(
+            f"## [{metadata.version}]", "## [9.8.7]"
+        ),
+        encoding="utf-8",
+    )
+
+    errors = repository_version_errors(tmp_path, metadata)
+    assert any("gemini-web-mcp/SKILL.md: Skill version '9.8.7'" in error for error in errors)
+    assert any("docs/changelog.md: current release section '9.8.7'" in error for error in errors)
 
 
 def test_release_tag_validation_uses_pyproject_version():

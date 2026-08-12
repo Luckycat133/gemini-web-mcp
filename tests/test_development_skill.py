@@ -68,7 +68,7 @@ def test_development_skill_has_no_machine_specific_paths() -> None:
         assert "C:\\Users\\" not in text
 
 
-def test_development_skill_tracks_current_baseline_and_version_lines() -> None:
+def test_development_skill_tracks_current_baseline_and_version_contract() -> None:
     text = _all_text(PUBLIC_SKILL)
 
     for required in (
@@ -77,9 +77,9 @@ def test_development_skill_tracks_current_baseline_and_version_lines() -> None:
         "Long-Operation Persistence and Cancellation",
         "Shared Long-Operation Service",
         "bounded authorized run on 2026-08-08",
-        "Python package currently declares `0.2.0`",
-        "historical Git tags reach `0.2.0`",
-        "ClawHub runtime skill preview is `0.2.0`",
+        "runtime Skill, and the development Skill currently declare `0.2.0`",
+        "all rewritten Git history and release refs use the canonical `0.2.0` project version",
+        "active repository version is unified at `0.2.0`",
         "clawhub install gemini-web-mcp",
         "tests._fastmcp_shim",
         "Do not hardcode volatile test counts",
@@ -102,14 +102,16 @@ def test_development_skill_limits_owner_decisions_to_unsettled_contracts() -> No
     skill = (PUBLIC_SKILL / "SKILL.md").read_text(encoding="utf-8")
     roadmap = (PUBLIC_SKILL / "references" / "roadmap.md").read_text(encoding="utf-8")
 
-    assert "The Cookie boundary, compact-server direction, and reliability-before-UI-parity priority are already established" in skill
+    assert "The unified `0.2.0` version contract, Cookie boundary, compact-server direction, and reliability-before-UI-parity priority are already established" in skill
     assert "Settled Directions — Do Not Reopen by Default" in roadmap
-    assert "Next Monotonic Python Package Release" in roadmap
+    assert "Settled Version Contract" in roadmap
+    assert "canonical active repository version" in roadmap
     assert "Dedicated Live-Compatibility Account" in roadmap
     assert "Long-Operation Persistence and Cancellation" in roadmap
     assert "Durable Cleanup Semantics" in roadmap
     assert "Official Support and Distribution Matrix" in roadmap
     assert "Recommended Conversation Order" in roadmap
+    assert "Next Monotonic Python Package Release" not in roadmap
 
 
 def test_development_skill_names_maintained_validation_and_experience_paths() -> None:
@@ -133,5 +135,5 @@ def test_development_skill_names_maintained_validation_and_experience_paths() ->
     assert "REVIEWED_SHA=replace-with-reviewed-40-character-commit" in experience
     assert "<reviewed-sha>" not in experience
     assert "Do not encode a volatile passing-test number" in testing
-    assert "runtime-skill preview is `0.2.0`" in testing
+    assert "canonical repository version is `0.2.0`" in testing
     assert "verified_absent" in experience

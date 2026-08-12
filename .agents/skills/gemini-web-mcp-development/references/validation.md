@@ -89,7 +89,7 @@ SOURCE="git+https://github.com/Luckycat133/gemini-web-mcp@${REVIEWED_SHA}"
 uvx --from "$SOURCE" gemini-mcp-onboarding
 ```
 
-The package version, Git tag, and runtime-skill version are separate contracts. Verify each affected line rather than assuming one version applies to all artifacts.
+The Python package and both public Skills share one active version, currently `0.2.0`. Verify their frontmatter, the changelog section, runtime metadata, release tag, and generated artifact names together. Rewritten history and release refs use the canonical project version.
 
 ## Development Skill Changes
 
@@ -107,7 +107,7 @@ Required checks include:
 - frontmatter and progressive disclosure;
 - no machine-specific paths;
 - no obsolete `.codex` mirror;
-- current package/tag/ClawHub version distinctions;
+- canonical package/runtime-Skill/development-Skill version parity;
 - settled directions are not listed as owner decisions;
 - every referenced command is copyable.
 
@@ -115,7 +115,7 @@ Required checks include:
 
 When `.agents/skills/gemini-web-mcp` changes:
 
-- increment the runtime skill version independently from the Python package;
+- keep its version aligned with `pyproject.toml`, the development Skill, and the changelog;
 - validate the exact published file set;
 - run `tests/test_skill_packaging.py` and any audit-specific contract;
 - confirm the ClawHub bundle license and metadata;
@@ -123,7 +123,7 @@ When `.agents/skills/gemini-web-mcp` changes:
 - preserve the explicit browser-Cookie authentication boundary;
 - do not claim that a dry-run or local archive is already published.
 
-The canonical runtime-skill version is `0.2.0`. Inspect ClawHub before claiming publication state.
+The canonical repository version is `0.2.0`. Inspect ClawHub before claiming that the repository version has been published there.
 
 ## Workflow Changes
 

@@ -64,7 +64,7 @@
 ### 📦 Skill 分发
 - 运行时 skill：`.agents/skills/gemini-web-mcp`
 - 仓库开发 skill：`.agents/skills/gemini-web-mcp-development`
-- ClawHub 预览版从 `0.2.0` 开始，当前安全补丁为 `0.2.0`，可使用 `clawhub install gemini-web-mcp` 安装
+- ClawHub 统一版本为 `0.2.0`，包含安全文案补丁；当前仓库运行时 skill 也为 `0.2.0`，可使用 `clawhub install gemini-web-mcp` 安装
 - `.agents/skills` 是唯一仓库来源，避免同时扫描 `.agents` 与 `.codex` 的客户端重复发现同名 skill
 - 两个 skill 都可直接从 GitHub 安装，并在 CI 中验证
 - Tag release 工作流构建 standalone skill zip、wheel 和源码包
@@ -480,7 +480,7 @@ primary/compact 间共享 typed result，删除只有在回读确认后才算已
 聊天的 `verified_absent` 删除；该测试不是专用账号全量 canary，也未覆盖媒体、文件、URL、Deep Research
 或账号 mutation。仍需完成更广的 live 基线、其他管理动作的 typed result、跨重启持久化 cleanup，以及
 共享的长任务 job API。
-源码与重写后的 tag 统一为 `0.2.0`；任何未来版本升级都必须同步更新全部版本源。
+当前仓库的 Python 包、运行时 skill 与开发 skill 已统一为 `0.2.0`；重写后的 Git 历史与发布引用均使用统一的 `0.2.0` 版本。
 
 完整的“已实现 / 部分完成 / 延后 / owner 决策”边界见
 [开发状态与下一步](docs/development-status.md)。离线 CI 和打包通过不等于已经观察到当前 Gemini Web 行为。

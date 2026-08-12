@@ -4,9 +4,11 @@ Use this reference to move from “the repository builds” to “an agent can c
 
 ## Understand the Three Distribution Surfaces
 
-- **Python package/server:** installs `gemini-mcp-server`, `gemini-mcp-skill-server`, and `gemini-mcp-onboarding`; current canonical source metadata is `0.2.0`; any future bump must update every version source together.
+- **Python package/server:** installs `gemini-mcp-server`, `gemini-mcp-skill-server`, and `gemini-mcp-onboarding`.
 - **Repository development skill:** instructs an engineering agent how to modify this repository.
-- **ClawHub runtime skill:** `clawhub install gemini-web-mcp` installs operating instructions for an already available runtime path; current preview version is `0.2.0`, on the same canonical project version line as the Python package.
+- **ClawHub runtime skill:** `clawhub install gemini-web-mcp` installs operating instructions for an already available runtime path; verify the public listing before claiming a repository change is published.
+
+These surfaces retain distinct roles and licenses, but the active repository version is unified at `0.2.0`. Rewritten package history and release refs use the canonical `0.2.0` version.
 
 Do not use a runtime-skill installation as proof that the Python server package or a GitHub Release was installed.
 

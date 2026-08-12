@@ -1,8 +1,9 @@
-"""Single-source release metadata and consistency checks.
+"""Canonical release metadata and consistency checks.
 
-``pyproject.toml`` is the only persisted source for the project version.  This
-module derives runtime-adjacent release names from it and validates both tagged
-release references and the evergreen source-install path used for onboarding.
+``pyproject.toml`` is the authoritative source for the active project version.
+This module derives runtime-adjacent release names from it and verifies that
+both public Skills, the current changelog section, tagged release references,
+and the evergreen source-install path stay aligned.
 """
 
 from __future__ import annotations
@@ -56,6 +57,19 @@ _RUNTIME_VERSION_FILES = (
     Path("src/__init__.py"),
     Path("src/server.py"),
     Path("src/skill_server.py"),
+)
+_SKILL_VERSION_FILES = (
+    Path(".agents/skills/gemini-web-mcp/SKILL.md"),
+    Path(".agents/skills/gemini-web-mcp-development/SKILL.md"),
+)
+_SKILL_VERSION = re.compile(
+    r'^  version:\s*["\']?(?P<version>[0-9]+\.[0-9]+\.[0-9]+)["\']?\s*$',
+    re.MULTILINE,
+)
+_CHANGELOG_PATH = Path("docs/changelog.md")
+_CHANGELOG_RELEASE_HEADING = re.compile(
+    r"^## \[(?P<version>[0-9]+\.[0-9]+\.[0-9]+)\] - (?P<date>[0-9]{4}-[0-9]{2}-[0-9]{2})\s*$",
+    re.MULTILINE,
 )
 
 
@@ -142,6 +156,44 @@ def repository_version_errors(
 
     release = metadata or load_release_metadata(project_root)
     errors: list[str] = []
+
+    for relative_path in _SKILL_VERSION_FILES:
+        absolute_path = project_root / relative_path
+        if not absolute_path.is_file():
+            errors.append(f"{relative_path.as_posix()}: required Skill version consumer is missing")
+            continue
+        text = absolute_path.read_text(encoding="utf-8")
+        frontmatter_end = text.find("\n---\n", 4) if text.startswith("---\n") else -1
+        if frontmatter_end < 0:
+            errors.append(f"{relative_path.as_posix()}: valid YAML frontmatter is required")
+            continue
+        matches = list(_SKILL_VERSION.finditer(text[4:frontmatter_end]))
+        if len(matches) != 1:
+            errors.append(
+                f"{relative_path.as_posix()}: expected one metadata.version, found {len(matches)}"
+            )
+            continue
+        observed = matches[0].group("version")
+        if observed != release.version:
+            errors.append(
+                f"{relative_path.as_posix()}: Skill version {observed!r} != {release.version!r}"
+            )
+
+    changelog_path = project_root / _CHANGELOG_PATH
+    if not changelog_path.is_file():
+        errors.append(f"{_CHANGELOG_PATH.as_posix()}: required changelog is missing")
+    else:
+        changelog = changelog_path.read_text(encoding="utf-8")
+        headings = list(_CHANGELOG_RELEASE_HEADING.finditer(changelog))
+        if not headings:
+            errors.append(
+                f"{_CHANGELOG_PATH.as_posix()}: no dated [X.Y.Z] release section was found"
+            )
+        elif headings[0].group("version") != release.version:
+            errors.append(
+                f"{_CHANGELOG_PATH.as_posix()}: current release section "
+                f"{headings[0].group('version')!r} != {release.version!r}"
+            )
 
     markdown_paths = [project_root / "README.md", project_root / "README.zh-CN.md"]
     markdown_paths.extend(sorted((project_root / "docs").rglob("*.md")))

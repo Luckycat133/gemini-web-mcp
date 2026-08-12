@@ -1,6 +1,6 @@
 # Development Status and Next Steps
 
-Updated: 2026-08-12
+Updated: 2026-08-13
 
 This page is the human-readable companion to [`.agents/skills/gemini-web-mcp-development`](../.agents/skills/gemini-web-mcp-development/SKILL.md). The Skill is the canonical engineering workflow; this page summarizes the current repository baseline and owner decisions.
 
@@ -14,14 +14,14 @@ d3145a3be45745523e7483b18835b4800da80ab5
 
 Its hosted CI and CodeQL completed successfully, including Ruff, Mypy, Python 3.11/3.12 tests, targeted architecture contracts, real primary/compact MCP stdio smoke, Agent Skill validation/direct install, and clean-wheel/onboarding checks.
 
-Current version lines are intentionally separate:
+The active repository version is unified:
 
 | Surface | Current line | Meaning |
 | --- | --- | --- |
-| Python package source | `0.2.0` | Canonical package version synchronized with rewritten release refs |
-| Historical Git tags | through `0.2.0` | Rewritten package-release history on the canonical version line |
-| Development Skill | `0.2.0` | Repository-maintenance instructions |
-| ClawHub runtime Skill | `0.2.0` | Operating instructions on the same canonical version line as the Python package |
+| Python package source | `0.2.0` | Canonical version in `pyproject.toml`; runtime banners and release asset names derive from it |
+| Runtime Skill | `0.2.0` | Operating instructions; role and MIT-0 license remain distinct from the server package |
+| Development Skill | `0.2.0` | Repository-maintenance instructions; version moves with the package and runtime Skill |
+| Rewritten Git history and release refs | `0.2.0` | Canonical project version across all rewritten commits and release refs |
 
 ## Implemented Repository Contracts
 
@@ -29,7 +29,7 @@ Current version lines are intentionally separate:
 | --- | --- | --- |
 | MCP SDK v2 and protocol negotiation | Implemented | Primary and compact entrypoints exercise current discovery and legacy negotiation over real stdio. |
 | Packaging and onboarding | Implemented | Wheel, source distribution, runtime Skill archive, clean installation, and credential-free `uvx` onboarding are maintained gates. |
-| Skill distribution | Implemented | `.agents/skills` is the single repository source; the runtime Skill has a separate ClawHub preview line. |
+| Skill distribution | Implemented | `.agents/skills` is the single repository source; both Skill roles share the package's active version while publication remains a separate action. |
 | Chat, sessions, and lifecycle | Implemented | Primary and compact adapters share core execution, opaque session IDs, explicit missing-session behavior, and typed state. |
 | Artifact model | Implemented | Image, video, audio, file, webpage, data, and report outputs use shared artifact state and verification metadata. |
 | Typed history | Implemented for list/search/read/export/delete | Primary and compact use one service with mapping/object normalization and evidence-based deletion. The primary deep scan remains prose-first. |
@@ -71,6 +71,7 @@ The following should not be repeatedly reopened during normal development:
 - the compact eleven-tool facade remains the low-token discovery product while execution moves into shared services;
 - core multimodal reliability, artifacts, recovery, and agent task completion precede broad UI parity;
 - `.agents/skills` remains the single repository Skill source.
+- the Python package and both public Skills share one active version, currently `0.2.0`; rewritten history uses the same canonical project version.
 
 ## Recommended Next Development Order
 
@@ -83,10 +84,6 @@ The following should not be repeatedly reopened during normal development:
 7. Select UI-parity features only after the preceding workflows are stable.
 
 ## Owner Decisions Still Required
-
-### Package Release Line
-
-Keep the canonical package version at `0.2.0` until the owner explicitly approves a future unified bump.
 
 ### Dedicated Live Account
 

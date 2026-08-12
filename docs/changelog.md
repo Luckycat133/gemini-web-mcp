@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-08-13
+
 ### Added
 - Added the complete root `LICENSE` text for AGPL-3.0-only and made wheel/source-distribution checks verify both PEP 639 metadata and the embedded license file without changing the runtime Skill's separate MIT-0 license
 - Prepared the unified ClawHub `0.2.0` release after its security audit: explicitly classified locally cached browser Cookies as sensitive account-authentication material, required approval and secure cache handling, scoped session clearing away from agent memory/instructions, and clarified that macOS browser authorization does not scan arbitrary credential files
@@ -18,6 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added a dated development status page that separates implemented repository contracts, partial work, unobserved live behavior, deferred UI parity, and owner decisions
 
 ### Changed
+- Unified the active Python package, runtime Skill, development Skill, runtime banners, release asset names, and documentation at `0.2.0`; all rewritten Git history and changelog release headings use the canonical `0.2.0` version
 - Made `.agents/skills` the single repository skill source and updated CI, release, packaging, and documentation checks to install and validate that source directly
 - Changed chat deletion so an accepted upstream call without read-back evidence is reported as accepted/unverified instead of verified success
 - Stopped treating `read_chat(None)` as deletion proof because the dependency also uses `None` for incomplete or failed reads
@@ -124,7 +127,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Serialized normal and streaming sends per session; asynchronous single-session reset waits for an in-flight send before detaching state and applying the remote-retention policy
 - Added cross-adapter, ID collision, unknown-ID isolation, concurrent-send, stream, reset-race, facade, and workflow tests; the P0.2 phase gate passed 1132 offline tests
 
-## [0.2.0] - 2026-07-17
 
 ### Skill Best Practices Alignment
 - Aligned with agentskills.io specification: renamed `mcp-builder` `reference/` directory to `references/` (plural form required by spec), updated 9 links in SKILL.md

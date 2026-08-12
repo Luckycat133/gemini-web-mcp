@@ -170,10 +170,10 @@ Skill 遵循 [agentskills.io](https://agentskills.io) 规范：`references/` 目
 
 发布流程（仅维护者）：
 
-1. 只修改 `pyproject.toml` 的 `project.version`；运行时版本从已安装包元数据读取
-2. 更新 README、客户端示例和 Launch Kit；固定 release URL 若存在必须匹配版本，公开 `uvx` 示例必须保留规范 Git 源，然后运行 `python scripts/check_version_consistency.py`
-3. `docs/changelog.md`：`## Unreleased` → `## vX.Y.Z (YYYY-MM-DD)`
-4. 运行 `python scripts/package_release.py --tag vX.Y.Z`，校验 tag、wheel 元数据和所有资产名
+1. 同时更新 `pyproject.toml` 的 `project.version`、运行时 Skill 与开发 Skill frontmatter；运行时 banner 从已安装包元数据读取
+2. 将 `docs/changelog.md` 的待发布内容归档到 `## [X.Y.Z] - YYYY-MM-DD`，保留空的 `## [Unreleased]`
+3. 更新 README、客户端示例和 Launch Kit；固定 release URL 若存在必须匹配版本，公开 `uvx` 示例必须保留规范 Git 源，然后运行 `python scripts/check_version_consistency.py`
+4. 运行 `python scripts/package_release.py --tag vX.Y.Z`，校验 tag、两个 Skill、changelog、wheel 元数据和所有资产名
 5. PR 合并后执行 `git tag -a vX.Y.Z -m "vX.Y.Z"` 并推送
 6. `.github/workflows/release.yml` 会重新执行静态检查、全量离线测试、skill 校验、profile/协议 smoke 和 clean-wheel 安装；只有下载后的资产再次通过 tag/名称/wheel 元数据校验，才创建 GitHub Release
 

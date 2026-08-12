@@ -2,23 +2,15 @@
 
 Use this reference only when a change would alter a product contract. Routine bug fixes and bounded service migrations should proceed from the established defaults without reopening settled questions.
 
+## Settled Version Contract
+
+The owner selected `0.2.0` as the canonical active repository version. `pyproject.toml`, the runtime Skill, the development Skill, release asset names, runtime banners, and the changelog must move together for every future bump.
+
+All rewritten Git history, changelog release headings, and local release refs use the canonical `0.2.0` project version. This history rewrite does not by itself publish GitHub, PyPI, or ClawHub artifacts.
+
 ## Decisions That Still Need the Owner
 
-### 1. Next Monotonic Python Package Release
-
-The Python package, rewritten Git tag line, and ClawHub runtime skill all use the canonical `0.2.0` version.
-
-Any future package release must move all canonical version sources together beyond `0.2.0`; the current tree uses MCP Python SDK v2, structured output contracts, and shared services.
-
-Decide:
-
-- whether and when to advance beyond the canonical `0.2.0` release line;
-- whether any compatibility period or migration note is required;
-- whether PyPI publication begins with that release or GitHub Releases remain canonical first.
-
-Keep rewritten Git history, package metadata, and the ClawHub skill on one canonical version line.
-
-### 2. Dedicated Live-Compatibility Account
+### 1. Dedicated Live-Compatibility Account
 
 A bounded authorized run has proven text, sessions, typed history, and chat cleanup, but it is not the repository's dedicated full canary.
 
@@ -32,7 +24,7 @@ Decide:
 
 Recommended cadence: weekly read-only probes, a release-candidate multimodal run, and disposable mutation tests only when explicitly requested.
 
-### 3. Long-Operation Persistence and Cancellation
+### 2. Long-Operation Persistence and Cancellation
 
 The recommended API is fixed:
 
@@ -53,7 +45,7 @@ The owner still needs to decide:
 
 Recommended direction: preserve provider identifiers in every result and persist a small local registry containing only recovery metadata, not raw account content.
 
-### 4. Durable Cleanup Semantics
+### 3. Durable Cleanup Semantics
 
 The current delayed cleanup queue is process-local. The default direction is to prefer provider-native temporary chats and retain caller-controlled TTL/retention.
 
@@ -67,7 +59,7 @@ Decide:
 
 Recommended direction: a small local SQLite queue with explicit pending/running/completed/failed states and no stored chat text.
 
-### 5. Official Support and Distribution Matrix
+### 4. Official Support and Distribution Matrix
 
 Decide which combinations are officially supported rather than merely documented as examples:
 
@@ -88,6 +80,7 @@ Recommended first official matrix: Codex plus one desktop client on macOS and Wi
 - The compact eleven-tool facade remains the low-token discovery product; execution should continue moving into shared services.
 - Core multimodal reliability, artifact delivery, recovery, and agent task completion take priority over broad Gemini UI parity.
 - `.agents/skills` is the single repository source for public skills.
+- The Python package and both public Skills share one active version, currently `0.2.0`; rewritten history uses the same canonical project version.
 
 Only revisit these when implementation evidence shows that the established contract cannot work.
 
@@ -186,8 +179,7 @@ Only after Packages A–F are stable, choose user-valued UI workflows such as Dr
 
 ## Recommended Conversation Order
 
-1. approve any future version advance beyond `0.2.0`;
-2. define the dedicated live account and release-blocking policy;
-3. choose long-operation persistence semantics;
-4. choose durable cleanup semantics;
-5. choose the first official client/platform/distribution matrix.
+1. define the dedicated live account and release-blocking policy;
+2. choose long-operation persistence semantics;
+3. choose durable cleanup semantics;
+4. choose the first official client/platform/distribution matrix.

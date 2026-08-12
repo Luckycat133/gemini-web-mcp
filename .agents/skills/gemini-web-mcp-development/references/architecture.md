@@ -46,7 +46,7 @@ Browser Cookie access is bounded, sanitized, and reversible. The ClawHub `0.2.0`
 
 ### Skill and Distribution Layout
 
-`.agents/skills` is the single repository source for the runtime and development skills. The runtime skill and Python package share the canonical `0.2.0` version; inspect ClawHub separately for publication state. Wheel, source distribution, runtime skill archive, clean install, and isolated onboarding are maintained gates.
+`.agents/skills` is the single repository source for the runtime and development skills. Their roles and licenses remain distinct, but both Skills and the Python package share the active `0.2.0` version. The ClawHub `0.2.0` audit remains evidence for the canonical release line; repository changes alone are not publication evidence. Wheel, source distribution, runtime skill archive, clean install, and isolated onboarding are maintained gates.
 
 ### Current Live Evidence Boundary
 

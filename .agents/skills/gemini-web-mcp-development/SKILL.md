@@ -46,11 +46,13 @@ Also inspect:
 - the latest dedicated live-canary run and whether it ran or was skipped;
 - the runtime skill version and any ClawHub audit/publish evidence.
 
-Keep the three version lines distinct:
+Use one canonical active version:
 
-- the Python package currently declares `0.2.0`;
-- rewritten Git tags use the canonical `0.2.0`;
-- the ClawHub runtime skill and Python package share the canonical `0.2.0` version.
+- `pyproject.toml`, the runtime Skill, and the development Skill currently declare `0.2.0`;
+- release asset names and runtime banners derive from the Python package metadata;
+- all rewritten Git history and release refs use the canonical `0.2.0` project version.
+
+Update all three active version sources and `docs/changelog.md` in the same commit for every future version bump.
 
 A green offline suite proves the repository contract. It does not prove that Gemini Web still behaves the same today.
 
@@ -66,7 +68,7 @@ The maintained tree already includes:
 - Notebook, scheduled-action, account, Gem, prompt, Cookie, doctor, cleanup, and compatibility surfaces;
 - centralized reverse-engineered RPC contracts and pure parsers;
 - verified Gem mutation semantics and evidence-based chat deletion;
-- bounded browser-Cookie authorization handling and the ClawHub `0.2.0` security wording contract;
+- bounded browser-Cookie authorization handling and the security wording contract established by the ClawHub `0.2.0` audit;
 - `.agents/skills` as the single repository source for public skills;
 - wheel/sdist/skill packaging, clean-install smoke, isolated `uvx` onboarding, and release gates;
 - a separately gated live compatibility canary;
@@ -141,13 +143,12 @@ Unless the owner selects a different product priority:
 
 Load [roadmap.md](references/roadmap.md) before changing:
 
-- any future unified version bump beyond `0.2.0`;
 - ownership, cadence, entitlement scope, and evidence retention for the dedicated live-canary account;
 - persistence and cancellation semantics for the shared long-operation API;
 - process-local versus durable cleanup semantics;
 - the official client/platform support matrix and canonical distribution path.
 
-The Cookie boundary, compact-server direction, and reliability-before-UI-parity priority are already established; do not repeatedly ask the owner to re-decide them.
+The unified `0.2.0` version contract, Cookie boundary, compact-server direction, and reliability-before-UI-parity priority are already established; do not repeatedly ask the owner to re-decide them.
 
 ## Testing and Real Experience
 
@@ -175,7 +176,7 @@ Do not claim a live capability from fixtures, package smoke, a skipped canary, o
 - Do not add tools only to mirror every observed Gemini UI entry.
 - Do not scatter emergency RPC IDs or response indices outside the registry/parser boundary.
 - Do not hardcode volatile test counts in public badges or skill instructions.
-- Do not confuse the package, Git-tag, and ClawHub skill version lines.
+- Do not let the active package and Skill versions drift; keep rewritten history and release refs at the canonical `0.2.0` version.
 - Do not call a skipped workflow, fixture, or synthetic response a live test.
 
 ## References
