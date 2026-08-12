@@ -1,10 +1,16 @@
 # How to Actually Experience the Product
 
-This is the shortest path from “the repository builds” to “an agent can really use it.” Use a reviewed commit SHA when reproducibility matters.
+Use this reference to move from “the repository builds” to “an agent can complete real Gemini Web workflows.” Pin a reviewed commit whenever reproducibility matters.
 
-## 1. Prove Installation and MCP Stdio Without Credentials
+## Understand the Three Distribution Surfaces
 
-Replace the example value before running:
+- **Python package/server:** installs `gemini-mcp-server`, `gemini-mcp-skill-server`, and `gemini-mcp-onboarding`; current canonical source metadata is `0.2.0`; any future bump must update every version source together.
+- **Repository development skill:** instructs an engineering agent how to modify this repository.
+- **ClawHub runtime skill:** `clawhub install gemini-web-mcp` installs operating instructions for an already available runtime path; current preview version is `0.2.0`, on the same canonical project version line as the Python package.
+
+Do not use a runtime-skill installation as proof that the Python server package or a GitHub Release was installed.
+
+## 1. Credential-Free Installation and MCP Stdio Preflight
 
 ```bash
 REVIEWED_SHA=replace-with-reviewed-40-character-commit
@@ -12,13 +18,22 @@ SOURCE="git+https://github.com/Luckycat133/gemini-web-mcp@${REVIEWED_SHA}"
 uvx --from "$SOURCE" gemini-mcp-onboarding
 ```
 
-Expected result: JSON reporting `status=ok`, `mode=offline`, `credentials_accessed=false`, a negotiated protocol version, server version, and a non-zero `model` profile tool count.
+Expected JSON includes:
 
-This proves installation, entrypoint resolution, stdio transport, MCP negotiation, and a real tool call. It does not prove Gemini authentication or model access.
+```text
+status=ok
+mode=offline
+credentials_accessed=false
+protocol_version=<negotiated version>
+server_version=<installed package version>
+enabled_tools>0
+```
 
-## 2. Prove Live Text Explicitly
+This proves installation, entrypoint resolution, stdio transport, MCP negotiation, and a real auth-free tool call. It does not prove Gemini authentication or model access.
 
-Configure the account cookies in the shell or client environment, replace the example SHA, then run:
+## 2. Explicitly Authorized Live Text
+
+Configure account Cookies in the process or client environment, then run:
 
 ```bash
 REVIEWED_SHA=replace-with-reviewed-40-character-commit
@@ -30,9 +45,14 @@ uvx --from "$SOURCE" gemini-mcp-onboarding chat \
   --thinking-level standard
 ```
 
-Inspect both returned text and the structured domain result. Confirm the request was temporary or that its cleanup/retention state is visible.
+Inspect both text and the structured domain result. Confirm:
 
-## 3. Prove a Verifiable Local Image
+- `ok=true` and terminal operation state;
+- requested/effective/observed backend fields are not conflated;
+- temporary/retention behavior is visible;
+- any created remote chat ID is recorded for direct cleanup.
+
+## 3. Independently Verified Local Image
 
 ```bash
 REVIEWED_SHA=replace-with-reviewed-40-character-commit
@@ -44,11 +64,19 @@ uvx --from "$SOURCE" gemini-mcp-onboarding image \
   --output-dir /tmp/gemini-mcp-images
 ```
 
-The command should fail unless it receives a local image inside the requested directory with non-zero size, image MIME type, positive dimensions, and `verification.status=verified`.
+The command should fail unless it receives a local image inside the requested directory with:
 
-## 4. Connect a Real Agent Client
+- an existing non-empty file;
+- image MIME type;
+- positive width and height;
+- artifact `state=local`;
+- `verification.status=verified`.
 
-Start with the smallest profile. Replace `REVIEWED_COMMIT_SHA` with the reviewed 40-character commit before copying the configuration into the client:
+Open the file rather than trusting response prose.
+
+## 4. Connect a Real MCP Client
+
+Replace the commit placeholder before copying this configuration:
 
 ```json
 {
@@ -68,25 +96,34 @@ Start with the smallest profile. Replace `REVIEWED_COMMIT_SHA` with the reviewed
 }
 ```
 
-Use `core` for images, video, music, files, URLs, and research. Use `gemini-mcp-skill-server` when the fixed compact facade is the desired discovery experience. Use `all` only for maintainer verification.
+Profile guidance:
 
-Good client prompts:
+- `model`: smallest text/session starting surface;
+- `history`: typed history workflows;
+- `history-organize`: history plus Notebook organization;
+- `account-read`: read-only account inventory;
+- `core`: text, media, files, URLs, and research;
+- `scheduled-admin`: explicitly authorized scheduled mutations;
+- `all`: maintainer verification only;
+- `gemini-mcp-skill-server`: fixed eleven-tool compact discovery surface.
+
+Useful client prompts:
 
 ```text
 Use Gemini to critique this answer, then summarize where the two models disagree.
 ```
 
 ```text
-Ask Gemini to generate an image, save it locally, and report the verified artifact path and dimensions.
+Ask Gemini to generate an image, save it locally, and report the verified path, MIME type, size, width, and height.
 ```
 
 ```text
-Start Deep Research without waiting. Return the operation/chat identifiers and tell me how the result can be recovered.
+Start Deep Research without waiting. Return every operation or chat identifier and explain how to recover the result.
 ```
 
-Observe whether the client discovers the intended tool without needing repository-specific coaching, displays artifacts usefully, and preserves structured errors.
+Observe whether the client selects the right tool without repository-specific coaching, preserves structured errors, and renders or locates artifacts usefully.
 
-## 5. Experience the Full Multimodal Surface From Source
+## 5. Full Multimodal Experience From Source
 
 ```bash
 git clone https://github.com/Luckycat133/gemini-web-mcp.git
@@ -100,51 +137,75 @@ python scripts/smoke_mcp_protocol.py
 GEMINI_TOOLS=core gemini-mcp-server
 ```
 
-Then use an MCP client to run, in order:
+Run these workflows in order:
 
-1. text and a multi-turn session;
-2. image generation and image editing with a reference file;
-3. video generation;
-4. music generation;
-5. local file analysis;
-6. URL analysis;
-7. Deep Research with both wait and start-only modes;
-8. history list/search/read/export, followed by a marked temporary chat deletion when authorized;
-9. a disposable Gem or scheduled-action mutation with read-back;
-10. cleanup of all marked artifacts.
+1. one-shot temporary text;
+2. primary and compact multi-turn sessions;
+3. image generation and reference-image editing;
+4. video generation;
+5. music generation;
+6. local-file analysis;
+7. URL analysis;
+8. Deep Research in start-only and wait modes;
+9. history list/search/read/export;
+10. a disposable Gem, scheduled action, or Notebook move with read-back;
+11. direct-ID cleanup for every created resource.
 
-Record each returned remote resource ID as soon as it is created. Gemini may
-generate a title that omits the prompt marker, so metadata-only marker cleanup
-is a fallback rather than proof that no test chat remains. Delete known chat
-IDs directly and require `verified_absent`; only enable turn scanning with
-explicit permission to read private chat text.
+## 6. Modality Acceptance Matrix
 
-## 6. What to Inspect, Not Just What to Read
+| Workflow | Minimum proof |
+| --- | --- |
+| Text | terminal structured result plus expected text |
+| Session | context preserved across turns; reset affects only the selected MCP/Gemini session |
+| Image | verified local file or usable remote URI; MIME, size, and dimensions |
+| Video | playable artifact; MIME, size, duration when observable, and terminal/queued state |
+| Music | playable artifact; MIME, size, duration when observable, and terminal/queued state |
+| File | source artifact identified and structured analysis result returned |
+| URL | requested URL preserved and structured webpage/analysis state returned |
+| Deep Research | operation/chat IDs, queued/running/completed/timed-out state, and result recovery path |
+| History | typed records, explicit pagination, and private-turn scanning only when authorized |
+| Mutation | authoritative read-back and no success text for ambiguous evidence |
+| Cleanup | every created ID accounted for; `verified_absent` when claiming deletion |
 
-For every result check:
+## 7. Long-Operation Friction to Record
 
-- `ok`, error code, retryability, and operation state;
-- requested, request, effective, and observed backend fields;
-- session/operation/continuation IDs;
-- artifact state, path/URI, MIME, size, dimensions or duration;
-- mutation verification status;
-- lifecycle and cleanup state;
-- whether text agrees with structured content.
+Until the shared `start/status/result/cancel` API exists, record:
 
-For video/audio, play the artifact. For files, open the saved path. For history or mutations, read back the authoritative state. A chat deletion is verified only when complete fresh history-metadata pagination produces `verification.status=verified_absent` and `data.deleted=true`; a zero-result marker search is insufficient when Gemini-generated titles omitted the marker. `read_chat(None)`, accepted-but-unverified, still-present, and read-back-error results are not proof of deletion. For long operations, verify that a timeout still leaves enough information to recover later.
+- which tool started the operation;
+- returned provider/research/chat IDs;
+- whether the call timed out or returned queued/running;
+- how the result was recovered;
+- whether another client/process could resume it;
+- whether cancellation was requested and what was actually observed;
+- artifact identity from initial request through final result.
 
-## 7. Record Friction as Product Evidence
+This evidence should shape the shared operation service rather than creating modality-specific polling tools independently.
 
-During actual use, note:
+## 8. Cleanup and History Verification
 
-- installation time and first successful call;
-- client-specific configuration failures;
-- tools the agent did not discover naturally;
-- ambiguous arguments or result fields;
-- artifacts the client could not render or locate;
-- long operations that needed a poll/resume workflow;
-- account/profile mismatches;
-- Gemini Web drift or parser failures;
-- whether cleanup and retention behaved as expected.
+Record every returned remote resource ID immediately. Gemini-generated titles may omit prompt markers, so marker search is only a fallback.
 
-Convert reproducible friction into a focused issue with client version, commit SHA, profile, tool arguments without secrets, structured result, diagnostic ID, and expected behavior.
+A chat deletion is verified only when a complete fresh authoritative history-metadata read-back produces `verification.status=verified_absent` and the structured result reports deletion. These are not proof:
+
+- accepted upstream delete response alone;
+- `read_chat(None)`;
+- zero marker-search results when titles omitted the marker;
+- incomplete pagination;
+- read-back error;
+- still-present state.
+
+## 9. Record Product Friction
+
+For each real client test, record:
+
+- client/version, OS, Python version, protocol mode, commit SHA;
+- install time and first successful call;
+- profile and tool selected by the agent;
+- arguments without credentials or private content;
+- structured result, diagnostic ID, and compatibility text;
+- artifact path/URI and renderability;
+- timeout and recovery behavior;
+- account/entitlement mismatch;
+- cleanup and retention outcome.
+
+Turn reproducible friction into focused issues. Separate client UX failures, project defects, entitlement absence, and Gemini Web drift.

@@ -1,108 +1,157 @@
-# Current State, Missing Work, and Known Defects
+# Current Architecture and Remaining Work
 
-Use this reference when auditing the repository or choosing the next engineering task. Verify every statement against the current checkout and recent CI before acting.
+Use this reference when auditing the repository or choosing the next engineering task. Verify every statement against the current checkout, recent CI, and the latest live evidence before acting.
 
-## What Is Already Implemented
+## Current Product Baseline
 
-The project already has a broad usable surface:
+The project already exposes a broad agent-facing Gemini Web surface:
 
-- primary MCP server with narrow `model`, `history`, `history-organize`, `account-read`, `scheduled-read`, `scheduled-admin`, `core`, and `all` profiles;
-- compact eleven-tool facade for low-token discovery;
-- one-shot and session chat, thinking levels, guided-learning modes, temporary chats, and Gem-backed chat;
+- primary MCP server profiles for narrow model, history, organization, account, scheduled, core, and full maintenance workflows;
+- a compact eleven-tool facade for low-token discovery;
+- one-shot chat, multi-turn sessions, thinking levels, learning modes, temporary chats, and Gem-backed chat;
 - image generation/editing, video, music, local-file analysis, URL analysis, and Deep Research;
-- typed artifact state for remote/local/queued/empty/failed outcomes, plus shared typed results for history list/search/read/export/delete;
-- history list/scan/search/read/export/delete, native Notebook reads and chat moves;
-- account inventory, usage, public-link reads, model/mode discovery, scheduled-action daily create/get/list/delete, and Gem CRUD;
-- prompts, cookie diagnostics, doctor, cleanup, onboarding, package/release automation, and an opt-in live canary;
-- official MCP SDK v2 discovery, structured content, generated output schemas, and compatibility negotiation.
+- typed artifact state for remote, local, queued, empty, partial, and failed outcomes;
+- shared typed history list/search/read/export/delete across primary and compact adapters;
+- native Notebook reads and chat moves;
+- account inventory, usage, public-link reads, model/mode discovery, scheduled daily create/get/list/delete, and Gem CRUD;
+- prompts, Cookie diagnostics, doctor, cleanup, onboarding, package/release automation, and an opt-in live canary;
+- official MCP Python SDK v2 discovery, generated schemas, structured content, and modern/legacy negotiation.
 
-## Confirmed Defects Fixed in the Current Audit Package
+## Recently Completed Foundations
 
-### Compact History Mapping Compatibility
+These are current baseline, not future work:
 
-The compact `history` list/read paths previously assumed upstream records were attribute objects. Mapping-backed chats could render as `Untitled` with blank IDs, and mapping-backed turns could render as `unknown` with empty text. The client facade now adapts mapping-backed history values once while preserving mapping semantics and the original client identity.
+### Shared History and Deletion Evidence
 
-### Volatile README Test Count
+Primary and compact history list/search/read/export/delete use one typed history service. Object- and mapping-backed values are normalized once, compatibility text is preserved, and deletion distinguishes:
 
-A hardcoded numeric test badge drifted behind the real suite. Public badges should report CI verification rather than a manually maintained test count.
+- verified absence after complete fresh metadata pagination;
+- accepted but unverifiable or incomplete read-back;
+- still-present records;
+- read-back failure.
 
-### History Adapter Duplication
+An ambiguous `read_chat(None)` or a zero-result marker search is not deletion proof.
 
-Primary and compact history list/search/read/export/delete now normalize object- and mapping-backed records in the shared
-history service and return the same typed domain data while preserving surface-specific compatibility text. Search retains
-source-page-before-filter pagination. Delete reports accepted/unverified unless read-back positively observes absence, and
-fails closed when the chat remains visible or read-back errors. Positive absence requires complete fresh pagination across
-the canonical recent/pinned metadata buckets; the dependency's ambiguous `read_chat(None)` result is never deletion proof.
+### Mutation Truthfulness
 
-### Unbounded macOS Keychain Wait
+Gem create/update/delete fails closed without positive read-back evidence. Notebook moves and scheduled actions preserve multiple verification states. Compatibility text may not advertise success when structured evidence is ambiguous or contradictory.
 
-`browser-cookie3` previously called macOS `security ... find-generic-password` with an unbounded `communicate()`, so even
-`validate=false` profile diagnostics could hang the MCP process. The repository now installs a locked, reversible reader
-only around browser-cookie access, applies `GEMINI_BROWSER_COOKIE_TIMEOUT_SECONDS`, restores the dependency function, and
-returns a sanitized timeout code without exposing Cookie values.
+### Runtime and Protocol Boundary
 
-### Repository Description Drift
+The runtime uses `mcp>=2,<3` and `mcp-types>=2,<3` through the project-owned SDK adapter. Primary and compact entrypoints are exercised over real stdio in current and legacy protocol modes.
 
-The GitHub repository description previously called the project a “FastMCP server.” It now identifies the project as an
-agent-first MCP Python SDK v2 gateway and skill set, matching the checked-in runtime and public documentation.
+### Browser-Cookie Authorization
+
+Browser Cookie access is bounded, sanitized, and reversible. The ClawHub `0.2.0` runtime-skill patch established that Cookie export can create sensitive local authentication material, must be explicitly approved, and must never be logged or treated as arbitrary credential-file access.
+
+### Skill and Distribution Layout
+
+`.agents/skills` is the single repository source for the runtime and development skills. The runtime skill and Python package share the canonical `0.2.0` version; inspect ClawHub separately for publication state. Wheel, source distribution, runtime skill archive, clean install, and isolated onboarding are maintained gates.
+
+### Current Live Evidence Boundary
+
+A bounded authorized run on 2026-08-08 observed Cookie initialization, temporary/retained text, multi-turn sessions, typed primary/compact history, and verified absence for four created chats. It did not establish a dedicated-account full baseline and did not observe media, files, URLs, Deep Research, Web build, account tier, or account mutations.
 
 ## Remaining High-Priority Engineering Gaps
 
-### 1. No Dedicated Full Live Baseline
+### 1. Dedicated Full Live Baseline
 
-Offline, package, protocol, and synthetic canary tests are strong, but the scheduled live canary remains inactive unless
-repository variables and a dedicated-account environment are configured. An explicitly authorized 2026-08-08 targeted
-run verified current Cookie initialization, text/session behavior, two history probes, primary/compact typed history, and
-`verified_absent` cleanup for four created chats. It did not record the account as dedicated or observe Web build, tier,
-media, files, URLs, Deep Research, or account mutations, so it is not a full live baseline.
+The scheduled canary still skips unless the repository variables, dedicated environment, and account secrets are configured. Release-grade confidence still needs current evidence for:
+
+- Web build, locale, account tier, and entitlements;
+- image, video, and music artifacts;
+- local file and URL analysis;
+- Deep Research start, timeout, recovery, and report retrieval;
+- disposable scheduled/Gem/Notebook mutations with read-back;
+- cleanup of every created test resource.
 
 ### 2. Incomplete Typed-Result Coverage
 
-Core chat/session/artifact/research paths and shared history list/search/read/export/delete are structured, but the primary-only deep history scan plus many account, prompt, cookie, doctor, cleanup, scheduled, Notebook, and compatibility tools still expose prose-first results. Agents should not need to parse phrases or emoji to determine success, retryability, pagination, or verification.
+Typed results cover core chat/session/artifact/research and shared history workflows. Remaining prose-first or uneven paths include:
 
-### 3. Primary/Compact Facade Duplication
+- primary-only deep history scan;
+- account inventory sub-actions and compatibility probes;
+- prompt, Cookie, doctor, and cleanup workflows;
+- portions of scheduled and Notebook presentation;
+- some maintenance and manifest-adjacent compatibility handlers.
 
-All compact history actions now use the shared history service. Compact account, prompt, cookie, doctor, cleanup, and parts of scheduled presentation still retain adapter-owned execution or formatting. Migrate one bounded action family at a time; keep compactness as a discovery/presentation property, not a separate business implementation.
+Agents should not need to parse prose or emoji to determine success, retryability, pagination, verification, or next action.
 
-### 4. Mutation Verification Is Uneven
+### 3. Remaining Compact-Adapter Duplication
 
-Gem mutations and chat deletion now fail closed without positive read-back evidence; Notebook moves and scheduled actions also preserve several read-back states. Apply the same review to cleanup, prompt storage, remaining scheduled/Notebook branches, and any future sharing/settings mutation. Define which source is authoritative and which ambiguous states are partial rather than successful.
+Compact history execution is shared. Compact account, prompt, Cookie, doctor, cleanup, and parts of scheduled presentation still own duplicated execution or formatting. Migrate one bounded action family at a time into shared services while preserving the compact eleven-tool discovery surface.
 
-### 5. Cleanup Is Process-Local
+### 4. Uneven Mutation Verification
 
-Pending remote-chat cleanup and its observations live in memory. A server restart can lose delayed deletion work. Choose between best-effort process-local cleanup, a durable local queue, or using provider-native temporary conversations wherever possible.
+Chat deletion and Gem mutations have strict evidence contracts. Complete the same audit for:
 
-### 6. Long Operations Lack a First-Class Job API
+- cleanup deletions;
+- prompt storage and deletion;
+- remaining scheduled branches;
+- remaining Notebook branches;
+- future sharing, public-link, settings, and Library mutations.
 
-Deep Research and media can report queued/running/timed-out states and preserve identifiers, but agents do not have a uniform `start / status / result / cancel` contract. A dedicated operation service would make timeout recovery and cross-client UX substantially clearer.
+Each mutation needs an authoritative source, explicit ambiguous states, and positive terminal evidence before success text.
 
-### 7. Search Pagination Semantics Need a Contract
+### 5. No Shared Long-Operation Job API
 
-Current history search treats `offset`/`limit` as the source page to scan, not necessarily the match page to return. That is bounded and predictable but can surprise users who expect global match pagination. Decide and document whether search pagination applies before or after filtering, especially when `scan_turns=true` could require many remote reads.
+Deep Research and media expose queued/running/timed-out states and identifiers, but recovery remains workflow-specific. Introduce one shared contract:
 
-## Gemini UI Workflows Not Yet Implemented
+```text
+start -> operation_id
+status(operation_id)
+result(operation_id)
+cancel(operation_id)
+```
 
-These are real missing capabilities, but should only be added when they improve agent workflows and have stable evidence:
+The service must define provider-backed identifiers, local registry state, persistence, cancellation, expiry, and behavior after process restart.
+
+### 6. Cleanup Is Process-Local
+
+Delayed remote-chat cleanup and observations are held in memory. A restart can lose pending work. The likely direction is:
+
+- prefer provider-native temporary chats;
+- persist only workflows that require delayed deletion;
+- keep caller-controlled retention and TTL;
+- expose pending/retry/terminal cleanup state.
+
+The persistence mechanism still requires an owner decision.
+
+### 7. Search Pagination Contract
+
+History search currently applies `offset`/`limit` to the source page before filtering, not to a global match result set. This is bounded and predictable but may surprise users. Preserve the current behavior until a reviewed contract defines post-filter pagination, remote-read cost, and `scan_turns=true` limits.
+
+## Deferred Gemini UI Workflows
+
+These are real missing capabilities, but should follow core reliability and stable live evidence:
 
 - Google Drive picker/attachment import;
-- Canvas document create/read/update/export;
+- Canvas create/read/update/export;
 - scheduled-action edit, enable/disable, weekly, and richer recurrence;
 - Notebook create, rename, delete, and source management;
-- public-link create, update, revoke, and sharing management;
-- history rename, pin/unpin, archive, and share workflows;
+- public-link create/update/revoke and sharing management;
+- history rename, pin/unpin, archive, and share;
 - personalization/settings and memory-import mutations;
-- Library asset listing beyond capability/probe surfaces;
-- first-class media/research job polling and cancellation;
-- genuine client-visible incremental progress rather than collected upstream streams;
-- onboarding commands for video, music, file, URL, and Deep Research.
+- Library asset listing and management;
+- genuine client-visible incremental progress.
 
-Theme, help, feedback, location, subscription, and other UI chrome should remain out of scope unless a concrete agent workflow requires them.
+Theme, help, feedback, location, subscription, and other UI chrome remain out of scope unless a concrete agent workflow requires them.
 
-## Recommended Priority
+## Settled Product Directions
 
-1. Configure the dedicated canary account and extend the live baseline to the unobserved P0 workflows.
-2. Continue typed results for the primary deep history scan and account, then prompt/cookie/doctor/cleanup.
-3. Audit every remote mutation for positive read-back and honest presentation.
-4. Introduce a shared long-operation job contract.
-5. Decide cleanup durability and release/version strategy.
-6. Improve end-to-end video, music, file, URL, and research onboarding before pursuing broad UI parity.
+Do not repeatedly reopen these choices:
+
+- browser-Cookie handling follows the explicit-approval and sensitive-cache contract;
+- the compact server remains the low-token discovery product while execution moves into shared services;
+- core multimodal reliability, artifact delivery, recovery, and agent task completion take priority over broad UI parity;
+- `.agents/skills` remains the single repository skill source.
+
+## Recommended Development Order
+
+1. Configure and record the dedicated full live baseline.
+2. Complete typed results for deep history and account/admin workflows.
+3. Finish the mutation read-back audit.
+4. Add the shared long-operation service and tool contract.
+5. Implement the selected durable cleanup model.
+6. Add video/music/file/URL/research onboarding and a real client/platform matrix.
+7. Revisit UI-parity features only after the preceding workflows are stable.

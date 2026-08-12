@@ -1,58 +1,40 @@
-# Decisions to Discuss With the Owner
+# Owner Decisions and Next Development Packages
 
-These choices materially change product contracts. Do not bury them inside unrelated maintenance work.
+Use this reference only when a change would alter a product contract. Routine bug fixes and bounded service migrations should proceed from the established defaults without reopening settled questions.
 
-## 1. What Is the Next Public Version?
+## Decisions That Still Need the Owner
 
-Current source metadata remains on a `1.x` line while historical Git tags/releases include higher `2.x` versions. A future release must not silently publish a numerically lower “latest” version.
+### 1. Next Monotonic Python Package Release
 
-Options:
+The Python package, rewritten Git tag line, and ClawHub runtime skill all use the canonical `0.2.0` version.
 
-- adopt a new version greater than every historical tag;
-- document separate historical/rebuilt lines with one canonical current line;
-- postpone binary releases and support reviewed source-at-SHA installs only.
-
-Recommended discussion: keep one canonical project version at `0.2.0` because the current architecture uses MCP SDK v2, structured contracts, and substantially different runtime boundaries.
-
-## 2. What Is the Official Live Compatibility Strategy?
-
-A targeted authorized live run has proven some current behavior, but it is not a complete compatibility baseline.
+Any future package release must move all canonical version sources together beyond `0.2.0`; the current tree uses MCP Python SDK v2, structured output contracts, and shared services.
 
 Decide:
 
-- whether to maintain a dedicated Gemini test account;
-- ownership, recovery, region, locale, and entitlement boundaries;
-- secret rotation and evidence retention rules;
-- which workflows must be proven before releases.
+- whether and when to advance beyond the canonical `0.2.0` release line;
+- whether any compatibility period or migration note is required;
+- whether PyPI publication begins with that release or GitHub Releases remain canonical first.
 
-Recommended sequence:
+Keep rewritten Git history, package metadata, and the ClawHub skill on one canonical version line.
 
-1. read-only capability baseline;
-2. temporary text/session/media verification;
-3. disposable mutations with read-back and cleanup.
+### 2. Dedicated Live-Compatibility Account
 
-## 3. Security Boundary for Cookie and Account Diagnostics
-
-Recent skill security review highlighted that browser Cookie handling must be treated as authentication material.
+A bounded authorized run has proven text, sessions, typed history, and chat cleanup, but it is not the repository's dedicated full canary.
 
 Decide:
 
-- whether Cookie access is always explicit opt-in;
-- allowed storage and cleanup policy;
-- whether diagnostics may access browser-derived authentication state;
-- what evidence may appear in logs or reports.
+- who owns and can recover the account;
+- region, locale, tier, and optional media/research entitlements;
+- secret rotation and run cadence;
+- which evidence may be retained in sanitized reports;
+- whether release publication is blocked when the last successful live baseline is too old.
 
-Rules to preserve:
+Recommended cadence: weekly read-only probes, a release-candidate multimodal run, and disposable mutation tests only when explicitly requested.
 
-- never print Cookie values;
-- never treat browser authorization as arbitrary credential-file access;
-- keep account/session cleanup separate from agent memory or instructions.
+### 3. Long-Operation Persistence and Cancellation
 
-## 4. Should Long Operations Become First-Class Jobs?
-
-Current calls can expose queued/running/timed-out states, but recovery is workflow-specific.
-
-Recommended contract:
+The recommended API is fixed:
 
 ```text
 start -> operation_id
@@ -61,64 +43,151 @@ result(operation_id)
 cancel(operation_id)
 ```
 
-Use one operation model across Deep Research, video, music, and future asynchronous media.
+The owner still needs to decide:
 
-## 5. What Is the Long-Term Role of Compact Server?
+- whether the local operation registry survives process restarts;
+- whether provider-backed IDs are sufficient when local state is lost;
+- cancellation guarantees when Gemini has already accepted work;
+- operation expiry and artifact-retention defaults;
+- whether one operation may be resumed from another MCP client.
 
-Recommended direction:
+Recommended direction: preserve provider identifiers in every result and persist a small local registry containing only recovery metadata, not raw account content.
 
-- keep compact discovery as a low-token product;
-- move execution into shared services;
-- test semantic parity instead of maintaining duplicate business logic.
+### 4. Durable Cleanup Semantics
 
-## 6. Core Reliability or UI Parity?
+The current delayed cleanup queue is process-local. The default direction is to prefer provider-native temporary chats and retain caller-controlled TTL/retention.
 
-Prioritize:
+Decide:
 
-1. multimodal reliability and artifact workflows;
-2. typed account/admin results and mutation verification;
-3. job recovery and onboarding;
-4. only then broad Gemini UI parity.
+- whether unavoidable delayed deletions use a durable local queue;
+- persistence format and location;
+- retry/backoff and terminal-failure behavior;
+- how pending cleanup is listed, cancelled, or transferred after restart;
+- whether a release may claim automatic cleanup without restart durability.
 
-Potential UI-parity work remains:
+Recommended direction: a small local SQLite queue with explicit pending/running/completed/failed states and no stored chat text.
 
-- Drive import;
-- Canvas;
-- richer scheduled recurrence;
-- Notebook CRUD/source management;
-- sharing/settings workflows;
-- Library management.
+### 5. Official Support and Distribution Matrix
 
-## 7. Supported Client Matrix
+Decide which combinations are officially supported rather than merely documented as examples:
 
-Define official support instead of listing examples only:
+- Codex, Claude Desktop, Claude Code, VS Code, and other MCP clients;
+- macOS, Windows, and Linux;
+- Python 3.11 and 3.12;
+- browser-Cookie discovery availability by platform;
+- artifact rendering/path behavior;
+- timeout guidance for video, music, and research;
+- canonical install path: reviewed Git SHA, immutable GitHub Release wheel, PyPI, ClawHub/runtime skill, and MCP directories.
 
-- client versions;
-- protocol modes;
-- supported operating systems;
-- artifact rendering expectations;
-- timeout guidance.
+Recommended first official matrix: Codex plus one desktop client on macOS and Windows, Python 3.11/3.12, reviewed Git SHA for development, and immutable GitHub Release wheel for public releases.
 
-## 8. Distribution Strategy
+## Settled Directions — Do Not Reopen by Default
 
-Choose the canonical path among:
+- Browser Cookies are sensitive authentication material; the explicit-approval, restricted-cache, no-logging contract is established.
+- Session reset affects only MCP/Gemini conversation state.
+- The compact eleven-tool facade remains the low-token discovery product; execution should continue moving into shared services.
+- Core multimodal reliability, artifact delivery, recovery, and agent task completion take priority over broad Gemini UI parity.
+- `.agents/skills` is the single repository source for public skills.
 
-- reviewed Git SHA;
-- immutable GitHub Release wheel;
-- PyPI;
-- runtime/development Skills;
-- MCP directories.
+Only revisit these when implementation evidence shows that the established contract cannot work.
 
-A discovery listing should follow a reproducible installation and version strategy.
+## Issue-Sized Next Development Packages
 
-## Suggested Owner Conversation Order
+### Package A — Dedicated Full Live Baseline
 
-1. version/release line;
-2. dedicated live compatibility account;
-3. security and Cookie boundary policy;
-4. next three user workflows;
-5. long-operation job model;
-6. cleanup durability;
-7. compact server commitment;
-8. official client/platform matrix;
-9. distribution channels.
+Deliverables:
+
+- configure the dedicated GitHub environment and repository variables;
+- record Web build/locale/tier when observable;
+- run read-only capability probes;
+- verify temporary text and primary/compact sessions;
+- verify image, video, and music artifacts;
+- verify local file, URL, and Deep Research workflows;
+- run disposable scheduled/Gem/Notebook mutations with read-back;
+- delete every created resource by returned ID and record cleanup evidence.
+
+Acceptance criteria:
+
+- sanitized schema-valid report;
+- no raw responses, Cookies, account identifiers, or private text;
+- each capability classified as observed, unavailable, drifted, or not entitled;
+- all created test resources accounted for.
+
+### Package B — Complete Typed Admin and Deep-History Results
+
+Order:
+
+1. primary-only deep history scan;
+2. account inventory and compatibility probes;
+3. prompt operations;
+4. Cookie status/profile/export outcomes;
+5. doctor;
+6. cleanup;
+7. remaining scheduled and Notebook presentation.
+
+Acceptance criteria:
+
+- stable `DomainResult` data/error/meta contracts;
+- explicit pagination, truncation, retryability, and verification;
+- compatibility text agrees with structured state;
+- primary/compact semantic parity where both expose the action.
+
+### Package C — Complete Mutation Verification Audit
+
+Inventory every remote create/update/move/delete. For each mutation define:
+
+- authoritative read-back source;
+- positive terminal evidence;
+- not-observed, mismatch, still-present, incomplete, and read-back-error states;
+- idempotency/retry behavior;
+- cleanup or rollback guidance.
+
+Acceptance criteria: no success marker without positive evidence and regression coverage for verified plus ambiguous outcomes.
+
+### Package D — Shared Long-Operation Service
+
+Implement one domain/service contract for Deep Research, video, music, and future asynchronous media.
+
+Acceptance criteria:
+
+- stable operation IDs and provider IDs;
+- start/status/result/cancel tools or actions;
+- queued/running/completed/timed-out/cancelled/failed states;
+- restart behavior matching the owner decision;
+- artifact identity preserved from start through result;
+- primary/compact parity.
+
+### Package E — Durable Cleanup
+
+Implement the selected persistence model after the owner decision.
+
+Acceptance criteria:
+
+- restart-safe pending work when durability is enabled;
+- explicit retry and terminal failure states;
+- list/cancel/retry operations;
+- no private chat text in persistence;
+- direct-ID cleanup remains authoritative over marker search.
+
+### Package F — Multimodal Onboarding and Client Matrix
+
+Add onboarding subcommands and documented manual checks for video, music, file, URL, and Deep Research. Exercise the official client/platform matrix.
+
+Acceptance criteria:
+
+- one copyable command or client workflow per modality;
+- independently verified artifacts or structured results;
+- timeout/recovery guidance;
+- client-specific friction recorded as reproducible issues.
+
+### Package G — Selected UI-Parity Work
+
+Only after Packages A–F are stable, choose user-valued UI workflows such as Drive import, Canvas, richer recurrence, Notebook CRUD/source management, sharing, or Library management. Require current live evidence before adding private RPC contracts.
+
+## Recommended Conversation Order
+
+1. approve any future version advance beyond `0.2.0`;
+2. define the dedicated live account and release-blocking policy;
+3. choose long-operation persistence semantics;
+4. choose durable cleanup semantics;
+5. choose the first official client/platform/distribution matrix.

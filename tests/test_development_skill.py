@@ -68,25 +68,27 @@ def test_development_skill_has_no_machine_specific_paths() -> None:
         assert "C:\\Users\\" not in text
 
 
-def test_development_skill_tracks_current_product_questions() -> None:
+def test_development_skill_tracks_current_baseline_and_version_lines() -> None:
     text = _all_text(PUBLIC_SKILL)
 
     for required in (
-        "Accepted Is Not Verified",
-        "No Dedicated Full Live Baseline",
-        "Long Operations Lack a First-Class Job API",
-        "Google Drive picker/attachment import",
-        "How to Actually Experience the Product",
-        "gemini-mcp-onboarding chat",
-        "gemini-mcp-onboarding image",
-        "What Is the Next Public Version?",
-        "historical Git tags/releases include higher `2.x` versions",
+        "Authentication Boundary Is Settled",
+        "Dedicated Full Live Baseline",
+        "Long-Operation Persistence and Cancellation",
+        "Shared Long-Operation Service",
+        "bounded authorized run on 2026-08-08",
+        "Python package currently declares `0.2.0`",
+        "historical Git tags reach `0.2.0`",
+        "ClawHub runtime skill preview is `0.2.0`",
+        "clawhub install gemini-web-mcp",
         "tests._fastmcp_shim",
         "Do not hardcode volatile test counts",
     ):
         assert required in text
 
     for obsolete in (
+        "Security Boundary for Cookie and Account Diagnostics",
+        "What Is the Long-Term Role of Compact Server?",
         "P3 — Reliability, Release, and Adoption",
         "P0.1",
         "P1.7",
@@ -96,9 +98,23 @@ def test_development_skill_tracks_current_product_questions() -> None:
         assert obsolete not in text
 
 
-def test_development_skill_names_the_maintained_validation_and_experience_paths() -> None:
-    testing = (PUBLIC_SKILL / "references/validation.md").read_text(encoding="utf-8")
-    experience = (PUBLIC_SKILL / "references/tool-design.md").read_text(encoding="utf-8")
+def test_development_skill_limits_owner_decisions_to_unsettled_contracts() -> None:
+    skill = (PUBLIC_SKILL / "SKILL.md").read_text(encoding="utf-8")
+    roadmap = (PUBLIC_SKILL / "references" / "roadmap.md").read_text(encoding="utf-8")
+
+    assert "The Cookie boundary, compact-server direction, and reliability-before-UI-parity priority are already established" in skill
+    assert "Settled Directions — Do Not Reopen by Default" in roadmap
+    assert "Next Monotonic Python Package Release" in roadmap
+    assert "Dedicated Live-Compatibility Account" in roadmap
+    assert "Long-Operation Persistence and Cancellation" in roadmap
+    assert "Durable Cleanup Semantics" in roadmap
+    assert "Official Support and Distribution Matrix" in roadmap
+    assert "Recommended Conversation Order" in roadmap
+
+
+def test_development_skill_names_maintained_validation_and_experience_paths() -> None:
+    testing = (PUBLIC_SKILL / "references" / "validation.md").read_text(encoding="utf-8")
+    experience = (PUBLIC_SKILL / "references" / "tool-design.md").read_text(encoding="utf-8")
 
     for command in (
         "python -m ruff check src tests scripts",
@@ -107,6 +123,7 @@ def test_development_skill_names_the_maintained_validation_and_experience_paths(
         "python scripts/run_contract_checklist.py",
         "python scripts/smoke_profiles.py",
         "python scripts/smoke_mcp_protocol.py",
+        "skills-ref validate .agents/skills/gemini-web-mcp-development",
     ):
         assert command in testing
 
@@ -116,5 +133,5 @@ def test_development_skill_names_the_maintained_validation_and_experience_paths(
     assert "REVIEWED_SHA=replace-with-reviewed-40-character-commit" in experience
     assert "<reviewed-sha>" not in experience
     assert "Do not encode a volatile passing-test number" in testing
-    assert "Gemini-generated titles may omit" in testing
+    assert "runtime-skill preview is `0.2.0`" in testing
     assert "verified_absent" in experience

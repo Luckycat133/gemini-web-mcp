@@ -1,99 +1,107 @@
 # Development Status and Next Steps
 
-Updated: 2026-08-08
+Updated: 2026-08-12
 
-This page translates the repository development skill into a human-readable status. The canonical agent instructions remain
-in [`.agents/skills/gemini-web-mcp-development`](../.agents/skills/gemini-web-mcp-development/SKILL.md).
+This page is the human-readable companion to [`.agents/skills/gemini-web-mcp-development`](../.agents/skills/gemini-web-mcp-development/SKILL.md). The Skill is the canonical engineering workflow; this page summarizes the current repository baseline and owner decisions.
 
-## Completion Answer
+## Current Baseline
 
-The development skill is not fully implemented, and it is not intended to become a one-time checklist. It combines shipped
-engineering contracts, a repeatable maintenance method, open product work, and decisions that require the repository owner.
+Latest reviewed pre-rewrite `main` commit at this update:
 
-In this page, **implemented** means the checked-in repository contract has offline, package, or MCP protocol evidence. It does
-not mean that the current Gemini Web deployment was observed. Live compatibility is reported separately.
+```text
+d3145a3be45745523e7483b18835b4800da80ab5
+```
 
-## Current Status
+Its hosted CI and CodeQL completed successfully, including Ruff, Mypy, Python 3.11/3.12 tests, targeted architecture contracts, real primary/compact MCP stdio smoke, Agent Skill validation/direct install, and clean-wheel/onboarding checks.
+
+Current version lines are intentionally separate:
+
+| Surface | Current line | Meaning |
+| --- | --- | --- |
+| Python package source | `0.2.0` | Canonical package version synchronized with rewritten release refs |
+| Historical Git tags | through `0.2.0` | Rewritten package-release history on the canonical version line |
+| Development Skill | `0.2.0` | Repository-maintenance instructions |
+| ClawHub runtime Skill | `0.2.0` | Operating instructions on the same canonical version line as the Python package |
+
+## Implemented Repository Contracts
 
 | Area | State | Current boundary |
 | --- | --- | --- |
-| MCP SDK v2 and protocol negotiation | Implemented | Primary and compact entrypoints exercise current discovery and the legacy initialize path over real stdio. |
-| Packaging and onboarding | Implemented | Wheel, source distribution, runtime skill zip, clean installation, and credential-free `uvx` onboarding are maintained gates. |
-| Agent Skill distribution | Implemented | Runtime and development skills have unique names under the single `.agents/skills` repository source. |
-| Chat, session, and artifact services | Implemented | Primary and compact adapters share core execution and typed results for these workflows. |
-| History typed results | Partial | Primary/compact list, search, read, export, and delete share one typed service. The primary-only deep source scan remains prose-first. |
-| Account/admin typed results | Partial | Account, prompt, cookie, doctor, cleanup, scheduled, Notebook, and compatibility coverage remains uneven. |
-| Mutation verification | Partial | Chat delete, Gem mutations, and several Notebook/scheduled paths now use read-back or explicitly report unverified acceptance, but every remote mutation has not completed the same audit. |
-| Live Gemini compatibility | Partial targeted observation | An authorized 2026-08-08 local run verified text, session, history, and deletion paths; the latest dedicated live-canary run is still skipped, and media/research/account mutation coverage remains unobserved. |
-| Delayed cleanup | Partial | Retention and process-local cleanup exist, but delayed work is not durable across server restarts. |
-| Long-running operations | Partial | Media and Deep Research preserve queued/running/timed-out states and identifiers, but no shared `start/status/result/cancel` job API exists. |
-| Additional Gemini UI workflows | Deferred | Drive import, Canvas mutations, richer Notebook/scheduled/sharing workflows, and other UI parity work require stable evidence and user value. |
-| Release version line | Established | Package metadata and rewritten release refs use canonical `0.2.0`; a future bump must update all sources together. |
+| MCP SDK v2 and protocol negotiation | Implemented | Primary and compact entrypoints exercise current discovery and legacy negotiation over real stdio. |
+| Packaging and onboarding | Implemented | Wheel, source distribution, runtime Skill archive, clean installation, and credential-free `uvx` onboarding are maintained gates. |
+| Skill distribution | Implemented | `.agents/skills` is the single repository source; the runtime Skill has a separate ClawHub preview line. |
+| Chat, sessions, and lifecycle | Implemented | Primary and compact adapters share core execution, opaque session IDs, explicit missing-session behavior, and typed state. |
+| Artifact model | Implemented | Image, video, audio, file, webpage, data, and report outputs use shared artifact state and verification metadata. |
+| Typed history | Implemented for list/search/read/export/delete | Primary and compact use one service with mapping/object normalization and evidence-based deletion. The primary deep scan remains prose-first. |
+| Gem mutation verification | Implemented | Create/update/delete require positive read-back evidence before success. |
+| Browser-Cookie authorization boundary | Implemented | Bounded authorization, sanitized errors, explicit approval, and sensitive local-cache handling are documented and tested. |
+| Account/admin typed results | Partial | Account, prompt, Cookie, doctor, cleanup, scheduled, Notebook, and compatibility coverage remains uneven. |
+| Mutation verification outside history/Gems | Partial | Several Notebook/scheduled paths preserve evidence, but the complete remote-mutation audit is unfinished. |
+| Live Gemini compatibility | Partial bounded observation | A 2026-08-08 authorized run verified Cookie initialization, text, sessions, typed history, and chat cleanup. The dedicated full canary remains unconfigured/skipped. |
+| Delayed cleanup | Partial | Process-local cleanup exists; pending delayed work is not durable across restarts. |
+| Long-running operations | Partial | Media and Deep Research preserve queued/running/timed-out states and IDs, but no shared `start/status/result/cancel` API exists. |
+| Broad Gemini UI parity | Deferred | Drive, Canvas, richer Notebook/scheduled/sharing/settings/Library workflows follow core reliability. |
 
-The latest recorded live-canary run at the time of this update was
-[skipped](https://github.com/Luckycat133/gemini-web-mcp/actions/runs/30889281960). It is not live evidence.
-The separate 2026-08-08 targeted local run is live evidence only for the bounded workflows listed below; the account was not
-recorded as the repository's dedicated canary account.
+## Current Live Evidence Boundary
 
-## Current Unreleased Change Set
+The 2026-08-08 authorized run observed:
 
-- Removed duplicate `.codex/skills` copies and updated CI, release, packaging, and documentation references to use
-  `.agents/skills` as the single source.
-- Added shared typed history list/read results with primary/compact parity and object/mapping normalization.
-- Extended that shared history service to search/export/delete. Delete now distinguishes verified absence, unavailable read-back,
-  a still-present chat, and read-back failure instead of equating an accepted call or ambiguous `read_chat(None)` with
-  verified deletion; positive absence requires a complete fresh recent/pinned metadata scan.
-- Made `GEMINI_AUTO_REFRESH=false` avoid starting the Cookie monitor thread.
-- Made offline compact protocol smoke use the auth-free static manifest instead of browser-profile diagnostics.
-- Bounded macOS `browser-cookie3` Keychain waits with `GEMINI_BROWSER_COOKIE_TIMEOUT_SECONDS`; timeout responses are
-  sanitized and the dependency function is restored after each access window.
-- Recorded an explicitly authorized targeted live run at commit `6811a7934d836b54c4d54d184caed321b356ecef` without
-  changing the official dedicated-canary status.
-- Preserved canonical product version `0.2.0`; this earlier change set did not itself publish a tag or release.
+- Cookie initialization and reachable read-only history probes;
+- temporary and retained text;
+- primary multi-turn context and session reset;
+- typed primary/compact history list/search;
+- four returned remote chat IDs deleted with `verification.status=verified_absent` after complete fresh metadata pagination.
 
-## Evidence Boundary
+It did not establish:
 
-The current change set has local evidence from:
+- a dedicated repository canary account;
+- Web build, locale, account tier, or entitlement matrix;
+- image, video, music, files, URLs, or Deep Research;
+- scheduled, Gem, or Notebook mutation behavior in the current deployment;
+- an official multi-client/platform compatibility matrix.
 
-- Ruff and Mypy;
-- the complete offline pytest suite and targeted contract checklist;
-- representative profile snapshots and four primary/compact modern/legacy stdio handshakes;
-- pinned Agent Skill validation plus direct repository installation;
-- clean Python 3.12 wheel installation, `pip check`, installed entrypoints, and offline onboarding.
+The latest scheduled dedicated-canary workflow remained skipped because the required repository variables/environment were not configured. A skipped run is not live success.
 
-The explicitly authorized 2026-08-08 targeted run used Python 3.12, `gemini-mcp-server==0.2.0`,
-`gemini-webapi==2.0.0`, `mcp==2.0.0`, `mcp-types==2.0.0`, and MCP protocol `2026-07-28`. It observed:
+## Settled Directions
 
-- successful environment-Cookie doctor/status checks and two reachable read-only history RPC probes;
-- successful primary temporary and retained text calls, with the temporary marker absent from history metadata;
-- successful primary multi-turn context preservation and local session reset;
-- typed primary and compact history list/search data plus successful compact text;
-- four returned remote chat IDs, all deleted with `verification.status=verified_absent` after complete fresh metadata
-  pagination; the final marker search returned zero matches;
-- no turn-text scan, pre-existing chat turn-text read, non-chat remote mutation, local artifact, or Cookie value in server logs.
+The following should not be repeatedly reopened during normal development:
 
-Gemini-generated titles did not preserve the prompt marker for the retained primary or compact chat, so metadata-only
-marker search did not find those chats before deletion. Explicit returned IDs provided the authoritative cleanup path.
-Account tier, locale, Web build, media, files, URLs, Deep Research, scheduled actions, Gems, and Notebook mutations were not
-recorded. This bounded observation therefore does not establish a dedicated full live baseline.
+- browser Cookies are sensitive authentication material and follow the explicit-approval/restricted-cache contract;
+- session reset changes only MCP/Gemini conversation state;
+- the compact eleven-tool facade remains the low-token discovery product while execution moves into shared services;
+- core multimodal reliability, artifacts, recovery, and agent task completion precede broad UI parity;
+- `.agents/skills` remains the single repository Skill source.
 
-## Recommended Next Order
+## Recommended Next Development Order
 
-1. Configure the dedicated canary account and extend the live baseline to media, files, URLs, Deep Research, and disposable account mutations.
-2. Continue one bounded typed-result slice at a time: primary deep history scan, then account, prompt, cookie, doctor, and cleanup.
-3. Audit every remote mutation for positive read-back and honest partial states.
-4. Define one long-operation job contract for media and Deep Research.
-5. Decide cleanup durability; keep the established canonical `0.2.0` release line synchronized.
-6. Add end-to-end video, music, file, URL, and research onboarding before broad UI parity.
+1. Configure the dedicated full live baseline and exercise media, files, URLs, research, disposable account mutations, and cleanup.
+2. Complete typed results for the primary deep history scan and account/admin surfaces.
+3. Finish the positive-read-back audit for every remote mutation.
+4. Implement one shared long-operation `start/status/result/cancel` service.
+5. Implement the selected restart-durable cleanup model.
+6. Add video, music, file, URL, and research onboarding plus the official client/platform matrix.
+7. Select UI-parity features only after the preceding workflows are stable.
 
 ## Owner Decisions Still Required
 
-- whether and when to advance the established `0.2.0` release line;
-- ownership, secrets, region, tier, and cadence for a dedicated live-canary account;
-- durable cleanup versus documented process-local best effort;
-- persistence and cancellation semantics for long-running jobs;
-- the long-term role of the fixed compact server;
-- officially supported clients, operating systems, and distribution channels.
+### Package Release Line
 
-See the development skill's [architecture status](../.agents/skills/gemini-web-mcp-development/references/architecture.md)
-and [owner decision record](../.agents/skills/gemini-web-mcp-development/references/roadmap.md) for the detailed contract.
+Keep the canonical package version at `0.2.0` until the owner explicitly approves a future unified bump.
+
+### Dedicated Live Account
+
+Define ownership, recovery, tier, region/locale, entitlements, secret rotation, run cadence, evidence retention, and whether stale/missing live evidence blocks a package release.
+
+### Long-Operation State
+
+Decide persistence across restarts, provider-ID recovery, cancellation guarantees, expiry, and cross-client resume semantics.
+
+### Cleanup Durability
+
+Decide whether unavoidable delayed deletions use a durable local queue, its retry/terminal-state model, and whether the project may claim automatic cleanup without restart durability.
+
+### Official Support and Distribution
+
+Choose the first supported client/OS matrix and the canonical relationship among reviewed Git SHA, immutable GitHub Release wheel, PyPI, ClawHub runtime Skill, and MCP directory listings.
+
+See the Skill's [architecture reference](../.agents/skills/gemini-web-mcp-development/references/architecture.md), [testing ladder](../.agents/skills/gemini-web-mcp-development/references/validation.md), [experience guide](../.agents/skills/gemini-web-mcp-development/references/tool-design.md), and [owner decision record](../.agents/skills/gemini-web-mcp-development/references/roadmap.md) for issue-sized acceptance criteria.
