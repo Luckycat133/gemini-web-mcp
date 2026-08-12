@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import io
 import subprocess
 import sys
+import tarfile
 import zipfile
 from importlib import import_module
 from importlib.metadata import version as distribution_version
@@ -12,6 +14,8 @@ import pytest
 import src
 from scripts.release_metadata import (
     CANONICAL_GIT_SOURCE,
+    PROJECT_LICENSE_EXPRESSION,
+    PROJECT_LICENSE_FILENAME,
     ReleaseMetadataError,
     find_product_version_errors,
     load_release_metadata,
@@ -22,6 +26,36 @@ from scripts.release_metadata import (
 )
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
+
+
+def _write_valid_release_artifacts(tmp_path: Path, metadata) -> None:
+    license_contents = (PROJECT_ROOT / PROJECT_LICENSE_FILENAME).read_bytes()
+    wheel_path = tmp_path / metadata.wheel_filename
+    dist_info = f"{metadata.distribution_basename}-{metadata.version}.dist-info"
+    with zipfile.ZipFile(wheel_path, "w") as archive:
+        archive.writestr(
+            f"{dist_info}/METADATA",
+            "\n".join(
+                (
+                    "Metadata-Version: 2.4",
+                    f"Name: {metadata.project_name}",
+                    f"Version: {metadata.version}",
+                    f"License-Expression: {PROJECT_LICENSE_EXPRESSION}",
+                    f"License-File: {PROJECT_LICENSE_FILENAME}",
+                    "",
+                )
+            ),
+        )
+        archive.writestr(f"{dist_info}/licenses/{PROJECT_LICENSE_FILENAME}", license_contents)
+
+    sdist_path = tmp_path / metadata.sdist_filename
+    root = f"{metadata.distribution_basename}-{metadata.version}"
+    with tarfile.open(sdist_path, "w:gz") as archive:
+        info = tarfile.TarInfo(f"{root}/{PROJECT_LICENSE_FILENAME}")
+        info.size = len(license_contents)
+        archive.addfile(info, io.BytesIO(license_contents))
+
+    (tmp_path / metadata.skill_filename).touch()
 
 
 def test_pyproject_is_the_runtime_and_distribution_version_source():
@@ -141,15 +175,7 @@ def test_release_tag_is_only_inferred_for_tag_builds():
 
 def test_release_asset_names_and_wheel_metadata_are_derived_from_pyproject(tmp_path):
     metadata = load_release_metadata(PROJECT_ROOT)
-    wheel_path = tmp_path / metadata.wheel_filename
-    dist_info = f"{metadata.distribution_basename}-{metadata.version}.dist-info/METADATA"
-    with zipfile.ZipFile(wheel_path, "w") as archive:
-        archive.writestr(
-            dist_info,
-            f"Metadata-Version: 2.1\nName: {metadata.project_name}\nVersion: {metadata.version}\n",
-        )
-    (tmp_path / metadata.sdist_filename).touch()
-    (tmp_path / metadata.skill_filename).touch()
+    _write_valid_release_artifacts(tmp_path, metadata)
 
     assert release_artifact_errors(tmp_path, metadata) == []
 
@@ -158,6 +184,28 @@ def test_release_asset_names_and_wheel_metadata_are_derived_from_pyproject(tmp_p
     assert release_artifact_errors(tmp_path, metadata) == [
         f"{tmp_path}: stale or mismatched release artifact {stale_asset.name}"
     ]
+
+
+def test_release_artifacts_reject_missing_license_metadata_and_files(tmp_path):
+    metadata = load_release_metadata(PROJECT_ROOT)
+    wheel_path = tmp_path / metadata.wheel_filename
+    dist_info = f"{metadata.distribution_basename}-{metadata.version}.dist-info/METADATA"
+    with zipfile.ZipFile(wheel_path, "w") as archive:
+        archive.writestr(
+            dist_info,
+            f"Metadata-Version: 2.1\nName: {metadata.project_name}\nVersion: {metadata.version}\n",
+        )
+    with tarfile.open(tmp_path / metadata.sdist_filename, "w:gz"):
+        pass
+    (tmp_path / metadata.skill_filename).touch()
+
+    errors = release_artifact_errors(tmp_path, metadata)
+
+    assert any("expected one embedded LICENSE, found 0" in error for error in errors)
+    assert any("wheel License-Expression=None" in error for error in errors)
+    assert any("wheel License-File=[]" in error for error in errors)
+    expected_license_path = f"{metadata.distribution_basename}-{metadata.version}/{PROJECT_LICENSE_FILENAME}"
+    assert any(f"missing {expected_license_path}" in error for error in errors)
 
 
 def test_version_checker_cli_passes_and_release_packager_rejects_stale_tag(tmp_path):

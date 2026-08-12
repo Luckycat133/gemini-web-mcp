@@ -5,6 +5,7 @@ description = "MCP server for Gemini Web API reverse engineering"
 requires-python = ">=3.11"
 readme = "README.md"
 license = "AGPL-3.0-only"
+license-files = ["LICENSE"]
 authors = [
     {name = "Gemini MCP Server Contributors"}
 ]
@@ -39,7 +40,7 @@ gemini-mcp-skill-server = "src.skill_server:main"
 gemini-mcp-onboarding = "src.onboarding:main"
 
 [build-system]
-requires = ["setuptools>=61.0"]
+requires = ["setuptools>=77.0"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]

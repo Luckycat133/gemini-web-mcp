@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Added the complete root `LICENSE` text for AGPL-3.0-only and made wheel/source-distribution checks verify both PEP 639 metadata and the embedded license file without changing the runtime Skill's separate MIT-0 license
 - Prepared the unified ClawHub `0.2.0` release after its security audit: explicitly classified locally cached browser Cookies as sensitive account-authentication material, required approval and secure cache handling, scoped session clearing away from agent memory/instructions, and clarified that macOS browser authorization does not scan arbitrary credential files
 - Prepared the three-file runtime skill for the unified ClawHub `0.2.0` release with explicit OpenClaw dependency and optional environment metadata; that ClawHub bundle is MIT-0 while the server source and development skill remain AGPL-3.0-only
 - Added shared typed history list/search/read/export/delete results across primary and compact adapters, including one-time object/mapping normalization while preserving compatibility text
@@ -25,6 +26,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Updated test-cleanup guidance to retain every returned remote chat ID because Gemini-generated titles may omit prompt markers; marker cleanup remains a bounded fallback and turn scanning remains opt-in
 
 ### Removed
+- Removed the stale `fastmcp` GitHub topic and added `mcp-python-sdk` to match the current SDK v2 implementation
 - Removed duplicate `.codex/skills` copies that caused clients scanning both discovery roots to list the runtime and development skills twice
 
 ### Fixed

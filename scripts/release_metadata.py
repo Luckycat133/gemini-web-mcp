@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import os
 import re
+import tarfile
 import tomllib
 import zipfile
 from collections.abc import Mapping, Sequence
@@ -19,6 +20,8 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 SKILL_ASSET_BASENAME = "gemini-web-mcp-skill"
 CANONICAL_GIT_SOURCE = "git+https://github.com/Luckycat133/gemini-web-mcp@main"
+PROJECT_LICENSE_EXPRESSION = "AGPL-3.0-only"
+PROJECT_LICENSE_FILENAME = "LICENSE"
 
 _STABLE_SEMVER = re.compile(r"[0-9]+\.[0-9]+\.[0-9]+")
 _PRODUCT_VERSION_PATTERNS = (
@@ -225,12 +228,25 @@ def require_repository_version_consistency(
 
 def _wheel_metadata_errors(wheel_path: Path, metadata: ReleaseMetadata) -> list[str]:
     errors: list[str] = []
+    license_contents: bytes | None = None
     try:
         with zipfile.ZipFile(wheel_path) as archive:
             metadata_files = [name for name in archive.namelist() if name.endswith(".dist-info/METADATA")]
             if len(metadata_files) != 1:
                 return [f"{wheel_path.name}: expected one .dist-info/METADATA, found {len(metadata_files)}"]
             message = Parser().parsestr(archive.read(metadata_files[0]).decode("utf-8"))
+            license_files = [
+                name
+                for name in archive.namelist()
+                if name.endswith(f".dist-info/licenses/{PROJECT_LICENSE_FILENAME}")
+            ]
+            if len(license_files) == 1:
+                license_contents = archive.read(license_files[0])
+            else:
+                errors.append(
+                    f"{wheel_path.name}: expected one embedded {PROJECT_LICENSE_FILENAME}, "
+                    f"found {len(license_files)}"
+                )
     except (OSError, UnicodeDecodeError, zipfile.BadZipFile) as exc:
         return [f"{wheel_path.name}: cannot read wheel metadata: {exc}"]
 
@@ -242,7 +258,42 @@ def _wheel_metadata_errors(wheel_path: Path, metadata: ReleaseMetadata) -> list[
         errors.append(
             f"{wheel_path.name}: wheel Version={message.get('Version')!r}, expected {metadata.version!r}"
         )
+    if message.get("License-Expression") != PROJECT_LICENSE_EXPRESSION:
+        errors.append(
+            f"{wheel_path.name}: wheel License-Expression={message.get('License-Expression')!r}, "
+            f"expected {PROJECT_LICENSE_EXPRESSION!r}"
+        )
+    license_metadata = message.get_all("License-File", [])
+    if PROJECT_LICENSE_FILENAME not in license_metadata:
+        errors.append(
+            f"{wheel_path.name}: wheel License-File={license_metadata!r}, "
+            f"expected {PROJECT_LICENSE_FILENAME!r}"
+        )
+    expected_license = PROJECT_ROOT.joinpath(PROJECT_LICENSE_FILENAME).read_bytes()
+    if license_contents is not None and license_contents != expected_license:
+        errors.append(f"{wheel_path.name}: embedded {PROJECT_LICENSE_FILENAME} differs from repository source")
     return errors
+
+
+def _sdist_license_errors(sdist_path: Path, metadata: ReleaseMetadata) -> list[str]:
+    expected_member = f"{metadata.distribution_basename}-{metadata.version}/{PROJECT_LICENSE_FILENAME}"
+    try:
+        with tarfile.open(sdist_path, "r:gz") as archive:
+            try:
+                member = archive.getmember(expected_member)
+            except KeyError:
+                return [f"{sdist_path.name}: missing {expected_member}"]
+            extracted = archive.extractfile(member)
+            if extracted is None:
+                return [f"{sdist_path.name}: {expected_member} is not a regular file"]
+            license_contents = extracted.read()
+    except (OSError, tarfile.TarError) as exc:
+        return [f"{sdist_path.name}: cannot read source distribution: {exc}"]
+
+    expected_license = PROJECT_ROOT.joinpath(PROJECT_LICENSE_FILENAME).read_bytes()
+    if license_contents != expected_license:
+        return [f"{sdist_path.name}: embedded {PROJECT_LICENSE_FILENAME} differs from repository source"]
+    return []
 
 
 def release_artifact_errors(
@@ -272,6 +323,9 @@ def release_artifact_errors(
     wheel_path = files.get(metadata.wheel_filename)
     if wheel_path is not None:
         errors.extend(_wheel_metadata_errors(wheel_path, metadata))
+    sdist_path = files.get(metadata.sdist_filename)
+    if sdist_path is not None:
+        errors.extend(_sdist_license_errors(sdist_path, metadata))
     return errors
 
 

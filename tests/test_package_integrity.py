@@ -69,12 +69,33 @@ def test_package_data_and_all_console_entrypoints_are_explicit():
     manifest = (PROJECT_ROOT / "MANIFEST.in").read_text(encoding="utf-8")
 
     assert metadata["project"]["scripts"] == EXPECTED_ENTRY_POINTS
+    assert metadata["project"]["license"] == "AGPL-3.0-only"
+    assert metadata["project"]["license-files"] == ["LICENSE"]
+    assert metadata["build-system"]["requires"] == ["setuptools>=77.0"]
     assert "data/*.json" in metadata["tool"]["setuptools"]["package-data"]["src"]
+    assert "include LICENSE" in manifest
     assert "recursive-include src/data *.json" in manifest
     assert "recursive-include scripts *.py" in manifest
     assert "recursive-include compatibility *.json" in manifest
     assert "recursive-include examples *.json *.toml" in manifest
     assert (PROJECT_ROOT / "src" / "onboarding.py").is_file()
+
+
+def test_repository_license_is_complete_and_runtime_skill_keeps_its_mit0_boundary():
+    license_text = (PROJECT_ROOT / "LICENSE").read_text(encoding="utf-8")
+    readme = (PROJECT_ROOT / "README.md").read_text(encoding="utf-8")
+    readme_zh = (PROJECT_ROOT / "README.zh-CN.md").read_text(encoding="utf-8")
+    runtime_skill = (PROJECT_ROOT / ".agents" / "skills" / "gemini-web-mcp" / "SKILL.md").read_text(
+        encoding="utf-8"
+    )
+
+    assert license_text.startswith("                    GNU AFFERO GENERAL PUBLIC LICENSE\n")
+    assert "Version 3, 19 November 2007" in license_text
+    assert "END OF TERMS AND CONDITIONS" in license_text
+    assert "[AGPL-3.0-only](LICENSE)" in readme
+    assert "[AGPL-3.0-only](LICENSE)" in readme_zh
+    assert "license: MIT-0" in runtime_skill
+    assert "license: AGPL-3.0-only" not in runtime_skill
 
 
 def test_dependency_checker_cli_passes():

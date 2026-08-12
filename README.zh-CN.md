@@ -70,7 +70,8 @@
 - Tag release 工作流构建 standalone skill zip、wheel 和源码包
 - `docs/launch-kit.md` 提供社交媒体发布文案和分发清单
 
-ClawHub 上的三文件运行 skill 包按 MIT-0 分发；MCP 服务器源码和仓库开发 skill 继续使用 AGPL-3.0-only。
+ClawHub 上的三文件运行 skill 包按 MIT-0 分发；MCP 服务器源码和仓库开发 skill 继续使用
+[AGPL-3.0-only](LICENSE)。
 
 ---
 
@@ -504,4 +505,4 @@ primary/compact 间共享 typed result，删除只有在回读确认后才算已
 
 ## 📄 许可证
 
-MCP 服务器源码与仓库开发 skill 使用 AGPL-3.0-only。ClawHub 上的三文件运行 skill 包使用 MIT-0。
+MCP 服务器源码与仓库开发 skill 使用 [AGPL-3.0-only](LICENSE)。ClawHub 上的三文件运行 skill 包使用 MIT-0。
