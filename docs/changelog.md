@@ -33,6 +33,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Removed duplicate `.codex/skills` copies that caused clients scanning both discovery roots to list the runtime and development skills twice
 
 ### Fixed
+- Parsed Deep Research source URLs before matching exact Google asset hostnames, so path, userinfo, and lookalike-domain text cannot be mistaken for `gstatic.com` or `googleusercontent.com` resources
 - Made the compact stdio protocol smoke call the auth-free static account manifest instead of browser-profile doctor diagnostics, preventing macOS Keychain prompts in offline verification
 - Made `GEMINI_AUTO_REFRESH=false` skip the Cookie monitor thread instead of starting an idle background monitor during offline and CI runs
 - Bounded `browser-cookie3` macOS Keychain waits, restored the dependency reader after each call, and returned a sanitized `BROWSER_COOKIE_ACCESS_TIMEOUT` instead of hanging indefinitely

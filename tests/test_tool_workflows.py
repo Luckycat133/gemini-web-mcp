@@ -2456,8 +2456,11 @@ def test_url_analysis_preserves_url_and_timeout(monkeypatch):
     asyncio.run(run())
 
     prompt, model, timeout = calls[0]
-    assert "https://example.com" in prompt
-    assert "Summarize this page in one sentence." in prompt
+    assert prompt == (
+        "Summarize this page in one sentence.\n\n"
+        "URL: https://example.com\n"
+        "Use the URL above as the content source for your answer."
+    )
     assert timeout == 60
 
 

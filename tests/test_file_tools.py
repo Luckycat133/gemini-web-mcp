@@ -407,8 +407,8 @@ def test_analyze_url_default_prompt_without_analysis_prompt(monkeypatch):
     assert prompt == "Please analyze the content at this URL: https://example.com/article"
 
 
-def test_analyze_url_custom_prompt_includes_url_and_user_prompt(monkeypatch):
-    """analysis_prompt 自定义 → prompt 含用户提示 + URL + 'Use the URL above...'。"""
+def test_analyze_url_custom_prompt_has_exact_url_structure(monkeypatch):
+    """analysis_prompt 自定义 → prompt 精确保留用户提示和独立 URL 行。"""
     client = _FakeFileClient()
     _patch_file_client_env(monkeypatch, client)
 
@@ -421,9 +421,11 @@ def test_analyze_url_custom_prompt_includes_url_and_user_prompt(monkeypatch):
 
     asyncio.run(run())
     prompt = client.captured_args[0]
-    assert "Summarize this video" in prompt
-    assert "https://example.com/video" in prompt
-    assert "Use the URL above as the content source" in prompt
+    assert prompt == (
+        "Summarize this video\n\n"
+        "URL: https://example.com/video\n"
+        "Use the URL above as the content source for your answer."
+    )
 
 
 def test_analyze_url_passes_model_and_thinking_level_to_client(monkeypatch):

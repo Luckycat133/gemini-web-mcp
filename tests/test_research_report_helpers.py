@@ -399,16 +399,18 @@ def test_walk_nested_json_skips_invalid_json_string_starting_with_bracket():
     assert len(nodes2) == 1
 
 
-def test_extract_sources_from_node_filters_gstatic_googleusercontent_dup_and_non_str():
-    """过滤 gstatic/favicon / googleusercontent / 重复 url / 非字符串字段 / 非 http url。"""
+def test_extract_sources_from_node_filters_google_assets_dup_and_invalid_urls():
+    """过滤 Google 资源、重复 URL、非字符串字段和无效 HTTP(S) URL。"""
     node = [
         "immersive-id", "ignored", "title", "ignored", "report",
         [
             ["fav", "https://example.com/p1", "Page 1"],
             ["fav", "https://example.com/p1", "Dup"],  # 重复 url
-            ["fav", "https://gstatic.com/favicon?x", "GS"],  # gstatic
-            ["fav", "https://googleusercontent.com/y", "GW"],  # googleusercontent
-            ["fav", "not-url", "Bad"],  # 非 http
+            ["fav", "https://www.gstatic.com/faviconV2?x", "GS"],  # gstatic favicon
+            ["fav", "https://lh3.googleusercontent.com/y", "GW"],  # googleusercontent
+            ["fav", "not-url", "Bad"],  # 非 URL
+            ["fav", "httpx://example.com/p3", "Bad scheme"],
+            ["fav", "https:///missing-host", "Missing host"],
             [1, "https://int-fav.com", "BadFav"],  # favicon 非 str
             ["fav", "https://example.com/p2", "Page 2"],
         ],
@@ -417,6 +419,23 @@ def test_extract_sources_from_node_filters_gstatic_googleusercontent_dup_and_non
     assert sources == [
         {"url": "https://example.com/p1", "title": "Page 1"},
         {"url": "https://example.com/p2", "title": "Page 2"},
+    ]
+
+
+def test_extract_sources_from_node_keeps_google_lookalikes_outside_hostname():
+    """路径、userinfo 或伪装域名中的 Google 字样不能误触资源过滤。"""
+    node = [
+        ["fav", "https://googleusercontent.com.evil.example/source", "Suffix lookalike"],
+        ["fav", "https://evil.example/googleusercontent.com/source", "Path lookalike"],
+        ["fav", "https://googleusercontent.com@evil.example/source", "Userinfo lookalike"],
+        ["fav", "https://gstatic.com.evil.example/favicon", "Gstatic lookalike"],
+    ]
+
+    assert _extract_sources_from_node(node) == [
+        {"url": "https://googleusercontent.com.evil.example/source", "title": "Suffix lookalike"},
+        {"url": "https://evil.example/googleusercontent.com/source", "title": "Path lookalike"},
+        {"url": "https://googleusercontent.com@evil.example/source", "title": "Userinfo lookalike"},
+        {"url": "https://gstatic.com.evil.example/favicon", "title": "Gstatic lookalike"},
     ]
 
 

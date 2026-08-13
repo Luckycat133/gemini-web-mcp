@@ -12,6 +12,7 @@ import re
 from collections.abc import Awaitable
 from types import SimpleNamespace
 from typing import Any, Literal
+from urllib.parse import urlsplit
 
 from ..adapters.mcp_sdk import MCPServer, TextContent
 
@@ -1013,9 +1014,19 @@ def _extract_sources_from_node(node: Any) -> list[dict[str, str]]:
         favicon, url, title = item[0], item[1], item[2]
         if not (isinstance(favicon, str) and isinstance(url, str) and isinstance(title, str)):
             continue
-        if not url.startswith("http"):
+        try:
+            parsed_url = urlsplit(url)
+            hostname = parsed_url.hostname
+        except ValueError:
             continue
-        if "gstatic.com/favicon" in url or "googleusercontent.com" in url:
+        if parsed_url.scheme.lower() not in {"http", "https"} or not hostname:
+            continue
+        normalized_hostname = hostname.rstrip(".").lower()
+        is_googleusercontent = normalized_hostname == "googleusercontent.com" or normalized_hostname.endswith(
+            ".googleusercontent.com"
+        )
+        is_gstatic = normalized_hostname == "gstatic.com" or normalized_hostname.endswith(".gstatic.com")
+        if is_googleusercontent or (is_gstatic and parsed_url.path.lower().startswith("/favicon")):
             continue
         if url in seen:
             continue
