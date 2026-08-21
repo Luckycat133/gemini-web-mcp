@@ -40,8 +40,13 @@ jobs:
 
           path = Path("tests/test_development_skill.py")
           text = path.read_text(encoding="utf-8")
-          text = text.replace('        "Shared Long-Operation Service",\n', "")
-          text = text.replace('    assert "Settled Directions — Do Not Reopen by Default" in roadmap\n', "")
+          for stale in (
+              '        "Shared Long-Operation Service",\n',
+              '    assert "Settled Directions — Do Not Reopen by Default" in roadmap\n',
+              '    assert "Settled Version Contract" in roadmap\n',
+              '    assert "canonical active repository version" in roadmap\n',
+          ):
+              text = text.replace(stale, "")
           path.write_text(text, encoding="utf-8")
           PY
       - name: Validate version and Skill contracts
