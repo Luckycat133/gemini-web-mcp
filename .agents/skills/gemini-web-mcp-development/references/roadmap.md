@@ -1,185 +1,45 @@
-# Owner Decisions and Next Development Packages
+# Settled Decisions and Next Development Packages
 
-Use this reference only when a change would alter a product contract. Routine bug fixes and bounded service migrations should proceed from the established defaults without reopening settled questions.
+Routine bug fixes and bounded service migrations should proceed without reopening settled product choices.
 
-## Settled Version Contract
+## Settled Decisions
 
-The owner selected `0.2.0` as the canonical active repository version. `pyproject.toml`, the runtime Skill, the development Skill, release asset names, runtime banners, and the changelog must move together for every future bump.
+- Preserve the existing `v0.2.0` tag and publish the completed audited patch as `v0.2.1`.
+- The maintainer supplies account Cookies through a protected GitHub environment or local process environment; never commit or print them.
+- Development order is full live baseline first, shared long-operation service second, then typed admin results, mutation verification, durable cleanup, onboarding/client matrix, and selected UI parity.
+- Use local-only SQLite for operation recovery and delayed cleanup. Store IDs, state, timestamps, attempts, error/verification codes, and artifact locators only—never prompts, chat text, Cookies, or raw upstream responses.
+- Long operations default to seven-day retention, support restart and cross-client resume, and use best-effort cancellation unless provider cancellation is observed.
+- Prefer provider-native temporary chats; only non-temporary cleanup work enters the durable queue.
+- Compact remains the low-token discovery product while execution belongs in shared services.
 
-All rewritten Git history, changelog release headings, and local release refs use the canonical `0.2.0` project version. This history rewrite does not by itself publish GitHub, PyPI, or ClawHub artifacts.
+## Package A — Dedicated Full Live Baseline
 
-## Decisions That Still Need the Owner
+Configure maintainer-provided Cookie secrets, record observable Web build/locale/tier/entitlements, test text, primary/compact sessions, image, video, music, file, URL, Deep Research, disposable Scheduled/Gem/Notebook mutations, and direct-ID cleanup. Produce a sanitized schema-valid report with every capability classified and every resource accounted for.
 
-### 1. Dedicated Live-Compatibility Account
+## Package B — Shared SQLite Long-Operation Service
 
-A bounded authorized run has proven text, sessions, typed history, and chat cleanup, but it is not the repository's dedicated full canary.
+Implement `start/status/result/cancel` for Deep Research, video, and music with stable operation/provider IDs, queued/running/completed/timed-out/cancelled/failed states, local SQLite migrations, restart/cross-client recovery, seven-day retention, pruning, artifact identity continuity, and best-effort cancellation.
 
-Decide:
+## Package C — Complete Typed Admin and Deep History
 
-- who owns and can recover the account;
-- region, locale, tier, and optional media/research entitlements;
-- secret rotation and run cadence;
-- which evidence may be retained in sanitized reports;
-- whether release publication is blocked when the last successful live baseline is too old.
+Order: primary deep history; account/compatibility; prompts; Cookie outcomes; doctor; cleanup; remaining scheduled/Notebook presentation. Require stable `DomainResult`, pagination/truncation/retryability/verification, text agreement, and primary/compact parity.
 
-Recommended cadence: weekly read-only probes, a release-candidate multimodal run, and disposable mutation tests only when explicitly requested.
+## Package D — Mutation Verification Audit
 
-### 2. Long-Operation Persistence and Cancellation
+For every remote mutation, define authoritative read-back, positive terminal evidence, ambiguous states, idempotency/retry behavior, and cleanup/rollback guidance.
 
-The recommended API is fixed:
+## Package E — Durable SQLite Cleanup
 
-```text
-start -> operation_id
-status(operation_id)
-result(operation_id)
-cancel(operation_id)
-```
+Implement pending/running/completed/failed/cancelled states, restart recovery, retry/backoff, list/retry/cancel, direct-ID authority, temporary-chat bypass, and no private text in storage.
 
-The owner still needs to decide:
+## Package F — Multimodal Onboarding and Client Matrix
 
-- whether the local operation registry survives process restarts;
-- whether provider-backed IDs are sufficient when local state is lost;
-- cancellation guarantees when Gemini has already accepted work;
-- operation expiry and artifact-retention defaults;
-- whether one operation may be resumed from another MCP client.
+Add one copyable, independently verified workflow for video, music, file, URL, and Deep Research, then exercise the official client/OS matrix.
 
-Recommended direction: preserve provider identifiers in every result and persist a small local registry containing only recovery metadata, not raw account content.
+## Package G — Selected UI Parity
 
-### 3. Durable Cleanup Semantics
+Only after A–F: Drive, Canvas, richer recurrence, Notebook CRUD/source management, sharing, or Library workflows with current live evidence.
 
-The current delayed cleanup queue is process-local. The default direction is to prefer provider-native temporary chats and retain caller-controlled TTL/retention.
+## Remaining Owner Question
 
-Decide:
-
-- whether unavoidable delayed deletions use a durable local queue;
-- persistence format and location;
-- retry/backoff and terminal-failure behavior;
-- how pending cleanup is listed, cancelled, or transferred after restart;
-- whether a release may claim automatic cleanup without restart durability.
-
-Recommended direction: a small local SQLite queue with explicit pending/running/completed/failed states and no stored chat text.
-
-### 4. Official Support and Distribution Matrix
-
-Decide which combinations are officially supported rather than merely documented as examples:
-
-- Codex, Claude Desktop, Claude Code, VS Code, and other MCP clients;
-- macOS, Windows, and Linux;
-- Python 3.11 and 3.12;
-- browser-Cookie discovery availability by platform;
-- artifact rendering/path behavior;
-- timeout guidance for video, music, and research;
-- canonical install path: reviewed Git SHA, immutable GitHub Release wheel, PyPI, ClawHub/runtime skill, and MCP directories.
-
-Recommended first official matrix: Codex plus one desktop client on macOS and Windows, Python 3.11/3.12, reviewed Git SHA for development, and immutable GitHub Release wheel for public releases.
-
-## Settled Directions — Do Not Reopen by Default
-
-- Browser Cookies are sensitive authentication material; the explicit-approval, restricted-cache, no-logging contract is established.
-- Session reset affects only MCP/Gemini conversation state.
-- The compact eleven-tool facade remains the low-token discovery product; execution should continue moving into shared services.
-- Core multimodal reliability, artifact delivery, recovery, and agent task completion take priority over broad Gemini UI parity.
-- `.agents/skills` is the single repository source for public skills.
-- The Python package and both public Skills share one active version, currently `0.2.0`; rewritten history uses the same canonical project version.
-
-Only revisit these when implementation evidence shows that the established contract cannot work.
-
-## Issue-Sized Next Development Packages
-
-### Package A — Dedicated Full Live Baseline
-
-Deliverables:
-
-- configure the dedicated GitHub environment and repository variables;
-- record Web build/locale/tier when observable;
-- run read-only capability probes;
-- verify temporary text and primary/compact sessions;
-- verify image, video, and music artifacts;
-- verify local file, URL, and Deep Research workflows;
-- run disposable scheduled/Gem/Notebook mutations with read-back;
-- delete every created resource by returned ID and record cleanup evidence.
-
-Acceptance criteria:
-
-- sanitized schema-valid report;
-- no raw responses, Cookies, account identifiers, or private text;
-- each capability classified as observed, unavailable, drifted, or not entitled;
-- all created test resources accounted for.
-
-### Package B — Complete Typed Admin and Deep-History Results
-
-Order:
-
-1. primary-only deep history scan;
-2. account inventory and compatibility probes;
-3. prompt operations;
-4. Cookie status/profile/export outcomes;
-5. doctor;
-6. cleanup;
-7. remaining scheduled and Notebook presentation.
-
-Acceptance criteria:
-
-- stable `DomainResult` data/error/meta contracts;
-- explicit pagination, truncation, retryability, and verification;
-- compatibility text agrees with structured state;
-- primary/compact semantic parity where both expose the action.
-
-### Package C — Complete Mutation Verification Audit
-
-Inventory every remote create/update/move/delete. For each mutation define:
-
-- authoritative read-back source;
-- positive terminal evidence;
-- not-observed, mismatch, still-present, incomplete, and read-back-error states;
-- idempotency/retry behavior;
-- cleanup or rollback guidance.
-
-Acceptance criteria: no success marker without positive evidence and regression coverage for verified plus ambiguous outcomes.
-
-### Package D — Shared Long-Operation Service
-
-Implement one domain/service contract for Deep Research, video, music, and future asynchronous media.
-
-Acceptance criteria:
-
-- stable operation IDs and provider IDs;
-- start/status/result/cancel tools or actions;
-- queued/running/completed/timed-out/cancelled/failed states;
-- restart behavior matching the owner decision;
-- artifact identity preserved from start through result;
-- primary/compact parity.
-
-### Package E — Durable Cleanup
-
-Implement the selected persistence model after the owner decision.
-
-Acceptance criteria:
-
-- restart-safe pending work when durability is enabled;
-- explicit retry and terminal failure states;
-- list/cancel/retry operations;
-- no private chat text in persistence;
-- direct-ID cleanup remains authoritative over marker search.
-
-### Package F — Multimodal Onboarding and Client Matrix
-
-Add onboarding subcommands and documented manual checks for video, music, file, URL, and Deep Research. Exercise the official client/platform matrix.
-
-Acceptance criteria:
-
-- one copyable command or client workflow per modality;
-- independently verified artifacts or structured results;
-- timeout/recovery guidance;
-- client-specific friction recorded as reproducible issues.
-
-### Package G — Selected UI-Parity Work
-
-Only after Packages A–F are stable, choose user-valued UI workflows such as Drive import, Canvas, richer recurrence, Notebook CRUD/source management, sharing, or Library management. Require current live evidence before adding private RPC contracts.
-
-## Recommended Conversation Order
-
-1. define the dedicated live account and release-blocking policy;
-2. choose long-operation persistence semantics;
-3. choose durable cleanup semantics;
-4. choose the first official client/platform/distribution matrix.
+Choose the first official support matrix across Codex, Claude Desktop, Claude Code, VS Code; macOS, Windows, Linux; and reviewed Git SHA, immutable GitHub Release wheel, PyPI, ClawHub, and discovery directories.

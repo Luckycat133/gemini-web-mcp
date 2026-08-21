@@ -13,7 +13,7 @@ def test_project_skill_frontmatter_and_guidance_are_complete():
     assert text.startswith("---\n")
     assert "name: gemini-web-mcp" in text
     assert "description:" in text
-    assert 'version: "0.2.0"' in text
+    assert 'version: "0.2.1"' in text
     assert "license: MIT-0" in text
     assert "openclaw:" in text
     assert "bins:" in text

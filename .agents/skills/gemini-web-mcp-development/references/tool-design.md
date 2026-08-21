@@ -8,7 +8,7 @@ Use this reference to move from “the repository builds” to “an agent can c
 - **Repository development skill:** instructs an engineering agent how to modify this repository.
 - **ClawHub runtime skill:** `clawhub install gemini-web-mcp` installs operating instructions for an already available runtime path; verify the public listing before claiming a repository change is published.
 
-These surfaces retain distinct roles and licenses, but the active repository version is unified at `0.2.0`. Rewritten package history and release refs use the canonical `0.2.0` version.
+These surfaces retain distinct roles and licenses, but the active repository version is unified at `0.2.1`. The existing `v0.2.0` tag remains immutable; new release refs use `0.2.1`.
 
 Do not use a runtime-skill installation as proof that the Python server package or a GitHub Release was installed.
 
@@ -182,6 +182,19 @@ Until the shared `start/status/result/cancel` API exists, record:
 - artifact identity from initial request through final result.
 
 This evidence should shape the shared operation service rather than creating modality-specific polling tools independently.
+
+## Shared Long-Operation Experience Target
+
+After the full live baseline, implement one local SQLite-backed flow:
+
+```text
+start -> operation_id
+status(operation_id)
+result(operation_id)
+cancel(operation_id)
+```
+
+Users must be able to restart the server and resume from another MCP client. Keep recovery metadata for seven days by default, preserve provider IDs and artifact identity, and report cancellation as best effort unless the provider confirms it. The database never stores prompts, chat text, Cookies, or raw responses.
 
 ## 8. Cleanup and History Verification
 

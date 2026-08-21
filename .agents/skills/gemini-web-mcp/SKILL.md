@@ -4,7 +4,7 @@ description: "Operate an installed Gemini Web MCP server safely: inspect the too
 license: MIT-0
 compatibility: "Requires Python 3.11+ and an installed server (verify with uvx --from git+https://github.com/Luckycat133/gemini-web-mcp@main gemini-mcp-onboarding). Live Gemini calls require account Cookies; image verification requires the image or all extra."
 metadata:
-  version: "0.2.0"
+  version: "0.2.1"
   openclaw:
     emoji: "♊️"
     homepage: https://github.com/Luckycat133/gemini-web-mcp

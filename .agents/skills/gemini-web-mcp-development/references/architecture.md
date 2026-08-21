@@ -42,11 +42,11 @@ The runtime uses `mcp>=2,<3` and `mcp-types>=2,<3` through the project-owned SDK
 
 ### Browser-Cookie Authorization
 
-Browser Cookie access is bounded, sanitized, and reversible. The ClawHub `0.2.0` runtime-skill patch established that Cookie export can create sensitive local authentication material, must be explicitly approved, and must never be logged or treated as arbitrary credential-file access.
+Browser Cookie access is bounded, sanitized, and reversible. The ClawHub `0.2.1` runtime-skill patch established that Cookie export can create sensitive local authentication material, must be explicitly approved, and must never be logged or treated as arbitrary credential-file access.
 
 ### Skill and Distribution Layout
 
-`.agents/skills` is the single repository source for the runtime and development skills. Their roles and licenses remain distinct, but both Skills and the Python package share the active `0.2.0` version. The ClawHub `0.2.0` audit remains evidence for the canonical release line; repository changes alone are not publication evidence. Wheel, source distribution, runtime skill archive, clean install, and isolated onboarding are maintained gates.
+`.agents/skills` is the single repository source for the runtime and development skills. Their roles and licenses remain distinct, but both Skills and the Python package share the active `0.2.1` version. The ClawHub `0.2.1` audit remains evidence for the canonical release line; repository changes alone are not publication evidence. Wheel, source distribution, runtime skill archive, clean install, and isolated onboarding are maintained gates.
 
 ### Current Live Evidence Boundary
 
@@ -104,7 +104,7 @@ result(operation_id)
 cancel(operation_id)
 ```
 
-The service must define provider-backed identifiers, local registry state, persistence, cancellation, expiry, and behavior after process restart.
+Use a local-only SQLite registry with provider identifiers, restart and cross-client recovery, seven-day default expiry, artifact identity continuity, and best-effort cancellation unless provider cancellation is observed.
 
 ### 6. Cleanup Is Process-Local
 
@@ -115,7 +115,7 @@ Delayed remote-chat cleanup and observations are held in memory. A restart can l
 - keep caller-controlled retention and TTL;
 - expose pending/retry/terminal cleanup state.
 
-The persistence mechanism still requires an owner decision.
+The owner approved a local-only SQLite queue. It stores identifiers and recovery state, never prompts, chat text, Cookies, or raw upstream responses.
 
 ### 7. Search Pagination Contract
 
@@ -148,10 +148,10 @@ Do not repeatedly reopen these choices:
 
 ## Recommended Development Order
 
-1. Configure and record the dedicated full live baseline.
-2. Complete typed results for deep history and account/admin workflows.
-3. Finish the mutation read-back audit.
-4. Add the shared long-operation service and tool contract.
-5. Implement the selected durable cleanup model.
+1. Configure and record the dedicated full live baseline using maintainer-supplied Cookie secrets.
+2. Add the shared SQLite-backed long-operation service and tool contract.
+3. Complete typed results for deep history and account/admin workflows.
+4. Finish the mutation read-back audit.
+5. Implement SQLite-backed durable cleanup.
 6. Add video/music/file/URL/research onboarding and a real client/platform matrix.
 7. Revisit UI-parity features only after the preceding workflows are stable.

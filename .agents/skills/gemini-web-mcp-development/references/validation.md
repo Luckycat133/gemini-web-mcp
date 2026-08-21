@@ -89,7 +89,7 @@ SOURCE="git+https://github.com/Luckycat133/gemini-web-mcp@${REVIEWED_SHA}"
 uvx --from "$SOURCE" gemini-mcp-onboarding
 ```
 
-The Python package and both public Skills share one active version, currently `0.2.0`. Verify their frontmatter, the changelog section, runtime metadata, release tag, and generated artifact names together. Rewritten history and release refs use the canonical project version.
+The Python package and both public Skills share active version `0.2.1`. Verify frontmatter, changelog, runtime metadata, release tag, and generated artifacts together while preserving `v0.2.0` as immutable history.
 
 ## Development Skill Changes
 
@@ -123,7 +123,7 @@ When `.agents/skills/gemini-web-mcp` changes:
 - preserve the explicit browser-Cookie authentication boundary;
 - do not claim that a dry-run or local archive is already published.
 
-The canonical repository version is `0.2.0`. Inspect ClawHub before claiming that the repository version has been published there.
+The active repository version is `0.2.1`; preserve the existing `v0.2.0` tag. Inspect ClawHub before claiming that `0.2.1` has been published there.
 
 ## Workflow Changes
 
@@ -140,6 +140,14 @@ Check:
 - the final head, not an earlier branch commit, owns the cited checks.
 
 A zero-job parse/startup failure is not a passing workflow.
+
+## SQLite Persistence Tests
+
+For long operations, cover schema creation/migration, restart recovery, concurrent status/result calls, cross-client resume, idempotent terminal reads, seven-day expiry/pruning, best-effort versus provider-confirmed cancellation, corrupt/missing records, artifact identity continuity, and proof that prompts, chat text, Cookies, and raw responses are never persisted.
+
+For cleanup, cover restart-safe pending work, retry/backoff, terminal failure, list/retry/cancel, duplicate deletion, direct-ID verification, temporary-chat bypass, and absence of private text in storage.
+
+torage.
 
 ## Live Evidence Boundary
 

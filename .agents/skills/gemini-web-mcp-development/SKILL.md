@@ -7,7 +7,7 @@ metadata:
   author: Luckycat133
   project: gemini-web-mcp
   scope: development
-  version: "0.2.0"
+  version: "0.2.1"
 ---
 
 # Gemini Web MCP Development
@@ -48,9 +48,9 @@ Also inspect:
 
 Use one canonical active version:
 
-- `pyproject.toml`, the runtime Skill, and the development Skill currently declare `0.2.0`;
+- `pyproject.toml`, the runtime Skill, and the development Skill currently declare `0.2.1`;
 - release asset names and runtime banners derive from the Python package metadata;
-- all rewritten Git history and release refs use the canonical `0.2.0` project version.
+- the existing `v0.2.0` tag remains immutable and new release refs use `0.2.1`.
 
 Update all three active version sources and `docs/changelog.md` in the same commit for every future version bump.
 
@@ -68,7 +68,7 @@ The maintained tree already includes:
 - Notebook, scheduled-action, account, Gem, prompt, Cookie, doctor, cleanup, and compatibility surfaces;
 - centralized reverse-engineered RPC contracts and pure parsers;
 - verified Gem mutation semantics and evidence-based chat deletion;
-- bounded browser-Cookie authorization handling and the security wording contract established by the ClawHub `0.2.0` audit;
+- bounded browser-Cookie authorization handling and the security wording contract established by the ClawHub `0.2.1` audit;
 - `.agents/skills` as the single repository source for public skills;
 - wheel/sdist/skill packaging, clean-install smoke, isolated `uvx` onboarding, and release gates;
 - a separately gated live compatibility canary;
@@ -123,32 +123,40 @@ Response prose is not a generated image, video, audio file, or report. Return a 
 
 The ClawHub security review established the operational contract. Treat browser Cookies as sensitive account-authentication material, require explicit user approval before export, restrict local cache access, never log/back up/share values, and remove caches when no longer needed. Session reset affects only MCP/Gemini conversation state. Do not reopen this as a generic policy discussion unless implementation behavior changes.
 
+### Local SQLite Persistence Is Settled
+
+Long-operation recovery and delayed cleanup may use a local-only SQLite database. Persist only operation/resource IDs, provider IDs, state, timestamps, attempts, error/verification codes, and artifact locators. Never persist prompts, chat text, Cookies, or raw upstream responses.
+
+Long operations default to seven-day retention, support restart and cross-client resume by operation ID, and expose best-effort cancellation unless provider cancellation is positively observed. Prefer provider-native temporary chats; only non-temporary cleanup work enters the durable queue.
+
 ### Test Doubles Do Not Prove the Product
 
 `tests._fastmcp_shim` is only a registration/branch-testing double. Real product evidence still requires actual MCP stdio discovery/calls, installed-wheel smoke, onboarding, and explicitly authorized live verification.
 
 ## Active Development Order
 
-Unless the owner selects a different product priority:
+Unless the owner explicitly changes product priority:
 
-1. establish the dedicated full live baseline for media, files, URLs, research, and disposable account mutations;
-2. complete typed results for the primary deep history scan and remaining account/admin surfaces;
-3. finish the read-back audit for every remote mutation;
-4. introduce one shared long-operation `start/status/result/cancel` contract;
-5. decide and implement cleanup durability across restarts;
-6. add end-to-end video, music, file, URL, and research onboarding plus a real client matrix;
-7. pursue Drive, Canvas, richer Notebook/scheduled/sharing, and other UI-parity work only after the core workflows are reliable.
+1. establish the dedicated full live baseline for media, files, URLs, research, disposable account mutations, and cleanup;
+2. implement one shared SQLite-backed long-operation `start/status/result/cancel` service for Deep Research, video, and music;
+3. complete typed results for primary deep history and remaining account/admin surfaces;
+4. finish the read-back audit for every remote mutation;
+5. implement SQLite-backed restart-durable cleanup;
+6. add end-to-end multimodal onboarding and the official client/platform matrix;
+7. pursue Drive, Canvas, richer Notebook/scheduled/sharing, and other UI parity only after core reliability.
 
-## Owner Decisions That Still Block Product Contracts
+## Settled Owner Decisions and Remaining Product Choice
 
-Load [roadmap.md](references/roadmap.md) before changing:
+The following are settled and must not be reopened during routine work:
 
-- ownership, cadence, entitlement scope, and evidence retention for the dedicated live-canary account;
-- persistence and cancellation semantics for the shared long-operation API;
-- process-local versus durable cleanup semantics;
-- the official client/platform support matrix and canonical distribution path.
+- preserve `v0.2.0` and publish the completed patch as `v0.2.1`;
+- the maintainer supplies account Cookies through a protected environment for explicitly authorized live testing;
+- complete the full live baseline before the shared long-operation service;
+- use local-only SQLite for long-operation recovery and delayed cleanup;
+- keep the compact low-token facade while execution moves into shared services;
+- prioritize reliability and agent task completion before broad UI parity.
 
-The unified `0.2.0` version contract, Cookie boundary, compact-server direction, and reliability-before-UI-parity priority are already established; do not repeatedly ask the owner to re-decide them.
+Load [roadmap.md](references/roadmap.md) only when selecting the first official client/OS/distribution support matrix.
 
 ## Testing and Real Experience
 
@@ -176,7 +184,7 @@ Do not claim a live capability from fixtures, package smoke, a skipped canary, o
 - Do not add tools only to mirror every observed Gemini UI entry.
 - Do not scatter emergency RPC IDs or response indices outside the registry/parser boundary.
 - Do not hardcode volatile test counts in public badges or skill instructions.
-- Do not let the active package and Skill versions drift; keep rewritten history and release refs at the canonical `0.2.0` version.
+- Do not let the active package and Skill versions drift; preserve `v0.2.0` and create new release refs at `0.2.1` or later.
 - Do not call a skipped workflow, fixture, or synthetic response a live test.
 
 ## References

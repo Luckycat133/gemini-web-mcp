@@ -47,7 +47,7 @@ def test_development_skill_frontmatter_and_progressive_disclosure() -> None:
     assert re.search(r"^name: gemini-web-mcp-development$", frontmatter, re.MULTILINE)
     assert re.search(r"^description: .+Use for .+$", frontmatter, re.MULTILINE)
     assert "scope: development" in frontmatter
-    assert 'version: "0.2.0"' in frontmatter
+    assert 'version: "0.2.1"' in frontmatter
     assert len(lines) < 500
 
     reference_links = re.findall(r"\]\((references/[^)]+)\)", body)
@@ -74,12 +74,11 @@ def test_development_skill_tracks_current_baseline_and_version_contract() -> Non
     for required in (
         "Authentication Boundary Is Settled",
         "Dedicated Full Live Baseline",
-        "Long-Operation Persistence and Cancellation",
-        "Shared Long-Operation Service",
+        "Shared SQLite Long-Operation Service",
         "bounded authorized run on 2026-08-08",
-        "runtime Skill, and the development Skill currently declare `0.2.0`",
-        "all rewritten Git history and release refs use the canonical `0.2.0` project version",
-        "active repository version is unified at `0.2.0`",
+        "runtime Skill, and the development Skill currently declare `0.2.1`",
+        "existing `v0.2.0` tag remains immutable",
+        "local-only SQLite",
         "clawhub install gemini-web-mcp",
         "tests._fastmcp_shim",
         "Do not hardcode volatile test counts",
@@ -102,15 +101,11 @@ def test_development_skill_limits_owner_decisions_to_unsettled_contracts() -> No
     skill = (PUBLIC_SKILL / "SKILL.md").read_text(encoding="utf-8")
     roadmap = (PUBLIC_SKILL / "references" / "roadmap.md").read_text(encoding="utf-8")
 
-    assert "The unified `0.2.0` version contract, Cookie boundary, compact-server direction, and reliability-before-UI-parity priority are already established" in skill
-    assert "Settled Directions — Do Not Reopen by Default" in roadmap
-    assert "Settled Version Contract" in roadmap
-    assert "canonical active repository version" in roadmap
-    assert "Dedicated Live-Compatibility Account" in roadmap
-    assert "Long-Operation Persistence and Cancellation" in roadmap
-    assert "Durable Cleanup Semantics" in roadmap
-    assert "Official Support and Distribution Matrix" in roadmap
-    assert "Recommended Conversation Order" in roadmap
+    assert "Settled Owner Decisions and Remaining Product Choice" in skill
+    assert "Package A — Dedicated Full Live Baseline" in roadmap
+    assert "Package B — Shared SQLite Long-Operation Service" in roadmap
+    assert "Remaining Owner Question" in roadmap
+    assert "local-only SQLite" in roadmap
     assert "Next Monotonic Python Package Release" not in roadmap
 
 
@@ -135,5 +130,6 @@ def test_development_skill_names_maintained_validation_and_experience_paths() ->
     assert "REVIEWED_SHA=replace-with-reviewed-40-character-commit" in experience
     assert "<reviewed-sha>" not in experience
     assert "Do not encode a volatile passing-test number" in testing
-    assert "canonical repository version is `0.2.0`" in testing
+    assert "active repository version is `0.2.1`" in testing
+    assert "SQLite Persistence Tests" in testing
     assert "verified_absent" in experience
