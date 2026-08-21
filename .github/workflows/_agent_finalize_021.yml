@@ -1,3 +1,4 @@
+# One-shot branch finalizer; deletes itself after committing the 0.2.1 preparation.
 name: Finalize 0.2.1 release branch
 
 on:
