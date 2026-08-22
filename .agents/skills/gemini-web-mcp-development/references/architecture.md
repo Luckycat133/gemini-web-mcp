@@ -1,157 +1,287 @@
-# Current Architecture and Remaining Work
+# Current Architecture and Target Product Topology
 
-Use this reference when auditing the repository or choosing the next engineering task. Verify every statement against the current checkout, recent CI, and the latest live evidence before acting.
+Use this reference when changing server boundaries, shared services, tool catalogs, or Runtime Skills. Verify statements against the current checkout and latest evidence.
 
-## Current Product Baseline
+## Current Compatibility Stack
 
-The project already exposes a broad agent-facing Gemini Web surface:
+The repository currently ships:
 
-- primary MCP server profiles for narrow model, history, organization, account, scheduled, core, and full maintenance workflows;
-- a compact eleven-tool facade for low-token discovery;
-- one-shot chat, multi-turn sessions, thinking levels, learning modes, temporary chats, and Gem-backed chat;
-- image generation/editing, video, music, local-file analysis, URL analysis, and Deep Research;
-- typed artifact state for remote, local, queued, empty, partial, and failed outcomes;
-- shared typed history list/search/read/export/delete across primary and compact adapters;
-- native Notebook reads and chat moves;
-- account inventory, usage, public-link reads, model/mode discovery, scheduled daily create/get/list/delete, and Gem CRUD;
-- prompts, Cookie diagnostics, doctor, cleanup, onboarding, package/release automation, and an opt-in live canary;
-- official MCP Python SDK v2 discovery, generated schemas, structured content, and modern/legacy negotiation.
+- `gemini-mcp-server`: profile-based primary MCP surface;
+- `gemini-mcp-skill-server`: fixed eleven-tool low-token surface;
+- `gemini-mcp-onboarding`: credential-free preflight plus explicitly authorized examples;
+- one task-first compatibility Runtime Skill, `gemini-web-mcp`;
+- one Development Skill;
+- shared client/session/chat/lifecycle/Artifact/history services;
+- account, Notebook, Scheduled, Gem, Prompt, Doctor, Cleanup, and compatibility services;
+- MCP Python SDK v2 adapters with modern and legacy protocol smoke.
 
-## Recently Completed Foundations
+These remain supported compatibility surfaces while focused products are introduced.
 
-These are current baseline, not future work:
-
-### Shared History and Deletion Evidence
-
-Primary and compact history list/search/read/export/delete use one typed history service. Object- and mapping-backed values are normalized once, compatibility text is preserved, and deletion distinguishes:
-
-- verified absence after complete fresh metadata pagination;
-- accepted but unverifiable or incomplete read-back;
-- still-present records;
-- read-back failure.
-
-An ambiguous `read_chat(None)` or a zero-result marker search is not deletion proof.
-
-### Mutation Truthfulness
-
-Gem create/update/delete fails closed without positive read-back evidence. Notebook moves and scheduled actions preserve multiple verification states. Compatibility text may not advertise success when structured evidence is ambiguous or contradictory.
-
-### Runtime and Protocol Boundary
-
-The runtime uses `mcp>=2,<3` and `mcp-types>=2,<3` through the project-owned SDK adapter. Primary and compact entrypoints are exercised over real stdio in current and legacy protocol modes.
-
-### Browser-Cookie Authorization
-
-Browser Cookie access is bounded, sanitized, and reversible. The ClawHub `0.2.1` runtime-skill patch established that Cookie export can create sensitive local authentication material, must be explicitly approved, and must never be logged or treated as arbitrary credential-file access.
-
-### Skill and Distribution Layout
-
-`.agents/skills` is the single repository source for the runtime and development skills. Their roles and licenses remain distinct, but both Skills and the Python package share the active `0.2.1` version. The ClawHub `0.2.1` audit remains evidence for the canonical release line; repository changes alone are not publication evidence. Wheel, source distribution, runtime skill archive, clean install, and isolated onboarding are maintained gates.
-
-### Current Live Evidence Boundary
-
-A bounded authorized run on 2026-08-08 observed Cookie initialization, temporary/retained text, multi-turn sessions, typed primary/compact history, and verified absence for four created chats. It did not establish a dedicated-account full baseline and did not observe media, files, URLs, Deep Research, Web build, account tier, or account mutations.
-
-## Remaining High-Priority Engineering Gaps
-
-### 1. Dedicated Full Live Baseline
-
-The scheduled canary still skips unless the repository variables, dedicated environment, and account secrets are configured. Release-grade confidence still needs current evidence for:
-
-- Web build, locale, account tier, and entitlements;
-- image, video, and music artifacts;
-- local file and URL analysis;
-- Deep Research start, timeout, recovery, and report retrieval;
-- disposable scheduled/Gem/Notebook mutations with read-back;
-- cleanup of every created test resource.
-
-### 2. Incomplete Typed-Result Coverage
-
-Typed results cover core chat/session/artifact/research and shared history workflows. Remaining prose-first or uneven paths include:
-
-- primary-only deep history scan;
-- account inventory sub-actions and compatibility probes;
-- prompt, Cookie, doctor, and cleanup workflows;
-- portions of scheduled and Notebook presentation;
-- some maintenance and manifest-adjacent compatibility handlers.
-
-Agents should not need to parse prose or emoji to determine success, retryability, pagination, verification, or next action.
-
-### 3. Remaining Compact-Adapter Duplication
-
-Compact history execution is shared. Compact account, prompt, Cookie, doctor, cleanup, and parts of scheduled presentation still own duplicated execution or formatting. Migrate one bounded action family at a time into shared services while preserving the compact eleven-tool discovery surface.
-
-### 4. Uneven Mutation Verification
-
-Chat deletion and Gem mutations have strict evidence contracts. Complete the same audit for:
-
-- cleanup deletions;
-- prompt storage and deletion;
-- remaining scheduled branches;
-- remaining Notebook branches;
-- future sharing, public-link, settings, and Library mutations.
-
-Each mutation needs an authoritative source, explicit ambiguous states, and positive terminal evidence before success text.
-
-### 5. No Shared Long-Operation Job API
-
-Deep Research and media expose queued/running/timed-out states and identifiers, but recovery remains workflow-specific. Introduce one shared contract:
+## Product Priority
 
 ```text
-start -> operation_id
-status(operation_id)
-result(operation_id)
-cancel(operation_id)
+1. Extend an agent with assistance, search, understanding, and research
+2. Give an agent generated image/video/music/report Artifacts
+3. Let an agent explicitly manage Gemini account data
 ```
 
-Use a local-only SQLite registry with provider identifiers, restart and cross-client recovery, seven-day default expiry, artifact identity continuity, and best-effort cancellation unless provider cancellation is observed.
+Do not make account management part of the default coding-agent tool catalog.
 
-### 6. Cleanup Is Process-Local
+## Target Topology
 
-Delayed remote-chat cleanup and observations are held in memory. A restart can lose pending work. The likely direction is:
+```text
+Gemini Web adapter + RPC registry/parsers
+                    │
+        shared domain and services
+                    │
+ ┌──────────────────┼──────────────────┐
+ │                  │                  │
+assist adapter   create adapter    account adapter
+ │                  │                  │
+gemini-assist    gemini-create     gemini-account
+Skill + MCP       Skill + MCP       Skill + MCP
+```
 
-- prefer provider-native temporary chats;
-- persist only workflows that require delayed deletion;
-- keep caller-controlled retention and TTL;
-- expose pending/retry/terminal cleanup state.
+All products remain in one repository and one Python distribution.
 
-The owner approved a local-only SQLite queue. It stores identifiers and recovery state, never prompts, chat text, Cookies, or raw upstream responses.
+### Shared Layers
 
-### 7. Search Pagination Contract
+```text
+src/domain
+  DomainResult, Artifact, operation and verification models
 
-History search currently applies `offset`/`limit` to the source page before filtering, not to a global match result set. This is bounded and predictable but may surprise users. Preserve the current behavior until a reviewed contract defines post-filter pagination, remote-read cost, and `scan_turns=true` limits.
+src/infrastructure
+  Gemini Web / gemini-webapi boundary
+  RPC registry, payload builders, pure parsers
+  SQLite migrations and repositories
 
-## Deferred Gemini UI Workflows
+src/services
+  chat, understanding, search, research, media
+  operations, lifecycle, cleanup
+  history, account, notebooks, scheduled, gems, prompts
 
-These are real missing capabilities, but should follow core reliability and stable live evidence:
+src/surfaces
+  assist.py
+  create.py
+  account.py
+  compatibility adapters
+```
 
-- Google Drive picker/attachment import;
-- Canvas create/read/update/export;
-- scheduled-action edit, enable/disable, weekly, and richer recurrence;
-- Notebook create, rename, delete, and source management;
-- public-link create/update/revoke and sharing management;
-- history rename, pin/unpin, archive, and share;
-- personalization/settings and memory-import mutations;
-- Library asset listing and management;
-- genuine client-visible incremental progress.
+A surface must not implement a second copy of request construction, parsing, polling, Artifact extraction, verification, or persistence.
 
-Theme, help, feedback, location, subscription, and other UI chrome remain out of scope unless a concrete agent workflow requires them.
+## Focused Products
 
-## Settled Product Directions
+### Assistance
 
-Do not repeatedly reopen these choices:
+```text
+Skill: gemini-assist
+entrypoint: gemini-mcp-assist
+MCP name: gemini_assist_mcp
+```
 
-- browser-Cookie handling follows the explicit-approval and sensitive-cache contract;
-- the compact server remains the low-token discovery product while execution moves into shared services;
-- core multimodal reliability, artifact delivery, recovery, and agent task completion take priority over broad UI parity;
-- `.agents/skills` remains the single repository skill source.
+Public tools:
 
-## Recommended Development Order
+```text
+gemini_ask
+gemini_search
+gemini_understand_image
+gemini_understand
+gemini_research
+```
 
-1. Configure and record the dedicated full live baseline using maintainer-supplied Cookie secrets.
-2. Add the shared SQLite-backed long-operation service and tool contract.
-3. Complete typed results for deep history and account/admin workflows.
-4. Finish the mutation read-back audit.
-5. Implement SQLite-backed durable cleanup.
-6. Add video/music/file/URL/research onboarding and a real client/platform matrix.
-7. Revisit UI-parity features only after the preceding workflows are stable.
+Responsibilities:
+
+- second opinions, critique, code/design review;
+- quick grounded search with observed source evidence;
+- simple visual understanding;
+- typed mixed-input understanding;
+- asynchronous Deep Research start.
+
+It does not expose history, Cookie, Scheduled, Gem, Prompt, or cleanup tools.
+
+### Creation
+
+```text
+Skill: gemini-create
+entrypoint: gemini-mcp-create
+MCP name: gemini_create_mcp
+```
+
+Public tools:
+
+```text
+gemini_generate_image
+gemini_edit_image
+gemini_generate_video
+gemini_generate_music
+gemini_get_operation_status
+gemini_get_operation_result
+gemini_cancel_operation
+```
+
+Responsibilities:
+
+- create verified image Artifacts;
+- edit an existing image and preserve source Artifact identity;
+- start video/music operations;
+- recover operation state and final Artifacts.
+
+It does not expose account data or generic chat/history tools.
+
+### Account
+
+```text
+Skill: gemini-account
+entrypoint: gemini-mcp-account
+MCP name: gemini_account_mcp
+```
+
+Public tools:
+
+```text
+gemini_history
+gemini_notebooks
+gemini_scheduled
+gemini_gems
+gemini_prompts
+gemini_account
+gemini_cleanup
+```
+
+Responsibilities:
+
+- explicit account metadata and content workflows;
+- read-before-mutate object selection;
+- authoritative mutation verification;
+- maintenance and cleanup diagnostics.
+
+This surface may expose a paginated operation/cleanup diagnostics view for maintenance. Assist/create should not expose an unbounded list of other clients' operations.
+
+## Tool Design Constraints
+
+### Prefixes and Discoverability
+
+Public tools use `gemini_` prefixes because hosts can aggregate multiple MCP servers. Names are verb-first and task-specific. Descriptions state exactly when the model should invoke them and what evidence they return.
+
+### Deterministic Catalogs
+
+Each dedicated server has a stable, small catalog. Authentication may affect execution or capabilities, but not silently replace the catalog with unrelated tools. Tool order, names, schemas, and annotations are snapshot-tested.
+
+### Structured Output
+
+Every public tool defines an output schema and returns validated structured content. Compatibility text is optional presentation and cannot contradict structured state.
+
+### Grounded Search
+
+`gemini_search` returns:
+
+```text
+answer
+sources[]
+observed_at
+grounding_state = grounded | answer_only | unavailable | failed
+```
+
+`grounded` requires observed source URLs or equivalent structured source evidence. A model answer without evidence is `answer_only`.
+
+### Mixed Inputs
+
+`gemini_understand` accepts a typed input collection rather than one overloaded string:
+
+```text
+text
+image path/URI
+file path/URI
+URL
+later audio/video
+```
+
+Each input keeps a stable identity. The result records which inputs were accepted, analyzed, skipped, or failed.
+
+### Artifacts
+
+Creation and completed Research return resource links or verified local files plus structured metadata. The calling agent uses the Artifact in its downstream task. Remote URI, local file, queued, partial, empty, and failed remain distinct.
+
+### Long Operations
+
+Modality-specific tools start operations and return an opaque handle immediately. Explicit status/result/cancel tools receive the handle as an argument. Do not rely on transport connection state.
+
+If the official MCP Tasks extension is available and negotiated, it can be supported as an additional protocol-native representation. The project-owned operation contract remains the compatibility path because supported clients and the Python SDK may not all expose the extension uniformly.
+
+## SQLite Boundaries
+
+Use one local database with explicit schema versions.
+
+### `operations`
+
+Allowed fields:
+
+```text
+operation_id
+operation_type
+provider_operation_id
+upstream_chat_id
+state
+created_at / updated_at / expires_at
+attempt_count
+error_code
+verification_status
+artifact_id / artifact locator
+```
+
+### `cleanup_jobs`
+
+Allowed fields:
+
+```text
+job_id
+resource_type / resource_id
+delete_at
+state
+attempt_count / next_attempt_at
+error_code
+verification_status
+```
+
+Never store Cookies, prompts, chat/report text, raw responses, or generated bytes.
+
+Operation IDs are high-entropy, opaque, restart-safe, and independent of MCP connection identity. Default retention is seven days. Status and result are idempotent. Cancellation is cooperative/best-effort until positively observed.
+
+## Existing Foundations to Preserve
+
+- async-safe client initialization/reset;
+- shared Session and Chat services;
+- typed `DomainResult` and stable public errors;
+- Artifact normalization and local verification;
+- centralized reverse-engineered contracts/parsers;
+- typed shared history and evidence-based deletion;
+- Gem read-back verification;
+- package/protocol/onboarding gates;
+- explicit live-evidence boundary.
+
+## Migration Strategy
+
+1. Keep the compatibility servers and `gemini-web-mcp` Skill working.
+2. Make the compatibility Skill task-first and route current tools truthfully.
+3. Build one complete `gemini-assist` vertical slice without copying business logic.
+4. Build `gemini-create` image flows.
+5. Add OperationService, then Research/video/music.
+6. Build `gemini-account` from shared account/history services.
+7. Publish dedicated Skills only after their entrypoints and trigger evaluations pass.
+8. Deprecate compatibility surfaces only after real client adoption proves the dedicated products.
+
+## Remaining Engineering Gaps
+
+- no dedicated assist/create/account entrypoints yet;
+- no grounded quick-search contract yet;
+- no typed mixed-input understanding service yet;
+- no restart-safe OperationService yet;
+- no restart-safe Cleanup queue yet;
+- prose-first admin paths remain;
+- mutation verification is uneven outside History/Gems;
+- full current live evidence is incomplete;
+- official client/OS matrix is undecided.
+
+## Deferred UI Parity
+
+Drive import, Canvas mutation, richer recurrence, Notebook CRUD/source management, sharing, settings, memory import, and Library asset management remain secondary until the focused core workflows are reliable.
