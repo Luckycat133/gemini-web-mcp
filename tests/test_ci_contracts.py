@@ -10,7 +10,7 @@ import tomllib
 from pathlib import Path
 
 from scripts.run_contract_checklist import CONTRACT_TESTS
-from scripts.smoke_profiles import COMPACT_TOOLS, PRIMARY_PROFILE_TOOLS
+from scripts.smoke_profiles import ASSIST_TOOLS, COMPACT_TOOLS, PRIMARY_PROFILE_TOOLS
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 CI_WORKFLOW = PROJECT_ROOT / ".github" / "workflows" / "ci.yml"
@@ -83,6 +83,7 @@ def test_representative_profile_snapshots_are_explicit_and_exhaustive() -> None:
         "scheduled",
         "session",
     }
+    assert ASSIST_TOOLS == {"gemini_ask"}
 
 
 def test_profile_snapshot_smoke_passes_from_the_installed_environment() -> None:

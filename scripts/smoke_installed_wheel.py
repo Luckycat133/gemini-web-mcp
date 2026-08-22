@@ -19,8 +19,9 @@ EXPECTED_ENTRY_POINTS = {
     "gemini-mcp-server": "src.server:main",
     "gemini-mcp-skill-server": "src.skill_server:main",
     "gemini-mcp-onboarding": "src.onboarding:main",
+    "gemini-mcp-assist": "src.surfaces.assist:main",
 }
-SERVER_ENTRY_POINTS = ("gemini-mcp-server", "gemini-mcp-skill-server")
+SERVER_ENTRY_POINTS = ("gemini-mcp-server", "gemini-mcp-skill-server", "gemini-mcp-assist")
 
 
 def _assert_installed_import() -> Path:
@@ -59,18 +60,22 @@ def _check_entry_point_metadata() -> None:
             raise TypeError(f"Console entrypoint {name!r} does not resolve to a callable")
 
 
-async def _check_tool_surfaces() -> tuple[int, int]:
+async def _check_tool_surfaces() -> tuple[int, int, int]:
     os.environ["GEMINI_TOOLS"] = "model"
     from src.server import mcp as primary_mcp
     from src.skill_server import mcp as compact_mcp
+    from src.surfaces.assist import mcp as assist_mcp
 
     primary_tools = {tool.name for tool in await primary_mcp.list_tools()}
     compact_tools = {tool.name for tool in await compact_mcp.list_tools()}
+    assist_tools = {tool.name for tool in await assist_mcp.list_tools()}
     if not {"gemini_chat", "gemini_doctor", "gemini_get_tool_manifest"} <= primary_tools:
         raise RuntimeError(f"Primary installed surface is incomplete: {sorted(primary_tools)}")
     if not {"chat", "doctor", "account"} <= compact_tools:
         raise RuntimeError(f"Compact installed surface is incomplete: {sorted(compact_tools)}")
-    return len(primary_tools), len(compact_tools)
+    if not {"gemini_ask"} <= assist_tools:
+        raise RuntimeError(f"Assist installed surface is incomplete: {sorted(assist_tools)}")
+    return len(primary_tools), len(compact_tools), len(assist_tools)
 
 
 def _start_console_entrypoints() -> None:
@@ -152,7 +157,7 @@ def main() -> None:
     package_path = _assert_installed_import()
     prompt_payload = _check_package_data()
     _check_entry_point_metadata()
-    primary_count, compact_count = asyncio.run(_check_tool_surfaces())
+    primary_count, compact_count, assist_count = asyncio.run(_check_tool_surfaces())
     _start_console_entrypoints()
     onboarding = _call_offline_text_tool()
     print(
@@ -164,6 +169,7 @@ def main() -> None:
                 "default_prompts": len(prompt_payload["prompts"]),
                 "primary_tools": primary_count,
                 "compact_tools": compact_count,
+                "assist_tools": assist_count,
                 "entrypoints_started": sorted(EXPECTED_ENTRY_POINTS),
                 "onboarding_text_tool": onboarding["text_tool"],
                 "onboarding_mode": onboarding["mode"],
