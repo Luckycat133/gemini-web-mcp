@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- Hardened research source extraction: percent-encoded gstatic icon paths (e.g. `/fav%69con.ico`) can no longer bypass the favicon filter, non-domain hostnames (IPv6 literals, embedded whitespace, invalid ports) are rejected, blank source titles are dropped, and duplicate sources are detected on a normalized scheme/host/default-port/path/query key instead of raw URL strings
+
 ## [0.2.0] - 2026-08-13
 
 ### Added

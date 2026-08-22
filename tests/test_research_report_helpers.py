@@ -439,6 +439,54 @@ def test_extract_sources_from_node_keeps_google_lookalikes_outside_hostname():
     ]
 
 
+def test_extract_sources_from_node_drops_blank_titles_and_malformed_hostnames():
+    """空白 title、含空格的主机名、IPv6 字面量、非法端口都被丢弃。"""
+    node = [
+        ["fav", "https://example.com/ok", "Ok"],
+        ["fav", "https://example.com/ws-title", "   "],  # 空白 title
+        ["fav", "https://example.com/empty-title", ""],  # 空 title
+        ["fav", "http://exa mple.com/space-host", "Space host"],  # 主机含空格
+        ["fav", "http://[2001:db8::1]/v6", "IPv6 literal"],  # IPv6 字面量
+        ["fav", "https://example.com:notaport/bad-port", "Bad port"],  # 非法端口
+    ]
+    assert _extract_sources_from_node(node) == [
+        {"url": "https://example.com/ok", "title": "Ok"},
+    ]
+
+
+def test_extract_sources_from_node_filters_percent_encoded_gstatic_favicon():
+    """unquote 后再匹配：%66avicon 等编码写法无法绕过 gstatic 图标过滤。"""
+    node = [
+        ["fav", "https://www.gstatic.com/fav%69con.ico", "Encoded"],
+        ["fav", "https://www.gstatic.com/faviconV2/client2?x=1", "V2"],
+        ["fav", "https://gstatic.com/favicon.ico", "Plain"],
+    ]
+    assert _extract_sources_from_node(node) == []
+
+
+def test_extract_sources_from_node_keeps_non_icon_gstatic_paths():
+    """首段不是已知图标名的 gstatic 路径（如 /favicon-notes）不被误杀。"""
+    node = [["fav", "https://www.gstatic.com/favicon-notes", "Notes"]]
+    assert _extract_sources_from_node(node) == [
+        {"url": "https://www.gstatic.com/favicon-notes", "title": "Notes"},
+    ]
+
+
+def test_extract_sources_from_node_dedupes_normalized_urls():
+    """scheme/主机大小写、默认端口、结尾斜杠、fragment 差异视为同一来源；path 大小写保留。"""
+    node = [
+        ["fav", "https://Example.com/a/", "First"],
+        ["fav", "https://example.com/a", "Same path no slash"],
+        ["fav", "https://example.com:443/a#frag", "Explicit port + fragment"],
+        ["fav", "HTTPS://EXAMPLE.COM/a/", "Uppercase scheme+host"],
+        ["fav", "http://example.com:80/b#x", "HTTP default port"],
+        ["fav", "http://example.com/b", "HTTP same path"],
+        ["fav", "https://example.com/a?utm=1", "Different query kept"],
+    ]
+    sources = _extract_sources_from_node(node)
+    assert [s["title"] for s in sources] == ["First", "HTTP default port", "Different query kept"]
+
+
 def test_extract_sources_from_node_returns_empty_when_no_valid_items():
     """无有效 source → 空列表。"""
     assert _extract_sources_from_node(["just", "strings", "here"]) == []

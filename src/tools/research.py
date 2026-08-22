@@ -12,7 +12,7 @@ import re
 from collections.abc import Awaitable
 from types import SimpleNamespace
 from typing import Any, Literal
-from urllib.parse import urlsplit
+from urllib.parse import unquote, urlsplit, urlunsplit
 
 from ..adapters.mcp_sdk import MCPServer, TextContent
 
@@ -1011,26 +1011,47 @@ def _extract_sources_from_node(node: Any) -> list[dict[str, str]]:
     for _path, item in _walk_nested_json(node):
         if not isinstance(item, list) or len(item) < 3:
             continue
+        # 条目形状为 [favicon, url, title]；favicon 仅用于结构校验，不参与输出。
         favicon, url, title = item[0], item[1], item[2]
         if not (isinstance(favicon, str) and isinstance(url, str) and isinstance(title, str)):
+            continue
+        if not title.strip():
             continue
         try:
             parsed_url = urlsplit(url)
             hostname = parsed_url.hostname
+            port = parsed_url.port
         except ValueError:
             continue
-        if parsed_url.scheme.lower() not in {"http", "https"} or not hostname:
+        scheme = parsed_url.scheme.lower()
+        if scheme not in {"http", "https"} or not hostname:
             continue
         normalized_hostname = hostname.rstrip(".").lower()
+        # 来源必须是普通域名：IPv6 字面量、含空格等畸形主机名一律丢弃，
+        # 防止绕过下方 google/gstatic 过滤。
+        if not re.fullmatch(r"[a-z0-9]([a-z0-9.-]*[a-z0-9])?", normalized_hostname):
+            continue
         is_googleusercontent = normalized_hostname == "googleusercontent.com" or normalized_hostname.endswith(
             ".googleusercontent.com"
         )
         is_gstatic = normalized_hostname == "gstatic.com" or normalized_hostname.endswith(".gstatic.com")
-        if is_googleusercontent or (is_gstatic and parsed_url.path.lower().startswith("/favicon")):
+        if is_googleusercontent:
             continue
-        if url in seen:
+        if is_gstatic:
+            # 先 unquote 再匹配，防止 %66avicon 这类编码绕过；只认已知图标路径，
+            # 避免 /favicon-notes 之类的正常 gstatic 页面被误杀。
+            favicon_path = unquote(parsed_url.path).lower()
+            if favicon_path.startswith(("/favicon.ico", "/faviconv")):
+                continue
+        # 去重键做归一化：scheme/主机小写、默认端口、结尾斜杠、fragment 差异视为同一来源。
+        netloc = parsed_url.netloc.lower()
+        default_port = {"http": 80, "https": 443}.get(scheme)
+        if port is not None and port == default_port:
+            netloc = netloc.rsplit(":", 1)[0]
+        dedupe_key = urlunsplit((scheme, netloc, parsed_url.path.rstrip("/") or "/", parsed_url.query, ""))
+        if dedupe_key in seen:
             continue
-        seen.add(url)
+        seen.add(dedupe_key)
         sources.append({"url": url, "title": title})
     return sources
 
