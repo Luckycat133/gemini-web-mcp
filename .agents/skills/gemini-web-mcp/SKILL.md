@@ -1,10 +1,10 @@
 ---
 name: gemini-web-mcp
-description: "Operate an installed Gemini Web MCP server safely: inspect the tool manifest, choose the narrowest profile and read-only workflow, manage explicitly selected history/notebook/account tasks, and verify generated media artifacts. Use for MCP tool operation; do not use for repository implementation, tests, CI, packaging, or releases—use gemini-web-mcp-development instead."
+description: "Use this skill when an agent should extend itself with Gemini Web: get a second opinion, search current web sources, understand images/files/URLs, run Deep Research, generate or edit image/video/music artifacts, or explicitly work with Gemini account data. Route by user intent instead of loading every tool. Do not use for repository implementation, tests, CI, packaging, or releases—use gemini-web-mcp-development instead."
 license: MIT-0
-compatibility: "Requires Python 3.11+ and an installed server (verify with uvx --from git+https://github.com/Luckycat133/gemini-web-mcp@main gemini-mcp-onboarding). Live Gemini calls require account Cookies; image verification requires the image or all extra."
+compatibility: "Requires Python 3.11+ and an installed Gemini Web MCP server. The low-token server covers common chat, image, generation, and account workflows; the primary core profile is currently required for local files, URLs, and Deep Research. Live calls require Gemini Web account Cookies."
 metadata:
-  version: "0.2.0"
+  version: "0.2.1"
   openclaw:
     emoji: "♊️"
     homepage: https://github.com/Luckycat133/gemini-web-mcp
@@ -30,110 +30,105 @@ metadata:
         description: Optional bounded macOS browser-credential authorization wait for Cookie discovery.
       - name: GEMINI_TOOLS
         required: false
-        description: Optional primary-server tool profile such as model, core, or all.
+        description: Optional primary-server tool profile such as model, core, history, or account-read.
 ---
 
 # Gemini Web MCP
 
-Use this skill only to operate the installed primary or low-token MCP server. For source changes, tests, CI, packaging, compatibility probes, or releases, stop and use the separate `gemini-web-mcp-development` skill.
+Use this Skill to complete the user's task with Gemini, not to tour the Gemini tool surface.
 
-## Start Here
+The product priority is:
 
-1. Before configuring an account, verify the installed server with `uvx --from git+https://github.com/Luckycat133/gemini-web-mcp@main gemini-mcp-onboarding`; this calls a real auth-free text tool and strips Gemini Cookie variables from its child process.
-2. Prefer `gemini_get_tool_manifest` before choosing primary-server tools. It is always exposed by `src.server`, including the narrow `model` profile.
-3. Check manifest `current_enabled`, `groups`, and `workflows`; do not hard-code tool counts because the static manifest can include groups not loaded in the current process.
-4. On the low-token server, prefer auth-free `account(action="manifest")` and `account(action="capabilities")` before account calls that initialize Gemini.
-5. Prefer read-only discovery first: `gemini_doctor`, manifest/capabilities, `gemini_probe_web_features`, metadata-only history search, profile diagnostics, and inventory/list tools.
-6. Treat `privacy=reads_private_chat_text` and other private text tools as explicit-user-intent tools: `gemini_read_chat`, `gemini_export_chat`, `gemini_search_chats(scan_turns=true)`, and research-report create actions that read chat text.
-7. Treat destructive tools as requiring explicit user intent: `gemini_delete_chat`, `gemini_cleanup_test_artifacts(dry_run=false)`, `gemini_delete_scheduled_action`, `gemini_reset_session`, `gemini_manage_gems(action="delete")`, and prompt deletion.
-8. `gemini_reset_session` changes only MCP/Gemini conversation state; it never changes agent memory or agent instructions.
+```text
+1. Agent assistance and multimodal understanding
+2. Generated artifacts
+3. Explicit Gemini account management
+```
 
-> Need the full tool/group/privacy/destructive map? See [references/tool_surface.md](references/tool_surface.md). Load it on demand — the live `gemini_get_tool_manifest` remains the source of truth.
+Choose one lane for the current task. Do not expose or load account-management tools merely because they exist.
 
-## Tool Surfaces
+## Choose the Capability Lane
 
-- Primary MCP server: `src.server`
-  - Use `GEMINI_TOOLS=model` or `chat` when an agent only needs to call Gemini models.
-  - Use `GEMINI_TOOLS=history` when an agent only needs `gemini_history` for list/scan/search/read/export chat history.
-  - Use `GEMINI_TOOLS=history-organize` when an agent needs `gemini_history`, `gemini_notebooks`, and explicit chat-to-Notebook moves.
-  - Use `GEMINI_TOOLS=account-read` when an agent only needs `gemini_account_inventory` for read-only Web surface inventory.
-  - Use `GEMINI_TOOLS=scheduled-admin` only for explicitly authorized scheduled-action create/delete workflows.
-  - Default `GEMINI_TOOLS=core` remains the broad content workflow: chat, media, files, and research.
-  - `GEMINI_TOOLS=all` is the full maintenance/verification surface, not a good default for general agents.
-  - `GEMINI_TOOLS=prompts` adds local prompt management plus always-on manifest/cookie helpers.
-- Low-token skill server: `src.skill_server`
-  - Use `account(action="manifest")` for compact tool guidance.
-  - Use `account(action="capabilities")` for the static Web capability map without cookies.
-  - Use `account(action="features|links|usage|library|notebooks|scheduled|modes")` for compact account-surface inventory.
-  - Use `history(action="list|search|read|export|delete")` for chat history.
-  - Record every returned remote test-resource ID; Gemini-generated titles may omit prompt markers.
-  - Use `cleanup(dry_run=true)` as a bounded fallback before deleting test chats or scheduled actions by marker.
-  - Use `scheduled(action="list|get|create|delete")` for compact scheduled-action workflows.
-  - Use `create(type="music", model="pro")` or primary `gemini_generate_music` for Lyria 3 Pro music requests.
-  - Use `doctor(validate_browser=false)` for low-cost local preflight before live account workflows.
-  - Use `cookie(action="profiles")` before `cookie(action="get", profile="...")` when Chrome has multiple signed-in profiles.
-  - `cookie(action="get")` and primary `gemini_get_cookie_from_browser` can materialize sensitive account-authentication material in a local cache. Obtain explicit user approval, restrict file access, never log/back up/share the cache, and remove it when it is no longer needed.
+| User intent | Preferred current route | What success means |
+| --- | --- | --- |
+| Second opinion, critique, code/design review | low-token `chat`; primary `gemini_chat` when exact controls are needed | useful Gemini result incorporated into the agent's work |
+| Quick current-web lookup | `chat` or `gemini_chat` with an explicit request for current sources | answer plus observed source URLs; otherwise label it ungrounded or escalate to Research |
+| Understand one image or screenshot | low-token `chat(image_path=...)`; primary `gemini_chat(image_paths=[...])` | analysis returned to the agent and used in the surrounding task |
+| Understand files, URLs, or mixed evidence | primary `gemini_upload_file`, `gemini_analyze_url`, and image chat as needed | source identity preserved and conclusions synthesized |
+| Deep, multi-source research | primary `gemini_deep_research(wait_for_completion=false, retain_chat=true)` | an opaque operation/chat handle is preserved immediately; a later result yields a report |
+| Generate or edit images | low-token `create(type="image")` / `edit`; primary media tools when exact controls are needed | a usable image Artifact, preferably a verified local file |
+| Generate video or music | low-token `create(type="video"|"music")` or primary media tools | queued/completed state plus recoverable IDs and a usable media Artifact |
+| History, Notebook, Scheduled, Gem, Prompt, usage, or cleanup | low-token account facades or narrow primary profiles | only the explicitly requested account operation is performed |
 
-## Stream And Long-Operation Results
+Load [workflows.md](references/workflows.md) for detailed task routes.
 
-- Treat `gemini_chat_stream` and `gemini_send_message_stream` as compatibility names for Gemini upstream streaming. The current MCP tools normalize and collect all chunks, then return one result; they do not provide MCP incremental delivery.
-- Read `_meta.domain_result.data.stream`: `delivery="collected"`, while `chunk_semantics` reports `delta`, `cumulative`, `mixed`, or `empty`. Do not concatenate the returned text again.
-- For `gemini_deep_research`, read `_meta.domain_result.meta.operation_state` and `data.state`; distinguish `queued`, `running`, `completed`, and `timed_out` rather than inferring completion from prose.
-- Use `wait_for_completion=false` when the user wants plan/start only. Prefer `retain_chat=true` for later retrieval, and preserve `upstream_chat_id` / `upstream_operation_id` whenever `continuation_possible=true`.
-- A `timed_out` result means this MCP wait ended, not necessarily that Gemini stopped the upstream research. Only claim a report exists when `report_available=true` or a later report-read call verifies it.
+## Default Server Choice
 
-## Chat History Workflow
+Use `gemini-mcp-skill-server` for the smallest current tool surface when it can complete the task.
 
-1. Deep-scan metadata sources when completeness matters:
-   - `gemini_history(action="scan", limit=..., offset=..., response_format="json")`
-2. List or search metadata first:
-   - `gemini_history(action="list", limit=..., offset=..., response_format="json")`
-   - `gemini_history(action="search", query=..., scan_turns=false, response_format="json")`
-3. Only scan turn text when the user asks for content search:
-   - `gemini_history(action="search", query=..., scan_turns=true, turns_per_chat=..., max_chars_per_turn=...)`
-4. Read/export one selected chat only after the user has indicated the target:
-   - `gemini_history(action="read", chat_id=...)`
-   - `gemini_history(action="export", chat_id=..., response_format="markdown"|"json")`
-5. Move chats to native notebooks only after identifying both target chat and notebook:
-   - `gemini_notebooks(action="list", ...)`
-   - `gemini_move_chat_to_notebook(chat_id=..., notebook_id=...)`
-   - `gemini_notebooks(action="chats", notebook_id=...)`
-6. Delete only with explicit confirmation:
-   - `gemini_delete_chat(chat_id=...)`
-   - Claim deletion only when `_meta.domain_result.data.deleted=true` and
-     `verification.status=verified_absent`; this requires a complete fresh history-metadata read-back.
-     `not_available` means accepted but unverified, and `read_chat(None)` alone is never absence proof.
-   - For test chats, retain the returned remote ID at creation time. A metadata-only marker search may miss the chat when
-     Gemini generates a title without the prompt marker; use `scan_turns=true` only with explicit permission to read turn text.
+Use the primary server only for a narrow profile:
 
-## Web Pro Coverage Rules
+- `GEMINI_TOOLS=model` for text/session work;
+- `GEMINI_TOOLS=core` for files, URLs, media, and Deep Research;
+- `GEMINI_TOOLS=history` or `history-organize` for explicit history work;
+- `GEMINI_TOOLS=account-read` for explicit account inventory;
+- `GEMINI_TOOLS=scheduled-admin` only for requested scheduled mutations.
 
-- `gemini_get_web_capabilities` is the static observed Pro Web surface map.
-- `gemini_probe_web_features` checks observed read-only RPC reachability and must not expose raw private RPC bodies.
-- Use `gemini_account_inventory(surface=...)` or the manifest `web_surface_inventory` workflow for read-only account inventory: public links, usage limits, native notebooks, library capabilities, scheduled actions, and tool mode status.
-- Treat `gemini_list_library_capabilities` as localized template/capability discovery, not private Library asset export.
-- Treat `gemini_get_tool_mode_status` as a read-only Canvas/Guided Learning mode-status probe; Canvas document mutation remains disabled.
-- Guided Learning is exposed through chat `learning_mode`; prefer this over UI assumptions.
-- Keep Drive picker, Canvas mutation, settings mutation, memory import mutation, public-link mutation, and unsupported scheduled-action recurrence/edit/toggle variants disabled until stable RPC contracts and explicit user authorization exist.
+Do not use `GEMINI_TOOLS=all` as a general-agent default.
 
-## Media Workflow
+The repository is migrating toward three dedicated products—`gemini-assist`, `gemini-create`, and `gemini-account`—while this Skill remains the compatibility router.
 
-- For music/video/image generation requests, use the MCP tool path and finish only when the tool reports saved local media files or an explicit export failure.
-- Keep `requested_model`, `request_model`, `effective_backend`, and `observed_backend` separate. An expected/effective label is not live backend evidence.
-- For a local image claim, verify that the path is inside the requested output directory, the file exists and is non-empty, MIME is `image/*`, dimensions are positive, and structured verification is `verified`; response prose or a remote URI alone is insufficient.
-- For Lyria 3 Pro/fullsong claims, verify raw backend markers and saved media duration; do not trust wrapper labels, model names, or chat prose alone.
-- `gemini_generate_music` can recover media from raw chat payloads even when `response.media` is empty; inspect returned file paths and duration metadata before summarizing success.
+## Standard Workflow
 
-## Scheduled Actions
+1. Identify the user's intended outcome.
+2. Choose exactly one capability lane.
+3. Call the narrowest current tool that can complete it.
+4. Read the structured result before trusting compatibility prose.
+5. Continue the user's actual task with the result or Artifact.
+6. Use manifest or diagnostics only when discovery or recovery is needed.
 
-- Use observed daily create, registry list, by-id get, and explicit delete by id through `gemini_create_scheduled_action`, `gemini_list_scheduled_actions`, `gemini_get_scheduled_action`, and `gemini_delete_scheduled_action`.
-- Refresh Chrome cookies first when account context matters. If the registry is unexpectedly empty, call `gemini_list_browser_cookie_profiles`, then `gemini_get_cookie_from_browser(profile="...")` for the profile with Gemini cookies or scheduled registry entries.
-- On macOS, treat `BROWSER_COOKIE_ACCESS_TIMEOUT` as a local browser-credential authorization timeout, not an invalid-account result. This workflow does not read arbitrary credential files. Adjust `GEMINI_BROWSER_COOKIE_TIMEOUT_SECONDS` only when the user controls that host; never request or print Cookie values.
-- After create/delete, check `verification_status`; after create also check `readable_by_id_after_create`, and after delete check `deleted_by_id_after_delete` or `task_state_after_delete=deleted` before claiming the task is gone.
+Do **not** call the manifest before every known workflow. Use `gemini_get_tool_manifest` or `account(action="manifest")` when:
 
-## Operational Verification
+- the expected tool is unavailable;
+- a schema or profile appears different;
+- the user asks what is supported;
+- upstream drift is suspected.
 
-- Run the credential-free onboarding command before the first live call and retain its JSON protocol/profile evidence.
-- For a live text check, use `gemini-mcp-onboarding chat --allow-live-account --prompt ...`; for an image deliverable, use the `image` subcommand with the image extra and a dedicated output directory.
-- State explicitly whether backend behavior was observed live or only expected from routing metadata.
-- Use `evaluations/gemini_web_mcp_contract.xml` only as a repository contract reference; changing it or any implementation file is development work and belongs to `gemini-web-mcp-development`.
+## Information Versus Artifacts
+
+Search and understanding normally return information to the calling agent. The agent should synthesize it and continue working rather than dumping raw Gemini output.
+
+Generation normally returns an Artifact. The agent should pass that file or URI to the next relevant tool:
+
+- add the image to the document, website, slide, or app;
+- use the edited image instead of merely reporting its path;
+- attach the video or audio to the requested project;
+- read and cite the research report.
+
+A path, URI, or success sentence alone is not completion. Load [artifacts.md](references/artifacts.md) for acceptance and handoff rules.
+
+## Long Operations
+
+Deep Research, video, and music are long operations. Start them asynchronously by default.
+
+Preserve every returned `operation_id`, `upstream_operation_id`, `upstream_chat_id`, and Artifact identity. Do not start a duplicate operation merely because one MCP call timed out.
+
+Until the shared local operation registry lands, use start-only/current typed states and retain the upstream IDs. The target contract is an opaque, restart-safe handle stored in local SQLite with no prompt, chat, Cookie, or raw-response content.
+
+Load [operations.md](references/operations.md) before running or recovering a long operation.
+
+## Account Workflows
+
+Only load or use account operations when the user explicitly asks to work with Gemini account data.
+
+Start with list/search/read actions, identify the exact object, then mutate or delete it. A remote request being accepted is not proof that the target state changed; require positive read-back before claiming success.
+
+For browser Cookie export, obtain explicit user approval because it can create sensitive account-authentication material in a local cache. Session reset changes only MCP/Gemini conversation state; it never changes agent memory or agent instructions.
+
+Load [tool_surface.md](references/tool_surface.md) only when detailed account, privacy, destructive, or profile information is needed.
+
+## Recovery
+
+Load [recovery.md](references/recovery.md) when a tool is missing, authentication fails, an entitlement is unavailable, a long operation times out, an Artifact is incomplete, or Gemini Web behavior appears to have drifted.
+
+Do not convert an unavailable entitlement, an ungrounded answer, a queued operation, or an accepted-but-unverified mutation into a success claim.

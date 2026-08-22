@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-08-21
+
+### Changed
+- Kept the existing `v0.2.0` tag immutable and advanced the active Python package, runtime Skill, development Skill, release assets, and current documentation to `0.2.1`.
+- Recorded the owner-approved development order: first establish a complete live Gemini baseline using maintainer-supplied account Cookies, then implement the shared long-operation service.
+- Settled local persistence on SQLite for long-operation recovery and delayed cleanup; the database remains local-only and stores recovery metadata rather than prompts, chat text, Cookies, or raw upstream responses.
+
+### Fixed
+- Added the repository AGPL-3.0-only license to wheel and source-distribution metadata and made release verification compare embedded license contents with the repository source.
+- Parsed Deep Research source URLs before matching exact Google asset hostnames, preventing path, userinfo, and lookalike-domain text from being mistaken for Google-hosted resources.
+- Refreshed the development Skill and status documentation so completed foundations are not repeatedly re-planned and settled owner decisions are no longer presented as open questions.
+
 ## [0.2.0] - 2026-08-13
 
 ### Added

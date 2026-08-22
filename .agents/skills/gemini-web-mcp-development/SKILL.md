@@ -1,20 +1,18 @@
 ---
 name: gemini-web-mcp-development
-description: Develop, refactor, test, package, and release the gemini-web-mcp repository as an agent-first Gemini Web gateway for text, images, video, music, files, URLs, Deep Research, history, and account workflows. Use for repository audits, bug fixes, MCP contracts, primary/compact parity, shared services, Gemini Web compatibility, multimodal artifacts, testing, onboarding, ClawHub skill maintenance, live canaries, versioning, or releases.
+description: "Develop, refactor, evaluate, package, and release gemini-web-mcp as three focused agent capability products: Gemini assistance and understanding, multimodal creation, and explicit Gemini account management. Use for repository audits, MCP surface design, task-first Agent Skills, shared services, long-operation recovery, artifacts, live compatibility, tests, packaging, or releases."
 license: AGPL-3.0-only
-compatibility: Requires a checkout of Luckycat133/gemini-web-mcp, Python 3.11+, git, and the project development dependencies. Offline tests are the default. Current Gemini behavior may only be claimed from an explicitly authorized live run; release-grade compatibility requires the dedicated-account canary.
+compatibility: Requires a checkout of Luckycat133/gemini-web-mcp, Python 3.11+, git, and the project development dependencies. Offline tests are the default. Current Gemini behavior may only be claimed from an explicitly authorized live run.
 metadata:
   author: Luckycat133
   project: gemini-web-mcp
   scope: development
-  version: "0.2.0"
+  version: "0.2.1"
 ---
 
 # Gemini Web MCP Development
 
-Use this skill to change the repository. Use the separate `gemini-web-mcp` runtime skill to operate an installed server.
-
-Install this development skill from the repository:
+Use this Skill to change the repository. Use the runtime Skills to operate installed MCP servers.
 
 ```bash
 npx --yes skills@1.5.21 add \
@@ -25,134 +23,205 @@ npx --yes skills@1.5.21 add \
 
 ## Mission
 
-Maintain a public MCP gateway that lets general-purpose agents use Gemini Web text and multimodal workflows without depending directly on unstable Web payloads. Optimize for completed workflows, truthful state, verifiable artifacts, reproducible installation, recoverable long operations, and diagnosable upstream drift—not raw tool count or complete UI imitation.
+Turn Gemini Web into focused capabilities that another agent can discover and compose:
+
+1. assistance, web search, image/file/URL understanding, and Deep Research;
+2. image, video, and music creation with usable Artifacts;
+3. explicit Gemini account management.
+
+Optimize for task completion, small deterministic tool catalogs, truthful structured state, usable files, restart-safe long work, and reproducible installation. Do not optimize for raw tool count or complete Gemini UI imitation.
 
 ## Inspect the Actual Baseline
 
-Before planning non-trivial work:
+Before non-trivial work:
 
 ```bash
 git status -sb
 git log --oneline -20
 ```
 
-Also inspect:
+Also inspect the affected source/tests, `pyproject.toml`, current tags/releases, changelog, development status, open PRs/issues, CI/CodeQL, live-canary evidence, and public Skill state.
 
-- the affected source and tests;
-- `pyproject.toml`, current tags, and current releases;
-- `docs/changelog.md` and `docs/development-status.md`;
-- open issues and pull requests;
-- the latest CI and CodeQL runs;
-- the latest dedicated live-canary run and whether it ran or was skipped;
-- the runtime skill version and any ClawHub audit/publish evidence.
+The active package and both current public Skills declare `0.2.1`. Preserve the existing `v0.2.0` tag and use `v0.2.1` for the audited patch release.
 
-Use one canonical active version:
+A green offline suite proves repository contracts. It does not prove current Gemini Web behavior.
 
-- `pyproject.toml`, the runtime Skill, and the development Skill currently declare `0.2.0`;
-- release asset names and runtime banners derive from the Python package metadata;
-- all rewritten Git history and release refs use the canonical `0.2.0` project version.
+## Current Compatibility Baseline
 
-Update all three active version sources and `docs/changelog.md` in the same commit for every future version bump.
+The repository already has:
 
-A green offline suite proves the repository contract. It does not prove that Gemini Web still behaves the same today.
+- MCP Python SDK v2 plus modern/legacy protocol smoke;
+- profile-based primary server and fixed eleven-tool low-token server;
+- shared client, chat, session, lifecycle, Artifact, and typed-history services;
+- text/session, image, video, music, file, URL, and Deep Research workflows;
+- Notebook, Scheduled, account, Gem, Prompt, Cookie, Doctor, and Cleanup surfaces;
+- centralized reverse-engineered RPC contracts and parsers;
+- verified Gem mutations and evidence-based chat deletion;
+- wheel/sdist/runtime-Skill packaging, clean install, and isolated onboarding;
+- an opt-in compatibility canary and a bounded 2026-08-08 live observation.
 
-## Current Shipped Baseline
+Do not rebuild these foundations. Treat the current broad/compact servers as compatibility surfaces while implementing the focused products below.
 
-The maintained tree already includes:
+## Target Product Architecture
 
-- the official MCP Python SDK v2 boundary with modern and legacy protocol smoke;
-- a profile-based primary server and a fixed eleven-tool compact facade;
-- shared client, session, chat, lifecycle, artifact, and typed history services;
-- text, multi-turn sessions, image generation/editing, video, music, files, URLs, and Deep Research;
-- typed artifacts and typed history list/search/read/export/delete across primary and compact surfaces;
-- Notebook, scheduled-action, account, Gem, prompt, Cookie, doctor, cleanup, and compatibility surfaces;
-- centralized reverse-engineered RPC contracts and pure parsers;
-- verified Gem mutation semantics and evidence-based chat deletion;
-- bounded browser-Cookie authorization handling and the security wording contract established by the ClawHub `0.2.0` audit;
-- `.agents/skills` as the single repository source for public skills;
-- wheel/sdist/skill packaging, clean-install smoke, isolated `uvx` onboarding, and release gates;
-- a separately gated live compatibility canary;
-- a bounded authorized 2026-08-08 live observation for Cookie initialization, text/session behavior, typed history, and verified chat cleanup.
+| Product | Agent Skill | Console entrypoint | MCP server name | Purpose |
+| --- | --- | --- | --- | --- |
+| Assistance | `gemini-assist` | `gemini-mcp-assist` | `gemini_assist_mcp` | second opinion, grounded search, image/multimodal understanding, Deep Research |
+| Creation | `gemini-create` | `gemini-mcp-create` | `gemini_create_mcp` | image generation/editing, video, music, operation recovery |
+| Account | `gemini-account` | `gemini-mcp-account` | `gemini_account_mcp` | history, Notebook, Scheduled, Gems, Prompts, inventory, cleanup |
 
-Do not recreate these foundations. Read [architecture.md](references/architecture.md) for the remaining engineering gaps.
+Keep one repository, one Python distribution, one Gemini adapter, and shared domain/services. Do not create three business implementations or three repositories.
+
+The current `gemini-web-mcp` Runtime Skill remains a task-first compatibility router until the dedicated servers and Skills are independently usable.
+
+Read [architecture.md](references/architecture.md) before changing product boundaries.
+
+## Public Tool Contracts
+
+All public tools use the `gemini_` prefix because hosts may aggregate multiple MCP servers.
+
+### Assistance
+
+```text
+gemini_ask
+gemini_search
+gemini_understand_image
+gemini_understand
+gemini_research
+```
+
+`gemini_ask` remains a distinct tool for second opinions, critique, code review, and ordinary text reasoning.
+
+`gemini_search` may claim grounded search only when observed source evidence exists. Otherwise return `answer_only`, `unavailable`, or `failed` rather than pretending the model searched the web.
+
+`gemini_understand_image` is the simple high-frequency visual tool. `gemini_understand` accepts typed mixed inputs—text, image, file, URL, and later audio/video—without making callers encode them into one generic string.
+
+`gemini_research` starts asynchronously by default and returns an opaque operation handle immediately.
+
+### Creation
+
+```text
+gemini_generate_image
+gemini_edit_image
+gemini_generate_video
+gemini_generate_music
+gemini_get_operation_status
+gemini_get_operation_result
+gemini_cancel_operation
+```
+
+The modality-specific tool starts work. Shared operation tools recover it. Do not add a broad unpaginated operation-list tool to assist/create surfaces.
+
+### Account
+
+```text
+gemini_history
+gemini_notebooks
+gemini_scheduled
+gemini_gems
+gemini_prompts
+gemini_account
+gemini_cleanup
+```
+
+Account tools load only for explicit account-data intent. Keep list/read and mutation semantics machine-distinguishable even when one facade uses an `action` field.
 
 ## Working Method
 
 For each change:
 
 1. Reproduce the defect or characterize the current contract.
-2. State the user-visible or developer-visible expected behavior.
-3. Find the lowest shared owner: domain, service, infrastructure adapter, MCP adapter, or presentation layer.
-4. Add a focused regression that fails for the old behavior.
-5. Implement one coherent change without duplicating business logic.
-6. Check primary and compact semantics when both expose the workflow.
-7. Synchronize schemas, profiles, manifest data, evaluations, docs, and skills only when the contract changes.
-8. Run focused tests, then the appropriate repository, package, protocol, and live checks.
-9. Report fixture, offline, package, protocol, workflow, and live evidence separately.
+2. State the user task that should become easier or more reliable.
+3. Choose the lowest shared owner: domain, service, infrastructure, MCP adapter, or Skill presentation.
+4. Add a focused failing regression or agent-use evaluation.
+5. Implement one coherent vertical slice without duplicating execution logic.
+6. Verify the dedicated surface and any compatibility surface that exposes the same workflow.
+7. Synchronize schemas, annotations, manifest, Skills, examples, evaluations, packaging, and docs only when the contract changes.
+8. Run focused tests, then repository, protocol, installed-product, Skill, and authorized-live checks as appropriate.
+9. Report fixture, protocol, package, agent-use, and live evidence separately.
 
 ## Engineering Invariants
 
+### Small, Deterministic Tool Catalogs
+
+Each dedicated MCP exposes only tools relevant to its capability lane. Tool order and schemas are deterministic. Do not require every agent to discover dozens of unrelated account and maintenance operations.
+
+### Task-First Skills
+
+Skill descriptions describe user intent because description matching is the trigger boundary. Main `SKILL.md` files route tasks; focused references carry details. Add positive trigger evaluations and near-miss negative evaluations for every dedicated Skill.
+
+Do not publish a dedicated Skill before its MCP surface is actually installable and usable.
+
 ### Structured State Is Authoritative
 
-Compatibility text may be concise, but it must not contradict the structured result's error code, operation state, artifact state, backend evidence, pagination, lifecycle, or verification status.
+Compatibility prose must not contradict error code, operation state, Artifact state, source evidence, pagination, lifecycle, or verification status. Define `outputSchema` and validated structured content for public tools.
 
 ### Accepted Is Not Verified
 
-A successful HTTP/RPC response is not proof that a remote create, update, move, or delete took effect.
+A successful request is not proof that a remote create/update/move/delete took effect. Use read-back or another authoritative observation and preserve ambiguous states.
 
-- Use read-back or another authoritative observation.
-- Render success only for positive terminal evidence.
-- Preserve ambiguous states such as `read_back_error`, `not_observed`, `mismatch`, `still_present`, or incomplete pagination.
-- Return the next verification action.
+### Opaque, Explicit Handles
 
-### Adapters Stay Thin
+Long work must not depend on connection-local MCP state. Return a high-entropy opaque `operation_id`; every status/result/cancel call receives it explicitly. Preserve provider/research/chat IDs in structured metadata when observed.
 
-`src/server.py`, `src/skill_server.py`, and tool-registration modules own MCP schemas, dispatch, defaults, and presentation. Reusable request construction, parsing, lifecycle, mutation verification, artifact handling, and long-operation recovery belong in shared services.
+### Local SQLite Persistence Is Settled
 
-Keep the compact server as the low-token discovery surface, but do not add a second business implementation.
+Use local-only SQLite tables such as `operations` and `cleanup_jobs`. Persist IDs, type, state, timestamps, attempts, stable errors, verification status, and Artifact locators only.
 
-### Normalize Boundary Data Once
+Never persist Cookies, prompts, chat/report text, raw Gemini responses, or generated bytes. Long-operation metadata defaults to seven-day retention. Support restart and cross-client resume. Cancellation is best effort unless provider cancellation is positively observed.
 
-Gemini Web and `gemini-webapi` may return objects, mappings, or mixed nested values. Normalize at the service or infrastructure boundary rather than scattering raw `getattr`, positional-index, or response-shape assumptions through presenters.
+### Artifact-First Creation
 
-### Multimodal Success Requires an Artifact
+Image/video/music/report completion requires a usable Artifact—not response prose. Return a resource link or verified local file plus structured metadata. The calling agent should use the Artifact in the user's next step rather than merely report its path.
 
-Response prose is not a generated image, video, audio file, or report. Return a usable URI or verified local file plus state and metadata. Keep requested model, transport model, effective backend, and observed backend distinct.
+### Thin Adapters
+
+Dedicated and compatibility servers own schemas, dispatch, defaults, and presentation. Reusable request construction, parsing, normalization, Artifact handling, operation recovery, mutation verification, and cleanup live in shared services.
 
 ### Authentication Boundary Is Settled
 
-The ClawHub security review established the operational contract. Treat browser Cookies as sensitive account-authentication material, require explicit user approval before export, restrict local cache access, never log/back up/share values, and remove caches when no longer needed. Session reset affects only MCP/Gemini conversation state. Do not reopen this as a generic policy discussion unless implementation behavior changes.
+Treat browser Cookies as sensitive authentication material, but do not turn ordinary feature development into repeated policy debate. Session reset changes only MCP/Gemini state.
 
 ### Test Doubles Do Not Prove the Product
 
-`tests._fastmcp_shim` is only a registration/branch-testing double. Real product evidence still requires actual MCP stdio discovery/calls, installed-wheel smoke, onboarding, and explicitly authorized live verification.
+`tests._fastmcp_shim` proves registration/branch behavior only. Product evidence still requires real MCP stdio calls, installed-wheel smoke, Skill installation, agent-use evaluations, and explicitly authorized live verification.
 
 ## Active Development Order
 
-Unless the owner selects a different product priority:
+1. Finish the task-first compatibility Runtime Skill and its trigger/hand-off contracts.
+2. Implement `gemini-assist` as the first focused vertical slice.
+3. Implement `gemini-create` with Artifact-first image generation/editing.
+4. Add the shared SQLite OperationService; connect Deep Research, video, and music with asynchronous starts.
+5. Implement `gemini-account` from shared account/history services.
+6. Run the dedicated full live baseline through the new surfaces.
+7. Complete typed admin results, mutation verification, and durable SQLite cleanup.
+8. Add multimodal onboarding, real-agent evaluations, and the official client/OS matrix.
+9. Add selected Drive/Canvas/Notebook/sharing parity only after core workflows are reliable.
 
-1. establish the dedicated full live baseline for media, files, URLs, research, and disposable account mutations;
-2. complete typed results for the primary deep history scan and remaining account/admin surfaces;
-3. finish the read-back audit for every remote mutation;
-4. introduce one shared long-operation `start/status/result/cancel` contract;
-5. decide and implement cleanup durability across restarts;
-6. add end-to-end video, music, file, URL, and research onboarding plus a real client matrix;
-7. pursue Drive, Canvas, richer Notebook/scheduled/sharing, and other UI-parity work only after the core workflows are reliable.
+Read [roadmap.md](references/roadmap.md) for issue-sized packages and acceptance criteria.
 
-## Owner Decisions That Still Block Product Contracts
+## Settled Product Decisions
 
-Load [roadmap.md](references/roadmap.md) before changing:
+Do not reopen these during routine work:
 
-- ownership, cadence, entitlement scope, and evidence retention for the dedicated live-canary account;
-- persistence and cancellation semantics for the shared long-operation API;
-- process-local versus durable cleanup semantics;
-- the official client/platform support matrix and canonical distribution path.
+- product priority is assistance/understanding, then generated Artifacts, then explicit account management;
+- one repository exposes three focused MCP servers and three focused Runtime Skills;
+- `gemini_ask` remains distinct;
+- Deep Research starts asynchronously by default;
+- dedicated public tools use the `gemini_` prefix;
+- long-operation status/result/cancel use explicit opaque handles;
+- local SQLite provides operation recovery and delayed cleanup;
+- the broad and eleven-tool servers remain compatibility surfaces during migration;
+- manifest is for discovery/recovery, not a mandatory call before every known workflow;
+- reliability and agent task completion precede broad UI parity.
 
-The unified `0.2.0` version contract, Cookie boundary, compact-server direction, and reliability-before-UI-parity priority are already established; do not repeatedly ask the owner to re-decide them.
+The remaining owner-level choice is the first officially supported client/OS/distribution matrix.
 
 ## Testing and Real Experience
 
-Use [validation.md](references/validation.md) for the evidence ladder. The minimum maintained offline gates are:
+Use [validation.md](references/validation.md) for the evidence ladder and [tool-design.md](references/tool-design.md) for agent-use and handoff evaluations.
+
+Minimum offline gates:
 
 ```bash
 python -m ruff check src tests scripts
@@ -164,29 +233,26 @@ python scripts/smoke_mcp_protocol.py
 git diff --check
 ```
 
-Use [tool-design.md](references/tool-design.md) to verify installation, live text, local image artifacts, compact/primary discovery, and the complete multimodal workflow in real MCP clients.
-
-Do not claim a live capability from fixtures, package smoke, a skipped canary, or response prose alone.
+Do not claim a live capability from fixtures, package smoke, a skipped canary, or generated prose alone.
 
 ## Focus Rules
 
-- Do not turn ordinary engineering into a generic policy review.
-- Do not reopen completed architecture phases because old prose mentions them.
-- Do not preserve accidental behavior merely because an old test encoded it.
+- Do not reopen the three-product split, `gemini_ask`, asynchronous research, SQLite, or task-first Skill decisions.
+- Do not add generic unprefixed names such as `search` to public aggregated tool surfaces.
+- Do not put account/admin tools into assist or create catalogs.
+- Do not publish a Skill whose named tools do not exist.
+- Do not introduce modality-specific operation stores or duplicate polling logic.
 - Do not add tools only to mirror every observed Gemini UI entry.
-- Do not scatter emergency RPC IDs or response indices outside the registry/parser boundary.
-- Do not hardcode volatile test counts in public badges or skill instructions.
-- Do not let the active package and Skill versions drift; keep rewritten history and release refs at the canonical `0.2.0` version.
-- Do not call a skipped workflow, fixture, or synthetic response a live test.
+- Do not scatter volatile RPC IDs or response indices outside the registry/parser boundary.
+- Do not hardcode volatile passing-test counts.
+- Preserve `v0.2.0`; use `v0.2.1` for this patch line.
 
 ## References
 
-Load only what the task needs:
-
-- [architecture.md](references/architecture.md): shipped capabilities, current gaps, settled directions, and priority order.
-- [validation.md](references/validation.md): focused, full, package, protocol, workflow, skill, and live testing.
-- [tool-design.md](references/tool-design.md): how to install and actually experience text and multimodal workflows.
-- [roadmap.md](references/roadmap.md): owner decisions and issue-sized next development packages.
+- [architecture.md](references/architecture.md): current compatibility stack and target focused topology.
+- [tool-design.md](references/tool-design.md): task-first tools, Skills, Artifacts, and agent-use evaluations.
+- [validation.md](references/validation.md): repository, protocol, package, Skill, operation, Artifact, and live evidence.
+- [roadmap.md](references/roadmap.md): settled decisions and issue-sized development packages.
 
 ## Handoff
 
@@ -194,16 +260,17 @@ End development work with:
 
 ```text
 Baseline commit:
+User workflow:
 Contract or defect:
 Root cause:
-Implementation boundary:
-Primary surface impact:
-Compact surface impact:
-Structured result / artifact / verification impact:
-Focused tests:
+Shared implementation boundary:
+Dedicated surface impact:
+Compatibility surface impact:
+Structured result / Artifact / operation impact:
+Focused tests and agent-use evaluations:
 Full repository checks:
 Package and MCP protocol checks:
-Runtime skill / ClawHub impact:
+Runtime Skill impact:
 Actual client or live Gemini observations:
 Remaining gaps:
 Owner decision required:

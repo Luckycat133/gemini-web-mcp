@@ -101,9 +101,9 @@ def test_runtime_and_development_skills_have_distinct_roles_and_install_paths() 
     normalized_development = _normalize_shell_continuations(development)
     client_doc = (PROJECT_ROOT / "docs" / "client-examples.md").read_text(encoding="utf-8")
 
-    assert "Operate an installed Gemini Web MCP server safely" in runtime
-    assert "do not use for repository implementation" in runtime
-    assert "Develop, refactor, test, package, and release" in development
+    assert "Use this Skill to complete the user's task with Gemini" in runtime
+    assert "do not use for repository implementation" in runtime.lower()
+    assert "Develop, refactor, evaluate, package, and release" in development
     assert "--skill gemini-web-mcp-development --agent codex --copy --yes" in normalized_development
     assert client_doc.count(SKILLS_CLI) == 2
     assert "--skill gemini-web-mcp" in client_doc

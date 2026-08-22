@@ -1,17 +1,18 @@
 # Testing and Evidence
 
-Use the narrowest test that proves the changed contract, then add the broader gates required by the affected boundary. Keep fixture, repository, protocol, installed-product, skill-distribution, and live evidence distinct.
+Use the narrowest test that proves a changed contract, then run the broader gates required by its boundary. Keep fixture, repository, protocol, installed-product, Skill, agent-use, and live evidence distinct.
 
 ## Evidence Levels
 
-1. **Unit/fixture evidence** — pure helpers, parsers, services, fake clients, and sanitized response fixtures.
-2. **Repository contract evidence** — Ruff, Mypy, full pytest, focused architecture contracts, snapshots, and documentation assertions.
-3. **Protocol evidence** — real MCP stdio discovery, list, and representative calls against both entrypoints and supported protocol modes.
-4. **Installed-product evidence** — wheel/sdist/runtime-skill build, clean environment, resources, entrypoints, `pip check`, and isolated `uvx` onboarding.
-5. **Skill-distribution evidence** — Agent Skills validation, direct repository install, package contents, ClawHub dry-run/audit evidence when the runtime skill changes.
-6. **Live Gemini evidence** — explicitly authorized calls against the current account and Web deployment; release-grade claims require the dedicated-account baseline.
+1. **Unit/fixture** — pure helpers, parsers, services, SQLite repositories, fake clients, sanitized fixtures.
+2. **Repository contracts** — Ruff, Mypy, pytest, architecture checklists, schemas, snapshots, docs assertions.
+3. **Protocol** — real MCP stdio discovery/list/call for every affected entrypoint and supported protocol era.
+4. **Installed product** — wheel/sdist/Skill build, clean install, entrypoints, resources, `pip check`, onboarding.
+5. **Skill distribution** — Agent Skills validation, direct install/byte comparison, bundle contents, trigger evaluations.
+6. **Agent-use** — a real agent selects the surface and completes a realistic task, including Artifact handoff or operation recovery.
+7. **Live Gemini** — explicitly authorized current-account calls; the only evidence for current upstream behavior.
 
-A large test count does not replace protocol, installed-product, skill-distribution, or live evidence.
+A large unit-test count does not replace protocol, installation, Skill trigger, agent-use, or live evidence.
 
 ## Fast Local Sequence
 
@@ -23,19 +24,7 @@ python -m mypy <changed-source-files>
 git diff --check
 ```
 
-For a remote mutation, cover at least:
-
-- accepted and positively verified;
-- accepted but not observed;
-- incomplete pagination or unavailable verification;
-- read-back error;
-- mismatch or still-present state;
-- blank/invalid identifiers before network access;
-- structured result and compatibility-text agreement.
-
-For a mapping/object compatibility change, cover objects, mappings, mixed nesting, missing optional fields, and unchanged legacy presentation.
-
-## Maintained Offline Gates
+## Maintained Repository Gates
 
 ```bash
 python -m ruff check src tests scripts
@@ -47,25 +36,199 @@ python scripts/smoke_mcp_protocol.py
 git diff --check
 ```
 
-The latest `main` baseline at the time of this Skill update is commit `d3145a3be45745523e7483b18835b4800da80ab5`; its CI and CodeQL completed successfully. Do not hard-code this commit as a permanent baseline—always inspect the current tree and current runs.
+Do not encode volatile passing-test counts in Skills or badges. Cite the exact hosted run when reporting CI.
 
-Do not encode a volatile passing-test number in the Skill or README. Cite the actual workflow run when reporting hosted evidence.
+## Focused Server Surface Contracts
 
-## Tool, Schema, Profile, and Adapter Changes
+For every dedicated surface, test:
 
-Verify:
+- exact MCP server name and console entrypoint;
+- deterministic ordered tool list;
+- no unrelated tools;
+- `gemini_` prefix on every public tool;
+- input/output schema, descriptions, annotations, structured content, and representative calls;
+- stable errors and operation/Artifact/verification fields;
+- delegation to shared services rather than duplicated execution;
+- compatibility behavior where the old surface exposes the same workflow.
 
-- exact registration in every affected profile;
-- input schema, annotations, output schema, and representative call;
-- structured content validates against the generated schema;
-- stable error codes, operation state, pagination, lifecycle, and verification fields;
-- primary/compact semantic parity where both expose the workflow;
-- manifest, evaluation, docs, and client examples are intentionally synchronized;
-- no duplicate execution logic was added to a compact adapter.
+### Assistance Expected Catalog
 
-Golden snapshots are reviewed contracts, not files to regenerate automatically after a failure.
+```text
+gemini_ask
+gemini_search
+gemini_understand_image
+gemini_understand
+gemini_research
+```
 
-## Package and Onboarding Changes
+Reject account/admin and generation-only tools in this catalog.
+
+### Creation Expected Catalog
+
+```text
+gemini_generate_image
+gemini_edit_image
+gemini_generate_video
+gemini_generate_music
+gemini_get_operation_status
+gemini_get_operation_result
+gemini_cancel_operation
+```
+
+Reject account tools, generic chat, and unbounded operation lists.
+
+### Account Expected Catalog
+
+```text
+gemini_history
+gemini_notebooks
+gemini_scheduled
+gemini_gems
+gemini_prompts
+gemini_account
+gemini_cleanup
+```
+
+Verify list/read versus mutation semantics remain distinguishable in structured output and annotations.
+
+Golden catalogs and schemas are reviewed contracts. Do not regenerate them automatically after failure.
+
+## Assistance Tests
+
+### `gemini_ask`
+
+- ordinary second-opinion result;
+- model/thinking controls;
+- structured failure/text agreement;
+- no mixed-input machinery required for pure text.
+
+### `gemini_search`
+
+- observed sources produce `grounded`;
+- source-free answer produces `answer_only`;
+- unavailable/failed are distinct;
+- URL normalization and deduplication;
+- recency/domain/language bounds;
+- no invented source metadata.
+
+### Understanding
+
+- one-image simple path;
+- object/mapping response normalization;
+- typed mixed inputs with stable IDs;
+- per-input accepted/skipped/failed state;
+- multiple files/images/URLs without silent dropping;
+- bounded input count/size;
+- result preserves source identities.
+
+### Research
+
+- starts asynchronously by default;
+- returns an opaque handle immediately;
+- preserves upstream IDs;
+- no duplicate start after timeout;
+- report result becomes an Artifact.
+
+## Skill Tests
+
+For each Runtime Skill:
+
+```bash
+skills-ref validate .agents/skills/<skill-name>
+```
+
+Also verify:
+
+- intent-focused description;
+- main file under 500 lines;
+- focused one-level references;
+- no machine-specific paths;
+- every named tool/entrypoint exists;
+- package version and bundle version are correct;
+- direct repository installation matches source bytes;
+- no duplicate Skill name across discovery roots.
+
+### Trigger Evaluations
+
+Maintain positive cases and near-miss negatives for assist/create/account. Test paraphrases, mixed languages, indirect requests, and multi-intent prompts.
+
+Expected behavior:
+
+- assistance requests select `gemini-assist`;
+- generation requests select `gemini-create`;
+- explicit Gemini account requests select `gemini-account`;
+- repository work selects `gemini-web-mcp-development`;
+- understanding an image does not select create;
+- creating an image does not select assist;
+- internal account use does not select account without user account-data intent.
+
+## SQLite OperationService Tests
+
+Cover:
+
+- schema creation and forward migrations;
+- atomic operation creation;
+- high-entropy opaque IDs;
+- provider/chat ID preservation;
+- queued/running/completed/timed_out/cancel_requested/cancelled/failed/expired transitions;
+- legal and illegal transitions;
+- restart recovery;
+- cross-client status/result lookup;
+- concurrent status/result/cancel;
+- idempotent terminal reads and repeated cancel;
+- seven-day expiry/pruning with injectable clock;
+- best-effort versus provider-confirmed cancellation;
+- missing/corrupt/expired records;
+- Artifact identity continuity;
+- no duplicate upstream start on retry;
+- proof that prompts, chat/report text, Cookies, raw responses, and generated bytes are never persisted.
+
+If protocol-native MCP Tasks are added, separately test capability negotiation, task-handle mapping, down-level compatibility, and that clients without the extension continue to use the explicit operation tools.
+
+## Durable Cleanup Tests
+
+Cover:
+
+- SQLite migrations and restart-safe pending work;
+- pending/running/completed/failed/cancelled states;
+- retry/backoff and terminal failure;
+- list/retry/cancel with pagination;
+- duplicate deletion/idempotency;
+- direct-ID authority;
+- positive `verified_absent` read-back;
+- temporary-chat bypass;
+- no private content in storage.
+
+## Artifact Tests
+
+For image/video/audio/report:
+
+- local, remote, queued, partial, empty, failed;
+- path resolution and destination containment;
+- existing non-empty regular file;
+- MIME/type;
+- image dimensions;
+- audio/video duration when available;
+- resource-link shape when supported;
+- requested/effective/observed backend separation;
+- source Artifact identity for edits;
+- operation-to-result Artifact identity continuity;
+- downstream handoff in an agent-use evaluation.
+
+## Mutation Tests
+
+For every create/update/move/delete:
+
+- accepted and positively verified;
+- accepted but not observed;
+- incomplete verification;
+- read-back error;
+- mismatch or still present;
+- blank/invalid identifiers before network access;
+- idempotency/retry behavior;
+- compatibility prose agrees with structured state.
+
+## Package and Onboarding
 
 ```bash
 python scripts/package_release.py --outdir dist
@@ -74,14 +237,9 @@ python scripts/check_version_consistency.py --artifacts-dir dist
 python -m venv /tmp/gemini-wheel-smoke
 /tmp/gemini-wheel-smoke/bin/python -m pip install dist/*.whl
 /tmp/gemini-wheel-smoke/bin/python -m pip check
-
-cd /tmp
-/tmp/gemini-wheel-smoke/bin/python <checkout>/scripts/smoke_installed_wheel.py
-/tmp/gemini-wheel-smoke/bin/python <checkout>/scripts/smoke_profiles.py
-/tmp/gemini-wheel-smoke/bin/python <checkout>/scripts/smoke_mcp_protocol.py
 ```
 
-Also prove the public one-command path outside the checkout:
+Outside the checkout, smoke every installed entrypoint and protocol surface. For the public source path:
 
 ```bash
 REVIEWED_SHA=replace-with-reviewed-40-character-commit
@@ -89,95 +247,38 @@ SOURCE="git+https://github.com/Luckycat133/gemini-web-mcp@${REVIEWED_SHA}"
 uvx --from "$SOURCE" gemini-mcp-onboarding
 ```
 
-The Python package and both public Skills share one active version, currently `0.2.0`. Verify their frontmatter, the changelog section, runtime metadata, release tag, and generated artifact names together. Rewritten history and release refs use the canonical project version.
+The active package and public Skills use `0.2.1`; preserve `v0.2.0` as immutable history.
 
-## Development Skill Changes
+## Compatibility Runtime Skill
 
-The repository has one development-skill source under `.agents/skills`.
+Until dedicated products ship, verify the umbrella Skill:
 
-```bash
-skills-ref validate .agents/skills/gemini-web-mcp-development
-python -m pytest -q tests/test_development_skill.py tests/test_skill_packaging.py
-```
+- routes by user intent;
+- uses compact first when sufficient;
+- routes file/URL/Research to narrow primary profiles;
+- does not require manifest before known tasks;
+- returns information to the agent for search/understanding;
+- requires downstream use for generated Artifacts;
+- starts Research asynchronously and preserves IDs;
+- only loads detailed account/tool reference for explicit account or recovery needs.
 
-Then install it directly from the repository and byte-compare the installed copy with `.agents/skills/gemini-web-mcp-development`.
+## Agent-Use Evaluations
 
-Required checks include:
+A real agent should complete:
 
-- frontmatter and progressive disclosure;
-- no machine-specific paths;
-- no obsolete `.codex` mirror;
-- canonical package/runtime-Skill/development-Skill version parity;
-- settled directions are not listed as owner decisions;
-- every referenced command is copyable.
+1. sourced current-web answer;
+2. screenshot diagnosis followed by a code fix;
+3. design/image plus code comparison;
+4. image generation followed by insertion into an app/document;
+5. image edit followed by replacement of the source asset;
+6. Research start, interruption/restart, result recovery, and report use;
+7. video/music start and final Artifact handoff;
+8. explicit history selection and verified account mutation.
 
-## Runtime Skill and ClawHub Changes
-
-When `.agents/skills/gemini-web-mcp` changes:
-
-- keep its version aligned with `pyproject.toml`, the development Skill, and the changelog;
-- validate the exact published file set;
-- run `tests/test_skill_packaging.py` and any audit-specific contract;
-- confirm the ClawHub bundle license and metadata;
-- perform a publish dry-run before any real publish;
-- preserve the explicit browser-Cookie authentication boundary;
-- do not claim that a dry-run or local archive is already published.
-
-The canonical repository version is `0.2.0`. Inspect ClawHub before claiming that the repository version has been published there.
-
-## Workflow Changes
-
-A repository text assertion is useful but insufficient. Confirm that GitHub Actions actually created and executed the intended jobs.
-
-Check:
-
-- expression contexts are valid at their YAML location;
-- all expected jobs exist;
-- stale runs are cancelled according to concurrency rules;
-- each diagnostic step ran;
-- artifacts were uploaded when required;
-- skipped live jobs are reported as skipped, not as live success;
-- the final head, not an earlier branch commit, owns the cited checks.
-
-A zero-job parse/startup failure is not a passing workflow.
+Record surface/tool selection, calls, retries, duplicate starts, structured state, Artifact/operation handoff, and final task completion.
 
 ## Live Evidence Boundary
 
-The authorized 2026-08-08 run is bounded evidence for Cookie initialization, text, sessions, typed history, and verified chat cleanup. It does not prove media, files, URLs, Deep Research, account mutations, account tier, locale, or Web build.
+A bounded 2026-08-08 run observed authentication, text, sessions, typed history, and verified chat cleanup. It does not prove media, files, URLs, Research, account mutations, tier, locale, or Web build.
 
-### Dedicated Full Baseline — Required Before a New Public Package Release
-
-1. initialize the dedicated account and record bounded environment metadata;
-2. run read-only capability probes and capture Web build/locale when observable;
-3. verify temporary one-shot text;
-4. verify session create/send/reset across primary and compact surfaces;
-5. verify a local image artifact;
-6. verify video and music artifact state, URI/file, MIME, size, and duration when available;
-7. verify local-file and URL analysis;
-8. verify Deep Research start, terminal/timeout state, preserved IDs, recovery, and report retrieval;
-9. verify history list/search/read/export and marked chat deletion with complete fresh metadata read-back;
-10. perform one disposable scheduled, Gem, or Notebook mutation with read-back;
-11. account for and clean up every generated resource by returned ID.
-
-Classify entitlement absence separately from upstream drift or implementation failure.
-
-## Live Result Record
-
-Retain only bounded evidence:
-
-```text
-commit:
-client and protocol:
-dependency versions:
-account tier / locale / entitlement class:
-Web build when observable:
-tool and arguments without credentials or private content:
-operation state:
-error code / retryability:
-verification status and method:
-artifact IDs, paths/URIs, MIME, size, dimensions/duration:
-requested / effective / observed backend:
-cleanup result:
-```
-
-Never treat response prose alone as proof of a mutation, artifact, or backend.
+A full live baseline should verify the new focused surfaces, classify entitlement absence separately from drift/failure, and account for every created resource by returned ID. Retain only sanitized state and metadata—never credentials, private content, or raw responses.
