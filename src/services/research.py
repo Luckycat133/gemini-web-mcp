@@ -227,6 +227,10 @@ async def run_deep_research_start_phase(
     except Exception as error:
         return DeepResearchStart(chat, plan, start_output, error=error)
     finally:
+        # Cleanup is stamped here at start-phase completion, before any compat
+        # wait-for-report wait runs on the returned handle. That is benign
+        # under default retention: retain_chat only records the chat for the
+        # retention-aware cleanup pass, it does not schedule a deletion.
         if plan is not None:
             schedule_chat_cleanup(
                 research_chat_id(plan=plan, chat=chat),

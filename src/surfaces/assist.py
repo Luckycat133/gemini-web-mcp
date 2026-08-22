@@ -327,13 +327,15 @@ async def gemini_understand(
     Each input is one typed object — ``{"id", "kind", ...}`` — instead of one
     overloaded string: ``kind=text`` carries ``text``, ``kind=image`` accepts a
     local ``path`` or an http(s) URI, ``kind=file`` accepts a local ``path`` or
-    an http(s) URI, and ``kind=url`` carries an absolute ``url``. At most 16
-    inputs are accepted; later ones are skipped. Every input keeps its ``id``;
-    the structured result records a per-input outcome (``accepted``,
-    ``analyzed``, ``skipped``, or ``failed``) so no input is silently dropped,
-    plus the synthesized analysis. An input is marked ``analyzed`` only when
-    the completed analysis acknowledges it — implicitly when it is the sole
-    input, otherwise by referencing its ``[id]``.
+    an http(s) URI, and ``kind=url`` carries an absolute ``url``. Requests
+    with more than 16 inputs are rejected outright by the input schema; an
+    input the service cannot use is recorded as ``skipped`` with its reason.
+    Every input keeps its ``id``; the structured result records a per-input
+    outcome (``accepted``, ``analyzed``, ``skipped``, or ``failed``) so no
+    input is silently dropped, plus the synthesized analysis. An input is
+    marked ``analyzed`` only when the completed analysis acknowledges it —
+    implicitly when it is the sole input, otherwise by referencing its
+    ``[id]``.
     """
     result = await _understand_service.understand(
         UnderstandRequest(
