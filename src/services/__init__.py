@@ -24,6 +24,12 @@ from .chat import (
     StartSessionRequest,
 )
 from .lifecycle import ConversationLifecycleService, LifecycleResetAllData
+from .research import (
+    RESEARCH_CLEANUP_SOURCE,
+    ResearchRequest,
+    ResearchService,
+    ResearchServiceDependencies,
+)
 from .search import (
     GroundingState,
     ObservedSource,
@@ -68,6 +74,10 @@ __all__ = [
     "ObservedSource",
     "observed_backend_from_response",
     "observed_sources_from_response",
+    "RESEARCH_CLEANUP_SOURCE",
+    "ResearchRequest",
+    "ResearchService",
+    "ResearchServiceDependencies",
     "response_chat_id",
     "SearchOperationData",
     "SearchRequest",

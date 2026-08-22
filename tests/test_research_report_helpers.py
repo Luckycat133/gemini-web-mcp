@@ -37,6 +37,7 @@ import pytest
 from src.adapters.mcp_sdk import MCPServer
 
 import src.tools.research as research_tools
+from src.services.research import is_capability_probe_false_negative as _is_capability_probe_false_negative
 from src.tools.research import (
     _create_deep_research_plan,
     _create_research_report_artifact,
@@ -46,7 +47,6 @@ from src.tools.research import (
     _format_deep_research_result,
     _format_research_report_actions,
     _format_research_report_artifact,
-    _is_capability_probe_false_negative,
     _is_default_deep_research_transport,
     _is_research_completion_message,
     _is_research_start_message,

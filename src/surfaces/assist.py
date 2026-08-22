@@ -2,8 +2,8 @@
 
 This is the dedicated assistance server from the focused-product topology.
 It exposes a small, deterministic catalog and delegates every request to the
-shared :class:`~src.services.chat.ChatService` instead of keeping a second
-copy of request construction, parsing, or persistence.
+shared ChatService/SearchService/UnderstandService/ResearchService instead of
+keeping a second copy of request construction, parsing, or persistence.
 """
 
 import logging
@@ -33,13 +33,16 @@ from ..client_wrapper import (
     send_session_message_stream,
 )
 from ..constants import normalize_model_alias, resolve_model_name
-from ..domain import DomainErrorCode, DomainResult
+from ..domain import DomainErrorCode, DomainResult, LongOperationData, OperationState
 from ..services import (
     MAX_UNDERSTAND_INPUTS,
     ChatRequest,
     ChatService,
     ChatServiceDependencies,
     GroundingState,
+    ResearchRequest,
+    ResearchService,
+    ResearchServiceDependencies,
     SearchOperationData,
     SearchRequest,
     SearchService,
@@ -64,9 +67,9 @@ mcp = MCPServer(
 # gemini-assist (v{__version__})
 
 Focused assistance surface: extend an agent with Gemini second opinions,
-critique, code/design review, grounded web search, and visual or mixed-input
-understanding. It deliberately exposes no history, Cookie, Scheduled, Gem,
-Prompt, or cleanup tools.
+critique, code/design review, grounded web search, visual or mixed-input
+understanding, and asynchronous Deep Research starts. It deliberately exposes
+no history, Cookie, Scheduled, Gem, Prompt, or cleanup tools.
 
 ## Tools
 - **gemini_ask**: one-shot text question with optional context
@@ -78,10 +81,13 @@ Prompt, or cleanup tools.
   path/URI, file path/URI, and URL inputs (max 16); each input keeps its id
   and a per-input outcome (accepted, analyzed, skipped, or failed), where
   analyzed means the completed analysis acknowledged that input
+- **gemini_research**: start one Deep Research run asynchronously and return
+  an opaque operation handle with the upstream operation/chat IDs preserved;
+  the research chat is retained by default so the report stays recoverable
 
 ## Models
 - flash-lite, flash (default), thinking, pro
-- thinking_level: standard or extended (gemini_ask)
+- thinking_level: standard or extended (gemini_ask, gemini_research)
 """,
 )
 
@@ -111,6 +117,22 @@ def _build_chat_service() -> ChatService:
 _chat_service = _build_chat_service()
 _search_service = SearchService(_chat_service)
 _understand_service = UnderstandService(_chat_service)
+
+
+def _build_research_service() -> ResearchService:
+    """Bind the shared research service to the shared client/session seams."""
+    return ResearchService(
+        ResearchServiceDependencies(
+            client_provider=lambda: get_gemini_client(),
+            client_initializer=lambda: initialize_client(),
+            cleanup_due_remote_chats=lambda client: cleanup_due_remote_chats(client),
+            schedule_chat_cleanup=lambda *args, **kwargs: schedule_remote_chat_cleanup(*args, **kwargs),
+            resolve_model=lambda model: resolve_model_name(model),
+        )
+    )
+
+
+_research_service = _build_research_service()
 
 
 def _invalid_argument(message: str) -> DomainResult[None]:
@@ -318,6 +340,65 @@ async def gemini_understand(
         )
     )
     return _render_understand_response(result)
+
+
+def _render_research_start(data: LongOperationData) -> list[TextContent]:
+    """Present the started research handle without contradicting structured state."""
+    sections: list[str] = [f"Deep Research is {data.state.value}."]
+    if data.title:
+        sections.append(f"Title: {data.title}")
+    if data.operation_id:
+        sections.append(f"Operation handle: {data.operation_id}")
+    if data.upstream_operation_id:
+        sections.append(f"Upstream research ID: {data.upstream_operation_id}")
+    if data.upstream_chat_id:
+        sections.append(f"Upstream chat ID: {data.upstream_chat_id}")
+    if data.state in {OperationState.QUEUED, OperationState.RUNNING}:
+        sections.append("This call returned immediately and did not wait for the final report.")
+    return [TextContent(type="text", text="\n".join(sections))]
+
+
+@mcp.tool(annotations=MUTATES_REMOTE)
+@domain_error_boundary("gemini_research", logger)
+async def gemini_research(
+    query: str,
+    model: str = "flash",
+    thinking_level: str = "extended",
+    timeout_seconds: int = 600,
+    retain_chat: bool = True,
+    delete_after_seconds: Optional[int] = None,
+) -> list[TextContent]:
+    """Start one Deep Research run asynchronously and return its operation handle.
+
+    Use this for multi-source investigation that produces a durable report.
+    The run starts on Gemini Web and this call returns immediately with an
+    opaque high-entropy ``operation_id`` — it never waits for the final
+    report. The structured result preserves the upstream operation and chat
+    identifiers (``upstream_operation_id``, ``upstream_chat_id``) with a typed
+    ``state`` (``queued`` or ``running``) so the report stays recoverable
+    later; the research chat is retained by default (``retain_chat`` is
+    ``true``) precisely so it is not cleaned up before the report is read.
+    The server keeps no connection-local operation state: the returned
+    identifiers are the only continuation handles. Deep Research requires an
+    AI Plus subscription and the final report can take several minutes.
+    """
+    result = await _research_service.start(
+        ResearchRequest(
+            query=query,
+            model=model,
+            thinking_level=thinking_level,
+            timeout_seconds=timeout_seconds,
+            retain_chat=retain_chat,
+            delete_after_seconds=delete_after_seconds,
+        )
+    )
+    if not result.ok or result.data is None:
+        return domain_text(result, domain_failure_text(result), use_result_data=True)
+    return attach_domain_result(
+        _render_research_start(result.data),
+        result,
+        use_result_data=True,
+    )
 
 
 def main() -> None:

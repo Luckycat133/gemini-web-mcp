@@ -28,6 +28,7 @@ from .results import (
     OperationState,
     ResultMeta,
     new_diagnostic_id,
+    new_operation_id,
     new_request_id,
     result_from_exception,
 )
@@ -56,6 +57,7 @@ __all__ = [
     "cleanup_observation_for_policy",
     "is_valid_remote_chat_id",
     "new_diagnostic_id",
+    "new_operation_id",
     "new_request_id",
     "result_from_exception",
 ]

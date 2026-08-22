@@ -228,6 +228,11 @@ def new_diagnostic_id() -> str:
     return f"diag_{uuid.uuid4().hex}"
 
 
+def new_operation_id() -> str:
+    """Return one opaque high-entropy handle for a started long operation."""
+    return f"op_{uuid.uuid4().hex}"
+
+
 def result_from_exception(
     error: BaseException,
     *,
