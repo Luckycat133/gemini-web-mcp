@@ -1,6 +1,6 @@
 ---
 name: gemini-web-mcp-development
-description: Develop, refactor, evaluate, package, and release gemini-web-mcp as three focused agent capability products: Gemini assistance and understanding, multimodal creation, and explicit Gemini account management. Use for repository audits, MCP surface design, task-first Agent Skills, shared services, long-operation recovery, artifacts, live compatibility, tests, packaging, or releases.
+description: "Develop, refactor, evaluate, package, and release gemini-web-mcp as three focused agent capability products: Gemini assistance and understanding, multimodal creation, and explicit Gemini account management. Use for repository audits, MCP surface design, task-first Agent Skills, shared services, long-operation recovery, artifacts, live compatibility, tests, packaging, or releases."
 license: AGPL-3.0-only
 compatibility: Requires a checkout of Luckycat133/gemini-web-mcp, Python 3.11+, git, and the project development dependencies. Offline tests are the default. Current Gemini behavior may only be claimed from an explicitly authorized live run.
 metadata:
