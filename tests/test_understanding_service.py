@@ -139,6 +139,24 @@ def test_understand_composes_each_input_kind_into_one_message(tmp_path):
     assert message.endswith("Refer to every input by its [id] so each observation stays tied to its source.")
 
 
+def test_understand_separates_adjacent_inline_text_blocks():
+    stub = _StubChatService(response=_response(text="[notes] and [extra] reviewed."))
+
+    _understand(
+        stub,
+        task="Analyze.",
+        inputs=(
+            UnderstandInput(id="notes", kind=UnderstandInputKind.TEXT, text="The button should be blue."),
+            UnderstandInput(id="extra", kind=UnderstandInputKind.TEXT, text="The header should be bold."),
+        ),
+    )
+
+    message = stub.captured_request.message
+    # Adjacent inline blocks stay separated by one blank line so text from one
+    # input never runs together with the next.
+    assert "[notes]\nThe button should be blue.\n\n[extra]\nThe header should be bold." in message
+
+
 def test_understand_image_delegates_with_default_task_and_cleanup_source(tmp_path):
     image = tmp_path / "shot.png"
     image.write_bytes(b"fake image bytes")
@@ -181,7 +199,9 @@ def test_understand_image_remote_uri_is_referenced_not_uploaded():
 # ---------------------------------------------------------------------------
 
 
-def test_understand_marks_accepted_inputs_analyzed_after_a_completed_analysis():
+def test_understand_marks_the_sole_input_analyzed_after_a_completed_analysis():
+    # With exactly one accepted input, a completed non-empty analysis may mark
+    # it analyzed even without an explicit [id] reference.
     stub = _StubChatService(response=_response(text="synthesized analysis"))
 
     result = _understand(
@@ -217,6 +237,58 @@ def test_understand_keeps_accepted_state_when_no_analysis_is_returned():
     assert result.data.analysis == ""
     # Without a completed analysis the input stays accepted, never analyzed.
     assert _outcomes(result) == [("notes", "text", UnderstandingOutcome.ACCEPTED)]
+
+
+def test_understand_marks_only_referenced_inputs_analyzed_with_multiple_inputs():
+    # With multiple accepted inputs, only [id] references observed in the
+    # analysis justify the analyzed outcome; the rest stay accepted.
+    stub = _StubChatService(response=_response(text="[notes] looks consistent; nothing else was mentioned."))
+
+    result = _understand(
+        stub,
+        task="Analyze.",
+        inputs=(
+            UnderstandInput(id="notes", kind=UnderstandInputKind.TEXT, text="some notes"),
+            UnderstandInput(id="extra", kind=UnderstandInputKind.TEXT, text="more notes"),
+        ),
+    )
+
+    assert result.ok is True
+    assert _outcomes(result) == [
+        ("notes", "text", UnderstandingOutcome.ANALYZED),
+        ("extra", "text", UnderstandingOutcome.ACCEPTED),
+    ]
+    assert [warning.code for warning in result.warnings] == ["input_acknowledgment_not_observed"]
+    assert "[extra]" in result.warnings[0].message
+    assert "individual acknowledgment not observed" in result.warnings[0].message
+    assert result.meta.details == {
+        "service": "understanding",
+        "accepted": 1,
+        "analyzed": 1,
+        "skipped": 0,
+        "failed": 0,
+    }
+
+
+def test_understand_marks_every_input_analyzed_when_each_is_referenced():
+    analysis = "[notes] is clear and [extra] agrees with it."
+    stub = _StubChatService(response=_response(text=analysis))
+
+    result = _understand(
+        stub,
+        task="Analyze.",
+        inputs=(
+            UnderstandInput(id="notes", kind=UnderstandInputKind.TEXT, text="some notes"),
+            UnderstandInput(id="extra", kind=UnderstandInputKind.TEXT, text="more notes"),
+        ),
+    )
+
+    assert result.ok is True
+    assert _outcomes(result) == [
+        ("notes", "text", UnderstandingOutcome.ANALYZED),
+        ("extra", "text", UnderstandingOutcome.ANALYZED),
+    ]
+    assert result.warnings == ()
 
 
 def test_understand_preserves_input_order_and_ids_with_mixed_outcomes(tmp_path):
@@ -292,7 +364,8 @@ def test_understand_skips_blank_ids_and_unsupported_kinds():
 
 
 def test_understand_bounds_the_typed_input_list():
-    stub = _StubChatService(response=_response())
+    analysis = " ".join(f"[note-{index}] reviewed." for index in range(16))
+    stub = _StubChatService(response=_response(text=analysis))
 
     result = _understand(
         stub,
@@ -310,6 +383,31 @@ def test_understand_bounds_the_typed_input_list():
     assert len(analyzed) == 16
     assert [item.id for item in skipped] == ["note-16"]
     assert "input limit exceeded" in skipped[0].detail
+
+
+def test_understand_over_limit_inputs_do_not_consume_their_ids():
+    # The 17th input is skipped for the limit without claiming its id, so a
+    # later duplicate is also reported for the limit, not as a duplicate id.
+    stub = _StubChatService(response=_response(text="[note-0] reviewed."))
+
+    result = _understand(
+        stub,
+        task="Analyze.",
+        inputs=tuple(
+            [UnderstandInput(id=f"note-{index}", kind=UnderstandInputKind.TEXT, text=f"note {index}") for index in range(16)]
+            + [
+                UnderstandInput(id="extra", kind=UnderstandInputKind.TEXT, text="first over limit"),
+                UnderstandInput(id="extra", kind=UnderstandInputKind.TEXT, text="second over limit"),
+            ]
+        ),
+    )
+
+    assert result.ok is True
+    assert result.data is not None
+    over_limit = [item for item in result.data.inputs if item.outcome is UnderstandingOutcome.SKIPPED]
+    assert [item.id for item in over_limit] == ["extra", "extra"]
+    assert all("input limit exceeded" in item.detail for item in over_limit)
+    assert not any("duplicate input id" in item.detail for item in over_limit)
 
 
 def test_understand_rejects_image_paths_that_are_not_usable_images(tmp_path):
@@ -330,6 +428,40 @@ def test_understand_rejects_image_paths_that_are_not_usable_images(tmp_path):
     assert result.data.inputs[0].outcome is UnderstandingOutcome.SKIPPED
     assert "local image rejected" in result.data.inputs[0].detail
     assert stub.captured_request is None
+
+
+def test_understand_rejects_empty_local_files_before_upload(tmp_path):
+    # A 0-byte file would pass path validation, upload nothing of value, and
+    # then be contradicted by its own size-empty failed artifact; skip it up front.
+    empty_image = tmp_path / "blank.png"
+    empty_image.write_bytes(b"")
+    empty_file = tmp_path / "blank.md"
+    empty_file.write_text("")
+    stub = _StubChatService(response=_response(text="[notes] is the only usable input."))
+
+    result = _understand(
+        stub,
+        task="Analyze.",
+        inputs=(
+            UnderstandInput(id="blank-image", kind=UnderstandInputKind.IMAGE, path=str(empty_image)),
+            UnderstandInput(id="blank-file", kind=UnderstandInputKind.FILE, path=str(empty_file)),
+            UnderstandInput(id="notes", kind=UnderstandInputKind.TEXT, text="usable"),
+        ),
+    )
+
+    assert result.ok is True
+    assert result.data is not None
+    assert stub.captured_request is not None
+    # Neither empty file was uploaded.
+    assert stub.captured_request.files == ()
+    outcomes = result.data.inputs
+    assert outcomes[0].outcome is UnderstandingOutcome.SKIPPED
+    assert outcomes[1].outcome is UnderstandingOutcome.SKIPPED
+    assert "local image is empty (0 bytes)" in outcomes[0].detail
+    assert "local file is empty (0 bytes)" in outcomes[1].detail
+    assert outcomes[2].outcome is UnderstandingOutcome.ANALYZED
+    assert [warning.code for warning in result.warnings] == ["input_skipped", "input_skipped"]
+    assert result.meta.details["skipped"] == 2
 
 
 # ---------------------------------------------------------------------------

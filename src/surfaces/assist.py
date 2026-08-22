@@ -9,6 +9,8 @@ copy of request construction, parsing, or persistence.
 import logging
 from typing import Optional
 
+from pydantic import Field
+
 from .. import __version__
 from ..adapters import (
     MCPServer,
@@ -33,6 +35,7 @@ from ..client_wrapper import (
 from ..constants import normalize_model_alias, resolve_model_name
 from ..domain import DomainErrorCode, DomainResult
 from ..services import (
+    MAX_UNDERSTAND_INPUTS,
     ChatRequest,
     ChatService,
     ChatServiceDependencies,
@@ -72,8 +75,9 @@ Prompt, or cleanup tools.
 - **gemini_understand_image**: understand one image from a local path or
   image URI, with the input image keeping a stable artifact identity
 - **gemini_understand**: typed mixed-input understanding over text, image
-  path/URI, file path/URI, and URL inputs; each input keeps its id and a
-  per-input outcome (accepted, analyzed, skipped, or failed)
+  path/URI, file path/URI, and URL inputs (max 16); each input keeps its id
+  and a per-input outcome (accepted, analyzed, skipped, or failed), where
+  analyzed means the completed analysis acknowledged that input
 
 ## Models
 - flash-lite, flash (default), thinking, pro
@@ -288,7 +292,7 @@ async def gemini_understand_image(
 @domain_error_boundary("gemini_understand", logger)
 async def gemini_understand(
     task: str,
-    inputs: list[UnderstandInput],
+    inputs: list[UnderstandInput] = Field(max_length=MAX_UNDERSTAND_INPUTS),
     model: str = "flash",
     thinking_level: str = "standard",
 ) -> list[TextContent]:
@@ -297,10 +301,13 @@ async def gemini_understand(
     Each input is one typed object — ``{"id", "kind", ...}`` — instead of one
     overloaded string: ``kind=text`` carries ``text``, ``kind=image`` accepts a
     local ``path`` or an http(s) URI, ``kind=file`` accepts a local ``path`` or
-    an http(s) URI, and ``kind=url`` carries an absolute ``url``. Every input
-    keeps its ``id``; the structured result records a per-input outcome
-    (``accepted``, ``analyzed``, ``skipped``, or ``failed``) so no input is
-    silently dropped, plus the synthesized analysis.
+    an http(s) URI, and ``kind=url`` carries an absolute ``url``. At most 16
+    inputs are accepted; later ones are skipped. Every input keeps its ``id``;
+    the structured result records a per-input outcome (``accepted``,
+    ``analyzed``, ``skipped``, or ``failed``) so no input is silently dropped,
+    plus the synthesized analysis. An input is marked ``analyzed`` only when
+    the completed analysis acknowledges it — implicitly when it is the sole
+    input, otherwise by referencing its ``[id]``.
     """
     result = await _understand_service.understand(
         UnderstandRequest(

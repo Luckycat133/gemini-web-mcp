@@ -42,8 +42,9 @@ class UnderstandingOutcome(str, Enum):
 
     ``SKIPPED`` inputs never reached the upstream request. ``ACCEPTED`` inputs
     were validated and included in the request, ``ANALYZED`` inputs additionally
-    have a completed analysis behind them, and ``FAILED`` inputs were included
-    in a request that errored.
+    have a completed analysis acknowledging them — implicitly when they are the
+    sole accepted input, otherwise only when the analysis references their
+    ``[id]`` — and ``FAILED`` inputs were included in a request that errored.
     """
 
     ACCEPTED = "accepted"
@@ -223,7 +224,10 @@ class UnderstandService:
         chat_data = chat_result.data
         assert chat_data is not None
         analysis = _response_text(chat_data.response).strip()
-        final_outcomes = _with_final_outcomes(outcomes, analyzed=bool(analysis))
+        final_outcomes = _with_final_outcomes(outcomes, analysis=analysis)
+        warnings = _skip_warnings(final_outcomes)
+        if analysis:
+            warnings += _acknowledgment_warnings(final_outcomes)
         return DomainResult.success(
             UnderstandOperationData(
                 task=task,
@@ -234,7 +238,7 @@ class UnderstandService:
                 observed_backend=observed_backend_from_response(chat_data.response),
                 lifecycle=chat_data.lifecycle,
             ),
-            warnings=_skip_warnings(outcomes),
+            warnings=warnings,
             request_id=chat_result.meta.request_id,
             requested_backend=chat_data.requested_model,
             effective_backend=chat_data.effective_model,
@@ -288,9 +292,9 @@ def _prepare_input(
             ),
             None,
         )
-    seen_ids.add(input_id)
     if ordinal >= MAX_UNDERSTAND_INPUTS:
         return _skipped_outcome(raw_input, f"input limit exceeded (max {MAX_UNDERSTAND_INPUTS} inputs)."), None
+    seen_ids.add(input_id)
 
     try:
         kind = UnderstandInputKind(raw_input.kind)
@@ -369,6 +373,8 @@ def _prepare_input(
         valid, value = validate_local_file_path(location)
     if not valid:
         return _skipped_outcome(raw_input, f"local {kind.value} rejected: {value}"), None
+    if _is_empty_local_file(value):
+        return _skipped_outcome(raw_input, f"local {kind.value} is empty (0 bytes); provide a non-empty file."), None
     return (
         _accepted_outcome(
             raw_input,
@@ -403,11 +409,16 @@ def _compose_understand_message(task: str, prepared: Sequence[_PreparedInput]) -
     if has_inline:
         lines.append("")
         lines.append("Inline text:")
+        block_index = 0
         for item in prepared:
-            if not item.inline_text:
+            inline_text = item.inline_text
+            if not inline_text:
                 continue
+            if block_index:
+                lines.append("")
             lines.append(f"[{item.input_id}]")
-            lines.append(item.inline_text)
+            lines.append(inline_text)
+            block_index += 1
     lines.append("")
     lines.append("Refer to every input by its [id] so each observation stays tied to its source.")
     return "\n".join(lines)
@@ -442,15 +453,26 @@ def _skipped_outcome(raw_input: UnderstandInput, reason: str) -> UnderstandInput
 def _with_final_outcomes(
     outcomes: Sequence[UnderstandInputOutcome],
     *,
-    analyzed: bool,
+    analysis: str,
 ) -> tuple[UnderstandInputOutcome, ...]:
-    """Upgrade accepted inputs once the analysis outcome is known."""
+    """Upgrade accepted inputs once the analysis outcome is known.
 
-    if not analyzed:
+    A completed non-empty analysis may mark the sole accepted input analyzed.
+    With multiple accepted inputs, only inputs the analysis actually references
+    by ``[id]`` are marked analyzed; the rest stay accepted because individual
+    acknowledgment was not observed.
+    """
+
+    if not analysis:
         return tuple(outcomes)
+    accepted = [outcome for outcome in outcomes if outcome.outcome is UnderstandingOutcome.ACCEPTED]
+    if not accepted:
+        return tuple(outcomes)
+    sole_accepted = len(accepted) == 1
     return tuple(
         replace(outcome, outcome=UnderstandingOutcome.ANALYZED)
         if outcome.outcome is UnderstandingOutcome.ACCEPTED
+        and (sole_accepted or f"[{outcome.id}]" in analysis)
         else outcome
         for outcome in outcomes
     )
@@ -476,6 +498,21 @@ def _skip_warnings(outcomes: Sequence[UnderstandInputOutcome]) -> tuple[DomainWa
         )
         for outcome in outcomes
         if outcome.outcome is UnderstandingOutcome.SKIPPED
+    )
+
+
+def _acknowledgment_warnings(outcomes: Sequence[UnderstandInputOutcome]) -> tuple[DomainWarning, ...]:
+    return tuple(
+        DomainWarning(
+            code="input_acknowledgment_not_observed",
+            message=(
+                f"Input [{outcome.id or '(missing id)'}] was included in the completed request; "
+                "individual acknowledgment not observed in the analysis."
+            ),
+            suggested_action="Re-run the task and ask for observations that reference every input by its [id].",
+        )
+        for outcome in outcomes
+        if outcome.outcome is UnderstandingOutcome.ACCEPTED
     )
 
 
@@ -547,6 +584,13 @@ def _artifact_kind(kind: UnderstandInputKind) -> ArtifactKind:
 def _response_text(response: Any) -> str:
     text = getattr(response, "text", "")
     return text if isinstance(text, str) else ""
+
+
+def _is_empty_local_file(path: str) -> bool:
+    try:
+        return Path(path).stat().st_size == 0
+    except OSError:
+        return False
 
 
 def _is_http_url(url: str) -> bool:

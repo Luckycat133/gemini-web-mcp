@@ -34,6 +34,7 @@ from .search import (
 )
 from .streams import StreamTextAccumulator
 from .understanding import (
+    MAX_UNDERSTAND_INPUTS,
     UnderstandImageRequest,
     UnderstandInput,
     UnderstandInputKind,
@@ -62,6 +63,7 @@ __all__ = [
     "GroundingState",
     "is_response_queued",
     "LifecycleResetAllData",
+    "MAX_UNDERSTAND_INPUTS",
     "merge_artifacts",
     "ObservedSource",
     "observed_backend_from_response",

@@ -245,6 +245,8 @@ def test_gemini_understand_input_schema_is_typed_and_deterministic():
     assert set(input_schema["properties"]) == {"id", "kind", "path", "url", "text"}
     assert schema["$defs"]["UnderstandInputKind"]["enum"] == ["text", "image", "file", "url"]
     assert schema["properties"]["inputs"]["items"]["$ref"] == "#/$defs/UnderstandInput"
+    # The input bound is discoverable in the schema itself.
+    assert schema["properties"]["inputs"]["maxItems"] == 16
 
 
 def test_assist_surface_exposes_no_account_or_history_tools():
@@ -662,7 +664,7 @@ def test_gemini_understand_accepts_mixed_typed_inputs_in_one_request(monkeypatch
     design.write_bytes(b"fake image bytes")
     spec = tmp_path / "spec.md"
     spec.write_text("# spec")
-    client = _FakeUnderstandClient(response_text="The implementation matches the design.")
+    client = _FakeUnderstandClient(response_text="The [design] matches the [spec], and [docs] and [notes] agree.")
     captured_schedule = []
     _patch_ask_client_env(monkeypatch, client, captured_schedule=captured_schedule)
 
@@ -697,7 +699,7 @@ def test_gemini_understand_accepts_mixed_typed_inputs_in_one_request(monkeypatch
     domain_result = content[0].meta["domain_result"]
     assert domain_result["ok"] is True
     data = domain_result["data"]
-    assert data["analysis"] == "The implementation matches the design."
+    assert data["analysis"] == "The [design] matches the [spec], and [docs] and [notes] agree."
     assert [(outcome["id"], outcome["outcome"]) for outcome in data["inputs"]] == [
         ("design", "analyzed"),
         ("spec", "analyzed"),
@@ -708,6 +710,7 @@ def test_gemini_understand_accepts_mixed_typed_inputs_in_one_request(monkeypatch
     assert data["inputs"][0]["artifact"]["state"] == "local"
     assert data["inputs"][2]["artifact"]["uri"] == "https://example.com/docs"
     assert data["inputs"][3]["artifact"] is None
+    assert domain_result["warnings"] == []
     assert domain_result["meta"]["details"] == {
         "service": "understanding",
         "accepted": 0,
@@ -715,6 +718,48 @@ def test_gemini_understand_accepts_mixed_typed_inputs_in_one_request(monkeypatch
         "skipped": 0,
         "failed": 0,
     }
+
+
+def test_gemini_understand_marks_only_referenced_inputs_analyzed(monkeypatch, tmp_path):
+    # With multiple accepted inputs, analyzed is per-input evidence: only the
+    # input the analysis references by [id] is analyzed; the rest stay accepted
+    # with an acknowledgment-not-observed warning instead of overstating.
+    design = tmp_path / "design.png"
+    design.write_bytes(b"fake image bytes")
+    client = _FakeUnderstandClient(response_text="[design] matches the implementation; nothing else was mentioned.")
+    _patch_ask_client_env(monkeypatch, client)
+
+    content = asyncio.run(
+        _call_tool(
+            "gemini_understand",
+            task="Compare the design with the implementation.",
+            inputs=[
+                {"id": "design", "kind": "image", "path": str(design)},
+                {"id": "notes", "kind": "text", "text": "The button should be blue."},
+            ],
+        )
+    )
+
+    domain_result = content[0].meta["domain_result"]
+    assert domain_result["ok"] is True
+    data = domain_result["data"]
+    assert [(outcome["id"], outcome["outcome"]) for outcome in data["inputs"]] == [
+        ("design", "analyzed"),
+        ("notes", "accepted"),
+    ]
+    assert [warning["code"] for warning in domain_result["warnings"]] == ["input_acknowledgment_not_observed"]
+    assert "[notes]" in domain_result["warnings"][0]["message"]
+    assert "individual acknowledgment not observed" in domain_result["warnings"][0]["message"]
+    assert domain_result["meta"]["details"] == {
+        "service": "understanding",
+        "accepted": 1,
+        "analyzed": 1,
+        "skipped": 0,
+        "failed": 0,
+    }
+    # Compatibility text repeats the truthful per-input outcomes.
+    assert "- [design] image: analyzed" in content[0].text
+    assert "- [notes] text: accepted" in content[0].text
 
 
 def test_gemini_understand_keeps_identity_and_records_skipped_inputs(monkeypatch, tmp_path):
