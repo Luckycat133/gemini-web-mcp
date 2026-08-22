@@ -174,7 +174,7 @@ def test_development_skill_names_maintained_validation_and_agent_use_paths() -> 
         "End-to-End Agent Evaluations",
         "downstream handoff",
         "no duplicate upstream start",
-        "MCP Tasks extension",
+        "protocol-native MCP Tasks",
         "Compatibility Runtime Skill",
     ):
         assert required in f"{testing}\n{design}"
