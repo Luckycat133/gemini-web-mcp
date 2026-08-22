@@ -37,9 +37,14 @@ import pytest
 from src.adapters.mcp_sdk import MCPServer
 
 import src.tools.research as research_tools
-from src.services.research import is_capability_probe_false_negative as _is_capability_probe_false_negative
+from src.services.research import (
+    create_deep_research_plan as _create_deep_research_plan,
+    is_capability_probe_false_negative as _is_capability_probe_false_negative,
+    is_default_deep_research_transport as _is_default_deep_research_transport,
+    start_deep_research_with_recovery as _start_deep_research_with_recovery,
+    start_fresh_research_chat as _start_fresh_research_chat,
+)
 from src.tools.research import (
-    _create_deep_research_plan,
     _create_research_report_artifact,
     _extract_deep_research_immersive_report,
     _extract_sources_from_node,
@@ -47,7 +52,6 @@ from src.tools.research import (
     _format_deep_research_result,
     _format_research_report_actions,
     _format_research_report_artifact,
-    _is_default_deep_research_transport,
     _is_research_completion_message,
     _is_research_start_message,
     _iter_source_links,
@@ -58,8 +62,6 @@ from src.tools.research import (
     _research_report_actions_payload,
     _resolve_deep_research_transport_model,
     _safe_filename,
-    _start_deep_research_with_recovery,
-    _start_fresh_research_chat,
     _title_from_markdown,
     _wait_for_deep_research_by_chat,
     _walk_nested_json,

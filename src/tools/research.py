@@ -39,19 +39,14 @@ from ..services import (
 )
 from ..services.research import (
     await_before_deadline as _await_before_deadline,
-    create_deep_research_plan as _create_deep_research_plan,
     format_research_query as _format_research_query,
-    is_default_deep_research_transport as _is_default_deep_research_transport,
-    null_scope as _null_scope,
+    has_native_research_api as _has_native_research_api,
     operation_state_from_upstream as _operation_state_from_upstream,
-    phase_timeout as _phase_timeout,
-    research_chat_id as _research_chat_id,
     research_domain_result as _research_domain_result,
     research_operation_data as _research_operation_data,
+    research_timed_out_result as _research_timed_out_result,
     resolve_deep_research_transport_model as _resolve_deep_research_transport_model,
-    start_deep_research_with_recovery as _start_deep_research_with_recovery,
-    start_fresh_research_chat as _start_fresh_research_chat,
-    upstream_state as _upstream_state,
+    run_deep_research_start_phase as _run_deep_research_start_phase,
 )
 from .annotations import MUTATES_LOCAL, MUTATES_REMOTE, READS_PRIVATE_REMOTE
 
@@ -84,76 +79,74 @@ def register_research_tools(mcp: MCPServer):
         delete_after_seconds: int | None,
     ) -> list[TextContent]:
         """Run Deep Research via the client's native plan/start/wait API."""
-        chat = _start_fresh_research_chat(client, research_model)
-        scope = _null_scope()
-        if not _is_default_deep_research_transport(research_model):
-            thinking_scope = getattr(client, "thinking_scope", None)
-            scope = (
-                thinking_scope(model_name, thinking_level)
-                if thinking_scope
-                else _null_scope()
+        start = await _run_deep_research_start_phase(
+            client,
+            query=query,
+            requested_model=model,
+            resolved_model=model_name,
+            research_model=research_model,
+            model_note=model_note,
+            thinking_level=thinking_level,
+            timeout_seconds=timeout_seconds,
+            operation="gemini_deep_research",
+            operation_id=None,
+            schedule_chat_cleanup=schedule_remote_chat_cleanup,
+            retain_chat=retain_chat,
+            delete_after_seconds=delete_after_seconds,
+            cleanup_source="gemini_deep_research",
+        )
+        if start.timed_out is not None:
+            return domain_text(
+                start.timed_out,
+                _deep_research_timeout_error(timeout_seconds).text,
+                use_result_data=True,
             )
-        plan = None
-        start_output = None
+        if start.error is not None:
+            raise start.error
+        chat, plan, start_output = start.chat, start.plan, start.start_output
+
+        if not wait_for_completion:
+            state = _operation_state_from_upstream(
+                getattr(start_output, "state", None),
+            )
+            status = SimpleNamespace(
+                state=state.value,
+                done=state is OperationState.COMPLETED,
+                notes=["caller requested start-only execution"],
+            )
+            upstream_result = SimpleNamespace(
+                plan=plan,
+                start_output=start_output,
+                final_output=None,
+                statuses=[status],
+                done=state is OperationState.COMPLETED,
+                poll_count=0,
+            )
+            data = _research_operation_data(
+                state,
+                plan=plan,
+                chat=chat,
+                upstream_result=upstream_result,
+                latest_upstream_state=state.value,
+                poll_count=0,
+            )
+            operation_result = _research_domain_result(data)
+            content = _format_deep_research_result(
+                query,
+                upstream_result,
+                model,
+                research_model,
+                model_note,
+                operation_state=state,
+                waited_for_completion=False,
+            )
+            return attach_domain_result(
+                [content],
+                operation_result,
+                use_result_data=True,
+            )
+
         try:
-            with scope:
-                plan = await _await_before_deadline(
-                    _create_deep_research_plan(
-                        client,
-                        _format_research_query(query, model, model_note),
-                        chat=chat,
-                        model=research_model,
-                    ),
-                    timeout=_phase_timeout(timeout_seconds),
-                )
-                start_output = await _start_deep_research_with_recovery(
-                    client,
-                    plan,
-                    chat,
-                    timeout=min(_phase_timeout(timeout_seconds), 120),
-                )
-
-            if not wait_for_completion:
-                state = _operation_state_from_upstream(
-                    getattr(start_output, "state", None),
-                )
-                status = SimpleNamespace(
-                    state=state.value,
-                    done=state is OperationState.COMPLETED,
-                    notes=["caller requested start-only execution"],
-                )
-                upstream_result = SimpleNamespace(
-                    plan=plan,
-                    start_output=start_output,
-                    final_output=None,
-                    statuses=[status],
-                    done=state is OperationState.COMPLETED,
-                    poll_count=0,
-                )
-                data = _research_operation_data(
-                    state,
-                    plan=plan,
-                    chat=chat,
-                    upstream_result=upstream_result,
-                    latest_upstream_state=state.value,
-                    poll_count=0,
-                )
-                operation_result = _research_domain_result(data)
-                content = _format_deep_research_result(
-                    query,
-                    upstream_result,
-                    model,
-                    research_model,
-                    model_note,
-                    operation_state=state,
-                    waited_for_completion=False,
-                )
-                return attach_domain_result(
-                    [content],
-                    operation_result,
-                    use_result_data=True,
-                )
-
             if getattr(plan, "research_id", None):
                 upstream_result = await _await_before_deadline(
                     client.wait_for_deep_research(
@@ -172,53 +165,39 @@ def register_research_tools(mcp: MCPServer):
                     poll_interval=poll_interval,
                     timeout=timeout_seconds,
                 )
-            upstream_result.start_output = start_output
-            state = (
-                OperationState.COMPLETED
-                if getattr(upstream_result, "done", False)
-                else OperationState.TIMED_OUT
-            )
-            data = _research_operation_data(
-                state,
-                plan=plan,
-                chat=chat,
-                upstream_result=upstream_result,
-            )
-            operation_result = _research_domain_result(data)
-            content = _format_deep_research_result(
-                query,
-                upstream_result,
-                model,
-                research_model,
-                model_note,
-                operation_state=state,
-                waited_for_completion=True,
-            )
-            return attach_domain_result(
-                [content],
-                operation_result,
-                use_result_data=True,
-            )
         except asyncio.TimeoutError:
-            data = _research_operation_data(
-                OperationState.TIMED_OUT,
-                plan=plan,
-                chat=chat,
-                latest_upstream_state=_upstream_state(start_output),
-            )
             return domain_text(
-                _research_domain_result(data),
+                _research_timed_out_result(plan=plan, chat=chat, start_output=start_output),
                 _deep_research_timeout_error(timeout_seconds).text,
                 use_result_data=True,
             )
-        finally:
-            if plan is not None:
-                schedule_remote_chat_cleanup(
-                    _research_chat_id(plan=plan, chat=chat),
-                    retain_chat=retain_chat,
-                    delete_after_seconds=delete_after_seconds,
-                    source="gemini_deep_research",
-                )
+        upstream_result.start_output = start_output
+        state = (
+            OperationState.COMPLETED
+            if getattr(upstream_result, "done", False)
+            else OperationState.TIMED_OUT
+        )
+        data = _research_operation_data(
+            state,
+            plan=plan,
+            chat=chat,
+            upstream_result=upstream_result,
+        )
+        operation_result = _research_domain_result(data)
+        content = _format_deep_research_result(
+            query,
+            upstream_result,
+            model,
+            research_model,
+            model_note,
+            operation_state=state,
+            waited_for_completion=True,
+        )
+        return attach_domain_result(
+            [content],
+            operation_result,
+            use_result_data=True,
+        )
 
     async def _run_fallback_deep_research(
         client: Any,
@@ -319,15 +298,7 @@ def register_research_tools(mcp: MCPServer):
             logger.info(f"正在启动 Deep Research: {query[:50]}...")
             poll_interval = max(3, poll_interval_seconds)
 
-            has_native_api = all(
-                hasattr(client, attr)
-                for attr in (
-                    "create_deep_research_plan",
-                    "start_deep_research",
-                    "wait_for_deep_research",
-                )
-            )
-            if has_native_api:
+            if _has_native_research_api(client):
                 return await _run_native_deep_research(
                     client, query, model, model_name, research_model,
                     thinking_level, model_note, timeout_seconds, poll_interval,

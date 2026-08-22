@@ -6,7 +6,10 @@ and start-with-recovery — below the MCP presentation layers. ``start`` never
 waits for the final report: it returns a typed
 :class:`~src.domain.LongOperationData` handle immediately, and recoverability
 rides on the preserved upstream identifiers instead of any connection-local
-MCP state.
+MCP state. The plan/start orchestration is shared with the compatibility
+``gemini_deep_research`` tool through
+:func:`run_deep_research_start_phase`, so both surfaces keep identical phase
+deadlines, TIMED_OUT classification, and chat-cleanup scheduling.
 """
 
 from __future__ import annotations
@@ -93,62 +96,41 @@ class ResearchService:
             return _capability_unavailable(request)
 
         research_model, model_note = resolve_deep_research_transport_model(request.model)
-        chat = start_fresh_research_chat(client, research_model)
-        scope = self._thinking_scope(client, research_model, request)
         operation_id = new_operation_id()
-        plan = None
-        start_output = None
-        try:
-            with scope:
-                plan = await await_before_deadline(
-                    create_deep_research_plan(
-                        client,
-                        format_research_query(query, request.model, model_note),
-                        chat=chat,
-                        model=research_model,
-                    ),
-                    timeout=phase_timeout(request.timeout_seconds),
-                )
-                start_output = await start_deep_research_with_recovery(
-                    client,
-                    plan,
-                    chat,
-                    timeout=min(phase_timeout(request.timeout_seconds), RESEARCH_START_TIMEOUT_SECONDS),
-                )
-        except asyncio.TimeoutError:
-            data = research_operation_data(
-                OperationState.TIMED_OUT,
-                operation=request.operation,
-                operation_id=operation_id,
-                plan=plan,
-                chat=chat,
-                latest_upstream_state=upstream_state(start_output),
-            )
-            return research_domain_result(data)
-        except Exception as error:
+        start = await run_deep_research_start_phase(
+            client,
+            query=query,
+            requested_model=request.model,
+            resolved_model=self._dependencies.resolve_model(request.model),
+            research_model=research_model,
+            model_note=model_note,
+            thinking_level=request.thinking_level,
+            timeout_seconds=request.timeout_seconds,
+            operation=request.operation,
+            operation_id=operation_id,
+            schedule_chat_cleanup=self._dependencies.schedule_chat_cleanup,
+            retain_chat=request.retain_chat,
+            delete_after_seconds=request.delete_after_seconds,
+            cleanup_source=request.cleanup_source,
+        )
+        if start.timed_out is not None:
+            return start.timed_out
+        if start.error is not None:
             return _failure_from_exception(
-                error,
+                start.error,
                 request,
                 operation_id=operation_id,
-                plan=plan,
-                chat=chat,
+                plan=start.plan,
+                chat=start.chat,
             )
-        finally:
-            if plan is not None:
-                self._dependencies.schedule_chat_cleanup(
-                    research_chat_id(plan=plan, chat=chat),
-                    retain_chat=request.retain_chat,
-                    delete_after_seconds=request.delete_after_seconds,
-                    source=request.cleanup_source,
-                )
 
-        state = operation_state_from_upstream(getattr(start_output, "state", None))
+        state = operation_state_from_upstream(getattr(start.start_output, "state", None))
         data = research_operation_data(
             state,
             operation=request.operation,
             operation_id=operation_id,
-            plan=plan,
-            chat=chat,
+            plan=start.plan,
+            chat=start.chat,
             latest_upstream_state=state.value,
             poll_count=0,
         )
@@ -160,22 +142,125 @@ class ResearchService:
         await self._dependencies.cleanup_due_remote_chats(client)
         return client
 
-    def _thinking_scope(
-        self,
-        client: Any,
-        research_model: Any,
-        request: ResearchRequest,
-    ) -> Any:
-        if is_default_deep_research_transport(research_model):
-            return null_scope()
-        thinking_scope = getattr(client, "thinking_scope", None)
-        if thinking_scope is None:
-            return null_scope()
-        return thinking_scope(self._dependencies.resolve_model(request.model), request.thinking_level)
+
+@dataclass(frozen=True)
+class DeepResearchStart:
+    """Outcome of one shared Deep Research plan/start phase run.
+
+    ``chat``, ``plan`` and ``start_output`` preserve the partial upstream
+    state so each surface can report the upstream identifiers. ``timed_out``
+    or ``error`` is set only when a phase failed; chat cleanup has already
+    been scheduled by :func:`run_deep_research_start_phase` in that case (and
+    on success).
+    """
+
+    chat: Any
+    plan: Any | None = None
+    start_output: Any | None = None
+    timed_out: DomainResult[LongOperationData] | None = None
+    error: BaseException | None = None
+
+
+async def run_deep_research_start_phase(
+    client: Any,
+    *,
+    query: str,
+    requested_model: str,
+    resolved_model: str,
+    research_model: Any,
+    model_note: str,
+    thinking_level: str,
+    timeout_seconds: int,
+    operation: str,
+    operation_id: str | None,
+    schedule_chat_cleanup: Callable[..., Any],
+    retain_chat: bool,
+    delete_after_seconds: int | None,
+    cleanup_source: str,
+) -> DeepResearchStart:
+    """Run the shared Deep Research plan/start phases for both surfaces.
+
+    The asynchronous ``gemini_research`` service and the compatibility
+    ``gemini_deep_research`` tool start Deep Research identically: fresh
+    research chat, optional thinking scope, plan under the request deadline
+    (with the ``phase_timeout`` floor), and start-with-recovery capped at
+    ``RESEARCH_START_TIMEOUT_SECONDS``. This coroutine owns that
+    orchestration: it converts a missed phase deadline into one typed
+    TIMED_OUT result, captures any other exception for the caller's
+    classifier, and schedules retention-aware chat cleanup exactly once in
+    ``finally``.
+    """
+    chat = start_fresh_research_chat(client, research_model)
+    scope = research_thinking_scope(client, research_model, resolved_model, thinking_level)
+    plan = None
+    start_output = None
+    try:
+        with scope:
+            plan = await await_before_deadline(
+                create_deep_research_plan(
+                    client,
+                    format_research_query(query, requested_model, model_note),
+                    chat=chat,
+                    model=research_model,
+                ),
+                timeout=phase_timeout(timeout_seconds),
+            )
+            start_output = await start_deep_research_with_recovery(
+                client,
+                plan,
+                chat,
+                timeout=min(phase_timeout(timeout_seconds), RESEARCH_START_TIMEOUT_SECONDS),
+            )
+    except asyncio.TimeoutError:
+        return DeepResearchStart(
+            chat,
+            plan,
+            start_output,
+            timed_out=research_timed_out_result(
+                operation=operation,
+                operation_id=operation_id,
+                plan=plan,
+                chat=chat,
+                start_output=start_output,
+            ),
+        )
+    except Exception as error:
+        return DeepResearchStart(chat, plan, start_output, error=error)
+    finally:
+        if plan is not None:
+            schedule_chat_cleanup(
+                research_chat_id(plan=plan, chat=chat),
+                retain_chat=retain_chat,
+                delete_after_seconds=delete_after_seconds,
+                source=cleanup_source,
+            )
+    return DeepResearchStart(chat, plan, start_output)
+
+
+def research_thinking_scope(
+    client: Any,
+    research_model: Any,
+    resolved_model: str,
+    thinking_level: str,
+) -> Any:
+    """Resolve the thinking scope for one Deep Research start request."""
+    if is_default_deep_research_transport(research_model):
+        return null_scope()
+    thinking_scope = getattr(client, "thinking_scope", None)
+    if thinking_scope is None:
+        return null_scope()
+    return thinking_scope(resolved_model, thinking_level)
 
 
 def has_native_research_api(client: Any) -> bool:
-    """Report whether the client exposes the native plan/start/wait API."""
+    """Report whether the client exposes the native plan/start/wait API.
+
+    ``wait_for_deep_research`` is required even though the asynchronous
+    ``gemini_research`` service never waits for the final report: this probe
+    is shared with the compatibility ``gemini_deep_research`` tool, whose
+    wait-for-completion mode polls that same API, so both surfaces gate on
+    one identical capability contract.
+    """
     return all(
         hasattr(client, attr)
         for attr in (
@@ -374,6 +459,26 @@ def research_domain_result(
         verification_status=verification_status,
         details=details,
     )
+
+
+def research_timed_out_result(
+    *,
+    operation: str = "gemini_deep_research",
+    operation_id: str | None = None,
+    plan: Any = None,
+    chat: Any = None,
+    start_output: Any = None,
+) -> DomainResult[LongOperationData]:
+    """Build the typed TIMED_OUT result for one missed Deep Research deadline."""
+    data = research_operation_data(
+        OperationState.TIMED_OUT,
+        operation=operation,
+        operation_id=operation_id,
+        plan=plan,
+        chat=chat,
+        latest_upstream_state=upstream_state(start_output),
+    )
+    return research_domain_result(data)
 
 
 async def create_deep_research_plan(client: Any, query: str, chat: Any, model: Any):

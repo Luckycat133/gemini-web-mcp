@@ -26,7 +26,7 @@ import pytest
 from src.adapters.mcp_sdk import MCPServer
 
 import src.tools.research as research_tools
-from src.tools.research import _null_scope
+from src.services.research import null_scope
 
 
 # ---------------------------------------------------------------------------
@@ -151,7 +151,7 @@ class _FakeNativeResearchClient:
         self.scope_called = True
         self.captured_scope_model = model
         self.captured_scope_thinking = thinking_level
-        return self._thinking_scope_obj if self._thinking_scope_obj is not None else _null_scope()
+        return self._thinking_scope_obj if self._thinking_scope_obj is not None else null_scope()
 
 
 def _patch_research_env(monkeypatch, client, *, captured_schedule=None,
@@ -840,6 +840,9 @@ def test_native_can_return_running_without_waiting_for_completion(monkeypatch):
     assert payload["meta"]["operation_state"] == "running"
     assert payload["data"]["upstream_operation_id"] == "r_running"
     assert payload["data"]["upstream_chat_id"] == "c_running"
+    # 兼容面不签发 operation handle（结构化增量是有意为之）；
+    # operation handle 只由异步 gemini_research 签发。
+    assert payload["data"]["operation_id"] is None
     assert client.captured_wait_plan is None
     assert "本次调用未等待最终报告" in content.text
 

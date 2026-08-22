@@ -22,16 +22,20 @@ surface-local copy of request construction. These tests pin:
 - research delegation: the asynchronous start contract (one opaque
   high-entropy ``operation_id``, preserved upstream operation/chat IDs, a
   typed ``state``, ``retain_chat`` defaulting to true, and no wait for the
-  final report).
+  final report), plus the plan-phase deadline contract (a missed deadline
+  returns one typed TIMED_OUT result with the issued handle preserved, and
+  ``timeout_seconds`` keeps its 30-second phase floor).
 """
 
 import asyncio
 import re
 from types import SimpleNamespace
 
+import src.services.research as research_service
 import src.surfaces.assist as assist
 
 from src import __version__
+from src.services.research import phase_timeout
 
 
 async def _call_tool(name: str, **kwargs):
@@ -1217,3 +1221,47 @@ def test_gemini_research_failure_is_typed_with_the_issued_handle(monkeypatch):
     assert captured_schedule == [
         {"cid": "c_plan1", "retain_chat": True, "delete_after_seconds": None, "source": "gemini_research"}
     ]
+
+
+def test_gemini_research_plan_phase_hang_returns_timed_out_with_issued_handle(monkeypatch):
+    class _HangingPlanClient(_FakeResearchClient):
+        async def create_deep_research_plan(self, query, chat=None, model=None):
+            await asyncio.Event().wait()
+
+    client = _HangingPlanClient()
+    captured_schedule = []
+    _patch_research_client_env(monkeypatch, client, captured_schedule=captured_schedule)
+    # Shrink only the phase deadline so the hanging plan phase misses it
+    # immediately; the real 30-second floor is pinned in the test below.
+    monkeypatch.setattr(research_service, "phase_timeout", lambda timeout_seconds: 0.05)
+
+    content = asyncio.run(_call_tool("gemini_research", query="Slow plan.", timeout_seconds=1))
+
+    domain_result = content[0].meta["domain_result"]
+    assert domain_result["ok"] is False
+    assert domain_result["error"]["code"] == "TIMED_OUT"
+    assert domain_result["error"]["retryable"] is True
+    assert domain_result["meta"]["operation_state"] == "timed_out"
+    assert domain_result["meta"]["verification_status"] == "completion_not_observed"
+    data = domain_result["data"]
+    assert data["state"] == "timed_out"
+    # The handle issued before the deadline is preserved for diagnostics.
+    assert re.fullmatch(r"op_[0-9a-f]{32}", data["operation_id"])
+    # The plan never completed, so no upstream identifiers were observed and
+    # there is no research chat id to schedule for cleanup.
+    assert data["upstream_operation_id"] is None
+    assert data["upstream_chat_id"] is None
+    assert data["continuation_possible"] is False
+    # A missed plan deadline never turns into a wait for the final report.
+    assert client.wait_calls == []
+    assert captured_schedule == []
+    # Compatibility text stays derived from the typed failure.
+    assert "TIMED_OUT" in content[0].text
+
+
+def test_gemini_research_timeout_seconds_keeps_thirty_second_phase_floor():
+    # timeout_seconds bounds only the plan/start phases and never shrinks
+    # below a 30-second deadline, even when a smaller value is requested.
+    assert phase_timeout(1) == 30
+    assert phase_timeout(30) == 30
+    assert phase_timeout(600) == 600

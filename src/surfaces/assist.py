@@ -371,16 +371,21 @@ async def gemini_research(
     """Start one Deep Research run asynchronously and return its operation handle.
 
     Use this for multi-source investigation that produces a durable report.
-    The run starts on Gemini Web and this call returns immediately with an
-    opaque high-entropy ``operation_id`` — it never waits for the final
-    report. The structured result preserves the upstream operation and chat
-    identifiers (``upstream_operation_id``, ``upstream_chat_id``) with a typed
-    ``state`` (``queued`` or ``running``) so the report stays recoverable
-    later; the research chat is retained by default (``retain_chat`` is
-    ``true``) precisely so it is not cleaned up before the report is read.
-    The server keeps no connection-local operation state: the returned
-    identifiers are the only continuation handles. Deep Research requires an
-    AI Plus subscription and the final report can take several minutes.
+    The run starts on Gemini Web and this call returns immediately after the
+    upstream research has started, with an opaque high-entropy
+    ``operation_id`` — it never waits for the final report.
+    ``timeout_seconds`` (default 600) bounds only the plan and start phases
+    of that startup: it is clamped to a 30-second floor, and the start phase
+    is additionally capped at 120 seconds. It does not bound the report
+    itself, which can take several minutes after the call has returned. The
+    structured result preserves the upstream operation and chat identifiers
+    (``upstream_operation_id``, ``upstream_chat_id``) with a typed ``state``
+    (``queued`` or ``running``) so the report stays recoverable later; the
+    research chat is retained by default (``retain_chat`` is ``true``)
+    precisely so it is not cleaned up before the report is read. The server
+    keeps no connection-local operation state: the returned identifiers are
+    the only continuation handles. Deep Research requires an AI Plus
+    subscription.
     """
     result = await _research_service.start(
         ResearchRequest(
