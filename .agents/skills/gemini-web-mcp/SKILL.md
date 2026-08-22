@@ -76,7 +76,7 @@ Use the primary server only for a narrow profile:
 
 Do not use `GEMINI_TOOLS=all` as a general-agent default.
 
-The repository is migrating toward three dedicated products—`gemini-assist`, `gemini-create`, and `gemini-account`—while this Skill remains the compatibility router.
+The repository is migrating toward three dedicated products. `gemini-assist` is now implemented as the dedicated `gemini-mcp-assist` server (`gemini_ask`, `gemini_search`, `gemini_understand_image`, `gemini_understand`, `gemini_research`) with its own `gemini-assist` Skill; `gemini-create` and `gemini-account` are not implemented yet. This Skill remains the compatibility router until they land.
 
 ## Standard Workflow
 

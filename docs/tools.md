@@ -838,6 +838,22 @@ compact 的 history/account/scheduled/doctor/cleanup 直接导入共享 service 
 
 ---
 
+## 专注 assistance 入口
+
+`src.surfaces.assist`（`gemini-mcp-assist` / `gemini_assist_mcp`）面向 assistance 意图提供恰好五个工具，不暴露 history、Cookie、Scheduled、Gem、Prompt 或 cleanup 工具：
+
+| Tool | Purpose |
+|------|---------|
+| `gemini_ask` | 单次提问，可附加上下文，用于第二意见、批评或代码/设计评审 |
+| `gemini_search` | 带观测来源的当前网页搜索；`grounding_state` 如实报告 grounded / answer_only / unavailable / failed |
+| `gemini_understand_image` | 理解单张本地图片或 http(s) 图片 URI |
+| `gemini_understand` | 文本、图片、文件、URL 的类型化混合输入理解（最多 16 个输入，逐输入记录结果） |
+| `gemini_research` | 异步启动一次 Deep Research 并返回保留的 operation handle 与上游 ID |
+
+`gemini_search` 与 `gemini_understand` 返回信息而不是 Artifact；完成的 Deep Research 报告保留在远端聊天中，通过返回的上游标识找回。对应 Runtime Skill 为 `gemini-assist`。
+
+---
+
 ## 🛡️ 智能错误处理
 
 智能错误处理会在遇到问题时自动提供解决方案。

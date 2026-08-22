@@ -8,14 +8,15 @@ The repository currently ships:
 
 - `gemini-mcp-server`: profile-based primary MCP surface;
 - `gemini-mcp-skill-server`: fixed eleven-tool low-token surface;
+- `gemini-mcp-assist`: dedicated five-tool assistance surface (`gemini_assist_mcp`);
 - `gemini-mcp-onboarding`: credential-free preflight plus explicitly authorized examples;
-- one task-first compatibility Runtime Skill, `gemini-web-mcp`;
+- two Runtime Skills: task-first compatibility `gemini-web-mcp` and dedicated assistance `gemini-assist`;
 - one Development Skill;
-- shared client/session/chat/lifecycle/Artifact/history services;
+- shared client/session/chat/lifecycle/Artifact/history/search/understanding/research services;
 - account, Notebook, Scheduled, Gem, Prompt, Doctor, Cleanup, and compatibility services;
 - MCP Python SDK v2 adapters with modern and legacy protocol smoke.
 
-These remain supported compatibility surfaces while focused products are introduced.
+These remain supported compatibility surfaces while the create and account focused products are introduced.
 
 ## Product Priority
 
@@ -272,9 +273,7 @@ Operation IDs are high-entropy, opaque, restart-safe, and independent of MCP con
 
 ## Remaining Engineering Gaps
 
-- no dedicated assist/create/account entrypoints yet;
-- no grounded quick-search contract yet;
-- no typed mixed-input understanding service yet;
+- no dedicated create/account entrypoints yet;
 - no restart-safe OperationService yet;
 - no restart-safe Cleanup queue yet;
 - prose-first admin paths remain;

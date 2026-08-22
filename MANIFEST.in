@@ -10,4 +10,5 @@ recursive-include src/data *.json
 recursive-include scripts *.py
 recursive-include examples *.json *.toml
 recursive-include .agents/skills/gemini-web-mcp *
+recursive-include .agents/skills/gemini-assist *
 global-exclude __pycache__ *.py[cod] .DS_Store

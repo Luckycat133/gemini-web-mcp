@@ -2,7 +2,7 @@
 
 Load this reference only after the `gemini-web-mcp` Skill has selected the user's capability lane.
 
-The current 0.2.x runtime has a low-token compatibility server plus narrow primary profiles. The target architecture will expose the same workflows through dedicated `gemini-assist`, `gemini-create`, and `gemini-account` MCP servers without duplicating shared services.
+The current 0.2.x runtime has a low-token compatibility server plus narrow primary profiles. The dedicated `gemini-assist` MCP server (`gemini-mcp-assist`) now implements the assistance workflows below; `gemini-create` and `gemini-account` remain pending. All of them share the same services instead of duplicating business logic.
 
 ## 1. Ask Gemini for a Second Opinion
 
@@ -23,7 +23,7 @@ Process:
 4. Resolve disagreements or present them explicitly.
 5. Continue the user's task; do not stop at “Gemini said…”.
 
-Target dedicated tool:
+Dedicated tool (`gemini-mcp-assist`):
 
 ```text
 gemini_ask
@@ -33,11 +33,11 @@ gemini_ask
 
 Use for current facts, documentation discovery, comparison, or a small number of sources.
 
-The compatibility runtime does not yet expose a dedicated grounded-search facade. Use `chat` or `gemini_chat` with an explicit request to search current sources and return source URLs.
+On the compatibility servers, use `chat` or `gemini_chat` with an explicit request to search current sources and return source URLs. The dedicated `gemini-mcp-assist` server exposes the grounded facade `gemini_search` directly.
 
 Only label the result as grounded when the response actually contains observed source URLs or equivalent structured source evidence.
 
-Use this result shape in the future dedicated surface:
+`gemini_search` returns this shape:
 
 ```text
 answer
@@ -78,7 +78,7 @@ Process:
 4. Return the analysis to the calling agent.
 5. Continue the surrounding task, such as fixing code or revising a design.
 
-Target dedicated tool:
+Dedicated tool (`gemini-mcp-assist`):
 
 ```text
 gemini_understand_image
@@ -100,22 +100,22 @@ For mixed inputs, run the smallest bounded calls needed, preserve the source ide
 
 Do not claim that a URL was fetched or a file was understood if the structured result only shows an accepted prompt without source or Artifact evidence.
 
-Target dedicated tool:
+Dedicated tool (`gemini-mcp-assist`):
 
 ```text
 gemini_understand
 ```
 
-Recommended target input:
+Its typed input shape:
 
 ```json
 {
   "task": "Compare the implementation with the design",
   "inputs": [
-    {"kind": "image", "path": "..."},
-    {"kind": "file", "path": "..."},
-    {"kind": "url", "url": "..."},
-    {"kind": "text", "text": "..."}
+    {"id": "design", "kind": "image", "path": "..."},
+    {"id": "spec", "kind": "file", "path": "..."},
+    {"id": "live", "kind": "url", "url": "..."},
+    {"id": "notes", "kind": "text", "text": "..."}
   ]
 }
 ```
@@ -145,7 +145,7 @@ Default behavior:
 
 Do not restart the same research merely because the initial MCP wait ended.
 
-Target dedicated tool:
+Dedicated tool (`gemini-mcp-assist`):
 
 ```text
 gemini_research

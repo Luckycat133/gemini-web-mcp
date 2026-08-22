@@ -29,6 +29,7 @@ CONTRACT_TESTS = (
     "tests/test_evaluations.py",
     "tests/test_development_skill.py",
     "tests/test_skill_packaging.py",
+    "tests/test_assist_skill.py",
     "tests/test_ci_contracts.py",
 )
 

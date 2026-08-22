@@ -23,6 +23,9 @@ from .chat import ChatRequest, ChatService
 logger = logging.getLogger(__name__)
 
 SEARCH_CLEANUP_SOURCE = "gemini_search"
+# Distinct from SEARCH_CLEANUP_SOURCE: this label identifies the failed search
+# execution in exception logs instead of reusing the remote-cleanup source name.
+SEARCH_EXCEPTION_OPERATION = "gemini_search_execution"
 DEFAULT_MAX_RESULTS = 8
 
 
@@ -65,6 +68,7 @@ class SearchOperationData:
     answer: str = ""
     sources: tuple[ObservedSource, ...] = ()
     observed_at: str | None = None
+    observed_source_count: int | None = None
     requested_model: str | None = None
     effective_model: str | None = None
     observed_backend: str | None = None
@@ -148,6 +152,7 @@ class SearchService:
                 answer=answer,
                 sources=sources,
                 observed_at=chat_result.meta.observed_at,
+                observed_source_count=len(observed),
                 requested_model=chat_data.requested_model,
                 effective_model=chat_data.effective_model,
                 observed_backend=observed_backend_from_response(response),
@@ -166,7 +171,7 @@ class SearchService:
         error: BaseException,
         request: SearchRequest,
     ) -> DomainResult[SearchOperationData]:
-        classified = result_from_exception(error, logger=logger, operation=SEARCH_CLEANUP_SOURCE)
+        classified = result_from_exception(error, logger=logger, operation=SEARCH_EXCEPTION_OPERATION)
         failure = classified.error
         assert failure is not None
         return _search_failure(

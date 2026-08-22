@@ -25,12 +25,14 @@ from .chat import (
 )
 from .lifecycle import ConversationLifecycleService, LifecycleResetAllData
 from .research import (
+    DEFAULT_RESEARCH_TIMEOUT_SECONDS,
     RESEARCH_CLEANUP_SOURCE,
     ResearchRequest,
     ResearchService,
     ResearchServiceDependencies,
 )
 from .search import (
+    DEFAULT_MAX_RESULTS,
     GroundingState,
     ObservedSource,
     SearchOperationData,
@@ -65,6 +67,8 @@ __all__ = [
     "CleanupStrategy",
     "ConversationLifecycleService",
     "classify_artifact_state",
+    "DEFAULT_MAX_RESULTS",
+    "DEFAULT_RESEARCH_TIMEOUT_SECONDS",
     "extract_response_artifacts",
     "GroundingState",
     "is_response_queued",

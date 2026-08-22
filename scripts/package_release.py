@@ -33,13 +33,18 @@ else:
 
 
 ROOT = PROJECT_ROOT
-SKILL_SOURCE = ROOT / ".agents" / "skills" / "gemini-web-mcp"
-SKILL_NAME = "gemini-web-mcp"
+SKILL_SOURCES = {
+    "gemini-web-mcp": ROOT / ".agents" / "skills" / "gemini-web-mcp",
+    "gemini-assist": ROOT / ".agents" / "skills" / "gemini-assist",
+}
 
 
 def require_skill_files() -> None:
-    required = [SKILL_SOURCE / "SKILL.md", SKILL_SOURCE / "agents" / "openai.yaml"]
-    missing = [path for path in required if not path.is_file()]
+    missing: list[Path] = []
+    for source in SKILL_SOURCES.values():
+        for required_file in (source / "SKILL.md", source / "agents" / "openai.yaml"):
+            if not required_file.is_file():
+                missing.append(required_file)
     if missing:
         formatted = ", ".join(str(path.relative_to(ROOT)) for path in missing)
         raise SystemExit(f"Missing required skill file(s): {formatted}")
@@ -51,19 +56,23 @@ def build_python_distributions(outdir: Path) -> None:
     shutil.rmtree(ROOT / "gemini_mcp_server.egg-info", ignore_errors=True)
 
 
-def build_skill_zip(outdir: Path, version: str) -> Path:
+def build_skill_zips(outdir: Path, version: str) -> list[Path]:
     require_skill_files()
-    zip_path = outdir / f"{SKILL_NAME}-skill-{version}.zip"
-    if zip_path.exists():
-        zip_path.unlink()
+    zip_paths: list[Path] = []
+    for skill_name, source in SKILL_SOURCES.items():
+        zip_path = outdir / f"{skill_name}-skill-{version}.zip"
+        if zip_path.exists():
+            zip_path.unlink()
 
-    with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
-        for path in sorted(SKILL_SOURCE.rglob("*")):
-            if path.is_file():
-                relative = path.relative_to(SKILL_SOURCE)
-                archive.write(path, f"{SKILL_NAME}/{relative.as_posix()}")
+        with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+            for path in sorted(source.rglob("*")):
+                if path.is_file():
+                    relative = path.relative_to(source)
+                    archive.write(path, f"{skill_name}/{relative.as_posix()}")
 
-    return zip_path
+        zip_paths.append(zip_path)
+
+    return zip_paths
 
 
 def main() -> None:
@@ -87,7 +96,7 @@ def main() -> None:
 
     if not args.skip_python:
         build_python_distributions(outdir)
-    skill_zip = build_skill_zip(outdir, metadata.version)
+    skill_zips = build_skill_zips(outdir, metadata.version)
 
     try:
         require_release_artifacts(outdir, metadata, require_python=not args.skip_python)
@@ -98,7 +107,9 @@ def main() -> None:
     print(f"Built release artifacts in {outdir}:")
     for artifact in artifacts:
         print(f"- {artifact}")
-    print(f"Standalone skill zip: {skill_zip}")
+    print("Standalone skill zips:")
+    for skill_zip in skill_zips:
+        print(f"- {skill_zip}")
 
 
 if __name__ == "__main__":

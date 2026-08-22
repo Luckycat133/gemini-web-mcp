@@ -170,7 +170,8 @@ The current supported one-command path installs the reviewed `main` source (or a
 
 The tag release workflow builds:
 
-- `gemini-web-mcp-skill-*.zip`: standalone Codex skill package
+- `gemini-web-mcp-skill-*.zip`: standalone Codex compatibility skill package
+- `gemini-assist-skill-*.zip`: standalone Codex assistance skill package
 - `gemini_mcp_server-*-py3-none-any.whl`: Python wheel
 - `gemini_mcp_server-*.tar.gz`: source distribution with docs, evaluations, and public skill files
 

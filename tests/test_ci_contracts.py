@@ -55,6 +55,7 @@ def test_targeted_contract_checklist_covers_stable_architecture_boundaries() -> 
         "tests/test_evaluations.py",
         "tests/test_development_skill.py",
         "tests/test_skill_packaging.py",
+        "tests/test_assist_skill.py",
         "tests/test_ci_contracts.py",
     } == set(CONTRACT_TESTS)
 
@@ -139,7 +140,7 @@ def test_ci_pins_reference_skill_validator_and_checks_single_public_sources() ->
     workflow = CI_WORKFLOW.read_text(encoding="utf-8")
 
     assert SKILLS_REF_SHA in workflow
-    assert workflow.count("skills-ref validate") == 2
+    assert workflow.count("skills-ref validate") == 3
     assert ".codex/skills" not in workflow
     assert f"skills@{SKILLS_CLI_VERSION} add \"$GITHUB_WORKSPACE\" --skill gemini-web-mcp-development" in workflow
     assert (

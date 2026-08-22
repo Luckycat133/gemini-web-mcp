@@ -35,6 +35,8 @@ from ..client_wrapper import (
 from ..constants import normalize_model_alias, resolve_model_name
 from ..domain import DomainErrorCode, DomainResult, LongOperationData, OperationState
 from ..services import (
+    DEFAULT_MAX_RESULTS,
+    DEFAULT_RESEARCH_TIMEOUT_SECONDS,
     MAX_UNDERSTAND_INPUTS,
     ChatRequest,
     ChatService,
@@ -210,6 +212,8 @@ def _render_search_result(data: SearchOperationData) -> list[TextContent]:
         for index, source in enumerate(data.sources, 1):
             title = (source.title or "").strip()
             lines.append(f"{index}. {source.url}" + (f" — {title}" if title else ""))
+        if data.observed_source_count is not None and data.observed_source_count > len(data.sources):
+            lines.append(f"({data.observed_source_count - len(data.sources)} more sources observed)")
         sections.append("\n".join(lines))
     elif data.grounding_state == GroundingState.ANSWER_ONLY:
         sections.append("No source evidence was observed for this answer.")
@@ -227,7 +231,7 @@ async def gemini_search(
     recency: Optional[str] = None,
     domains: Optional[list[str]] = None,
     language: Optional[str] = None,
-    max_results: int = 8,
+    max_results: int = DEFAULT_MAX_RESULTS,
     model: str = "flash",
 ) -> list[TextContent]:
     """Search the web through Gemini and return the answer with observed source evidence.
@@ -364,7 +368,7 @@ async def gemini_research(
     query: str,
     model: str = "flash",
     thinking_level: str = "extended",
-    timeout_seconds: int = 600,
+    timeout_seconds: int = DEFAULT_RESEARCH_TIMEOUT_SECONDS,
     retain_chat: bool = True,
     delete_after_seconds: Optional[int] = None,
 ) -> list[TextContent]:
@@ -408,6 +412,7 @@ async def gemini_research(
 
 def main() -> None:
     """Run the gemini_assist_mcp stdio server."""
+    logging.basicConfig(level=logging.INFO)
     logger.info("Starting %s (v%s)", SERVER_NAME, __version__)
     init_cookie_manager_integration()
     mcp.run()
