@@ -24,6 +24,14 @@ from .chat import (
     StartSessionRequest,
 )
 from .lifecycle import ConversationLifecycleService, LifecycleResetAllData
+from .search import (
+    GroundingState,
+    ObservedSource,
+    SearchOperationData,
+    SearchRequest,
+    SearchService,
+    observed_sources_from_response,
+)
 from .streams import StreamTextAccumulator
 
 __all__ = [
@@ -41,11 +49,17 @@ __all__ = [
     "ConversationLifecycleService",
     "classify_artifact_state",
     "extract_response_artifacts",
+    "GroundingState",
     "is_response_queued",
     "LifecycleResetAllData",
     "merge_artifacts",
+    "ObservedSource",
     "observed_backend_from_response",
+    "observed_sources_from_response",
     "response_chat_id",
+    "SearchOperationData",
+    "SearchRequest",
+    "SearchService",
     "SessionMessageRequest",
     "StartSessionRequest",
     "StreamTextAccumulator",

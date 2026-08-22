@@ -83,7 +83,7 @@ def test_representative_profile_snapshots_are_explicit_and_exhaustive() -> None:
         "scheduled",
         "session",
     }
-    assert ASSIST_TOOLS == {"gemini_ask"}
+    assert ASSIST_TOOLS == {"gemini_ask", "gemini_search"}
 
 
 def test_profile_snapshot_smoke_passes_from_the_installed_environment() -> None:

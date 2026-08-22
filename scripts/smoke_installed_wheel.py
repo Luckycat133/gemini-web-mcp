@@ -73,7 +73,7 @@ async def _check_tool_surfaces() -> tuple[int, int, int]:
         raise RuntimeError(f"Primary installed surface is incomplete: {sorted(primary_tools)}")
     if not {"chat", "doctor", "account"} <= compact_tools:
         raise RuntimeError(f"Compact installed surface is incomplete: {sorted(compact_tools)}")
-    if not {"gemini_ask"} <= assist_tools:
+    if not {"gemini_ask", "gemini_search"} <= assist_tools:
         raise RuntimeError(f"Assist installed surface is incomplete: {sorted(assist_tools)}")
     return len(primary_tools), len(compact_tools), len(assist_tools)
 

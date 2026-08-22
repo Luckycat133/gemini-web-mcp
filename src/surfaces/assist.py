@@ -15,6 +15,7 @@ from ..adapters import (
     TextContent,
     attach_domain_result,
     domain_error_boundary,
+    domain_failure_text,
     domain_text,
 )
 from ..client_wrapper import (
@@ -35,6 +36,10 @@ from ..services import (
     ChatRequest,
     ChatService,
     ChatServiceDependencies,
+    GroundingState,
+    SearchOperationData,
+    SearchRequest,
+    SearchService,
     observed_backend_from_response,
 )
 from ..tools.annotations import MUTATES_REMOTE
@@ -51,15 +56,17 @@ mcp = MCPServer(
 # gemini-assist (v{__version__})
 
 Focused assistance surface: extend an agent with Gemini second opinions,
-critique, and code/design review. It deliberately exposes no history,
-Cookie, Scheduled, Gem, Prompt, or cleanup tools.
+critique, code/design review, and grounded web search. It deliberately
+exposes no history, Cookie, Scheduled, Gem, Prompt, or cleanup tools.
 
 ## Tools
 - **gemini_ask**: one-shot text question with optional context
+- **gemini_search**: grounded web search with observed source evidence;
+  grounding_state is grounded only when source URLs were observed
 
 ## Models
 - flash-lite, flash (default), thinking, pro
-- thinking_level: standard or extended
+- thinking_level: standard or extended (gemini_ask)
 """,
 )
 
@@ -87,6 +94,7 @@ def _build_chat_service() -> ChatService:
 
 
 _chat_service = _build_chat_service()
+_search_service = SearchService(_chat_service)
 
 
 def _invalid_argument(message: str) -> DomainResult[None]:
@@ -148,6 +156,66 @@ async def gemini_ask(
             "observed_backend": observed_backend_from_response(result.data.response),
             "lifecycle": result.data.lifecycle,
         },
+    )
+
+
+def _render_search_result(data: SearchOperationData) -> list[TextContent]:
+    """Present the grounded-search answer without contradicting structured state."""
+    sections: list[str] = []
+    answer = data.answer.strip()
+    if answer:
+        sections.append(answer)
+    else:
+        sections.append("No answer was returned for this search.")
+    if data.sources:
+        lines = ["Sources:"]
+        for index, source in enumerate(data.sources, 1):
+            title = (source.title or "").strip()
+            lines.append(f"{index}. {source.url}" + (f" — {title}" if title else ""))
+        sections.append("\n".join(lines))
+    elif data.grounding_state == GroundingState.ANSWER_ONLY:
+        sections.append("No source evidence was observed for this answer.")
+    footer = f"Grounding state: {data.grounding_state.value}"
+    if data.observed_at:
+        footer += f"\nObserved at: {data.observed_at}"
+    sections.append(footer)
+    return [TextContent(type="text", text="\n\n".join(sections))]
+
+
+@mcp.tool(annotations=MUTATES_REMOTE)
+@domain_error_boundary("gemini_search", logger)
+async def gemini_search(
+    query: str,
+    recency: Optional[str] = None,
+    domains: Optional[list[str]] = None,
+    language: Optional[str] = None,
+    max_results: int = 8,
+    model: str = "flash",
+) -> list[TextContent]:
+    """Search the web through Gemini and return the answer with observed source evidence.
+
+    Use this for current-web questions whose answer should name its sources.
+    The structured result carries ``grounding_state`` (grounded, answer_only,
+    unavailable, or failed), the observed ``sources`` list, and an
+    ``observed_at`` timestamp. An answer without observed source evidence is
+    reported as ``answer_only`` and is never labeled grounded.
+    """
+    result = await _search_service.search(
+        SearchRequest(
+            query=query,
+            recency=recency,
+            domains=tuple(domains or ()),
+            language=language,
+            max_results=max_results,
+            model=model,
+        )
+    )
+    if not result.ok or result.data is None:
+        return domain_text(result, domain_failure_text(result), use_result_data=True)
+    return attach_domain_result(
+        _render_search_result(result.data),
+        result,
+        use_result_data=True,
     )
 
 
