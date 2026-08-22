@@ -33,6 +33,16 @@ from .search import (
     observed_sources_from_response,
 )
 from .streams import StreamTextAccumulator
+from .understanding import (
+    UnderstandImageRequest,
+    UnderstandInput,
+    UnderstandInputKind,
+    UnderstandInputOutcome,
+    UnderstandOperationData,
+    UnderstandRequest,
+    UnderstandService,
+    UnderstandingOutcome,
+)
 
 __all__ = [
     "artifact_exception_result",
@@ -63,4 +73,12 @@ __all__ = [
     "SessionMessageRequest",
     "StartSessionRequest",
     "StreamTextAccumulator",
+    "UnderstandImageRequest",
+    "UnderstandInput",
+    "UnderstandInputKind",
+    "UnderstandInputOutcome",
+    "UnderstandOperationData",
+    "UnderstandRequest",
+    "UnderstandService",
+    "UnderstandingOutcome",
 ]

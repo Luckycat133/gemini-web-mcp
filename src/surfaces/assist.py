@@ -40,6 +40,11 @@ from ..services import (
     SearchOperationData,
     SearchRequest,
     SearchService,
+    UnderstandImageRequest,
+    UnderstandInput,
+    UnderstandOperationData,
+    UnderstandRequest,
+    UnderstandService,
     observed_backend_from_response,
 )
 from ..tools.annotations import MUTATES_REMOTE
@@ -56,13 +61,19 @@ mcp = MCPServer(
 # gemini-assist (v{__version__})
 
 Focused assistance surface: extend an agent with Gemini second opinions,
-critique, code/design review, and grounded web search. It deliberately
-exposes no history, Cookie, Scheduled, Gem, Prompt, or cleanup tools.
+critique, code/design review, grounded web search, and visual or mixed-input
+understanding. It deliberately exposes no history, Cookie, Scheduled, Gem,
+Prompt, or cleanup tools.
 
 ## Tools
 - **gemini_ask**: one-shot text question with optional context
 - **gemini_search**: grounded web search with observed source evidence;
   grounding_state is grounded only when source URLs were observed
+- **gemini_understand_image**: understand one image from a local path or
+  image URI, with the input image keeping a stable artifact identity
+- **gemini_understand**: typed mixed-input understanding over text, image
+  path/URI, file path/URI, and URL inputs; each input keeps its id and a
+  per-input outcome (accepted, analyzed, skipped, or failed)
 
 ## Models
 - flash-lite, flash (default), thinking, pro
@@ -95,6 +106,7 @@ def _build_chat_service() -> ChatService:
 
 _chat_service = _build_chat_service()
 _search_service = SearchService(_chat_service)
+_understand_service = UnderstandService(_chat_service)
 
 
 def _invalid_argument(message: str) -> DomainResult[None]:
@@ -217,6 +229,88 @@ async def gemini_search(
         result,
         use_result_data=True,
     )
+
+
+def _render_understand_result(data: UnderstandOperationData) -> list[TextContent]:
+    """Present the understanding analysis and per-input outcomes together."""
+    sections: list[str] = []
+    analysis = data.analysis.strip()
+    sections.append(analysis or "No analysis was returned for this request.")
+    if data.inputs:
+        lines = ["Inputs:"]
+        for outcome in data.inputs:
+            line = f"- [{outcome.id or '(missing id)'}] {outcome.kind}: {outcome.outcome.value}"
+            if outcome.detail:
+                line += f" ({outcome.detail})"
+            lines.append(line)
+        sections.append("\n".join(lines))
+    return [TextContent(type="text", text="\n\n".join(sections))]
+
+
+def _render_understand_response(result: DomainResult[UnderstandOperationData]) -> list[TextContent]:
+    if not result.ok or result.data is None:
+        return domain_text(result, domain_failure_text(result), use_result_data=True)
+    return attach_domain_result(
+        _render_understand_result(result.data),
+        result,
+        use_result_data=True,
+    )
+
+
+@mcp.tool(annotations=MUTATES_REMOTE)
+@domain_error_boundary("gemini_understand_image", logger)
+async def gemini_understand_image(
+    image: str,
+    task: Optional[str] = None,
+    model: str = "flash",
+    thinking_level: str = "standard",
+) -> list[TextContent]:
+    """Understand one image and return the analysis tied to that image.
+
+    Use this for screenshots, photos, diagrams, and other single-image tasks.
+    ``image`` accepts a local image file path or an http(s) image URI; local
+    images ride the shared chat upload workflow. The structured result
+    carries the input image artifact identity, the per-input outcome, and
+    requested/effective/observed model evidence alongside the analysis text.
+    """
+    result = await _understand_service.understand_image(
+        UnderstandImageRequest(
+            image=image,
+            task=task,
+            model=model,
+            thinking_level=thinking_level,
+        )
+    )
+    return _render_understand_response(result)
+
+
+@mcp.tool(annotations=MUTATES_REMOTE)
+@domain_error_boundary("gemini_understand", logger)
+async def gemini_understand(
+    task: str,
+    inputs: list[UnderstandInput],
+    model: str = "flash",
+    thinking_level: str = "standard",
+) -> list[TextContent]:
+    """Understand mixed text, image, file, and URL inputs in one request.
+
+    Each input is one typed object — ``{"id", "kind", ...}`` — instead of one
+    overloaded string: ``kind=text`` carries ``text``, ``kind=image`` accepts a
+    local ``path`` or an http(s) URI, ``kind=file`` accepts a local ``path`` or
+    an http(s) URI, and ``kind=url`` carries an absolute ``url``. Every input
+    keeps its ``id``; the structured result records a per-input outcome
+    (``accepted``, ``analyzed``, ``skipped``, or ``failed``) so no input is
+    silently dropped, plus the synthesized analysis.
+    """
+    result = await _understand_service.understand(
+        UnderstandRequest(
+            task=task,
+            inputs=tuple(inputs),
+            model=model,
+            thinking_level=thinking_level,
+        )
+    )
+    return _render_understand_response(result)
 
 
 def main() -> None:

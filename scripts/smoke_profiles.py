@@ -147,7 +147,7 @@ COMPACT_TOOLS = frozenset(
     }
 )
 
-ASSIST_TOOLS = frozenset({"gemini_ask", "gemini_search"})
+ASSIST_TOOLS = frozenset({"gemini_ask", "gemini_search", "gemini_understand", "gemini_understand_image"})
 
 
 async def _list_module_tools(module_name: str) -> list[str]:
