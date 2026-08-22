@@ -1,6 +1,6 @@
 ---
 name: gemini-assist
-description: "Use this skill when the user wants a second opinion, critique, code or design review, grounded current-web search with observed sources, image or screenshot understanding, file, URL, or mixed-input understanding, or Deep Research. Do not use it for pure image, video, or music generation, Gemini account administration, or repository development; route those requests to the creation, account, or development capability instead."
+description: "Use this skill when the user wants a second opinion, critique, code or design review, current-web search that names its sources, image or screenshot understanding, file, URL, or mixed-input understanding, or Deep Research. Prefer this focused skill over the gemini-web-mcp compatibility skill for pure assistance and understanding workloads. Do not use it for pure image, video, or music generation, Gemini account administration, or repository development; route those requests to the creation, account, or development capability instead."
 license: MIT-0
 compatibility: "Requires Python 3.11+ and the dedicated gemini-mcp-assist MCP server. Run it with uvx --from git+https://github.com/Luckycat133/gemini-web-mcp@main gemini-mcp-assist. Live calls require Gemini Web account Cookies."
 metadata:

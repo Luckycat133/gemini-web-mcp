@@ -1,14 +1,21 @@
-"""Trigger and packaging contracts for the ``gemini-assist`` runtime Skill.
+"""Trigger-boundary content and packaging contracts for the ``gemini-assist`` runtime Skill.
 
 The Skill description is the trigger boundary (see
-``.agents/skills/gemini-web-mcp-development/references/tool-design.md``), so
-these tests pin both directions:
+``.agents/skills/gemini-web-mcp-development/references/tool-design.md``).
+These tests are offline trigger-boundary content contracts — vocabulary and
+routing-table presence checks against the description and body — not real
+trigger evaluations:
 
-- positive assistance intents select the assistance Skill and route to one of
-  its five documented tools;
+- positive assistance intents are covered by the description's routing
+  vocabulary and each has exactly one owning tool in the documented routing
+  table;
 - near-miss negatives — pure generation, Gemini account administration, and
-  repository development — are explicitly routed away, and the assist catalog
-  itself contains no creation, account, or maintenance tool.
+  repository development — are explicitly routed away in the description, and
+  the assist catalog itself contains no creation, account, or maintenance
+  tool.
+
+Real trigger evaluation with paraphrases, mixed languages, and multi-intent
+requests remains future live/agent-use evaluation and is not claimed here.
 
 The packaging contracts mirror ``tests/test_skill_packaging.py`` for the
 compatibility Skill: an exact file set, complete frontmatter, a body under 500
@@ -34,10 +41,11 @@ ASSIST_ENTRYPOINT_COMMAND = "uvx --from git+https://github.com/Luckycat133/gemin
 
 # The five assist positives from tool-design.md, each mapped to the activation
 # term that must appear in the trigger description and the owning tool that
-# must be documented in the Skill body.
+# must be documented in the Skill body. These are offline vocabulary checks on
+# the trigger boundary, not real trigger evaluations.
 ASSIST_POSITIVE_INTENTS = {
     "Check the latest framework documentation and give me sourced migration advice.": (
-        "grounded current-web search",
+        "current-web search that names its sources",
         "gemini_search",
     ),
     "Explain the error in this screenshot and tell me what code to change.": (
@@ -59,7 +67,8 @@ ASSIST_POSITIVE_INTENTS = {
 }
 
 # The three assist near-miss negatives from tool-design.md, each mapped to the
-# exclusion term that must appear in the trigger description.
+# exclusion term that must appear in the trigger description. Again, these are
+# offline vocabulary checks, not real trigger evaluations.
 ASSIST_NEGATIVE_INTENTS = {
     "Generate a hero image for this landing page.": "pure image, video, or music generation",
     "Delete my old Gemini conversations.": "Gemini account administration",
@@ -87,7 +96,7 @@ def _frontmatter_and_body() -> tuple[str, str]:
 # ---------------------------------------------------------------------------
 
 
-def test_description_activates_on_assistance_intents() -> None:
+def test_description_contains_the_assistance_intent_vocabulary() -> None:
     frontmatter, _ = _frontmatter_and_body()
     description = re.search(r"^description: (.+)$", frontmatter, re.MULTILINE)
     assert description is not None
@@ -96,7 +105,7 @@ def test_description_activates_on_assistance_intents() -> None:
         "second opinion",
         "critique",
         "code or design review",
-        "grounded current-web search with observed sources",
+        "current-web search that names its sources",
         "image or screenshot understanding",
         "file, URL, or mixed-input understanding",
         "Deep Research",
@@ -104,7 +113,7 @@ def test_description_activates_on_assistance_intents() -> None:
         assert activation_term in description.group(1)
 
 
-def test_positive_assistance_intents_select_documented_assist_tools() -> None:
+def test_positive_assistance_intents_have_description_vocabulary_and_documented_tools() -> None:
     frontmatter, body = _frontmatter_and_body()
     description = re.search(r"^description: (.+)$", frontmatter, re.MULTILINE)
     assert description is not None
@@ -117,12 +126,47 @@ def test_positive_assistance_intents_select_documented_assist_tools() -> None:
         assert f"`{owning_tool}`" in body, intent
 
 
+def test_description_names_the_compatibility_sibling_and_states_the_preference() -> None:
+    frontmatter, _ = _frontmatter_and_body()
+    description = re.search(r"^description: (.+)$", frontmatter, re.MULTILINE)
+    assert description is not None
+    description_text = description.group(1)
+
+    # The compatibility Skill claims the same assistance lanes, so this
+    # description must disambiguate by naming the sibling and preferring this
+    # focused product for assistance-only workloads.
+    assert "gemini-web-mcp" in description_text
+    assert (
+        "Prefer this focused skill over the gemini-web-mcp compatibility skill"
+        " for pure assistance and understanding workloads" in description_text
+    )
+
+
 def test_skill_routes_each_assistance_intent_to_exactly_one_tool() -> None:
     _, body = _frontmatter_and_body()
     routing_table = body.split("## Choose The Tool", 1)[1].split("##", 1)[0]
 
-    for _intent, (_activation_term, owning_tool) in ASSIST_POSITIVE_INTENTS.items():
-        assert routing_table.count(f"`{owning_tool}`") >= 1
+    data_rows = []
+    for line in routing_table.splitlines():
+        stripped = line.strip()
+        if not stripped.startswith("|") or stripped.startswith(("| ---", "| User intent")):
+            continue
+        cells = [cell.strip() for cell in stripped.strip("|").split("|")]
+        assert len(cells) == 3, cells
+        data_rows.append(cells)
+    assert data_rows, "the routing table must document the assistance intents"
+
+    # Every documented intent has exactly one owning row.
+    for intent, (_activation_term, owning_tool) in ASSIST_POSITIVE_INTENTS.items():
+        owning_rows = [row for row in data_rows if f"`{owning_tool}`" in row[1]]
+        assert len(owning_rows) == 1, intent
+
+    # Each row routes to exactly one tool from the real assist catalog; no row
+    # mixes ownership between two tools or invents an undocumented tool.
+    for row in data_rows:
+        routed_tools = re.findall(r"`(gemini_[a-z_]+)`", row[1])
+        assert len(routed_tools) == 1 and routed_tools[0] in ASSIST_TOOLS, row
+    assert len(data_rows) == len(ASSIST_TOOLS)
 
 
 # ---------------------------------------------------------------------------

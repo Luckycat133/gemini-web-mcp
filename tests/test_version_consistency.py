@@ -251,6 +251,13 @@ def test_release_asset_names_and_wheel_metadata_are_derived_from_pyproject(tmp_p
         f"{tmp_path}: stale or mismatched release artifact {stale_asset.name}"
     ]
 
+    stale_assist_asset = tmp_path / "gemini-assist-skill-9.8.7.zip"
+    stale_assist_asset.touch()
+    assert release_artifact_errors(tmp_path, metadata) == [
+        f"{tmp_path}: stale or mismatched release artifact {stale_assist_asset.name}",
+        f"{tmp_path}: stale or mismatched release artifact {stale_asset.name}",
+    ]
+
 
 def test_release_artifacts_reject_missing_license_metadata_and_files(tmp_path):
     metadata = load_release_metadata(PROJECT_ROOT)

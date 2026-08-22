@@ -33,7 +33,7 @@ The broad and low-token servers remain compatibility surfaces while the create a
 - shared typed history list/search/read/export/delete;
 - Gem read-back verification and verified chat deletion;
 - centralized RPC contracts/parsers;
-- the dedicated `gemini_assist_mcp` five-tool surface (`gemini_ask`, `gemini_search`, `gemini_understand_image`, `gemini_understand`, `gemini_research`) with shared Search/Understand/Research services and the `gemini-assist` Runtime Skill with trigger evaluations;
+- the dedicated `gemini_assist_mcp` five-tool surface (`gemini_ask`, `gemini_search`, `gemini_understand_image`, `gemini_understand`, `gemini_research`) with shared Search/Understand/Research services and the `gemini-assist` Runtime Skill with offline trigger-boundary content contracts (description vocabulary and routing-table presence checks);
 - wheel/sdist/runtime-Skill packaging, embedded license checks, clean install, and onboarding;
 - CI, CodeQL, Skill validation, profile snapshots, and protocol smoke.
 
@@ -44,12 +44,13 @@ The broad and low-token servers remain compatibility surfaces while the create a
 - complete typed account/admin results;
 - full mutation verification audit;
 - complete current live Gemini evidence;
+- real trigger evaluation with paraphrases and mixed languages;
 - task-level real-agent evaluations and official client/OS matrix.
 
 ## Development Order
 
 1. Finish and evaluate the task-first compatibility Skill.
-2. Implement `gemini-assist` (done: five-tool `gemini_assist_mcp` surface, shared Search/Understand/Research services, `gemini-assist` Skill, trigger evaluations, and packaged skill asset).
+2. Implement `gemini-assist` (done: five-tool `gemini_assist_mcp` surface, shared Search/Understand/Research services, `gemini-assist` Skill, offline trigger-boundary content contracts, and packaged skill asset).
 3. Implement `gemini-create` image generation/editing.
 4. Add SQLite OperationService and connect Research, video, and music.
 5. Implement `gemini-account`.

@@ -543,6 +543,45 @@ def test_gemini_search_returns_grounded_state_with_observed_sources(monkeypatch)
     assert "Grounding state: grounded" in content[0].text
 
 
+def test_gemini_search_reports_remaining_sources_footer_when_truncated(monkeypatch):
+    client = _FakeSearchClient(
+        response_text="Sourced answer.",
+        citations=[
+            {"url": f"https://example.com/{index}", "title": None} for index in range(3)
+        ],
+    )
+    _patch_ask_client_env(monkeypatch, client)
+
+    content = asyncio.run(_call_tool("gemini_search", query="anything", max_results=2))
+
+    domain_result = content[0].meta["domain_result"]
+    data = domain_result["data"]
+    assert len(data["sources"]) == 2
+    # The structured count is the total observed, not the truncated prefix.
+    assert data["observed_source_count"] == 3
+    # The compatibility text foots the truncated remainder.
+    assert "(1 more sources observed)" in content[0].text
+
+
+def test_gemini_search_omits_remaining_sources_footer_when_not_truncated(monkeypatch):
+    client = _FakeSearchClient(
+        response_text="Sourced answer.",
+        citations=[
+            {"url": "https://example.com/one", "title": None},
+            {"url": "https://example.com/two", "title": None},
+        ],
+    )
+    _patch_ask_client_env(monkeypatch, client)
+
+    content = asyncio.run(_call_tool("gemini_search", query="anything", max_results=8))
+
+    domain_result = content[0].meta["domain_result"]
+    data = domain_result["data"]
+    assert len(data["sources"]) == 2
+    assert data["observed_source_count"] == 2
+    assert "more sources observed" not in content[0].text
+
+
 def test_gemini_search_never_labels_source_free_prose_as_grounded(monkeypatch):
     client = _FakeSearchClient(response_text="Probably the newest version is fine.", citations=[])
     _patch_ask_client_env(monkeypatch, client)

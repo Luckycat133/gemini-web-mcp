@@ -243,6 +243,37 @@ def test_search_does_not_warn_when_all_sources_fit():
     assert result.warnings == ()
 
 
+def test_search_observed_source_count_reports_the_total_when_truncated():
+    citations = [
+        {"url": f"https://example.com/{index}", "title": None} for index in range(3)
+    ]
+    stub = _StubChatService(response=_response(citations=citations))
+
+    result = _search(stub, query="anything", max_results=2)
+
+    assert result.ok is True
+    data = result.data
+    assert data is not None
+    assert len(data.sources) == 2
+    # The count reports every observed source, not just the returned prefix.
+    assert data.observed_source_count == 3
+
+
+def test_search_observed_source_count_equals_the_returned_sources_when_not_truncated():
+    citations = [
+        {"url": f"https://example.com/{index}", "title": None} for index in range(2)
+    ]
+    stub = _StubChatService(response=_response(citations=citations))
+
+    result = _search(stub, query="anything", max_results=8)
+
+    assert result.ok is True
+    data = result.data
+    assert data is not None
+    assert len(data.sources) == 2
+    assert data.observed_source_count == len(data.sources)
+
+
 def test_search_rejects_blank_query_before_any_client_use():
     stub = _StubChatService(response=_response())
 

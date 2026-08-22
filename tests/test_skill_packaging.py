@@ -125,6 +125,26 @@ def test_project_skill_openai_metadata_is_task_first() -> None:
     assert "TODO" not in metadata
 
 
+def test_description_names_the_assist_sibling_and_states_the_preference() -> None:
+    skill = PUBLIC_SKILL_DIR / "SKILL.md"
+    lines = skill.read_text(encoding="utf-8").splitlines()
+    assert lines[0] == "---"
+    closing_index = lines[1:].index("---") + 1
+    frontmatter = "\n".join(lines[1:closing_index])
+    description = re.search(r"^description: (.+)$", frontmatter, re.MULTILINE)
+    assert description is not None
+    description_text = description.group(1)
+
+    # The gemini-assist Skill claims the same assistance lanes, so this
+    # description must disambiguate by naming the focused sibling and deferring
+    # to it when only assistance and understanding are needed.
+    assert "gemini-assist" in description_text
+    assert (
+        "prefer the focused gemini-assist skill when only assistance"
+        " and understanding are needed" in description_text
+    )
+
+
 def test_project_skill_names_are_unique_across_discovery_roots() -> None:
     skill_files = sorted(
         path

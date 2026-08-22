@@ -1,6 +1,6 @@
 ---
 name: gemini-web-mcp
-description: "Use this skill when an agent should extend itself with Gemini Web: get a second opinion, search current web sources, understand images/files/URLs, run Deep Research, generate or edit image/video/music artifacts, or explicitly work with Gemini account data. Route by user intent instead of loading every tool. Do not use for repository implementation, tests, CI, packaging, or releases—use gemini-web-mcp-development instead."
+description: "Use this skill when an agent should extend itself with Gemini Web: get a second opinion, search current web sources, understand images/files/URLs, run Deep Research, generate or edit image/video/music artifacts, or explicitly work with Gemini account data. Route by user intent instead of loading every tool. This skill is the compatibility router; prefer the focused gemini-assist skill when only assistance and understanding are needed. Do not use for repository implementation, tests, CI, packaging, or releases—use gemini-web-mcp-development instead."
 license: MIT-0
 compatibility: "Requires Python 3.11+ and an installed Gemini Web MCP server. The low-token server covers common chat, image, generation, and account workflows; the primary core profile is currently required for local files, URLs, and Deep Research. Live calls require Gemini Web account Cookies."
 metadata:
