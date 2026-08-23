@@ -202,7 +202,7 @@ def test_remy_goal_stopped_reason_max_pages(monkeypatch):
 
 
 def test_remy_goal_clamps_page_size_and_max_pages_and_max_items(monkeypatch):
-    """非法 page_size/max_pages/max_items 被 _clamp_int 收敛到默认/边界。"""
+    """非法 page_size/max_pages/max_items 被 clamp_int 收敛到默认/边界。"""
     bodies = [[[_remy_entry("a1")]]]
     monkeypatch.setattr(manage_tools, "_extract_rpc_bodies", lambda _t, _r: bodies)
 

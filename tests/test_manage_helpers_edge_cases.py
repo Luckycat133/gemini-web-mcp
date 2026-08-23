@@ -27,6 +27,8 @@ mock 边界：helper 直接调用，不经 MCP 分发。
 import asyncio
 from types import SimpleNamespace
 
+from src.services import history as history_service
+
 import src.tools.manage as manage_tools
 
 
@@ -41,22 +43,22 @@ def _run(coro):
 
 def test_clamp_int_in_range_returns_value():
     """int 值在 [minimum, maximum] 内 → 原值返回。"""
-    assert manage_tools._clamp_int(5, default=10, minimum=1, maximum=100) == 5
+    assert history_service.clamp_int(5, default=10, minimum=1, maximum=100) == 5
 
 
 def test_clamp_int_above_max_returns_max():
     """值超过 maximum → 返回 maximum。"""
-    assert manage_tools._clamp_int(200, default=10, minimum=1, maximum=100) == 100
+    assert history_service.clamp_int(200, default=10, minimum=1, maximum=100) == 100
 
 
 def test_clamp_int_none_returns_default():
     """None → int(None) 抛 TypeError → 回退 default，再 clamp 到 [1, 100]。"""
-    assert manage_tools._clamp_int(None, default=42, minimum=1, maximum=100) == 42
+    assert history_service.clamp_int(None, default=42, minimum=1, maximum=100) == 42
 
 
 def test_clamp_int_numeric_string_parses():
     """数字 str "5" → int(5)。"""
-    assert manage_tools._clamp_int("5", default=10, minimum=1, maximum=100) == 5
+    assert history_service.clamp_int("5", default=10, minimum=1, maximum=100) == 5
 
 
 # ===========================================================================
@@ -67,7 +69,7 @@ def test_clamp_int_numeric_string_parses():
 def test_paginate_items_normal_page_with_has_more():
     """limit < len(items) → page 切片，has_more=True，next_offset=offset+count。"""
     items = [1, 2, 3, 4, 5]
-    page, info = manage_tools._paginate_items(items, limit=2, offset=1)
+    page, info = history_service.paginate_items(items, limit=2, offset=1)
     assert page == [2, 3]
     assert info["total_count"] == 5
     assert info["count"] == 2
@@ -80,7 +82,7 @@ def test_paginate_items_normal_page_with_has_more():
 def test_paginate_items_last_page_no_has_more():
     """offset+limit >= len(items) → has_more=False，next_offset=None。"""
     items = [1, 2, 3]
-    page, info = manage_tools._paginate_items(items, limit=5, offset=0)
+    page, info = history_service.paginate_items(items, limit=5, offset=0)
     assert page == [1, 2, 3]
     assert info["has_more"] is False
     assert info["next_offset"] is None
@@ -88,7 +90,7 @@ def test_paginate_items_last_page_no_has_more():
 
 def test_paginate_items_empty_items():
     """空 items → page=[]，has_more=False，next_offset=None。"""
-    page, info = manage_tools._paginate_items([], limit=10, offset=0)
+    page, info = history_service.paginate_items([], limit=10, offset=0)
     assert page == []
     assert info["total_count"] == 0
     assert info["count"] == 0
@@ -99,7 +101,7 @@ def test_paginate_items_empty_items():
 def test_paginate_items_clamps_invalid_limit_offset():
     """limit=-5 → clamp 1；offset=999 → clamp max(len(items), 0)=3。"""
     items = [1, 2, 3]
-    page, info = manage_tools._paginate_items(items, limit=-5, offset=999)
+    page, info = history_service.paginate_items(items, limit=-5, offset=999)
     assert info["limit"] == 1
     assert info["offset"] == 3
     assert page == []
@@ -113,7 +115,7 @@ def test_paginate_items_clamps_invalid_limit_offset():
 def test_chat_to_dict_full_namespace():
     """SimpleNamespace(cid, title, is_pinned, timestamp) → 完整 dict。"""
     chat = SimpleNamespace(cid="c_1", title="Title", is_pinned=True, timestamp=1000)
-    result = manage_tools._chat_to_dict(chat)
+    result = history_service.chat_to_dict(chat)
     assert result["id"] == "c_1"
     assert result["title"] == "Title"
     assert result["is_pinned"] is True
@@ -124,7 +126,7 @@ def test_chat_to_dict_full_namespace():
 def test_chat_to_dict_defaults_for_missing_fields():
     """缺少 cid/title/is_pinned/timestamp → id="", title="Untitled", is_pinned=False, time=""。"""
     chat = SimpleNamespace()
-    result = manage_tools._chat_to_dict(chat)
+    result = history_service.chat_to_dict(chat)
     assert result["id"] == ""
     assert result["title"] == "Untitled"
     assert result["is_pinned"] is False
@@ -255,13 +257,13 @@ def test_find_notebook_casefold_with_whitespace():
 def test_turn_matches_query_role_only_with_empty_text():
     """text 为空但 role 匹配 → True。"""
     turn = {"role": "user", "text": ""}
-    assert manage_tools._turn_matches_query(turn, "user") is True
+    assert history_service.turn_matches_query(turn, "user") is True
 
 
 def test_turn_matches_query_text_only_with_empty_role():
     """role 为空但 text 匹配 → True。"""
     turn = {"role": "", "text": "find needle here"}
-    assert manage_tools._turn_matches_query(turn, "needle") is True
+    assert history_service.turn_matches_query(turn, "needle") is True
 
 
 # ===========================================================================
@@ -274,7 +276,7 @@ def test_read_chat_turns_without_read_chat_raises():
     client = SimpleNamespace()
     raised = False
     try:
-        _run(manage_tools._read_chat_turns(client, "c_1", 20, 1000))
+        _run(history_service.read_chat_turns(client, "c_1", 20, 1000))
     except RuntimeError as e:
         raised = True
         assert "read_chat" in str(e)
@@ -289,7 +291,7 @@ def test_read_chat_turns_turns_raw_not_list_returns_empty():
         return SimpleNamespace(cid=chat_id, turns="not_a_list")
 
     client.read_chat = read_chat
-    history, turns = _run(manage_tools._read_chat_turns(client, "c_1", 20, 1000))
+    history, turns = _run(history_service.read_chat_turns(client, "c_1", 20, 1000))
     assert history is not None
     assert turns == []
 
@@ -339,7 +341,7 @@ def test_format_chat_export_markdown_with_metadata_title_and_time():
         "turns": [{"role": "user", "text": "hello"}],
         "metadata": {"title": "My Chat", "time": "2025-01-01 00:00:00 UTC"},
     }
-    result = manage_tools._format_chat_export_markdown(payload)
+    result = history_service.format_chat_export_markdown(payload)
     assert "## Gemini Chat Export: My Chat" in result
     assert "Chat ID: c_1" in result
     assert "Turns: 1" in result
@@ -355,7 +357,7 @@ def test_format_chat_export_markdown_without_metadata_falls_back_to_chat_id():
         "count": 0,
         "turns": [],
     }
-    result = manage_tools._format_chat_export_markdown(payload)
+    result = history_service.format_chat_export_markdown(payload)
     assert "## Gemini Chat Export: c_42" in result
     assert "Chat ID: c_42" in result
     assert "Turns: 0" in result

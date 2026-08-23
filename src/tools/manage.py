@@ -6,7 +6,6 @@ import json
 import os
 import shutil
 import sys
-from datetime import datetime, timezone
 from ..adapters import attach_domain_result, domain_text, exception_text
 from ..adapters.mcp_sdk import MCPServer, TextContent
 from typing import Any, Callable, Literal, Optional, TypeVar
@@ -37,6 +36,7 @@ from ..infrastructure.rpc_parsers import (
     parse_usage_entry as parse_registered_usage,
     summarize_rpc_response as summarize_registered_rpc_response,
 )
+from ..services.account import sanitize_account_status
 from ..services.compatibility import sanitized_error_code, sanitized_error_type
 from ..services.gems import (
     _find_gem_by_id as registered_find_gem_by_id,
@@ -47,11 +47,16 @@ from ..services.gems import (
     update_gem as update_gem_service,
 )
 from ..services.history import (
+    chat_to_dict,
+    clamp_int,
     conversation_history_payload as registered_conversation_history_payload,
     delete_chat_result,
     export_chat_result,
+    format_chat_export_markdown,
     list_chats_result,
+    paginate_items,
     read_chat_result,
+    read_chat_turns,
     search_chats_result,
 )
 from ..services.manifest import (
@@ -176,158 +181,11 @@ CONVERSATION_HISTORY_FILTERS: tuple[dict[str, Any], ...] = (
 )
 
 
-def _format_timestamp(timestamp: object) -> str:
-    if not isinstance(timestamp, (int, float)) or timestamp <= 0:
-        return ""
-    return datetime.fromtimestamp(timestamp, tz=timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
-
-
-def _truncate(text: object, max_chars: int) -> str:
-    value = str(text or "")
-    if max_chars <= 0 or len(value) <= max_chars:
-        return value
-    return value[:max_chars].rstrip() + "\n...[truncated]"
-
-
-def _clamp_int(value: object, default: int, minimum: int, maximum: int) -> int:
-    """Normalize user-provided numeric tool arguments into a safe inclusive range."""
-    try:
-        number: int = int(value)  # type: ignore[call-overload]
-    except (TypeError, ValueError):
-        number = default
-    return min(max(number, minimum), maximum)
-
-
-def _paginate_items(items: list[Any], limit: int, offset: int, max_limit: int = 100) -> tuple[list[Any], dict[str, Any]]:
-    safe_limit = _clamp_int(limit, default=max_limit, minimum=1, maximum=max_limit)
-    safe_offset = _clamp_int(offset, default=0, minimum=0, maximum=max(len(items), 0))
-    page = items[safe_offset : safe_offset + safe_limit]
-    next_offset = safe_offset + len(page)
-    has_more = next_offset < len(items)
-    return page, {
-        "total_count": len(items),
-        "count": len(page),
-        "offset": safe_offset,
-        "limit": safe_limit,
-        "has_more": has_more,
-        "next_offset": next_offset if has_more else None,
-    }
-
-
 def _json_response(payload: Any) -> list[TextContent]:
     """Serialize payload as a single JSON TextContent (for response_format='json')."""
     return [TextContent(type="text", text=json.dumps(payload, ensure_ascii=False, indent=2))]
 
 
-def _get_attr(item: object, name: str, default: object = "") -> object:
-    if isinstance(item, dict):
-        return item.get(name, default)
-    return getattr(item, name, default)
-
-
-def _get_chat_id(chat: object) -> str:
-    return str(_get_attr(chat, "cid", "") or _get_attr(chat, "id", "") or "")
-
-
-def _get_chat_title(chat: object) -> str:
-    return str(_get_attr(chat, "title", "") or "Untitled")
-
-
-def _chat_to_dict(chat) -> dict:
-    timestamp = _get_attr(chat, "timestamp", None)
-    return {
-        "id": _get_chat_id(chat),
-        "title": _get_chat_title(chat),
-        "is_pinned": bool(_get_attr(chat, "is_pinned", False)),
-        "timestamp": timestamp,
-        "time": _format_timestamp(timestamp),
-    }
-
-
-def _sanitize_account_status(status: object) -> dict:
-    if not isinstance(status, dict):
-        return {"status": str(status)}
-
-    summary_raw = status.get("summary")
-    summary = summary_raw if isinstance(summary_raw, dict) else {}
-    rpc_raw = status.get("rpc")
-    rpc = rpc_raw if isinstance(rpc_raw, dict) else {}
-    rpc_status: dict[str, dict[str, Any]] = {}
-    for name, payload in rpc.items():
-        if not isinstance(payload, dict):
-            rpc_status[name] = {"ok": bool(payload)}
-            continue
-        rpc_status[name] = {
-            "ok": bool(payload.get("ok")),
-            "status_code": payload.get("status_code"),
-            "reject_code": payload.get("reject_code"),
-        }
-
-    return {
-        "source_path": status.get("source_path"),
-        "account_path": status.get("account_path"),
-        "summary": summary,
-        "rpc": rpc_status,
-    }
-
-
-def _turn_to_dict(turn, max_chars: int) -> dict:
-    return {
-        "role": str(_get_attr(turn, "role", "unknown") or "unknown"),
-        "text": _truncate(_get_attr(turn, "text", ""), max_chars),
-    }
-
-
-async def _read_chat_turns(client: object, chat_id: str, limit: int, max_chars: int) -> tuple[object, list[dict]]:
-    if not hasattr(client, "read_chat"):
-        raise RuntimeError("当前 gemini-webapi 不支持 read_chat。")
-    history = await client.read_chat(chat_id, limit=limit)
-    turns_raw = _get_attr(history, "turns", []) if history else []
-    turns: list[Any] = turns_raw if isinstance(turns_raw, list) else []
-    return history, [_turn_to_dict(turn, max_chars) for turn in turns[:limit]]
-
-
-def _turn_matches_query(turn: dict[str, str], query: str) -> bool:
-    needle = query.strip().lower()
-    if not needle:
-        return False
-    return needle in turn.get("role", "").lower() or needle in turn.get("text", "").lower()
-
-
-def _chat_export_payload(
-    chat_id: str,
-    history: object,
-    turns: list[dict],
-    metadata: dict[str, Any] | None,
-    limit: int,
-    max_chars_per_turn: int,
-) -> dict[str, Any]:
-    payload: dict[str, Any] = {
-        "chat_id": str(_get_attr(history, "cid", "") or chat_id),
-        "count": len(turns),
-        "limit": limit,
-        "max_chars_per_turn": max_chars_per_turn,
-        "turns": turns,
-    }
-    if metadata:
-        payload["metadata"] = metadata
-    return payload
-
-
-def _format_chat_export_markdown(payload: dict[str, Any]) -> str:
-    metadata_raw = payload.get("metadata")
-    metadata = metadata_raw if isinstance(metadata_raw, dict) else {}
-    title = metadata.get("title") or payload["chat_id"]
-    lines = [
-        f"## Gemini Chat Export: {title}",
-        f"Chat ID: {payload['chat_id']}",
-        f"Turns: {payload['count']}",
-    ]
-    if metadata.get("time"):
-        lines.append(f"Time: {metadata['time']}")
-    for idx, turn in enumerate(payload["turns"], 1):
-        lines.extend(["", f"### {idx}. {turn['role']}", turn["text"]])
-    return "\n".join(lines)
 
 
 
@@ -473,9 +331,9 @@ async def _fetch_conversation_metadata_source(
     max_pages: int = 50,
 ) -> dict[str, Any]:
     contract = get_contract("history.page")
-    safe_page_size = _clamp_int(page_size, default=100, minimum=1, maximum=100)
-    safe_max_pages = _clamp_int(max_pages, default=50, minimum=1, maximum=200)
-    safe_max_items = _clamp_int(max_items, default=5000, minimum=1, maximum=10000)
+    safe_page_size = clamp_int(page_size, default=100, minimum=1, maximum=100)
+    safe_max_pages = clamp_int(max_pages, default=50, minimum=1, maximum=200)
+    safe_max_items = clamp_int(max_items, default=5000, minimum=1, maximum=10000)
     items: list[dict[str, Any]] = []
     seen: set[str] = set()
     next_page_token: str | None = None
@@ -630,9 +488,9 @@ async def _fetch_remy_goal_conversation_refs(
     max_pages: int = 50,
 ) -> dict[str, Any]:
     contract = get_contract("history.remy_goals")
-    safe_page_size = _clamp_int(page_size, default=100, minimum=1, maximum=100)
-    safe_max_pages = _clamp_int(max_pages, default=50, minimum=1, maximum=200)
-    safe_max_items = _clamp_int(max_items, default=5000, minimum=1, maximum=10000)
+    safe_page_size = clamp_int(page_size, default=100, minimum=1, maximum=100)
+    safe_max_pages = clamp_int(max_pages, default=50, minimum=1, maximum=200)
+    safe_max_items = clamp_int(max_items, default=5000, minimum=1, maximum=10000)
     items: list[dict[str, Any]] = []
     seen: set[str] = set()
     next_page_token: str | None = None
@@ -719,8 +577,8 @@ async def _fetch_notebook_chats(
     offset: int,
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     contract = get_contract("notebooks.chats")
-    safe_limit = _clamp_int(limit, default=20, minimum=1, maximum=100)
-    safe_offset = _clamp_int(offset, default=0, minimum=0, maximum=10000)
+    safe_limit = clamp_int(limit, default=20, minimum=1, maximum=100)
+    safe_offset = clamp_int(offset, default=0, minimum=0, maximum=10000)
     target_count = safe_offset + safe_limit
     page_size = min(max(target_count, 10), 100)
     items: list[dict[str, Any]] = []
@@ -829,7 +687,7 @@ async def _fetch_recent_conversation_metadata(
     target_count: int,
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     contract = get_contract("history.page")
-    safe_target = _clamp_int(target_count, default=50, minimum=1, maximum=5000)
+    safe_target = clamp_int(target_count, default=50, minimum=1, maximum=5000)
     source_filters = tuple(source for source in CONVERSATION_HISTORY_FILTERS if source["name"] in {"ui_pinned", "ui_recent"})
     sources = await _fetch_conversation_metadata_sources(
         client,
@@ -1113,7 +971,7 @@ async def _cleanup_test_artifacts_payload(
     if not marker_list:
         marker_list = ["codex-"]
 
-    safe_chat_limit = _clamp_int(max_chats, default=25, minimum=1, maximum=100)
+    safe_chat_limit = clamp_int(max_chats, default=25, minimum=1, maximum=100)
     include_chats = target in {"all", "chats"}
     include_scheduled = target in {"all", "scheduled"}
     matched_chats: list[dict[str, Any]] = []
@@ -1126,7 +984,7 @@ async def _cleanup_test_artifacts_payload(
         else:
             chats = (client.list_chats() or [])[:safe_chat_limit]
             for chat in chats:
-                item = _chat_to_dict(chat)
+                item = chat_to_dict(chat)
                 matched_fields: list[str] = []
                 matched_markers = _marker_hits(item.get("id"), marker_list)
                 if matched_markers:
@@ -1138,7 +996,7 @@ async def _cleanup_test_artifacts_payload(
 
                 if scan_turns and item.get("id") and hasattr(client, "read_chat"):
                     try:
-                        _history, turns = await _read_chat_turns(client, item["id"], 20, 300)
+                        _history, turns = await read_chat_turns(client, item["id"], 20, 300)
                         for turn in turns:
                             turn_hits = _marker_hits(turn.get("text"), marker_list)
                             if turn_hits:
@@ -1367,7 +1225,7 @@ def register_manage_tools(mcp: MCPServer, layers: list[str] | set[str] | tuple[s
 
         try:
             if hasattr(client, "_batch_execute"):
-                target_count = _clamp_int(limit, default=10, minimum=1, maximum=50) + _clamp_int(
+                target_count = clamp_int(limit, default=10, minimum=1, maximum=50) + clamp_int(
                     offset, default=0, minimum=0, maximum=5000
                 )
                 items, diagnostic = await _fetch_recent_conversation_metadata(client, target_count)
@@ -1429,9 +1287,9 @@ def register_manage_tools(mcp: MCPServer, layers: list[str] | set[str] | tuple[s
             return [TextContent(type="text", text="❌ 当前客户端不支持 Gemini Web RPC 深度扫描。")]
 
         try:
-            safe_max_items = _clamp_int(max_items_per_source, default=5000, minimum=1, maximum=10000)
-            safe_page_size = _clamp_int(page_size, default=100, minimum=1, maximum=100)
-            safe_max_pages = _clamp_int(max_pages_per_source, default=50, minimum=1, maximum=200)
+            safe_max_items = clamp_int(max_items_per_source, default=5000, minimum=1, maximum=10000)
+            safe_page_size = clamp_int(page_size, default=100, minimum=1, maximum=100)
+            safe_max_pages = clamp_int(max_pages_per_source, default=50, minimum=1, maximum=200)
             source_blocks = await _fetch_conversation_metadata_sources(
                 client,
                 CONVERSATION_HISTORY_FILTERS,
@@ -1507,7 +1365,7 @@ def register_manage_tools(mcp: MCPServer, layers: list[str] | set[str] | tuple[s
                 )
 
             merged_items, _sources_by_id = _merge_conversation_source_items(source_blocks)
-            page, page_info = _paginate_items(merged_items, limit, offset, max_limit=500)
+            page, page_info = paginate_items(merged_items, limit, offset, max_limit=500)
             source_diagnostics = [
                 {
                     "name": block.get("name"),
@@ -1662,15 +1520,15 @@ def register_manage_tools(mcp: MCPServer, layers: list[str] | set[str] | tuple[s
             return domain_text(result, fallback)
 
         try:
-            safe_limit = _clamp_int(limit, default=10, minimum=1, maximum=50)
-            safe_offset = _clamp_int(offset, default=0, minimum=0, maximum=5000)
+            safe_limit = clamp_int(limit, default=10, minimum=1, maximum=50)
+            safe_offset = clamp_int(offset, default=0, minimum=0, maximum=5000)
             if hasattr(client, "_batch_execute"):
                 chats, diagnostic = await _fetch_recent_conversation_metadata(client, safe_limit + safe_offset)
             else:
-                chats = [_chat_to_dict(chat) for chat in client.list_chats() or []]
+                chats = [chat_to_dict(chat) for chat in client.list_chats() or []]
                 diagnostic = {"source": "client_cache", "fetched_count": len(chats), "has_remote_more": False}
-            safe_turn_limit = _clamp_int(turns_per_chat, default=20, minimum=1, maximum=50)
-            safe_chars = _clamp_int(max_chars_per_turn, default=1000, minimum=100, maximum=4000)
+            safe_turn_limit = clamp_int(turns_per_chat, default=20, minimum=1, maximum=50)
+            safe_chars = clamp_int(max_chars_per_turn, default=1000, minimum=100, maximum=4000)
             result = await search_chats_result(
                 client,
                 chats,
@@ -1759,7 +1617,7 @@ def register_manage_tools(mcp: MCPServer, layers: list[str] | set[str] | tuple[s
             payload = result.data
             if response_format == "json":
                 return attach_domain_result(_json_response(payload), result, use_result_data=True)
-            return domain_text(result, _format_chat_export_markdown(payload), use_result_data=True)
+            return domain_text(result, format_chat_export_markdown(payload), use_result_data=True)
         except Exception as e:
             logger.error(f"导出聊天失败: {e}")
             return [TextContent(type="text", text=f"❌ 导出失败: {str(e)}")]
@@ -1875,7 +1733,7 @@ def register_manage_tools(mcp: MCPServer, layers: list[str] | set[str] | tuple[s
 
         try:
             status = await client.inspect_account_status()
-            sanitized = _sanitize_account_status(status)
+            sanitized = sanitize_account_status(status)
             if response_format == "json":
                 return _json_response(sanitized)
 
@@ -2101,7 +1959,7 @@ def register_manage_tools(mcp: MCPServer, layers: list[str] | set[str] | tuple[s
             bodies = _extract_rpc_bodies(response.text, probe["rpcid"])
             entries = bodies[0] if bodies and isinstance(bodies[0], list) else []
             parsed_links = [_parse_public_link_entry(item) for item in entries]
-            links, page_info = _paginate_items(parsed_links, limit, offset)
+            links, page_info = paginate_items(parsed_links, limit, offset)
             payload = {
                 **page_info,
                 "items": links,
@@ -2214,7 +2072,7 @@ def register_manage_tools(mcp: MCPServer, layers: list[str] | set[str] | tuple[s
                 first = bodies[0][0]
                 if isinstance(first, list):
                     entries = [_parse_library_capability(item) for item in first]
-            page, page_info = _paginate_items(entries, limit, offset)
+            page, page_info = paginate_items(entries, limit, offset)
             payload = {
                 **page_info,
                 "items": page,
@@ -2256,7 +2114,7 @@ def register_manage_tools(mcp: MCPServer, layers: list[str] | set[str] | tuple[s
 
         try:
             notebooks, diagnostic = await _fetch_native_notebooks(client, locale)
-            page, page_info = _paginate_items(notebooks, limit, offset, max_limit=100)
+            page, page_info = paginate_items(notebooks, limit, offset, max_limit=100)
             payload = {
                 "ok": True,
                 **page_info,
@@ -2462,7 +2320,7 @@ def register_manage_tools(mcp: MCPServer, layers: list[str] | set[str] | tuple[s
             elif scope == "inactive":
                 entries = [item for item in entries if item.get("enabled") is False]
 
-            page, page_info = _paginate_items(entries, limit, offset)
+            page, page_info = paginate_items(entries, limit, offset)
             result = {
                 "name": "scheduled_actions_registry",
                 "source_rpc": diagnostic["source_rpc"],
@@ -2703,7 +2561,7 @@ def register_manage_tools(mcp: MCPServer, layers: list[str] | set[str] | tuple[s
                 leading_enabled = body[0] if body and isinstance(body[0], bool) else None
                 if len(body) > 1 and isinstance(body[1], list):
                     entries = [_parse_tool_mode_entry(item) for item in body[1]]
-            page, page_info = _paginate_items(entries, limit, offset, max_limit=100)
+            page, page_info = paginate_items(entries, limit, offset, max_limit=100)
 
             payload = {
                 **page_info,

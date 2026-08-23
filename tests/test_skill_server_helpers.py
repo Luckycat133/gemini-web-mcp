@@ -16,11 +16,11 @@ mock 边界：
   `get_cookie_from_browser` / `list_browser_cookie_profiles` /
   `schedule_remote_chat_cleanup` / `schedule_remote_chat_cleanup_from_response`
 - tools.manage 接缝：`_fetch_scheduled_registry` / `_fetch_scheduled_task_by_id` /
-  `_read_chat_turns` / `_chat_to_dict` / `_paginate_items` / `_extract_rpc_bodies` /
+  `read_chat_turns` / `chat_to_dict` / `paginate_items` / `_extract_rpc_bodies` /
   `_summarize_probe_response` / `_fetch_native_notebooks` /
   `_cleanup_test_artifacts_payload` / `_doctor_payload` /
   `_format_doctor_markdown` / `_format_cleanup_markdown` /
-  `_format_chat_export_markdown` / `_format_web_capabilities_markdown` /
+  `format_chat_export_markdown` / `_format_web_capabilities_markdown` /
   `_format_tool_manifest_markdown` / `_tool_manifest_payload` /
   `_web_capabilities_payload` / `_scheduled_daily_payload` /
   `_parse_scheduled_action_create_body` / `_parse_public_link_entry` /

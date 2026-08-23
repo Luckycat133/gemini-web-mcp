@@ -5,6 +5,7 @@ import sys
 from types import SimpleNamespace
 
 from src.adapters.mcp_sdk import MCPServer
+from src.services import history as history_service
 
 
 def _tool_text(result):
@@ -419,9 +420,8 @@ def test_prompts_group_tool_has_local_destructive_annotation():
 
 
 def test_paginate_items_normalizes_invalid_inputs():
-    import src.tools.manage as manage_tools
 
-    page, pagination = manage_tools._paginate_items([1, 2, 3], limit="bad", offset=-4, max_limit=2)
+    page, pagination = history_service.paginate_items([1, 2, 3], limit="bad", offset=-4, max_limit=2)
 
     assert page == [1, 2]
     assert pagination == {

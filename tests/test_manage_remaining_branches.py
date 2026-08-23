@@ -139,7 +139,7 @@ async def _call(mcp, name, **kwargs):
 
 
 def _chat(cid, title="t", is_pinned=False, timestamp=None):
-    """构造可被 ``_chat_to_dict`` 解析的 chat 对象。"""
+    """构造可被 ``chat_to_dict`` 解析的 chat 对象。"""
     return SimpleNamespace(cid=cid, title=title, is_pinned=is_pinned, timestamp=timestamp)
 
 

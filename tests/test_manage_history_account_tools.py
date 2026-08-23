@@ -21,7 +21,7 @@
    casefold title）、items 空、time 渲染、has_more 下一页、response_format=json
    ok 矩阵、顶层 except。
 
-辅助 helper 同步覆盖：``_turn_matches_query`` / ``_read_chat_turns`` /
+辅助 helper 同步覆盖：``history_service.turn_matches_query`` / ``history_service.read_chat_turns`` /
 ``_parse_tool_mode_entry`` / ``_parse_usage_entry`` / ``_find_notebook`` /
 ``_fetch_notebook_chats``。
 
@@ -39,6 +39,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 from src.adapters.mcp_sdk import MCPServer
+from src.services import history as history_service
 
 import src.tools.manage as manage_tools
 
@@ -140,30 +141,30 @@ def _turn(role, text):
 def test_turn_matches_query_role_match():
     """role 字段包含 query → True。"""
     turn = {"role": "user", "text": "unrelated"}
-    assert manage_tools._turn_matches_query(turn, "user") is True
+    assert history_service.turn_matches_query(turn, "user") is True
 
 
 def test_turn_matches_query_text_match():
     """text 字段包含 query → True。"""
     turn = {"role": "model", "text": "find hotel options"}
-    assert manage_tools._turn_matches_query(turn, "hotel") is True
+    assert history_service.turn_matches_query(turn, "hotel") is True
 
 
 def test_turn_matches_query_case_insensitive():
     """大小写不敏感匹配。"""
     turn = {"role": "Model", "text": "Needle found"}
-    assert manage_tools._turn_matches_query(turn, "NEEDLE") is True
+    assert history_service.turn_matches_query(turn, "NEEDLE") is True
 
 
 def test_turn_matches_query_empty_returns_false():
     """空 query（strip 后为空）→ False。"""
     turn = {"role": "user", "text": "anything"}
-    assert manage_tools._turn_matches_query(turn, "   ") is False
+    assert history_service.turn_matches_query(turn, "   ") is False
 
 
 def test_turn_matches_query_no_match():
     turn = {"role": "user", "text": "nothing here"}
-    assert manage_tools._turn_matches_query(turn, "missing") is False
+    assert history_service.turn_matches_query(turn, "missing") is False
 
 
 def test_read_chat_turns_without_read_chat_raises():
@@ -171,7 +172,7 @@ def test_read_chat_turns_without_read_chat_raises():
     client = _ListChatsClient([])
     raised = False
     try:
-        _run(manage_tools._read_chat_turns(client, "c_1", 20, 1000))
+        _run(history_service.read_chat_turns(client, "c_1", 20, 1000))
     except RuntimeError as e:
         raised = True
         assert "read_chat" in str(e)
@@ -183,7 +184,7 @@ def test_read_chat_turns_returns_truncated_dicts():
     turns = [_turn("user", "x" * 50), _turn("model", "y" * 50), _turn("user", "z")]
     client = _ReadChatClient([], {"c_1": turns})
 
-    history, parsed = _run(manage_tools._read_chat_turns(client, "c_1", 2, 10))
+    history, parsed = _run(history_service.read_chat_turns(client, "c_1", 2, 10))
     assert history is not None
     assert len(parsed) == 2  # limit=2 切片
     assert parsed[0]["role"] == "user"
@@ -200,7 +201,7 @@ def test_read_chat_turns_empty_history_returns_empty():
         return None
     client.read_chat = read_chat_none
 
-    history, parsed = _run(manage_tools._read_chat_turns(client, "c_1", 20, 1000))
+    history, parsed = _run(history_service.read_chat_turns(client, "c_1", 20, 1000))
     assert history is None
     assert parsed == []
 

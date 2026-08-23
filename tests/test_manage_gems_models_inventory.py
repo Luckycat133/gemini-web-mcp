@@ -22,7 +22,7 @@
 
 mock 边界：
 - client_wrapper 接缝：``get_gemini_client`` / ``initialize_client``
-- ``gemini_export_chat`` 内部接缝：``_read_chat_turns`` /
+- ``gemini_export_chat`` 内部接缝：``read_chat_turns`` /
   ``_fetch_recent_conversation_metadata``
 - 调用方式：MCP handler 经 ``register_manage_tools(mcp, layers=["all"])``
   注册后通过 ``mcp.call_tool`` 分发；对于 Literal 类型校验会拒绝的
@@ -518,7 +518,7 @@ def test_export_chat_history_none(monkeypatch):
     history = None
     client = _ReadChatClient(history=history)
     _patch_seams(monkeypatch, client)
-    # _read_chat_turns 内部调用 client.read_chat → 返回 None
+    # read_chat_turns 内部调用 client.read_chat → 返回 None
     mcp = _make_mcp()
     result = _run(_call(mcp, "gemini_export_chat", chat_id="chat_99"))
     assert result[0].text == "未找到聊天: chat_99"
