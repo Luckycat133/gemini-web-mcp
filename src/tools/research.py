@@ -241,6 +241,114 @@ def _research_domain_result(
 
 
 
+def _start_only_research_response(
+    query: str,
+    model: str,
+    research_model: Any,
+    model_note: str,
+    plan,
+    chat,
+    start_output,
+) -> list[TextContent]:
+    """Render the caller-requested start-only outcome without polling."""
+    state = _operation_state_from_upstream(getattr(start_output, "state", None))
+    status = SimpleNamespace(
+        state=state.value,
+        done=state is OperationState.COMPLETED,
+        notes=["caller requested start-only execution"],
+    )
+    upstream_result = SimpleNamespace(
+        plan=plan,
+        start_output=start_output,
+        final_output=None,
+        statuses=[status],
+        done=state is OperationState.COMPLETED,
+        poll_count=0,
+    )
+    data = _research_operation_data(
+        state,
+        plan=plan,
+        chat=chat,
+        upstream_result=upstream_result,
+        latest_upstream_state=state.value,
+        poll_count=0,
+    )
+    operation_result = _research_domain_result(data)
+    content = _format_deep_research_result(
+        query,
+        upstream_result,
+        model,
+        research_model,
+        model_note,
+        operation_state=state,
+        waited_for_completion=False,
+    )
+    return attach_domain_result([content], operation_result, use_result_data=True)
+
+
+async def _await_deep_research_outcome(
+    client: Any,
+    plan,
+    chat,
+    start_output,
+    poll_interval: int,
+    timeout_seconds: int,
+):
+    if getattr(plan, "research_id", None):
+        upstream_result = await _await_before_deadline(
+            client.wait_for_deep_research(
+                plan,
+                poll_interval=poll_interval,
+                timeout=timeout_seconds,
+            ),
+            timeout=timeout_seconds + poll_interval + 10,
+        )
+    else:
+        upstream_result = await _wait_for_deep_research_by_chat(
+            client=client,
+            plan=plan,
+            chat=chat,
+            start_output=start_output,
+            poll_interval=poll_interval,
+            timeout=timeout_seconds,
+        )
+    upstream_result.start_output = start_output
+    return upstream_result
+
+
+def _completed_research_response(
+    query: str,
+    model: str,
+    research_model: Any,
+    model_note: str,
+    plan,
+    chat,
+    upstream_result,
+) -> list[TextContent]:
+    state = (
+        OperationState.COMPLETED
+        if getattr(upstream_result, "done", False)
+        else OperationState.TIMED_OUT
+    )
+    data = _research_operation_data(
+        state,
+        plan=plan,
+        chat=chat,
+        upstream_result=upstream_result,
+    )
+    operation_result = _research_domain_result(data)
+    content = _format_deep_research_result(
+        query,
+        upstream_result,
+        model,
+        research_model,
+        model_note,
+        operation_state=state,
+        waited_for_completion=True,
+    )
+    return attach_domain_result([content], operation_result, use_result_data=True)
+
+
 async def _run_native_deep_research(
     client: Any,
     query: str,
@@ -286,91 +394,17 @@ async def _run_native_deep_research(
             )
 
         if not wait_for_completion:
-            state = _operation_state_from_upstream(
-                getattr(start_output, "state", None),
-            )
-            status = SimpleNamespace(
-                state=state.value,
-                done=state is OperationState.COMPLETED,
-                notes=["caller requested start-only execution"],
-            )
-            upstream_result = SimpleNamespace(
-                plan=plan,
-                start_output=start_output,
-                final_output=None,
-                statuses=[status],
-                done=state is OperationState.COMPLETED,
-                poll_count=0,
-            )
-            data = _research_operation_data(
-                state,
-                plan=plan,
-                chat=chat,
-                upstream_result=upstream_result,
-                latest_upstream_state=state.value,
-                poll_count=0,
-            )
-            operation_result = _research_domain_result(data)
-            content = _format_deep_research_result(
-                query,
-                upstream_result,
-                model,
-                research_model,
-                model_note,
-                operation_state=state,
-                waited_for_completion=False,
-            )
-            return attach_domain_result(
-                [content],
-                operation_result,
-                use_result_data=True,
-            )
+            return _start_only_research_response(query, model, research_model, model_note, plan, chat, start_output)
 
-        if getattr(plan, "research_id", None):
-            upstream_result = await _await_before_deadline(
-                client.wait_for_deep_research(
-                    plan,
-                    poll_interval=poll_interval,
-                    timeout=timeout_seconds,
-                ),
-                timeout=timeout_seconds + poll_interval + 10,
-            )
-        else:
-            upstream_result = await _wait_for_deep_research_by_chat(
-                client=client,
-                plan=plan,
-                chat=chat,
-                start_output=start_output,
-                poll_interval=poll_interval,
-                timeout=timeout_seconds,
-            )
-        upstream_result.start_output = start_output
-        state = (
-            OperationState.COMPLETED
-            if getattr(upstream_result, "done", False)
-            else OperationState.TIMED_OUT
+        upstream_result = await _await_deep_research_outcome(
+            client,
+            plan,
+            chat,
+            start_output,
+            poll_interval,
+            timeout_seconds,
         )
-        data = _research_operation_data(
-            state,
-            plan=plan,
-            chat=chat,
-            upstream_result=upstream_result,
-        )
-        operation_result = _research_domain_result(data)
-        content = _format_deep_research_result(
-            query,
-            upstream_result,
-            model,
-            research_model,
-            model_note,
-            operation_state=state,
-            waited_for_completion=True,
-        )
-        return attach_domain_result(
-            [content],
-            operation_result,
-            use_result_data=True,
-        )
+        return _completed_research_response(query, model, research_model, model_note, plan, chat, upstream_result)
     except asyncio.TimeoutError:
         data = _research_operation_data(
             OperationState.TIMED_OUT,
@@ -452,6 +486,84 @@ def _deep_research_generic_error(e: Exception) -> TextContent:
         "请确认：\n1. 您的账户是否有 AI Plus 订阅？\n"
         "2. 该功能在您所在的区域是否可用？"
     )
+
+
+def _research_artifact_failure_response(
+    error: Exception,
+    chat_id: str,
+    artifact_type: str,
+) -> list[TextContent]:
+    if isinstance(error, OSError):
+        data = ArtifactResultData(
+            state=ArtifactState.FAILED,
+            request_model=artifact_type,
+            effective_backend="MCP local renderer",
+            observed_backend="filesystem",
+            source_chat_id=chat_id,
+            media_type="research_report",
+        )
+        result = artifact_save_failure_result(
+            error,
+            data,
+            logger=logger,
+            operation="gemini_create_from_research_report",
+        )
+        message = "❌ Research report artifact creation failed. Check the output directory and retry."
+    else:
+        data = ArtifactResultData(
+            state=ArtifactState.FAILED,
+            request_model=artifact_type,
+            effective_backend="MCP local renderer",
+            source_chat_id=chat_id,
+            media_type="research_report",
+        )
+        result = artifact_exception_result(
+            error,
+            data,
+            logger=logger,
+            operation="gemini_create_from_research_report",
+        )
+        message = "❌ Research report artifact creation failed. Inspect the diagnostic ID and retry."
+    return domain_text(result, message, use_result_data=True)
+
+
+def _research_artifact_success_response(
+    artifact: dict,
+    chat_id: str,
+    artifact_type: str,
+    response_format: str,
+) -> list[TextContent]:
+    typed_artifact = artifact_from_local_path(
+        _research_artifact_kind(artifact["path"]),
+        artifact["path"],
+        title=artifact["title"],
+        source_chat_id=chat_id,
+        request_model=artifact_type,
+        effective_backend="MCP local renderer",
+        observed_backend="filesystem",
+    )
+    data = ArtifactResultData(
+        state=typed_artifact.state,
+        artifacts=(typed_artifact,),
+        request_model=artifact_type,
+        effective_backend="MCP local renderer",
+        observed_backend="filesystem",
+        source_chat_id=chat_id,
+        media_type="research_report",
+    )
+    save_failures = ("post_write_verification",) if typed_artifact.state == ArtifactState.FAILED else ()
+    result = artifact_result(data, save_failures=save_failures)
+    if response_format == "json":
+        return attach_domain_result(
+            [TextContent(type="text", text=json.dumps(artifact, ensure_ascii=False, indent=2))],
+            result,
+            use_result_data=True,
+        )
+    text = _format_research_report_artifact(artifact)
+    if typed_artifact.state == ArtifactState.FAILED:
+        text = f"❌ Research report artifact could not be verified.\n\n{text}"
+    content = append_artifact_block([TextContent(type="text", text=text)], data.artifacts)
+    return attach_domain_result(content, result, use_result_data=True)
 
 
 def register_research_tools(mcp: MCPServer):
@@ -603,77 +715,12 @@ def register_research_tools(mcp: MCPServer):
                 chat_id=chat_id,
                 output_dir=output_dir,
             )
-        except OSError as error:
-            data = ArtifactResultData(
-                state=ArtifactState.FAILED,
-                request_model=artifact_type,
-                effective_backend="MCP local renderer",
-                observed_backend="filesystem",
-                source_chat_id=chat_id,
-                media_type="research_report",
-            )
-            result = artifact_save_failure_result(
-                error,
-                data,
-                logger=logger,
-                operation="gemini_create_from_research_report",
-            )
-            return domain_text(
-                result,
-                "❌ Research report artifact creation failed. Check the output directory and retry.",
-                use_result_data=True,
-            )
         except Exception as error:
-            data = ArtifactResultData(
-                state=ArtifactState.FAILED,
-                request_model=artifact_type,
-                effective_backend="MCP local renderer",
-                source_chat_id=chat_id,
-                media_type="research_report",
-            )
-            result = artifact_exception_result(
-                error,
-                data,
-                logger=logger,
-                operation="gemini_create_from_research_report",
-            )
-            return domain_text(
-                result,
-                "❌ Research report artifact creation failed. Inspect the diagnostic ID and retry.",
-                use_result_data=True,
-            )
+            return _research_artifact_failure_response(error, chat_id, artifact_type)
 
-        typed_artifact = artifact_from_local_path(
-            _research_artifact_kind(artifact["path"]),
-            artifact["path"],
-            title=artifact["title"],
-            source_chat_id=chat_id,
-            request_model=artifact_type,
-            effective_backend="MCP local renderer",
-            observed_backend="filesystem",
-        )
-        data = ArtifactResultData(
-            state=typed_artifact.state,
-            artifacts=(typed_artifact,),
-            request_model=artifact_type,
-            effective_backend="MCP local renderer",
-            observed_backend="filesystem",
-            source_chat_id=chat_id,
-            media_type="research_report",
-        )
-        save_failures = ("post_write_verification",) if typed_artifact.state == ArtifactState.FAILED else ()
-        result = artifact_result(data, save_failures=save_failures)
-        if response_format == "json":
-            return attach_domain_result(
-                [TextContent(type="text", text=json.dumps(artifact, ensure_ascii=False, indent=2))],
-                result,
-                use_result_data=True,
-            )
-        text = _format_research_report_artifact(artifact)
-        if typed_artifact.state == ArtifactState.FAILED:
-            text = f"❌ Research report artifact could not be verified.\n\n{text}"
-        content = append_artifact_block([TextContent(type="text", text=text)], data.artifacts)
-        return attach_domain_result(content, result, use_result_data=True)
+        return _research_artifact_success_response(artifact, chat_id, artifact_type, response_format)
+
+
 
 
 async def _create_deep_research_plan(client, query: str, chat, model):

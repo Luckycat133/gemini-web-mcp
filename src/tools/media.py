@@ -505,6 +505,38 @@ def _finalize_media_content(
     return append_artifact_block(content, data.artifacts)
 
 
+def _invalid_image_response(image_error: str | None) -> list[TextContent]:
+    return domain_text(
+        DomainResult.failure(
+            DomainErrorCode.INVALID_ARGUMENT,
+            image_error or "Invalid image path.",
+            suggested_action="Correct the image path and retry.",
+            verification_status="input_rejected",
+        ),
+        f"❌ {image_error}",
+    )
+
+
+def _initial_input_artifacts(
+    safe_image_path: str | None,
+    requested_model: str,
+    request_model: str | None,
+    effective_backend: str,
+) -> tuple[Artifact, ...]:
+    if not safe_image_path:
+        return ()
+    return (
+        artifact_from_local_path(
+            ArtifactKind.IMAGE,
+            safe_image_path,
+            title=Path(safe_image_path).name,
+            requested_backend=requested_model,
+            request_model=request_model,
+            effective_backend=effective_backend,
+        ),
+    )
+
+
 def register_media_tools(mcp: MCPServer):
 
     @mcp.tool(annotations=MUTATES_REMOTE)
@@ -523,33 +555,13 @@ def register_media_tools(mcp: MCPServer):
         """媒体生成"""
         valid_image, safe_image_path, image_error = validate_optional_image_path(image_path)
         if not valid_image:
-            return domain_text(
-                DomainResult.failure(
-                    DomainErrorCode.INVALID_ARGUMENT,
-                    image_error or "Invalid image path.",
-                    suggested_action="Correct the image path and retry.",
-                    verification_status="input_rejected",
-                ),
-                f"❌ {image_error}",
-            )
+            return _invalid_image_response(image_error)
 
         client = get_gemini_client()
         await initialize_client()
         await cleanup_due_remote_chats(client)
         media_request = resolve_media_request(model, media_type, thinking_level)
         effective_timeout = _media_timeout(media_type, timeout_seconds)
-        input_artifacts: tuple[Artifact, ...] = ()
-        if safe_image_path:
-            input_artifacts = (
-                artifact_from_local_path(
-                    ArtifactKind.IMAGE,
-                    safe_image_path,
-                    title=Path(safe_image_path).name,
-                    requested_backend=model,
-                    request_model=media_request["request_model"],
-                    effective_backend=media_request["backend_label"],
-                ),
-            )
         job = _MediaJob(
             prompt=prompt,
             media_type=media_type,
@@ -560,7 +572,12 @@ def register_media_tools(mcp: MCPServer):
             note=media_request["note"],
             files=[safe_image_path] if safe_image_path else None,
             safe_image_path=safe_image_path,
-            input_artifacts=input_artifacts,
+            input_artifacts=_initial_input_artifacts(
+                safe_image_path,
+                model,
+                media_request["request_model"],
+                media_request["backend_label"],
+            ),
             timeout_seconds=effective_timeout,
         )
         logger.info(

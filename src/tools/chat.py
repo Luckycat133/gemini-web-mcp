@@ -70,9 +70,7 @@ def _build_chat_service() -> ChatService:
     )
 
 
-def register_chat_tools(mcp: MCPServer):
-    chat_service = _build_chat_service()
-
+def _register_conversation_tools(mcp: MCPServer, chat_service) -> None:
     @mcp.tool(annotations=MUTATES_REMOTE)
     @domain_error_boundary("gemini_chat", logger)
     async def gemini_chat(
@@ -210,6 +208,9 @@ def register_chat_tools(mcp: MCPServer):
             },
         )
 
+
+
+def _register_session_tools(mcp: MCPServer, chat_service) -> None:
     @mcp.tool(annotations=DESTRUCTIVE_REMOTE)
     @domain_error_boundary("gemini_reset_session", logger)
     async def gemini_reset_session(session_id: str) -> list[TextContent]:
@@ -257,6 +258,9 @@ def register_chat_tools(mcp: MCPServer):
             session_list.append(f"{i}. {sid} - {describe_model_name(data['model'])} ({retain_text})")
         return domain_text(result, "\n".join(session_list), use_result_data=True)
 
+
+
+def _register_streaming_tools(mcp: MCPServer, chat_service) -> None:
     @mcp.tool(annotations=MUTATES_REMOTE)
     @domain_error_boundary("gemini_chat_stream", logger)
     async def gemini_chat_stream(
@@ -372,3 +376,11 @@ def register_chat_tools(mcp: MCPServer):
                 "lifecycle": result.data.lifecycle,
             },
         )
+
+
+def register_chat_tools(mcp: MCPServer):
+    chat_service = _build_chat_service()
+
+    _register_conversation_tools(mcp, chat_service)
+    _register_session_tools(mcp, chat_service)
+    _register_streaming_tools(mcp, chat_service)

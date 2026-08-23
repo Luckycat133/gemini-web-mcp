@@ -954,6 +954,63 @@ async def scheduled(
         return _error_text(e, "Scheduled action")
 
 
+def _skill_input_artifacts(
+    safe_image_path: Optional[str],
+    requested_model: str,
+    request_model: Optional[str],
+    effective_backend: Optional[str],
+    *,
+    observed_backend: Optional[str] = None,
+    source_chat_id: Optional[str] = None,
+) -> tuple[Artifact, ...]:
+    if not safe_image_path:
+        return ()
+    return (
+        artifact_from_local_path(
+            ArtifactKind.IMAGE,
+            safe_image_path,
+            title=Path(safe_image_path).name,
+            requested_backend=requested_model,
+            request_model=request_model,
+            effective_backend=effective_backend,
+            observed_backend=observed_backend,
+            source_chat_id=source_chat_id,
+        ),
+    )
+
+
+def _skill_media_result(
+    response: Any,
+    input_artifacts: tuple[Artifact, ...],
+    *,
+    requested_model: str,
+    request_model: Optional[str],
+    effective_backend: Optional[str],
+    media_type: str,
+) -> tuple[ArtifactResultData, Any]:
+    observed_backend = observed_backend_from_response(response)
+    artifacts = extract_response_artifacts(
+        response,
+        media_type=media_type,
+        requested_backend=requested_model,
+        request_model=request_model,
+        effective_backend=effective_backend,
+        observed_backend=observed_backend,
+    )
+    data = ArtifactResultData(
+        state=classify_artifact_state(response, artifacts),
+        artifacts=artifacts,
+        input_artifacts=input_artifacts,
+        requested_model=requested_model,
+        request_model=request_model,
+        effective_backend=effective_backend,
+        observed_backend=observed_backend,
+        source_chat_id=response_chat_id(response),
+        media_type=media_type,
+    )
+    return data, artifact_result(data)
+
+
 @mcp.tool(annotations=MUTATES_REMOTE)
 async def create(
     prompt: str,
@@ -992,17 +1049,7 @@ async def create(
         }
         media_prompt = prefixes.get(media_type, "") + prompt
         files = [safe_image_path] if safe_image_path else None
-        if safe_image_path:
-            input_artifacts = (
-                artifact_from_local_path(
-                    ArtifactKind.IMAGE,
-                    safe_image_path,
-                    title=Path(safe_image_path).name,
-                    requested_backend=requested_model,
-                    request_model=request_model,
-                    effective_backend=effective_backend,
-                ),
-            )
+        input_artifacts = _skill_input_artifacts(safe_image_path, requested_model, request_model, effective_backend)
 
         response = await client.generate_content(
             prompt=media_prompt,
@@ -1011,40 +1058,22 @@ async def create(
             thinking_level=thinking_level,
         )
         _schedule_skill_response_cleanup(response, f"skill_create:{media_type}")
-        observed_backend = observed_backend_from_response(response)
-        artifacts = extract_response_artifacts(
-            response,
-            media_type=media_type,
-            requested_backend=requested_model,
-            request_model=request_model,
-            effective_backend=effective_backend,
-            observed_backend=observed_backend,
+        input_artifacts = _skill_input_artifacts(
+            safe_image_path,
+            requested_model,
+            request_model,
+            effective_backend,
+            observed_backend=observed_backend_from_response(response),
+            source_chat_id=response_chat_id(response),
         )
-        if safe_image_path:
-            input_artifacts = (
-                artifact_from_local_path(
-                    ArtifactKind.IMAGE,
-                    safe_image_path,
-                    title=Path(safe_image_path).name,
-                    requested_backend=requested_model,
-                    request_model=request_model,
-                    effective_backend=effective_backend,
-                    observed_backend=observed_backend,
-                    source_chat_id=response_chat_id(response),
-                ),
-            )
-        data = ArtifactResultData(
-            state=classify_artifact_state(response, artifacts),
-            artifacts=artifacts,
-            input_artifacts=input_artifacts,
+        data, result = _skill_media_result(
+            response,
+            input_artifacts,
             requested_model=requested_model,
             request_model=request_model,
             effective_backend=effective_backend,
-            observed_backend=observed_backend,
-            source_chat_id=response_chat_id(response),
             media_type=media_type,
         )
-        result = artifact_result(data)
         content = _format_response(
             response,
             media_type,
@@ -1105,15 +1134,11 @@ async def edit(
 
         model = _normalize_model(model)
         request_model = resolve_model_name(model)
-        input_artifacts = (
-            artifact_from_local_path(
-                ArtifactKind.IMAGE,
-                safe_image_path or image_path,
-                title=Path(safe_image_path or image_path).name,
-                requested_backend=requested_model,
-                request_model=request_model,
-                effective_backend=request_model,
-            ),
+        input_artifacts = _skill_input_artifacts(
+            safe_image_path or image_path,
+            requested_model,
+            request_model,
+            request_model,
         )
 
         response = await client.generate_content(
@@ -1123,39 +1148,22 @@ async def edit(
             thinking_level=thinking_level,
         )
         _schedule_skill_response_cleanup(response, "skill_edit")
-        observed_backend = observed_backend_from_response(response)
-        artifacts = extract_response_artifacts(
+        input_artifacts = _skill_input_artifacts(
+            safe_image_path or image_path,
+            requested_model,
+            request_model,
+            request_model,
+            observed_backend=observed_backend_from_response(response),
+            source_chat_id=response_chat_id(response),
+        )
+        data, result = _skill_media_result(
             response,
-            media_type="image",
-            requested_backend=requested_model,
-            request_model=request_model,
-            effective_backend=request_model,
-            observed_backend=observed_backend,
-        )
-        input_artifacts = (
-            artifact_from_local_path(
-                ArtifactKind.IMAGE,
-                safe_image_path or image_path,
-                title=Path(safe_image_path or image_path).name,
-                requested_backend=requested_model,
-                request_model=request_model,
-                effective_backend=request_model,
-                observed_backend=observed_backend,
-                source_chat_id=response_chat_id(response),
-            ),
-        )
-        data = ArtifactResultData(
-            state=classify_artifact_state(response, artifacts),
-            artifacts=artifacts,
-            input_artifacts=input_artifacts,
+            input_artifacts,
             requested_model=requested_model,
             request_model=request_model,
             effective_backend=request_model,
-            observed_backend=observed_backend,
-            source_chat_id=response_chat_id(response),
             media_type="image_edit",
         )
-        result = artifact_result(data)
         content = _format_response(response, "image")
         content = append_artifact_block(content, data.artifacts)
         return attach_domain_result(content, result, use_result_data=True)

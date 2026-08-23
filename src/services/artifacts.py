@@ -111,6 +111,63 @@ def artifact_from_remote(
     )
 
 
+def _unavailable_local_artifact(
+    *,
+    identity: str,
+    kind: ArtifactKind,
+    path: str,
+    title: str | None,
+    uri: str | None,
+    source_chat_id: str | None,
+    requested_backend: str | None,
+    request_model: str | None,
+    effective_backend: str | None,
+    observed_backend: str | None,
+    method: str,
+) -> Artifact:
+    return Artifact(
+        id=identity,
+        kind=kind,
+        state=ArtifactState.FAILED,
+        title=title,
+        uri=uri,
+        local_path=path,
+        mime_type=_guess_mime_type(path),
+        source_chat_id=source_chat_id,
+        requested_backend=requested_backend,
+        request_model=request_model,
+        effective_backend=effective_backend,
+        observed_backend=observed_backend,
+        verification=ArtifactVerification(
+            ArtifactVerificationStatus.FAILED,
+            methods=(method,),
+        ),
+    )
+
+
+def _probe_media_metadata(
+    kind: ArtifactKind,
+    resolved_path: str,
+    methods: list[str],
+    duration_probe: Callable[[str], float | None] | None,
+    dimensions_probe: Callable[[str], tuple[int, int] | None] | None,
+) -> tuple[int | None, int | None, float | None]:
+    width = height = None
+    if kind == ArtifactKind.IMAGE:
+        probe = dimensions_probe or _probe_image_dimensions
+        dimensions = probe(resolved_path)
+        if dimensions is not None:
+            width, height = dimensions
+            methods.append("image_dimensions")
+
+    duration_seconds = None
+    if kind in {ArtifactKind.AUDIO, ArtifactKind.VIDEO} and duration_probe is not None:
+        duration_seconds = _positive_float(duration_probe(resolved_path))
+        if duration_seconds is not None:
+            methods.append("duration_probe")
+    return width, height, duration_seconds
+
+
 def artifact_from_local_path(
     kind: ArtifactKind,
     path: str,
@@ -129,46 +186,37 @@ def artifact_from_local_path(
     identity = artifact_id(kind, uri=uri, local_path=resolved_path)
     file_path = Path(resolved_path)
     if not file_path.is_file():
-        return Artifact(
-            id=identity,
+        return _unavailable_local_artifact(
+            identity=identity,
             kind=kind,
-            state=ArtifactState.FAILED,
+            path=resolved_path,
             title=title,
             uri=uri,
-            local_path=resolved_path,
-            mime_type=_guess_mime_type(resolved_path),
             source_chat_id=source_chat_id,
             requested_backend=requested_backend,
             request_model=request_model,
             effective_backend=effective_backend,
             observed_backend=observed_backend,
-            verification=ArtifactVerification(
-                ArtifactVerificationStatus.FAILED,
-                methods=("file_missing",),
-            ),
+            method="file_missing",
         )
 
     try:
         size_bytes = file_path.stat().st_size
     except OSError:
-        return Artifact(
-            id=identity,
+        return _unavailable_local_artifact(
+            identity=identity,
             kind=kind,
-            state=ArtifactState.FAILED,
+            path=resolved_path,
             title=title,
             uri=uri,
-            local_path=resolved_path,
-            mime_type=_guess_mime_type(resolved_path),
             source_chat_id=source_chat_id,
             requested_backend=requested_backend,
             request_model=request_model,
             effective_backend=effective_backend,
             observed_backend=observed_backend,
-            verification=ArtifactVerification(
-                ArtifactVerificationStatus.FAILED,
-                methods=("file_unreadable",),
-            ),
+            method="file_unreadable",
         )
+
     methods = ["file_exists", "size_checked"]
     status = ArtifactVerificationStatus.VERIFIED
     state = ArtifactState.LOCAL
@@ -179,19 +227,13 @@ def artifact_from_local_path(
     else:
         methods.append("size_nonzero")
 
-    width = height = None
-    if kind == ArtifactKind.IMAGE:
-        probe = dimensions_probe or _probe_image_dimensions
-        dimensions = probe(resolved_path)
-        if dimensions is not None:
-            width, height = dimensions
-            methods.append("image_dimensions")
-
-    duration_seconds = None
-    if kind in {ArtifactKind.AUDIO, ArtifactKind.VIDEO} and duration_probe is not None:
-        duration_seconds = _positive_float(duration_probe(resolved_path))
-        if duration_seconds is not None:
-            methods.append("duration_probe")
+    width, height, duration_seconds = _probe_media_metadata(
+        kind,
+        resolved_path,
+        methods,
+        duration_probe,
+        dimensions_probe,
+    )
 
     return Artifact(
         id=identity,

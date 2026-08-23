@@ -413,6 +413,121 @@ async def _fetch_conversation_metadata_source(
     }
 
 
+async def _collect_notebook_chat_sources(
+    client: object,
+    safe_max_items: int,
+) -> tuple[list[dict[str, Any]], dict[str, Any] | None, list[dict[str, Any]]]:
+    """Fetch every native notebook's chat list as extra deep-scan sources."""
+    summary: list[dict[str, Any]] = []
+    diagnostic: dict[str, Any] | None = None
+    source_blocks: list[dict[str, Any]] = []
+    notebooks, diagnostic = await _fetch_native_notebooks(client)
+    for notebook in notebooks:
+        notebook_id = notebook.get("id", "")
+        if not notebook_id:
+            continue
+        notebook_items: list[dict[str, Any]] = []
+        notebook_pages: list[dict[str, Any]] = []
+        next_offset = 0
+        while len(notebook_items) < safe_max_items:
+            batch_limit = min(100, safe_max_items - len(notebook_items))
+            page_items, page_payload = await _fetch_notebook_chats(client, notebook_id, batch_limit, next_offset)
+            source_name = f"notebook:{notebook.get('title') or notebook_id}"
+            for item in page_items:
+                item["history_source"] = source_name
+            notebook_items.extend(page_items)
+            notebook_pages.append(
+                {
+                    "offset": next_offset,
+                    "count": len(page_items),
+                    "has_more": bool(page_payload.get("has_more")),
+                    "next_offset": page_payload.get("next_offset"),
+                }
+            )
+            if not page_payload.get("has_more") or not page_items:
+                break
+            new_offset = page_payload.get("next_offset")
+            if not isinstance(new_offset, int) or new_offset <= next_offset:
+                break
+            next_offset = new_offset
+        summary.append(
+            {
+                "notebook_id": notebook_id,
+                "title": notebook.get("title", ""),
+                "fetched_count": len(notebook_items),
+                "pages": notebook_pages,
+            }
+        )
+        source_blocks.append(
+            {
+                "name": f"notebook:{notebook.get('title') or notebook_id}",
+                "rpcid": get_contract("notebooks.chats").rpc_id,
+                "items": notebook_items,
+                "diagnostic": {
+                    "source_rpc": get_contract("notebooks.chats").rpc_id,
+                    "observed": get_contract("notebooks.chats").observed,
+                    "notebook_id": notebook_id,
+                    "notebook_title": notebook.get("title", ""),
+                    "fetched_count": len(notebook_items),
+                    "pages": notebook_pages,
+                },
+            }
+        )
+    return summary, diagnostic, source_blocks
+
+
+def _summarize_scan_sources(source_blocks: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    source_diagnostics = [
+        {
+            "name": block.get("name"),
+            "rpcid": block.get("rpcid"),
+            "fetched_count": len(block.get("items", [])),
+            "diagnostic": block.get("diagnostic", {}),
+        }
+        for block in source_blocks
+    ]
+    coverage_warnings = []
+    for block in source_diagnostics:
+        stopped_reason = block.get("diagnostic", {}).get("stopped_reason")
+        if stopped_reason in {"max_items", "max_pages"}:
+            coverage_warnings.append(
+                {
+                    "source": block.get("name"),
+                    "stopped_reason": stopped_reason,
+                    "message": "This source may have more remote items than this scan fetched.",
+                }
+            )
+    return source_diagnostics, coverage_warnings
+
+
+def _format_scan_history_markdown(payload: dict[str, Any], page: list[dict[str, Any]]) -> str:
+    lines = [
+        "## Gemini 历史对话深度扫描",
+        f"合并唯一对话: {payload['total_count']}；当前 offset={payload['offset']} count={payload['count']}",
+        "",
+        "### 来源计数",
+    ]
+    for name, count in payload["source_counts"].items():
+        lines.append(f"- {name}: {count}")
+    if payload["coverage_warnings"]:
+        lines.extend(["", "### 覆盖警告"])
+        for warning in payload["coverage_warnings"]:
+            lines.append(f"- {warning['source']}: {warning['stopped_reason']}")
+    lines.extend(["", "### 当前页"])
+    for idx, item in enumerate(page, payload["offset"] + 1):
+        pin = " 📌" if item.get("is_pinned") else ""
+        time_text = f" · {item['time']}" if item.get("time") else ""
+        sources = ", ".join(item.get("sources", []))
+        lines.append(f"{idx}. {item.get('title') or '(untitled)'}{pin} (ID: {item.get('id', '')}){time_text}")
+        if sources:
+            lines.append(f"   sources: {sources}")
+        if item.get("project_id"):
+            lines.append(f"   project_id: {item['project_id']}")
+    if payload["has_more"]:
+        lines.append(f"\n下一页: offset={payload['next_offset']}")
+    return "\n".join(lines)
+
+
 async def _fetch_conversation_metadata_sources(
     client,
     filters: tuple[dict[str, Any], ...] = CONVERSATION_HISTORY_FILTERS,
@@ -1113,58 +1228,11 @@ def _register_history_scan_tools(mcp: MCPServer, enabled_tool_names: set[str], t
             notebook_summary: list[dict[str, Any]] = []
             notebook_diagnostic: dict[str, Any] | None = None
             if include_notebook_chats:
-                notebooks, notebook_diagnostic = await _fetch_native_notebooks(client)
-                for notebook in notebooks:
-                    notebook_id = notebook.get("id", "")
-                    if not notebook_id:
-                        continue
-                    notebook_items: list[dict[str, Any]] = []
-                    notebook_pages: list[dict[str, Any]] = []
-                    next_offset = 0
-                    while len(notebook_items) < safe_max_items:
-                        batch_limit = min(100, safe_max_items - len(notebook_items))
-                        page_items, page_payload = await _fetch_notebook_chats(client, notebook_id, batch_limit, next_offset)
-                        source_name = f"notebook:{notebook.get('title') or notebook_id}"
-                        for item in page_items:
-                            item["history_source"] = source_name
-                        notebook_items.extend(page_items)
-                        notebook_pages.append(
-                            {
-                                "offset": next_offset,
-                                "count": len(page_items),
-                                "has_more": bool(page_payload.get("has_more")),
-                                "next_offset": page_payload.get("next_offset"),
-                            }
-                        )
-                        if not page_payload.get("has_more") or not page_items:
-                            break
-                        new_offset = page_payload.get("next_offset")
-                        if not isinstance(new_offset, int) or new_offset <= next_offset:
-                            break
-                        next_offset = new_offset
-                    notebook_summary.append(
-                        {
-                            "notebook_id": notebook_id,
-                            "title": notebook.get("title", ""),
-                            "fetched_count": len(notebook_items),
-                            "pages": notebook_pages,
-                        }
-                    )
-                    source_blocks.append(
-                        {
-                            "name": f"notebook:{notebook.get('title') or notebook_id}",
-                            "rpcid": get_contract("notebooks.chats").rpc_id,
-                            "items": notebook_items,
-                            "diagnostic": {
-                                "source_rpc": get_contract("notebooks.chats").rpc_id,
-                                "observed": get_contract("notebooks.chats").observed,
-                                "notebook_id": notebook_id,
-                                "notebook_title": notebook.get("title", ""),
-                                "fetched_count": len(notebook_items),
-                                "pages": notebook_pages,
-                            },
-                        }
-                    )
+                notebook_summary, notebook_diagnostic, notebook_blocks = await _collect_notebook_chat_sources(
+                    client,
+                    safe_max_items,
+                )
+                source_blocks.extend(notebook_blocks)
 
             if include_remy_goals:
                 source_blocks.append(
@@ -1178,27 +1246,7 @@ def _register_history_scan_tools(mcp: MCPServer, enabled_tool_names: set[str], t
 
             merged_items, _sources_by_id = _merge_conversation_source_items(source_blocks)
             page, page_info = paginate_items(merged_items, limit, offset, max_limit=500)
-            source_diagnostics = [
-                {
-                    "name": block.get("name"),
-                    "rpcid": block.get("rpcid"),
-                    "fetched_count": len(block.get("items", [])),
-                    "diagnostic": block.get("diagnostic", {}),
-                }
-                for block in source_blocks
-            ]
-            coverage_warnings = []
-            for block in source_diagnostics:
-                diagnostic = block.get("diagnostic", {})
-                stopped_reason = diagnostic.get("stopped_reason")
-                if stopped_reason in {"max_items", "max_pages"}:
-                    coverage_warnings.append(
-                        {
-                            "source": block.get("name"),
-                            "stopped_reason": stopped_reason,
-                            "message": "This source may have more remote items than this scan fetched.",
-                        }
-                    )
+            source_diagnostics, coverage_warnings = _summarize_scan_sources(source_blocks)
 
             payload = {
                 "ok": True,
@@ -1226,31 +1274,7 @@ def _register_history_scan_tools(mcp: MCPServer, enabled_tool_names: set[str], t
             if response_format == "json":
                 return _json_response(payload)
 
-            lines = [
-                "## Gemini 历史对话深度扫描",
-                f"合并唯一对话: {payload['total_count']}；当前 offset={payload['offset']} count={payload['count']}",
-                "",
-                "### 来源计数",
-            ]
-            for name, count in payload["source_counts"].items():
-                lines.append(f"- {name}: {count}")
-            if coverage_warnings:
-                lines.extend(["", "### 覆盖警告"])
-                for warning in coverage_warnings:
-                    lines.append(f"- {warning['source']}: {warning['stopped_reason']}")
-            lines.extend(["", "### 当前页"])
-            for idx, item in enumerate(page, payload["offset"] + 1):
-                pin = " 📌" if item.get("is_pinned") else ""
-                time_text = f" · {item['time']}" if item.get("time") else ""
-                sources = ", ".join(item.get("sources", []))
-                lines.append(f"{idx}. {item.get('title') or '(untitled)'}{pin} (ID: {item.get('id', '')}){time_text}")
-                if sources:
-                    lines.append(f"   sources: {sources}")
-                if item.get("project_id"):
-                    lines.append(f"   project_id: {item['project_id']}")
-            if payload["has_more"]:
-                lines.append(f"\n下一页: offset={payload['next_offset']}")
-            return [TextContent(type="text", text="\n".join(lines))]
+            return [TextContent(type="text", text=_format_scan_history_markdown(payload, page))]
         except Exception as e:
             logger.error(f"深度扫描聊天历史失败: {e}")
             return [TextContent(type="text", text=f"❌ 深度扫描失败: {str(e)}")]

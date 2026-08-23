@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import uuid
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field, fields, is_dataclass
 from datetime import datetime, timezone
 from enum import Enum
@@ -261,9 +261,11 @@ def result_from_exception(
     )
 
 
-def _classify_exception(
-    error: BaseException,
-) -> tuple[DomainErrorCode, str, bool, str | None, OperationState]:
+_Classification = tuple[DomainErrorCode, str, bool, str | None, OperationState]
+_TextRule = tuple[Callable[[str, str], bool], _Classification]
+
+
+def _exception_type_classification(error: BaseException) -> _Classification | None:
     if isinstance(error, asyncio.CancelledError):
         return (
             DomainErrorCode.CANCELLED,
@@ -304,104 +306,131 @@ def _classify_exception(
             "Check network or proxy settings and retry.",
             OperationState.FAILED,
         )
+    return None
+
+
+def _matches_no_cookie(legacy_code: str, error_text: str) -> bool:
+    return legacy_code == "NO_COOKIE" or (
+        ("psid" in error_text or "cookie" in error_text) and ("not set" in error_text or "missing" in error_text)
+    )
+
+
+def _matches_invalid_cookie(legacy_code: str, error_text: str) -> bool:
+    return legacy_code == "INVALID_COOKIE" or (
+        ("cookie" in error_text or "psid" in error_text)
+        and any(marker in error_text for marker in ("invalid", "expired", "rejected"))
+    )
+
+
+def _matches_session_not_found(legacy_code: str, error_text: str) -> bool:
+    return legacy_code == "SESSION_NOT_FOUND" or (
+        "session" in error_text and ("not found" in error_text or "不存在" in error_text)
+    )
+
+
+def _matches_network_error(legacy_code: str, error_text: str) -> bool:
+    return legacy_code == "NETWORK_ERROR" or any(
+        marker in error_text for marker in ("network", "connection refused", "connection reset")
+    )
+
+
+def _matches_model_unavailable(legacy_code: str, error_text: str) -> bool:
+    return legacy_code == "MODEL_UNAVAILABLE" or (
+        "model" in error_text and any(marker in error_text for marker in ("unavailable", "not available"))
+    )
+
+
+def _contains_any(error_text: str, *markers: str) -> bool:
+    return any(marker in error_text for marker in markers)
+
+
+# Ordered text/legacy-code rules; first match wins, mirroring the original ladder.
+_TEXT_CLASSIFICATION_RULES: tuple[_TextRule, ...] = (
+    (_matches_no_cookie, (
+        DomainErrorCode.AUTH_REQUIRED,
+        "Gemini Web authentication is not configured.",
+        False,
+        "Use gemini_get_cookie_from_browser or configure GEMINI_PSID, then retry.",
+        OperationState.FAILED,
+    )),
+    ((lambda code, text: code in {"AUTH_REQUIRED", "UNAUTHORIZED"} or _contains_any(text, "authentication required", "not authenticated")), (
+        DomainErrorCode.AUTH_REQUIRED,
+        "Authentication is required for this operation.",
+        False,
+        "Load a valid Gemini Web cookie and retry.",
+        OperationState.FAILED,
+    )),
+    (_matches_invalid_cookie, (
+        DomainErrorCode.AUTH_EXPIRED,
+        "Gemini Web authentication is invalid or expired.",
+        False,
+        "Refresh the Gemini Web cookie and retry.",
+        OperationState.FAILED,
+    )),
+    (_matches_session_not_found, (
+        DomainErrorCode.SESSION_NOT_FOUND,
+        "The requested session does not exist.",
+        False,
+        "Create a session with gemini_start_chat and use the returned ID.",
+        OperationState.FAILED,
+    )),
+    ((lambda code, text: code in {"RATE_LIMIT", "RATE_LIMITED"} or "rate limit" in text), (
+        DomainErrorCode.RATE_LIMITED,
+        "The upstream service rate limit was reached.",
+        True,
+        "Wait before retrying or use a lower-cost model.",
+        OperationState.FAILED,
+    )),
+    ((lambda code, text: "timeout" in text or "timed out" in text), (
+        DomainErrorCode.TIMED_OUT,
+        "The upstream operation timed out.",
+        True,
+        "Retry later or increase the operation timeout.",
+        OperationState.TIMED_OUT,
+    )),
+    (_matches_network_error, (
+        DomainErrorCode.NETWORK_ERROR,
+        "The upstream service could not be reached.",
+        True,
+        "Check network or proxy settings and retry.",
+        OperationState.FAILED,
+    )),
+    (_matches_model_unavailable, (
+        DomainErrorCode.CAPABILITY_UNAVAILABLE,
+        "The requested model or capability is unavailable.",
+        False,
+        "Choose an available model or inspect account capabilities.",
+        OperationState.UNAVAILABLE,
+    )),
+    ((lambda code, text: code == "UPSTREAM_CHANGED" or _contains_any(text, "upstream response changed", "response shape changed", "parse drift")), (
+        DomainErrorCode.UPSTREAM_CHANGED,
+        "The upstream response no longer matches the supported contract.",
+        False,
+        "Update the adapter or report the diagnostic ID.",
+        OperationState.FAILED,
+    )),
+    ((lambda code, text: _contains_any(text, "upstream rejected", "forbidden", "permission denied")), (
+        DomainErrorCode.UPSTREAM_REJECTED,
+        "The upstream service rejected the operation.",
+        False,
+        "Check account permissions and request parameters before retrying.",
+        OperationState.FAILED,
+    )),
+)
+
+
+def _classify_exception(
+    error: BaseException,
+) -> _Classification:
+    type_classification = _exception_type_classification(error)
+    if type_classification is not None:
+        return type_classification
 
     legacy_code = str(getattr(error, "code", "")).upper()
     error_text = str(error).lower()
-    if legacy_code == "NO_COOKIE" or (
-        ("psid" in error_text or "cookie" in error_text) and ("not set" in error_text or "missing" in error_text)
-    ):
-        return (
-            DomainErrorCode.AUTH_REQUIRED,
-            "Gemini Web authentication is not configured.",
-            False,
-            "Use gemini_get_cookie_from_browser or configure GEMINI_PSID, then retry.",
-            OperationState.FAILED,
-        )
-    if legacy_code in {"AUTH_REQUIRED", "UNAUTHORIZED"} or any(
-        marker in error_text for marker in ("authentication required", "not authenticated")
-    ):
-        return (
-            DomainErrorCode.AUTH_REQUIRED,
-            "Authentication is required for this operation.",
-            False,
-            "Load a valid Gemini Web cookie and retry.",
-            OperationState.FAILED,
-        )
-    if legacy_code == "INVALID_COOKIE" or (
-        ("cookie" in error_text or "psid" in error_text)
-        and any(marker in error_text for marker in ("invalid", "expired", "rejected"))
-    ):
-        return (
-            DomainErrorCode.AUTH_EXPIRED,
-            "Gemini Web authentication is invalid or expired.",
-            False,
-            "Refresh the Gemini Web cookie and retry.",
-            OperationState.FAILED,
-        )
-    if legacy_code == "SESSION_NOT_FOUND" or (
-        "session" in error_text and ("not found" in error_text or "不存在" in error_text)
-    ):
-        return (
-            DomainErrorCode.SESSION_NOT_FOUND,
-            "The requested session does not exist.",
-            False,
-            "Create a session with gemini_start_chat and use the returned ID.",
-            OperationState.FAILED,
-        )
-    if legacy_code in {"RATE_LIMIT", "RATE_LIMITED"} or "rate limit" in error_text:
-        return (
-            DomainErrorCode.RATE_LIMITED,
-            "The upstream service rate limit was reached.",
-            True,
-            "Wait before retrying or use a lower-cost model.",
-            OperationState.FAILED,
-        )
-    if "timeout" in error_text or "timed out" in error_text:
-        return (
-            DomainErrorCode.TIMED_OUT,
-            "The upstream operation timed out.",
-            True,
-            "Retry later or increase the operation timeout.",
-            OperationState.TIMED_OUT,
-        )
-    if legacy_code == "NETWORK_ERROR" or any(
-        marker in error_text for marker in ("network", "connection refused", "connection reset")
-    ):
-        return (
-            DomainErrorCode.NETWORK_ERROR,
-            "The upstream service could not be reached.",
-            True,
-            "Check network or proxy settings and retry.",
-            OperationState.FAILED,
-        )
-    if legacy_code == "MODEL_UNAVAILABLE" or (
-        "model" in error_text and any(marker in error_text for marker in ("unavailable", "not available"))
-    ):
-        return (
-            DomainErrorCode.CAPABILITY_UNAVAILABLE,
-            "The requested model or capability is unavailable.",
-            False,
-            "Choose an available model or inspect account capabilities.",
-            OperationState.UNAVAILABLE,
-        )
-    if legacy_code == "UPSTREAM_CHANGED" or any(
-        marker in error_text for marker in ("upstream response changed", "response shape changed", "parse drift")
-    ):
-        return (
-            DomainErrorCode.UPSTREAM_CHANGED,
-            "The upstream response no longer matches the supported contract.",
-            False,
-            "Update the adapter or report the diagnostic ID.",
-            OperationState.FAILED,
-        )
-    if any(marker in error_text for marker in ("upstream rejected", "forbidden", "permission denied")):
-        return (
-            DomainErrorCode.UPSTREAM_REJECTED,
-            "The upstream service rejected the operation.",
-            False,
-            "Check account permissions and request parameters before retrying.",
-            OperationState.FAILED,
-        )
+    for matches, classification in _TEXT_CLASSIFICATION_RULES:
+        if matches(legacy_code, error_text):
+            return classification
     return (
         DomainErrorCode.INTERNAL_ERROR,
         "An internal error prevented the operation from completing.",

@@ -375,6 +375,15 @@ async def export_chat_result(
     )
 
 
+def _deletion_payload(chat_id: str, deleted: bool | None, status: str, source: str | None) -> dict[str, Any]:
+    return {
+        "chat_id": chat_id,
+        "delete_requested": True,
+        "deleted": deleted,
+        "verification": {"status": status, "source": source},
+    }
+
+
 async def delete_chat_result(
     client: object,
     chat_id: str,
@@ -398,14 +407,8 @@ async def delete_chat_result(
 
     await client.delete_chat(normalized_chat_id)  # type: ignore[attr-defined]
     if not hasattr(client, "_batch_execute"):
-        payload = {
-            "chat_id": normalized_chat_id,
-            "delete_requested": True,
-            "deleted": None,
-            "verification": {"status": "not_available", "source": None},
-        }
         return DomainResult.success(
-            payload,
+            _deletion_payload(normalized_chat_id, None, "not_available", None),
             operation_state=OperationState.ACCEPTED,
             verification_status="not_available",
             details={"source": "client_delete_chat"},
@@ -414,19 +417,10 @@ async def delete_chat_result(
     try:
         absent, observation_details = await observe_chat_absence(client, normalized_chat_id)
     except Exception as error:
-        payload = {
-            "chat_id": normalized_chat_id,
-            "delete_requested": True,
-            "deleted": None,
-            "verification": {
-                "status": "read_back_error",
-                "source": "history.page",
-            },
-        }
         return DomainResult.failure(
             DomainErrorCode.VERIFICATION_FAILED,
             "The chat deletion request returned, but read-back verification failed.",
-            data=payload,
+            data=_deletion_payload(normalized_chat_id, None, "read_back_error", "history.page"),
             retryable=True,
             suggested_action="Read the chat again before retrying deletion.",
             verification_status="read_back_error",
@@ -434,48 +428,24 @@ async def delete_chat_result(
         )
 
     if absent is None:
-        payload = {
-            "chat_id": normalized_chat_id,
-            "delete_requested": True,
-            "deleted": None,
-            "verification": {"status": "not_available", "source": "history.page"},
-        }
         return DomainResult.success(
-            payload,
+            _deletion_payload(normalized_chat_id, None, "not_available", "history.page"),
             operation_state=OperationState.ACCEPTED,
             verification_status="not_available",
             details=observation_details,
         )
 
     if absent:
-        payload = {
-            "chat_id": normalized_chat_id,
-            "delete_requested": True,
-            "deleted": True,
-            "verification": {
-                "status": "verified_absent",
-                "source": "history.page",
-            },
-        }
         return DomainResult.success(
-            payload,
+            _deletion_payload(normalized_chat_id, True, "verified_absent", "history.page"),
             verification_status="verified_absent",
             details=observation_details,
         )
 
-    payload = {
-        "chat_id": normalized_chat_id,
-        "delete_requested": True,
-        "deleted": False,
-        "verification": {
-            "status": "still_present",
-            "source": "history.page",
-        },
-    }
     return DomainResult.failure(
         DomainErrorCode.VERIFICATION_FAILED,
         "The chat is still readable after the deletion request.",
-        data=payload,
+        data=_deletion_payload(normalized_chat_id, False, "still_present", "history.page"),
         retryable=True,
         suggested_action="Retry later or inspect the chat before issuing another deletion request.",
         verification_status="still_present",

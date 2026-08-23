@@ -130,6 +130,76 @@ def _analysis_failure_response(error: Exception, context: _AnalysisContext, mess
     )
 
 
+def _invalid_analysis_input_response(
+    error_message: str,
+    suggested_action: str,
+    requested_model: str,
+    media_type: str,
+) -> list[TextContent]:
+    data = ArtifactResultData(
+        state=ArtifactState.FAILED,
+        requested_model=requested_model,
+        media_type=media_type,
+    )
+    return domain_text(
+        DomainResult.failure(
+            DomainErrorCode.INVALID_ARGUMENT,
+            error_message,
+            data=data,
+            suggested_action=suggested_action,
+            verification_status="input_rejected",
+        ),
+        f"❌ {error_message}",
+        use_result_data=True,
+    )
+
+
+async def _init_analysis_client() -> Any:
+    client = get_gemini_client()
+    await initialize_client()
+    await cleanup_due_remote_chats(client)
+    return client
+
+
+def _analysis_success_result(
+    response: Any,
+    source_artifact: Artifact,
+    model: str,
+    model_name: str,
+    media_type: str,
+) -> tuple[ArtifactResultData, Any]:
+    observed_backend = observed_backend_from_response(response)
+    outputs = extract_response_artifacts(
+        response,
+        requested_backend=model,
+        request_model=model_name,
+        effective_backend=model_name,
+        observed_backend=observed_backend,
+    )
+    data = ArtifactResultData(
+        state=_analysis_state(response, outputs, source_artifact),
+        artifacts=outputs,
+        input_artifacts=(source_artifact,),
+        requested_model=model,
+        request_model=model_name,
+        effective_backend=model_name,
+        observed_backend=observed_backend,
+        source_chat_id=response_chat_id(response),
+        media_type=media_type,
+    )
+    return data, artifact_result(data)
+
+
+def _url_analysis_prompt(analysis_prompt: Optional[str], valid_url: str) -> str:
+    if analysis_prompt:
+        return (
+            f"{analysis_prompt}\n\n"
+            f"URL: {valid_url}\n"
+            "Use the URL above as the content source for your answer."
+        )
+    return f"Please analyze the content at this URL: {valid_url}"
+
+
 def register_file_tools(mcp: MCPServer) -> None:
     """Register all file and URL related MCP tools.
 
@@ -157,27 +227,15 @@ def register_file_tools(mcp: MCPServer) -> None:
         """
         is_safe, safe_path_or_error = _validate_file_path(file_path)
         if not is_safe:
-            data = ArtifactResultData(
-                state=ArtifactState.FAILED,
+            return _invalid_analysis_input_response(
+                safe_path_or_error,
+                "Provide an existing file inside an allowed directory.",
                 requested_model=model,
                 media_type="file_analysis",
             )
-            return domain_text(
-                DomainResult.failure(
-                    DomainErrorCode.INVALID_ARGUMENT,
-                    safe_path_or_error,
-                    data=data,
-                    suggested_action="Provide an existing file inside an allowed directory.",
-                    verification_status="input_rejected",
-                ),
-                f"❌ {safe_path_or_error}",
-                use_result_data=True,
-            )
         safe_file_path = safe_path_or_error
 
-        client = get_gemini_client()
-        await initialize_client()
-        await cleanup_due_remote_chats(client)
+        client = await _init_analysis_client()
         model_name = resolve_model_name(model)
         source_artifact = artifact_from_local_path(
             ArtifactKind.FILE,
@@ -220,37 +278,17 @@ def register_file_tools(mcp: MCPServer) -> None:
                 source="gemini_upload_file",
             )
 
-            remote_chat_id = response_chat_id(response)
-            observed_backend = observed_backend_from_response(response)
-            outputs = extract_response_artifacts(
-                response,
-                requested_backend=model,
-                request_model=model_name,
-                effective_backend=model_name,
-                observed_backend=observed_backend,
-            )
             source_artifact = artifact_from_local_path(
                 ArtifactKind.FILE,
                 safe_file_path,
                 title=Path(safe_file_path).name,
-                source_chat_id=remote_chat_id,
+                source_chat_id=response_chat_id(response),
                 requested_backend=model,
                 request_model=model_name,
                 effective_backend=model_name,
-                observed_backend=observed_backend,
+                observed_backend=observed_backend_from_response(response),
             )
-            data = ArtifactResultData(
-                state=_analysis_state(response, outputs, source_artifact),
-                artifacts=outputs,
-                input_artifacts=(source_artifact,),
-                requested_model=model,
-                request_model=model_name,
-                effective_backend=model_name,
-                observed_backend=observed_backend,
-                source_chat_id=remote_chat_id,
-                media_type="file_analysis",
-            )
-            result = artifact_result(data)
+            data, result = _analysis_success_result(response, source_artifact, model, model_name, "file_analysis")
             content = _analysis_content(
                 f"✅ Successfully analyzed {Path(safe_file_path).name}\n\n{result_text}",
                 data,
@@ -281,27 +319,15 @@ def register_file_tools(mcp: MCPServer) -> None:
         """
         is_valid, valid_url_or_error = _validate_url(url)
         if not is_valid:
-            data = ArtifactResultData(
-                state=ArtifactState.FAILED,
+            return _invalid_analysis_input_response(
+                valid_url_or_error,
+                "Provide an absolute URL with a scheme and host.",
                 requested_model=model,
                 media_type="url_analysis",
             )
-            return domain_text(
-                DomainResult.failure(
-                    DomainErrorCode.INVALID_ARGUMENT,
-                    valid_url_or_error,
-                    data=data,
-                    suggested_action="Provide an absolute URL with a scheme and host.",
-                    verification_status="input_rejected",
-                ),
-                f"❌ {valid_url_or_error}",
-                use_result_data=True,
-            )
         valid_url = valid_url_or_error
 
-        client = get_gemini_client()
-        await initialize_client()
-        await cleanup_due_remote_chats(client)
+        client = await _init_analysis_client()
         model_name = resolve_model_name(model)
         source_artifact = artifact_from_remote(
             ArtifactKind.WEBPAGE,
@@ -312,15 +338,16 @@ def register_file_tools(mcp: MCPServer) -> None:
             effective_backend=model_name,
             verification_method="input_uri_provided",
         )
+        context = _AnalysisContext(
+            requested_model=model,
+            request_model=model_name,
+            effective_backend=model_name,
+            media_type="url_analysis",
+            operation="gemini_analyze_url",
+            source_artifact=source_artifact,
+        )
 
-        if analysis_prompt:
-            prompt = (
-                f"{analysis_prompt}\n\n"
-                f"URL: {valid_url}\n"
-                "Use the URL above as the content source for your answer."
-            )
-        else:
-            prompt = f"Please analyze the content at this URL: {valid_url}"
+        prompt = _url_analysis_prompt(analysis_prompt, valid_url)
 
         logger.info(f"分析 URL: {valid_url}")
 
@@ -352,38 +379,18 @@ def register_file_tools(mcp: MCPServer) -> None:
                 source="gemini_analyze_url",
             )
 
-            remote_chat_id = response_chat_id(response)
-            observed_backend = observed_backend_from_response(response)
-            outputs = extract_response_artifacts(
-                response,
-                requested_backend=model,
-                request_model=model_name,
-                effective_backend=model_name,
-                observed_backend=observed_backend,
-            )
             source_artifact = artifact_from_remote(
                 ArtifactKind.WEBPAGE,
                 valid_url,
                 title=urlparse(valid_url).netloc,
-                source_chat_id=remote_chat_id,
+                source_chat_id=response_chat_id(response),
                 requested_backend=model,
                 request_model=model_name,
                 effective_backend=model_name,
-                observed_backend=observed_backend,
+                observed_backend=observed_backend_from_response(response),
                 verification_method="input_uri_provided",
             )
-            data = ArtifactResultData(
-                state=_analysis_state(response, outputs, source_artifact),
-                artifacts=outputs,
-                input_artifacts=(source_artifact,),
-                requested_model=model,
-                request_model=model_name,
-                effective_backend=model_name,
-                observed_backend=observed_backend,
-                source_chat_id=remote_chat_id,
-                media_type="url_analysis",
-            )
-            result = artifact_result(data)
+            data, result = _analysis_success_result(response, source_artifact, model, model_name, "url_analysis")
             return attach_domain_result(
                 _analysis_content(result_text, data),
                 result,
