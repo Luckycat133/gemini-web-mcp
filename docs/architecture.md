@@ -65,7 +65,8 @@ gemini-mcp-server/
 │   ├── domain/            # 领域结果、artifact、错误、告警与操作状态
 │   ├── adapters/          # MCP 文本兼容、artifact 展示和结构化结果适配
 │   ├── infrastructure/    # Gemini Web RPC registry、payload builder 与纯 parser
-│   ├── services/          # primary/compact 共用的应用服务与读回验证
+│   ├── services/          # 各表面共用的应用服务与读回验证（chat/artifact/history/research/search/understanding 等）
+│   ├── surfaces/          # 聚焦型独立 MCP 表面（assist.py：五工具 gemini_assist_mcp，入口 gemini-mcp-assist）
 │   ├── thinking_client.py # Thinking/Learning 模式传输层
 │   ├── error_handler.py   # 错误处理装饰器
 │   ├── constants.py       # 模型常量与配置
@@ -336,6 +337,16 @@ delivery=collected                   queued/running/completed/timed_out
 Deep Research 使用 `LongOperationData` 保存上游 research/chat ID、最新状态、轮询次数和报告
 可用性。超时是本次等待的终态，不会被取消后迟到的协程结果改写；如果已经拿到上游 ID，
 `continuation_possible` 仍为 true。调用方取消会继续向子任务传播，不会被一般异常边界吞掉。
+
+### 10. 聚焦表面（surfaces/）
+
+`src/surfaces/assist.py` 是第一个聚焦型独立 MCP 表面：控制台入口 `gemini-mcp-assist` 启动
+五工具的 `gemini_assist_mcp`（`gemini_ask`、`gemini_search`、`gemini_understand_image`、
+`gemini_understand`、`gemini_research`），面向纯协助类工作负载。该目录下的表面必须保持为共享
+服务之上的薄适配层——搜索与理解逻辑在 `src/services/search.py` 与 `src/services/understanding.py`，
+Deep Research 启动阶段由 `src/services/research.py` 与兼容面 `gemini_deep_research` 复用；
+表面自身只做参数校验和文本渲染。`scripts/smoke_profiles.py` 与 `scripts/smoke_mcp_protocol.py`
+把 assist 面纳入与 primary/facade 相同的工具面快照和 stdio 握手验证。
 
 ---
 
