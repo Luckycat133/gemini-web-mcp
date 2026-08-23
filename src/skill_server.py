@@ -461,6 +461,139 @@ async def chat(
         )
 
 
+async def _history_list_text(client: object, limit: int, offset: int) -> list[TextContent]:
+    chats = client.list_chats() if hasattr(client, "list_chats") else []
+    chats = chats or []
+    result = _list_chats_result(chats, limit, offset, max_limit=50)
+    assert result.data is not None
+    page = result.data["items"]
+    if not page:
+        return domain_text(result, "No chats", use_result_data=True)
+    lines = []
+    for i, item in enumerate(page, result.data["offset"] + 1):
+        lines.append(f"{i}. {item['title']} ({item['id']})")
+    if result.data["has_more"]:
+        lines.append(f"next_offset={result.data['next_offset']}")
+    return domain_text(result, "\n".join(lines), use_result_data=True)
+
+
+async def _history_search_text(
+    client: object,
+    query: Optional[str],
+    limit: int,
+    offset: int,
+    scan_turns: bool,
+) -> list[TextContent]:
+    needle = (query or "").strip()
+    if not needle or (scan_turns and not hasattr(client, "read_chat")):
+        result = await _search_chats_result(
+            client,
+            [],
+            needle,
+            limit,
+            offset,
+            scan_turns=scan_turns,
+        )
+        fallback = "query required" if not needle else "read_chat unavailable"
+        return domain_text(result, fallback)
+    chats = client.list_chats() if hasattr(client, "list_chats") else []
+    chats = chats or []
+    result = await _search_chats_result(
+        client,
+        chats,
+        needle,
+        limit,
+        offset,
+        scan_turns=scan_turns,
+        turns_per_chat=min(max(limit, 1), 20),
+        max_chars_per_turn=1000,
+        max_limit=50,
+    )
+    assert result.data is not None
+    lines = []
+    for match in result.data["matches"]:
+        lines.append(f"{match['title']} ({match['id']})")
+        for snippet in match.get("snippets", [])[:3]:
+            if snippet.get("error"):
+                lines.append(f"  read error: {snippet['error']}")
+            else:
+                lines.append(
+                    f"  turn {snippet.get('turn_index')} {snippet.get('role')}: "
+                    f"{_truncate_text(snippet.get('text', ''), 240)}"
+                )
+    if result.data["has_more"]:
+        lines.append(f"next_offset={result.data['next_offset']}")
+    return domain_text(result, "\n".join(lines) if lines else "No matches", use_result_data=True)
+
+
+async def _history_read_text(client: object, chat_id: Optional[str], limit: int) -> list[TextContent]:
+    result = await _read_chat_result(client, chat_id or "", limit, 2000, max_limit=50)
+    if not result.ok:
+        if result.error_code == DomainErrorCode.INVALID_ARGUMENT.value:
+            return domain_text(result, "chat_id required")
+        return domain_text(result, "read_chat unavailable")
+    assert result.data is not None
+    if not result.data["turns"]:
+        return domain_text(result, "No turns", use_result_data=True)
+    lines = [f"{turn['role']}: {turn['text']}" for turn in result.data["turns"]]
+    return domain_text(result, "\n\n".join(lines), use_result_data=True)
+
+
+async def _history_export_text(client: object, chat_id: Optional[str], limit: int) -> list[TextContent]:
+    async def _load_export_metadata() -> list[object]:
+        if not hasattr(client, "list_chats"):
+            return []
+        return list(client.list_chats() or [])
+
+    result = await _export_chat_result(
+        client,
+        chat_id or "",
+        limit,
+        20000,
+        metadata_loader=_load_export_metadata,
+        max_limit=200,
+    )
+    if not result.ok:
+        fallback = (
+            "chat_id required"
+            if result.error_code == DomainErrorCode.INVALID_ARGUMENT.value
+            else "read_chat unavailable"
+        )
+        return domain_text(result, fallback)
+    assert result.data is not None
+    if not result.meta.details.get("found"):
+        return domain_text(result, f"No chat: {chat_id}", use_result_data=True)
+    return domain_text(
+        result,
+        _format_chat_export_markdown(result.data),
+        use_result_data=True,
+    )
+
+
+async def _history_delete_text(client: object, chat_id: Optional[str]) -> list[TextContent]:
+    result = await _delete_chat_result(client, chat_id or "")
+    if not result.ok:
+        if result.error_code == DomainErrorCode.INVALID_ARGUMENT.value:
+            return domain_text(result, "chat_id required")
+        if result.error_code == DomainErrorCode.CAPABILITY_UNAVAILABLE.value:
+            return domain_text(result, "delete_chat unavailable")
+        assert result.data is not None
+        status = result.data["verification"]["status"]
+        if status == "still_present":
+            return domain_text(result, f"Delete not verified: {result.data['chat_id']} is still present", use_result_data=True)
+        return domain_text(
+            result,
+            f"Delete requested: {result.data['chat_id']} (read-back verification failed)",
+            use_result_data=True,
+        )
+    assert result.data is not None
+    if result.data["deleted"] is True:
+        text = f"Deleted and verified absent: {result.data['chat_id']}"
+    else:
+        text = f"Delete requested: {result.data['chat_id']} (not independently verified)"
+    return domain_text(result, text, use_result_data=True)
+
+
 @mcp.tool(annotations=DESTRUCTIVE_REMOTE)
 async def history(
     action: Literal["list", "search", "read", "export", "delete"],
@@ -476,126 +609,15 @@ async def history(
         await initialize_client()
 
         if action == "list":
-            chats = client.list_chats() if hasattr(client, "list_chats") else []
-            chats = chats or []
-            result = _list_chats_result(chats, limit, offset, max_limit=50)
-            assert result.data is not None
-            page = result.data["items"]
-            if not page:
-                return domain_text(result, "No chats", use_result_data=True)
-            lines = []
-            for i, item in enumerate(page, result.data["offset"] + 1):
-                lines.append(f"{i}. {item['title']} ({item['id']})")
-            if result.data["has_more"]:
-                lines.append(f"next_offset={result.data['next_offset']}")
-            return domain_text(result, "\n".join(lines), use_result_data=True)
-
+            return await _history_list_text(client, limit, offset)
         if action == "search":
-            needle = (query or "").strip()
-            if not needle or (scan_turns and not hasattr(client, "read_chat")):
-                result = await _search_chats_result(
-                    client,
-                    [],
-                    needle,
-                    limit,
-                    offset,
-                    scan_turns=scan_turns,
-                )
-                fallback = "query required" if not needle else "read_chat unavailable"
-                return domain_text(result, fallback)
-            chats = client.list_chats() if hasattr(client, "list_chats") else []
-            chats = chats or []
-            result = await _search_chats_result(
-                client,
-                chats,
-                needle,
-                limit,
-                offset,
-                scan_turns=scan_turns,
-                turns_per_chat=min(max(limit, 1), 20),
-                max_chars_per_turn=1000,
-                max_limit=50,
-            )
-            assert result.data is not None
-            lines = []
-            for match in result.data["matches"]:
-                lines.append(f"{match['title']} ({match['id']})")
-                for snippet in match.get("snippets", [])[:3]:
-                    if snippet.get("error"):
-                        lines.append(f"  read error: {snippet['error']}")
-                    else:
-                        lines.append(
-                            f"  turn {snippet.get('turn_index')} {snippet.get('role')}: "
-                            f"{_truncate_text(snippet.get('text', ''), 240)}"
-                        )
-            if result.data["has_more"]:
-                lines.append(f"next_offset={result.data['next_offset']}")
-            return domain_text(result, "\n".join(lines) if lines else "No matches", use_result_data=True)
-
+            return await _history_search_text(client, query, limit, offset, scan_turns)
         if action == "read":
-            result = await _read_chat_result(client, chat_id or "", limit, 2000, max_limit=50)
-            if not result.ok:
-                if result.error_code == DomainErrorCode.INVALID_ARGUMENT.value:
-                    return domain_text(result, "chat_id required")
-                return domain_text(result, "read_chat unavailable")
-            assert result.data is not None
-            if not result.data["turns"]:
-                return domain_text(result, "No turns", use_result_data=True)
-            lines = [f"{turn['role']}: {turn['text']}" for turn in result.data["turns"]]
-            return domain_text(result, "\n\n".join(lines), use_result_data=True)
-
+            return await _history_read_text(client, chat_id, limit)
         if action == "export":
-            async def _load_export_metadata() -> list[object]:
-                if not hasattr(client, "list_chats"):
-                    return []
-                return list(client.list_chats() or [])
-
-            result = await _export_chat_result(
-                client,
-                chat_id or "",
-                limit,
-                20000,
-                metadata_loader=_load_export_metadata,
-                max_limit=200,
-            )
-            if not result.ok:
-                fallback = (
-                    "chat_id required"
-                    if result.error_code == DomainErrorCode.INVALID_ARGUMENT.value
-                    else "read_chat unavailable"
-                )
-                return domain_text(result, fallback)
-            assert result.data is not None
-            if not result.meta.details.get("found"):
-                return domain_text(result, f"No chat: {chat_id}", use_result_data=True)
-            return domain_text(
-                result,
-                _format_chat_export_markdown(result.data),
-                use_result_data=True,
-            )
-
+            return await _history_export_text(client, chat_id, limit)
         if action == "delete":
-            result = await _delete_chat_result(client, chat_id or "")
-            if not result.ok:
-                if result.error_code == DomainErrorCode.INVALID_ARGUMENT.value:
-                    return domain_text(result, "chat_id required")
-                if result.error_code == DomainErrorCode.CAPABILITY_UNAVAILABLE.value:
-                    return domain_text(result, "delete_chat unavailable")
-                assert result.data is not None
-                status = result.data["verification"]["status"]
-                if status == "still_present":
-                    return domain_text(result, f"Delete not verified: {result.data['chat_id']} is still present", use_result_data=True)
-                return domain_text(
-                    result,
-                    f"Delete requested: {result.data['chat_id']} (read-back verification failed)",
-                    use_result_data=True,
-                )
-            assert result.data is not None
-            if result.data["deleted"] is True:
-                text = f"Deleted and verified absent: {result.data['chat_id']}"
-            else:
-                text = f"Delete requested: {result.data['chat_id']} (not independently verified)"
-            return domain_text(result, text, use_result_data=True)
+            return await _history_delete_text(client, chat_id)
 
         return [TextContent(type="text", text="Invalid action")]
 

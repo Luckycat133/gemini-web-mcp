@@ -3,11 +3,13 @@
 """
 
 import json
+from dataclasses import dataclass
 import os
 import shutil
 import sys
 from ..adapters import attach_domain_result, domain_text, exception_text
 from ..adapters.mcp_sdk import MCPServer, TextContent
+from collections.abc import Coroutine
 from typing import Any, Callable, Literal, Optional, TypeVar
 import logging
 
@@ -738,152 +740,149 @@ def _doctor_overall_status(checks: list[dict[str, Any]]) -> DoctorStatus:
     return "ok"
 
 
-def _doctor_payload(browser: str = "chrome", validate_browser: bool = False) -> dict[str, Any]:
-    """Build a safe preflight report without exposing cookie values."""
-    checks: list[dict[str, Any]] = []
+def _doctor_static_checks() -> list[dict[str, Any]]:
     current_tool_groups, enabled_groups = _current_enabled_manifest_groups()
     manifest = _tool_manifest_payload("all")
-
-    checks.append(
-        _doctor_check(
-            "python_runtime",
-            "ok",
-            f"Python {sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}",
-            executable=sys.executable,
-        )
+    python_check = _doctor_check(
+        "python_runtime",
+        "ok",
+        f"Python {sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}",
+        executable=sys.executable,
     )
-
-    checks.append(
-        _doctor_check(
-            "tool_surface",
-            "ok",
-            f"{manifest['current_enabled_count']} of {manifest['total_count']} manifest tools are enabled",
-            current_tool_groups=current_tool_groups,
-            enabled_groups=sorted(enabled_groups),
-            total_count=manifest["total_count"],
-            current_enabled_count=manifest["current_enabled_count"],
-        )
+    surface_check = _doctor_check(
+        "tool_surface",
+        "ok",
+        f"{manifest['current_enabled_count']} of {manifest['total_count']} manifest tools are enabled",
+        current_tool_groups=current_tool_groups,
+        enabled_groups=sorted(enabled_groups),
+        total_count=manifest["total_count"],
+        current_enabled_count=manifest["current_enabled_count"],
     )
+    return [python_check, surface_check]
 
-    cookie_status = get_cookie_status()
+
+def _doctor_cookie_check(cookie_status: dict[str, Any]) -> dict[str, Any]:
     has_cookie = bool(cookie_status.get("has_cookie"))
     needs_refresh = bool(cookie_status.get("needs_refresh", False))
     if not cookie_status.get("available", False):
-        cookie_check = _doctor_check("cookie_status", "warn", "Cookie manager is unavailable")
-    elif not has_cookie:
-        cookie_check = _doctor_check("cookie_status", "warn", "No runtime Gemini cookie is configured")
-    elif needs_refresh:
-        cookie_check = _doctor_check(
+        return _doctor_check("cookie_status", "warn", "Cookie manager is unavailable")
+    if not has_cookie:
+        return _doctor_check("cookie_status", "warn", "No runtime Gemini cookie is configured")
+    if needs_refresh:
+        return _doctor_check(
             "cookie_status",
             "warn",
             "Runtime Gemini cookie exists but should be refreshed",
             source=cookie_status.get("source"),
             cookie_status=cookie_status.get("status"),
         )
-    else:
-        cookie_check = _doctor_check(
-            "cookie_status",
-            "ok",
-            "Runtime Gemini cookie is configured",
-            source=cookie_status.get("source"),
-            cookie_status=cookie_status.get("status"),
-        )
-    checks.append(cookie_check)
+    return _doctor_check(
+        "cookie_status",
+        "ok",
+        "Runtime Gemini cookie is configured",
+        source=cookie_status.get("source"),
+        cookie_status=cookie_status.get("status"),
+    )
 
-    browser_profiles: list[dict[str, Any]] = []
-    if browser:
-        try:
-            raw_profiles = list_browser_cookie_profiles(browser, validate=validate_browser)
-            for item in raw_profiles:
-                browser_profiles.append(
-                    {
-                        "browser": item.get("browser", browser),
-                        "profile": item.get("profile"),
-                        "has_psid": item.get("has_psid"),
-                        "has_psidts": item.get("has_psidts"),
-                        "cookie_count": item.get("cookie_count"),
-                        "chrome_selected_profile": item.get("chrome_selected_profile"),
-                        "chrome_selected_profile_directory": item.get("chrome_selected_profile_directory"),
-                        "account_available": item.get("account_available"),
-                        "scheduled_registry_count": item.get("scheduled_registry_count"),
-                        "error": item.get("error"),
-                        "error_code": item.get("error_code"),
-                    }
-                )
-        except Exception as e:
-            browser_profiles = [{"browser": browser, "error": f"{type(e).__name__}: {e}"}]
 
-    profile_errors = [item for item in browser_profiles if item.get("error")]
+def _collect_browser_profiles(browser: str, validate_browser: bool) -> list[dict[str, Any]]:
+    if not browser:
+        return []
+    try:
+        raw_profiles = list_browser_cookie_profiles(browser, validate=validate_browser)
+    except Exception as e:
+        return [{"browser": browser, "error": f"{type(e).__name__}: {e}"}]
+    return [
+        {
+            "browser": item.get("browser", browser),
+            "profile": item.get("profile"),
+            "has_psid": item.get("has_psid"),
+            "has_psidts": item.get("has_psidts"),
+            "cookie_count": item.get("cookie_count"),
+            "chrome_selected_profile": item.get("chrome_selected_profile"),
+            "chrome_selected_profile_directory": item.get("chrome_selected_profile_directory"),
+            "account_available": item.get("account_available"),
+            "scheduled_registry_count": item.get("scheduled_registry_count"),
+            "error": item.get("error"),
+            "error_code": item.get("error_code"),
+        }
+        for item in raw_profiles
+    ]
+
+
+def _select_recommended_profile(browser_profiles: list[dict[str, Any]]) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
     profiles_with_psid = [item for item in browser_profiles if item.get("has_psid")]
     selected_profile = next((item for item in browser_profiles if item.get("chrome_selected_profile")), None)
     recommended_profile = next(
         (item for item in profiles_with_psid if item.get("account_available") is True),
         profiles_with_psid[0] if profiles_with_psid else None,
     )
+    return selected_profile, recommended_profile
+
+
+def _doctor_browser_profile_check(browser: str, validate_browser: bool, browser_profiles: list[dict[str, Any]]) -> dict[str, Any]:
+    profile_errors = [item for item in browser_profiles if item.get("error")]
+    profiles_with_psid = [item for item in browser_profiles if item.get("has_psid")]
+    selected_profile, recommended_profile = _select_recommended_profile(browser_profiles)
 
     if not browser:
-        checks.append(_doctor_check("browser_profiles", "skip", "Browser profile diagnostics were disabled"))
-    elif profile_errors and not profiles_with_psid:
-        checks.append(
-            _doctor_check(
-                "browser_profiles",
-                "warn",
-                f"Could not read usable {browser} Gemini cookies",
-                errors=profile_errors,
-            )
+        return _doctor_check("browser_profiles", "skip", "Browser profile diagnostics were disabled")
+    if profile_errors and not profiles_with_psid:
+        return _doctor_check(
+            "browser_profiles",
+            "warn",
+            f"Could not read usable {browser} Gemini cookies",
+            errors=profile_errors,
         )
-    elif not profiles_with_psid:
-        checks.append(
-            _doctor_check(
-                "browser_profiles",
-                "warn",
-                f"No {browser} profile has a Gemini PSID",
-                profiles=browser_profiles,
-            )
+    if not profiles_with_psid:
+        return _doctor_check(
+            "browser_profiles",
+            "warn",
+            f"No {browser} profile has a Gemini PSID",
+            profiles=browser_profiles,
         )
-    elif selected_profile and not selected_profile.get("has_psid"):
-        checks.append(
-            _doctor_check(
-                "browser_profile_alignment",
-                "warn",
-                "Chrome selected profile has no Gemini PSID, but another profile does",
-                selected_profile=selected_profile.get("profile"),
-                selected_profile_directory=selected_profile.get("chrome_selected_profile_directory"),
-                recommended_profile=recommended_profile.get("profile") if recommended_profile else None,
-                validate_browser=validate_browser,
-            )
+    if selected_profile and not selected_profile.get("has_psid"):
+        return _doctor_check(
+            "browser_profile_alignment",
+            "warn",
+            "Chrome selected profile has no Gemini PSID, but another profile does",
+            selected_profile=selected_profile.get("profile"),
+            selected_profile_directory=selected_profile.get("chrome_selected_profile_directory"),
+            recommended_profile=recommended_profile.get("profile") if recommended_profile else None,
+            validate_browser=validate_browser,
         )
-    else:
-        checks.append(
-            _doctor_check(
-                "browser_profile_alignment",
-                "ok",
-                f"{browser} has a usable Gemini cookie profile",
-                selected_profile=selected_profile.get("profile") if selected_profile else None,
-                recommended_profile=recommended_profile.get("profile") if recommended_profile else None,
-                validate_browser=validate_browser,
-            )
-        )
-
-    ffprobe_path = shutil.which("ffprobe")
-    checks.append(
-        _doctor_check(
-            "ffprobe",
-            "ok" if ffprobe_path else "warn",
-            "ffprobe is available for media duration verification" if ffprobe_path else "ffprobe was not found in PATH",
-            path=ffprobe_path,
-        )
+    return _doctor_check(
+        "browser_profile_alignment",
+        "ok",
+        f"{browser} has a usable Gemini cookie profile",
+        selected_profile=selected_profile.get("profile") if selected_profile else None,
+        recommended_profile=recommended_profile.get("profile") if recommended_profile else None,
+        validate_browser=validate_browser,
     )
 
+
+def _doctor_environment_checks(ffprobe_path: str | None) -> list[dict[str, Any]]:
     generated_media_dir = os.path.abspath("generated_media")
-    checks.append(
-        _doctor_check(
-            "generated_media_dir",
-            "ok" if os.path.isdir(generated_media_dir) else "warn",
-            "generated_media directory exists" if os.path.isdir(generated_media_dir) else "generated_media directory does not exist yet",
-            path=generated_media_dir,
-        )
+    ffprobe_check = _doctor_check(
+        "ffprobe",
+        "ok" if ffprobe_path else "warn",
+        "ffprobe is available for media duration verification" if ffprobe_path else "ffprobe was not found in PATH",
+        path=ffprobe_path,
     )
+    media_dir_check = _doctor_check(
+        "generated_media_dir",
+        "ok" if os.path.isdir(generated_media_dir) else "warn",
+        "generated_media directory exists" if os.path.isdir(generated_media_dir) else "generated_media directory does not exist yet",
+        path=generated_media_dir,
+    )
+    return [ffprobe_check, media_dir_check]
+
+
+def _doctor_recommendations(browser: str, validate_browser: bool, profile_state: dict[str, Any]) -> list[str]:
+    has_cookie = profile_state["has_cookie"]
+    selected_profile = profile_state["selected_profile"]
+    recommended_profile = profile_state["recommended_profile"]
+    ffprobe_path = profile_state["ffprobe_path"]
 
     recommendations: list[str] = []
     if recommended_profile and selected_profile and not selected_profile.get("has_psid"):
@@ -898,8 +897,32 @@ def _doctor_payload(browser: str = "chrome", validate_browser: bool = False) -> 
         recommendations.append("Run gemini_doctor(validate_browser=true) when you need live account/profile validation.")
     if not ffprobe_path:
         recommendations.append("Install ffmpeg/ffprobe before relying on music/video duration checks.")
+    return recommendations
 
-    payload = {
+
+def _doctor_payload(browser: str = "chrome", validate_browser: bool = False) -> dict[str, Any]:
+    """Build a safe preflight report without exposing cookie values."""
+    checks = _doctor_static_checks()
+
+    cookie_status = get_cookie_status()
+    has_cookie = bool(cookie_status.get("has_cookie"))
+    checks.append(_doctor_cookie_check(cookie_status))
+
+    browser_profiles = _collect_browser_profiles(browser, validate_browser)
+    checks.append(_doctor_browser_profile_check(browser, validate_browser, browser_profiles))
+
+    ffprobe_path = shutil.which("ffprobe")
+    checks.extend(_doctor_environment_checks(ffprobe_path))
+
+    selected_profile, recommended_profile = _select_recommended_profile(browser_profiles)
+    profile_state = {
+        "has_cookie": has_cookie,
+        "selected_profile": selected_profile,
+        "recommended_profile": recommended_profile,
+        "ffprobe_path": ffprobe_path,
+    }
+
+    return {
         "name": "gemini_doctor",
         "overall_status": _doctor_overall_status(checks),
         "safe": True,
@@ -907,9 +930,8 @@ def _doctor_payload(browser: str = "chrome", validate_browser: bool = False) -> 
         "browser": browser,
         "checks": checks,
         "browser_profiles": browser_profiles,
-        "recommendations": recommendations,
+        "recommendations": _doctor_recommendations(browser, validate_browser, profile_state),
     }
-    return payload
 
 
 def _format_doctor_markdown(payload: dict[str, Any]) -> str:
@@ -959,6 +981,135 @@ def _marker_hits(text: object, markers: list[str]) -> list[str]:
     return [marker for marker in markers if marker.lower() in haystack]
 
 
+@dataclass(frozen=True)
+class _CleanupScanOptions:
+    """Immutable inputs shared by both cleanup scan phases."""
+
+    markers: list[str]
+    chat_limit: int
+    scan_turns: bool
+    dry_run: bool
+
+
+async def _cleanup_matching_chats(
+    client: object,
+    options: _CleanupScanOptions,
+) -> tuple[list[dict[str, Any]], list[dict[str, str]]]:
+    matched_chats: list[dict[str, Any]] = []
+    errors: list[dict[str, str]] = []
+    if not hasattr(client, "list_chats"):
+        errors.append({"target": "chats", "error": "list_chats unavailable"})
+        return matched_chats, errors
+
+    chats = (client.list_chats() or [])[: options.chat_limit]
+    for chat in chats:
+        item = chat_to_dict(chat)
+        matched_fields: list[str] = []
+        matched_markers = _marker_hits(item.get("id"), options.markers)
+        if matched_markers:
+            matched_fields.append("id")
+        title_hits = _marker_hits(item.get("title"), options.markers)
+        if title_hits:
+            matched_fields.append("title")
+            matched_markers.extend(title_hits)
+
+        if options.scan_turns and item.get("id") and hasattr(client, "read_chat"):
+            try:
+                _history, turns = await read_chat_turns(client, item["id"], 20, 300)
+                for turn in turns:
+                    turn_hits = _marker_hits(turn.get("text"), options.markers)
+                    if turn_hits:
+                        matched_fields.append("turn")
+                        matched_markers.extend(turn_hits)
+                        break
+            except Exception as e:
+                errors.append({"target": f"chat:{item.get('id')}", "error": f"{type(e).__name__}: {e}"})
+
+        if matched_fields:
+            deleted = False
+            delete_error = ""
+            if not options.dry_run:
+                if not hasattr(client, "delete_chat"):
+                    delete_error = "delete_chat unavailable"
+                else:
+                    try:
+                        await client.delete_chat(item["id"])
+                        deleted = True
+                    except Exception as e:
+                        delete_error = f"{type(e).__name__}: {e}"
+            matched_chats.append(
+                {
+                    "id": item.get("id"),
+                    "title": item.get("title"),
+                    "matched_fields": sorted(set(matched_fields)),
+                    "matched_markers": sorted(set(matched_markers)),
+                    "deleted": deleted,
+                    "delete_error": delete_error,
+                }
+            )
+    return matched_chats, errors
+
+
+async def _cleanup_matching_scheduled(
+    client: object,
+    options: _CleanupScanOptions,
+) -> tuple[list[dict[str, Any]], list[dict[str, str]]]:
+    matched_scheduled: list[dict[str, Any]] = []
+    errors: list[dict[str, str]] = []
+    if not hasattr(client, "_batch_execute"):
+        errors.append({"target": "scheduled", "error": "_batch_execute unavailable"})
+        return matched_scheduled, errors
+
+    try:
+        entries, diagnostic = await _fetch_scheduled_registry(client, 300)
+        for item in entries:
+            search_text = "\n".join(
+                str(item.get(key, ""))
+                for key in ("id", "title", "instructions", "schedule_label")
+            )
+            matched_markers = _marker_hits(search_text, options.markers)
+            if not matched_markers:
+                continue
+            deleted = False
+            delete_error = ""
+            verification_status = "dry_run"
+            if not options.dry_run:
+                try:
+                    delete_result = await delete_action_service(
+                        client,
+                        action_id=item["id"],
+                        max_chars=300,
+                        fetch_registry=_fetch_scheduled_registry,
+                        fetch_by_id=_fetch_scheduled_task_by_id,
+                        extract_bodies=_extract_rpc_bodies,
+                    )
+                    verification_status = delete_result["verification_status"]
+                    deleted = bool(
+                        delete_result["ok"]
+                        and (
+                            delete_result.get("deleted_by_id_after_delete") is True
+                            or delete_result.get("visible_after_delete") is not True
+                        )
+                    )
+                except Exception as e:
+                    delete_error = f"{type(e).__name__}: {e}"
+                    verification_status = "delete_error"
+            matched_scheduled.append(
+                {
+                    "id": item.get("id"),
+                    "title": item.get("title"),
+                    "task_state": item.get("task_state"),
+                    "matched_markers": sorted(set(matched_markers)),
+                    "deleted": deleted,
+                    "verification_status": verification_status,
+                    "delete_error": delete_error,
+                }
+            )
+    except Exception as e:
+        errors.append({"target": "scheduled", "error": f"{type(e).__name__}: {e}"})
+    return matched_scheduled, errors
+
+
 async def _cleanup_test_artifacts_payload(
     client: object,
     markers: str = "codex-,Cleanup Verification Marker",
@@ -971,115 +1122,22 @@ async def _cleanup_test_artifacts_payload(
     if not marker_list:
         marker_list = ["codex-"]
 
-    safe_chat_limit = clamp_int(max_chats, default=25, minimum=1, maximum=100)
-    include_chats = target in {"all", "chats"}
-    include_scheduled = target in {"all", "scheduled"}
+    options = _CleanupScanOptions(
+        markers=marker_list,
+        chat_limit=clamp_int(max_chats, default=25, minimum=1, maximum=100),
+        scan_turns=scan_turns,
+        dry_run=dry_run,
+    )
+
     matched_chats: list[dict[str, Any]] = []
     matched_scheduled: list[dict[str, Any]] = []
     errors: list[dict[str, str]] = []
-
-    if include_chats:
-        if not hasattr(client, "list_chats"):
-            errors.append({"target": "chats", "error": "list_chats unavailable"})
-        else:
-            chats = (client.list_chats() or [])[:safe_chat_limit]
-            for chat in chats:
-                item = chat_to_dict(chat)
-                matched_fields: list[str] = []
-                matched_markers = _marker_hits(item.get("id"), marker_list)
-                if matched_markers:
-                    matched_fields.append("id")
-                title_hits = _marker_hits(item.get("title"), marker_list)
-                if title_hits:
-                    matched_fields.append("title")
-                    matched_markers.extend(title_hits)
-
-                if scan_turns and item.get("id") and hasattr(client, "read_chat"):
-                    try:
-                        _history, turns = await read_chat_turns(client, item["id"], 20, 300)
-                        for turn in turns:
-                            turn_hits = _marker_hits(turn.get("text"), marker_list)
-                            if turn_hits:
-                                matched_fields.append("turn")
-                                matched_markers.extend(turn_hits)
-                                break
-                    except Exception as e:
-                        errors.append({"target": f"chat:{item.get('id')}", "error": f"{type(e).__name__}: {e}"})
-
-                if matched_fields:
-                    deleted = False
-                    delete_error = ""
-                    if not dry_run:
-                        if not hasattr(client, "delete_chat"):
-                            delete_error = "delete_chat unavailable"
-                        else:
-                            try:
-                                await client.delete_chat(item["id"])
-                                deleted = True
-                            except Exception as e:
-                                delete_error = f"{type(e).__name__}: {e}"
-                    matched_chats.append(
-                        {
-                            "id": item.get("id"),
-                            "title": item.get("title"),
-                            "matched_fields": sorted(set(matched_fields)),
-                            "matched_markers": sorted(set(matched_markers)),
-                            "deleted": deleted,
-                            "delete_error": delete_error,
-                        }
-                    )
-
-    if include_scheduled:
-        if not hasattr(client, "_batch_execute"):
-            errors.append({"target": "scheduled", "error": "_batch_execute unavailable"})
-        else:
-            try:
-                entries, diagnostic = await _fetch_scheduled_registry(client, 300)
-                for item in entries:
-                    search_text = "\n".join(
-                        str(item.get(key, ""))
-                        for key in ("id", "title", "instructions", "schedule_label")
-                    )
-                    matched_markers = _marker_hits(search_text, marker_list)
-                    if not matched_markers:
-                        continue
-                    deleted = False
-                    delete_error = ""
-                    verification_status = "dry_run"
-                    if not dry_run:
-                        try:
-                            delete_result = await delete_action_service(
-                                client,
-                                action_id=item["id"],
-                                max_chars=300,
-                                fetch_registry=_fetch_scheduled_registry,
-                                fetch_by_id=_fetch_scheduled_task_by_id,
-                                extract_bodies=_extract_rpc_bodies,
-                            )
-                            verification_status = delete_result["verification_status"]
-                            deleted = bool(
-                                delete_result["ok"]
-                                and (
-                                    delete_result.get("deleted_by_id_after_delete") is True
-                                    or delete_result.get("visible_after_delete") is not True
-                                )
-                            )
-                        except Exception as e:
-                            delete_error = f"{type(e).__name__}: {e}"
-                            verification_status = "delete_error"
-                    matched_scheduled.append(
-                        {
-                            "id": item.get("id"),
-                            "title": item.get("title"),
-                            "task_state": item.get("task_state"),
-                            "matched_markers": sorted(set(matched_markers)),
-                            "deleted": deleted,
-                            "verification_status": verification_status,
-                            "delete_error": delete_error,
-                        }
-                    )
-            except Exception as e:
-                errors.append({"target": "scheduled", "error": f"{type(e).__name__}: {e}"})
+    if target in {"all", "chats"}:
+        matched_chats, chat_errors = await _cleanup_matching_chats(client, options)
+        errors.extend(chat_errors)
+    if target in {"all", "scheduled"}:
+        matched_scheduled, scheduled_errors = await _cleanup_matching_scheduled(client, options)
+        errors.extend(scheduled_errors)
 
     return {
         "name": "gemini_cleanup_test_artifacts",
@@ -1087,7 +1145,7 @@ async def _cleanup_test_artifacts_payload(
         "target": target,
         "markers": marker_list,
         "scan_turns": scan_turns,
-        "max_chats": safe_chat_limit,
+        "max_chats": options.chat_limit,
         "matched_chat_count": len(matched_chats),
         "matched_scheduled_count": len(matched_scheduled),
         "deleted_chat_count": sum(1 for item in matched_chats if item.get("deleted")),
@@ -1170,8 +1228,9 @@ _find_gem_by_id = registered_find_gem_by_id
 _gem_field = registered_gem_field
 
 
-def register_manage_tools(mcp: MCPServer, layers: list[str] | set[str] | tuple[str, ...] | None = None):
-    enabled_tool_names = resolve_manage_tool_names(layers)
+
+def _conditional_tool_decorator(mcp: MCPServer, enabled_tool_names: set[str]):
+    """Build the @_tool decorator that registers only profile-enabled tools."""
 
     def _tool(tool_name: str, annotations) -> Callable[[_F], _F]:
         def decorator(func: _F) -> _F:
@@ -1183,6 +1242,12 @@ def register_manage_tools(mcp: MCPServer, layers: list[str] | set[str] | tuple[s
             return func
 
         return decorator
+
+    return _tool
+
+
+def _register_cleanup_tools(mcp: MCPServer, enabled_tool_names: set[str]) -> None:
+    _tool = _conditional_tool_decorator(mcp, enabled_tool_names)
 
     @_tool("gemini_cleanup_test_artifacts", DESTRUCTIVE_REMOTE)
     async def gemini_cleanup_test_artifacts(
@@ -1212,6 +1277,10 @@ def register_manage_tools(mcp: MCPServer, layers: list[str] | set[str] | tuple[s
         if response_format == "json":
             return _json_response(payload)
         return [TextContent(type="text", text=_format_cleanup_markdown(payload))]
+
+
+def _register_history_scan_tools(mcp: MCPServer, enabled_tool_names: set[str], tool_functions: dict[str, Callable[..., Coroutine[Any, Any, list["TextContent"]]]]) -> None:
+    _tool = _conditional_tool_decorator(mcp, enabled_tool_names)
 
     @_tool("gemini_list_chats", READS_PRIVATE_REMOTE)
     async def gemini_list_chats(
@@ -1442,6 +1511,12 @@ def register_manage_tools(mcp: MCPServer, layers: list[str] | set[str] | tuple[s
         except Exception as e:
             logger.error(f"深度扫描聊天历史失败: {e}")
             return [TextContent(type="text", text=f"❌ 深度扫描失败: {str(e)}")]
+    tool_functions.update(
+        gemini_list_chats=gemini_list_chats,
+        gemini_scan_chat_history_sources=gemini_scan_chat_history_sources,
+    )
+def _register_history_read_tools(mcp: MCPServer, enabled_tool_names: set[str], tool_functions: dict[str, Callable[..., Coroutine[Any, Any, list["TextContent"]]]]) -> None:
+    _tool = _conditional_tool_decorator(mcp, enabled_tool_names)
 
     @_tool("gemini_read_chat", READS_PRIVATE_REMOTE)
     async def gemini_read_chat(
@@ -1621,6 +1696,13 @@ def register_manage_tools(mcp: MCPServer, layers: list[str] | set[str] | tuple[s
         except Exception as e:
             logger.error(f"导出聊天失败: {e}")
             return [TextContent(type="text", text=f"❌ 导出失败: {str(e)}")]
+    tool_functions.update(
+        gemini_search_chats=gemini_search_chats,
+        gemini_read_chat=gemini_read_chat,
+        gemini_export_chat=gemini_export_chat,
+    )
+def _register_history_facade_tools(mcp: MCPServer, enabled_tool_names: set[str], tool_functions: dict[str, Callable[..., Coroutine[Any, Any, list["TextContent"]]]]) -> None:
+    _tool = _conditional_tool_decorator(mcp, enabled_tool_names)
 
     @_tool("gemini_history", READS_PRIVATE_REMOTE)
     async def gemini_history(
@@ -1646,9 +1728,9 @@ def register_manage_tools(mcp: MCPServer, layers: list[str] | set[str] | tuple[s
         This read-only entrypoint never deletes or moves chats. Use it for narrow history agents.
         """
         if action == "list":
-            return await gemini_list_chats(limit=limit, offset=offset, response_format=response_format)
+            return await tool_functions["gemini_list_chats"](limit=limit, offset=offset, response_format=response_format)
         if action == "scan":
-            return await gemini_scan_chat_history_sources(
+            return await tool_functions["gemini_scan_chat_history_sources"](
                 limit=limit,
                 offset=offset,
                 max_items_per_source=max_items_per_source,
@@ -1659,7 +1741,7 @@ def register_manage_tools(mcp: MCPServer, layers: list[str] | set[str] | tuple[s
                 response_format=response_format,
             )
         if action == "search":
-            return await gemini_search_chats(
+            return await tool_functions["gemini_search_chats"](
                 query=query,
                 limit=limit,
                 offset=offset,
@@ -1669,14 +1751,14 @@ def register_manage_tools(mcp: MCPServer, layers: list[str] | set[str] | tuple[s
                 response_format=response_format,
             )
         if action == "read":
-            return await gemini_read_chat(
+            return await tool_functions["gemini_read_chat"](
                 chat_id=chat_id,
                 limit=limit,
                 response_format=response_format,
                 max_chars_per_turn=max_chars_per_turn,
             )
         if action == "export":
-            return await gemini_export_chat(
+            return await tool_functions["gemini_export_chat"](
                 chat_id=chat_id,
                 response_format=response_format,
                 limit=limit,
@@ -1719,6 +1801,10 @@ def register_manage_tools(mcp: MCPServer, layers: list[str] | set[str] | tuple[s
                 prefix="❌ 删除失败",
                 preserve_message=True,
             )
+
+
+def _register_account_probe_tools(mcp: MCPServer, enabled_tool_names: set[str], tool_functions: dict[str, Callable[..., Coroutine[Any, Any, list["TextContent"]]]]) -> None:
+    _tool = _conditional_tool_decorator(mcp, enabled_tool_names)
 
     @_tool("gemini_inspect_account", READS_PRIVATE_REMOTE)
     async def gemini_inspect_account(
@@ -1846,6 +1932,12 @@ def register_manage_tools(mcp: MCPServer, layers: list[str] | set[str] | tuple[s
                 lines.append(f"- {item['name']} ({item['rpcid']}): {status}{suffix}")
         lines.append("\n说明: 输出已省略原始响应正文和账号内容。")
         return [TextContent(type="text", text="\n".join(lines))]
+    tool_functions.update(
+        gemini_inspect_account=gemini_inspect_account,
+        gemini_probe_web_features=gemini_probe_web_features,
+    )
+def _register_manifest_tools(mcp: MCPServer, enabled_tool_names: set[str], tool_functions: dict[str, Callable[..., Coroutine[Any, Any, list["TextContent"]]]]) -> None:
+    _tool = _conditional_tool_decorator(mcp, enabled_tool_names)
 
     @_tool("gemini_get_web_capabilities", READ_ONLY_REMOTE)
     async def gemini_get_web_capabilities(
@@ -1875,6 +1967,11 @@ def register_manage_tools(mcp: MCPServer, layers: list[str] | set[str] | tuple[s
         if response_format == "json":
             return _json_response(payload)
         return [TextContent(type="text", text=_format_tool_manifest_markdown(payload))]
+    tool_functions.update(
+        gemini_get_web_capabilities=gemini_get_web_capabilities,
+    )
+def _register_account_inventory_tools(mcp: MCPServer, enabled_tool_names: set[str], tool_functions: dict[str, Callable[..., Coroutine[Any, Any, list["TextContent"]]]]) -> None:
+    _tool = _conditional_tool_decorator(mcp, enabled_tool_names)
 
     @_tool("gemini_account_inventory", READS_PRIVATE_REMOTE)
     async def gemini_account_inventory(
@@ -1897,19 +1994,19 @@ def register_manage_tools(mcp: MCPServer, layers: list[str] | set[str] | tuple[s
         without mutating account data.
         """
         if surface == "capabilities":
-            return await gemini_get_web_capabilities(response_format=response_format)
+            return await tool_functions["gemini_get_web_capabilities"](response_format=response_format)
         if surface == "status":
-            return await gemini_inspect_account(response_format=response_format)
+            return await tool_functions["gemini_inspect_account"](response_format=response_format)
         if surface == "features":
-            return await gemini_probe_web_features(surface=feature_surface, response_format=response_format)
+            return await tool_functions["gemini_probe_web_features"](surface=feature_surface, response_format=response_format)
         if surface == "links":
-            return await gemini_list_public_links(limit=limit, offset=offset, response_format=response_format)
+            return await tool_functions["gemini_list_public_links"](limit=limit, offset=offset, response_format=response_format)
         if surface == "usage":
-            return await gemini_get_usage_limits(scope=usage_scope, response_format=response_format)
+            return await tool_functions["gemini_get_usage_limits"](scope=usage_scope, response_format=response_format)
         if surface == "library":
-            return await gemini_list_library_capabilities(limit=limit, offset=offset, response_format=response_format)
+            return await tool_functions["gemini_list_library_capabilities"](limit=limit, offset=offset, response_format=response_format)
         if surface == "notebooks":
-            return await gemini_notebooks(
+            return await tool_functions["gemini_notebooks"](
                 action=notebook_action,
                 notebook_id=notebook_id,
                 notebook_title=notebook_title,
@@ -1919,7 +2016,7 @@ def register_manage_tools(mcp: MCPServer, layers: list[str] | set[str] | tuple[s
                 response_format=response_format,
             )
         if surface == "notebook_chats":
-            return await gemini_notebooks(
+            return await tool_functions["gemini_notebooks"](
                 action="chats",
                 notebook_id=notebook_id,
                 notebook_title=notebook_title,
@@ -1929,16 +2026,16 @@ def register_manage_tools(mcp: MCPServer, layers: list[str] | set[str] | tuple[s
                 response_format=response_format,
             )
         if surface == "scheduled":
-            return await gemini_list_scheduled_actions(
+            return await tool_functions["gemini_list_scheduled_actions"](
                 scope=scheduled_scope,
                 limit=limit,
                 offset=offset,
                 response_format=response_format,
             )
         if surface == "modes":
-            return await gemini_get_tool_mode_status(limit=limit, offset=offset, response_format=response_format)
+            return await tool_functions["gemini_get_tool_mode_status"](limit=limit, offset=offset, response_format=response_format)
         if surface == "models":
-            return await gemini_list_models()
+            return await tool_functions["gemini_list_models"]()
         return [TextContent(type="text", text=f"❌ 不支持的 account inventory surface: {surface}")]
 
     @_tool("gemini_list_public_links", READS_PRIVATE_REMOTE)
@@ -2098,6 +2195,16 @@ def register_manage_tools(mcp: MCPServer, layers: list[str] | set[str] | tuple[s
         except Exception as e:
             logger.error(f"Library 能力读取失败: {e}")
             return [TextContent(type="text", text=f"❌ 读取 Library 能力失败: {str(e)}")]
+    tool_functions.update(
+        gemini_list_public_links=gemini_list_public_links,
+        gemini_get_usage_limits=gemini_get_usage_limits,
+        gemini_list_library_capabilities=gemini_list_library_capabilities,
+    )
+
+
+
+def _register_notebook_tools(mcp: MCPServer, enabled_tool_names: set[str], tool_functions: dict[str, Callable[..., Coroutine[Any, Any, list["TextContent"]]]]) -> None:
+    _tool = _conditional_tool_decorator(mcp, enabled_tool_names)
 
     @_tool("gemini_list_notebooks", READS_PRIVATE_REMOTE)
     async def gemini_list_notebooks(
@@ -2219,14 +2326,14 @@ def register_manage_tools(mcp: MCPServer, layers: list[str] | set[str] | tuple[s
         This read-only entrypoint does not move, create, or delete notebooks/chats.
         """
         if action == "list":
-            return await gemini_list_notebooks(
+            return await tool_functions["gemini_list_notebooks"](
                 limit=limit,
                 offset=offset,
                 locale=locale,
                 response_format=response_format,
             )
         if action == "chats":
-            return await gemini_list_notebook_chats(
+            return await tool_functions["gemini_list_notebook_chats"](
                 notebook_id=notebook_id,
                 notebook_title=notebook_title,
                 limit=limit,
@@ -2297,6 +2404,16 @@ def register_manage_tools(mcp: MCPServer, layers: list[str] | set[str] | tuple[s
         except Exception as e:
             logger.error(f"Gemini Notebook 移动失败: {e}")
             return [TextContent(type="text", text=f"❌ 移动 Gemini Notebook 聊天失败: {str(e)}")]
+    tool_functions.update(
+        gemini_notebooks=gemini_notebooks,
+    )
+    tool_functions.update(
+        gemini_list_notebooks=gemini_list_notebooks,
+        gemini_list_notebook_chats=gemini_list_notebook_chats,
+    )
+
+def _register_scheduled_tools(mcp: MCPServer, enabled_tool_names: set[str], tool_functions: dict[str, Callable[..., Coroutine[Any, Any, list["TextContent"]]]]) -> None:
+    _tool = _conditional_tool_decorator(mcp, enabled_tool_names)
 
     @_tool("gemini_list_scheduled_actions", READS_PRIVATE_REMOTE)
     async def gemini_list_scheduled_actions(
@@ -2532,6 +2649,11 @@ def register_manage_tools(mcp: MCPServer, layers: list[str] | set[str] | tuple[s
         except Exception as e:
             logger.error(f"定时操作删除失败: {e}")
             return [TextContent(type="text", text=f"❌ 删除定时操作失败: {str(e)}")]
+    tool_functions.update(
+        gemini_list_scheduled_actions=gemini_list_scheduled_actions,
+    )
+def _register_tool_mode_tools(mcp: MCPServer, enabled_tool_names: set[str], tool_functions: dict[str, Callable[..., Coroutine[Any, Any, list["TextContent"]]]]) -> None:
+    _tool = _conditional_tool_decorator(mcp, enabled_tool_names)
 
     @_tool("gemini_get_tool_mode_status", READ_ONLY_REMOTE)
     async def gemini_get_tool_mode_status(
@@ -2597,6 +2719,11 @@ def register_manage_tools(mcp: MCPServer, layers: list[str] | set[str] | tuple[s
         except Exception as e:
             logger.error(f"工具模式状态读取失败: {e}")
             return [TextContent(type="text", text=f"❌ 读取工具模式状态失败: {str(e)}")]
+    tool_functions.update(
+        gemini_get_tool_mode_status=gemini_get_tool_mode_status,
+    )
+def _register_model_tools(mcp: MCPServer, enabled_tool_names: set[str], tool_functions: dict[str, Callable[..., Coroutine[Any, Any, list["TextContent"]]]]) -> None:
+    _tool = _conditional_tool_decorator(mcp, enabled_tool_names)
 
     @_tool("gemini_list_models", READS_PRIVATE_REMOTE)
     async def gemini_list_models() -> list[TextContent]:
@@ -2647,6 +2774,11 @@ def register_manage_tools(mcp: MCPServer, layers: list[str] | set[str] | tuple[s
             description = getattr(model, "description", "") or "无描述"
             model_lines.append(f"- {display_name}: {model_name} ({available})\n  {description}")
         return [TextContent(type="text", text="\n".join(model_lines))]
+    tool_functions.update(
+        gemini_list_models=gemini_list_models,
+    )
+def _register_gem_tools(mcp: MCPServer, enabled_tool_names: set[str]) -> None:
+    _tool = _conditional_tool_decorator(mcp, enabled_tool_names)
 
     @_tool("gemini_manage_gems", DESTRUCTIVE_REMOTE)
     async def gemini_manage_gems(
@@ -2734,3 +2866,21 @@ def register_manage_tools(mcp: MCPServer, layers: list[str] | set[str] | tuple[s
         except Exception as e:
             logger.error(f"Gem 操作失败: {e}")
             return [TextContent(type="text", text=f"❌ 失败: {str(e)}")]
+
+
+def register_manage_tools(mcp: MCPServer, layers: list[str] | set[str] | tuple[str, ...] | None = None):
+    enabled_tool_names = resolve_manage_tool_names(layers)
+    tool_functions: dict[str, Callable[..., Coroutine[Any, Any, list["TextContent"]]]] = {}
+
+    _register_cleanup_tools(mcp, enabled_tool_names)
+    _register_history_scan_tools(mcp, enabled_tool_names, tool_functions)
+    _register_history_read_tools(mcp, enabled_tool_names, tool_functions)
+    _register_history_facade_tools(mcp, enabled_tool_names, tool_functions)
+    _register_account_probe_tools(mcp, enabled_tool_names, tool_functions)
+    _register_manifest_tools(mcp, enabled_tool_names, tool_functions)
+    _register_account_inventory_tools(mcp, enabled_tool_names, tool_functions)
+    _register_notebook_tools(mcp, enabled_tool_names, tool_functions)
+    _register_scheduled_tools(mcp, enabled_tool_names, tool_functions)
+    _register_tool_mode_tools(mcp, enabled_tool_names, tool_functions)
+    _register_model_tools(mcp, enabled_tool_names, tool_functions)
+    _register_gem_tools(mcp, enabled_tool_names)
