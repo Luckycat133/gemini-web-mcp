@@ -39,7 +39,6 @@
 - [常见问题 FAQ](./faq.md)
 - [故障排除](./troubleshooting.md)
 - [实机测试清单](./manual-testing.md) - 哪些内容需要真实账号验证
-- [Release Notes 2026-05-23](./release-notes-2026-05-23.md)
 - [Changelog](./changelog.md)
 - [贡献指南](./contributing.md)
 
