@@ -1,213 +1,347 @@
-# How to Actually Experience the Product
+# Task-First Tool, Skill, and Agent-Use Design
 
-Use this reference to move from “the repository builds” to “an agent can complete real Gemini Web workflows.” Pin a reviewed commit whenever reproducibility matters.
+Use this reference when designing dedicated MCP tools, Runtime Skills, Artifacts, or end-to-end evaluations.
 
-## Understand the Three Distribution Surfaces
+## Design Goal
 
-- **Python package/server:** installs `gemini-mcp-server`, `gemini-mcp-skill-server`, and `gemini-mcp-onboarding`.
-- **Repository development skill:** instructs an engineering agent how to modify this repository.
-- **ClawHub runtime skill:** `clawhub install gemini-web-mcp` installs operating instructions for an already available runtime path; verify the public listing before claiming a repository change is published.
+The product succeeds when an agent recognizes the user's task, selects a small relevant tool surface, obtains truthful structured state or a usable Artifact, and continues the user's workflow.
 
-These surfaces retain distinct roles and licenses, but the active repository version is unified at `0.2.0`. Rewritten package history and release refs use the canonical `0.2.0` version.
+A large tool catalog, a successful raw RPC, or response prose alone is not product success.
 
-Do not use a runtime-skill installation as proof that the Python server package or a GitHub Release was installed.
+## Product Lanes
 
-## 1. Credential-Free Installation and MCP Stdio Preflight
+### `gemini-assist`
 
-```bash
-REVIEWED_SHA=replace-with-reviewed-40-character-commit
-SOURCE="git+https://github.com/Luckycat133/gemini-web-mcp@${REVIEWED_SHA}"
-uvx --from "$SOURCE" gemini-mcp-onboarding
-```
+Use for:
 
-Expected JSON includes:
+- second opinions and critique;
+- code/design review;
+- current-web search with sources;
+- image/screenshot understanding;
+- file/URL/mixed-input understanding;
+- Deep Research.
+
+Do not trigger for a pure generation request or Gemini account administration.
+
+### `gemini-create`
+
+Use for:
+
+- image generation;
+- image editing;
+- video generation;
+- music generation;
+- recovering creation operations.
+
+Do not trigger when the user only wants to understand an existing image or inspect account data.
+
+### `gemini-account`
+
+Use only for explicit requests about Gemini history, Notebooks, Scheduled Actions, Gems, Prompts, account inventory, or cleanup.
+
+Do not trigger merely because an assistance or creation workflow uses a Gemini account internally.
+
+## Skill Trigger Design
+
+The Skill description is the primary trigger boundary. Write it in intent terms, not implementation terms.
+
+Good description properties:
+
+- says what user requests should activate the Skill;
+- distinguishes close alternatives;
+- does not require the user to say “Gemini” or “MCP” when the desired capability is clear;
+- excludes repository development work;
+- avoids enumerating low-level implementation details.
+
+Main `SKILL.md` files should:
+
+- route the task;
+- state the minimum completion contract;
+- link focused references;
+- remain under 500 lines;
+- avoid loading account/security/maintenance detail for every task.
+
+References should be one level deep and focused on one domain.
+
+## Trigger Evaluations
+
+Each dedicated Skill needs positive and near-miss negative cases.
+
+### Assist positives
 
 ```text
-status=ok
-mode=offline
-credentials_accessed=false
-protocol_version=<negotiated version>
-server_version=<installed package version>
-enabled_tools>0
+Check the latest framework documentation and give me sourced migration advice.
+Explain the error in this screenshot and tell me what code to change.
+Compare these two UI screenshots with the implementation.
+Ask another strong model to criticize this architecture.
+Research this technical market and produce a sourced report.
 ```
 
-This proves installation, entrypoint resolution, stdio transport, MCP negotiation, and a real auth-free tool call. It does not prove Gemini authentication or model access.
+### Assist negatives
 
-## 2. Explicitly Authorized Live Text
-
-Configure account Cookies in the process or client environment, then run:
-
-```bash
-REVIEWED_SHA=replace-with-reviewed-40-character-commit
-SOURCE="git+https://github.com/Luckycat133/gemini-web-mcp@${REVIEWED_SHA}"
-uvx --from "$SOURCE" gemini-mcp-onboarding chat \
-  --allow-live-account \
-  --prompt "Reply with exactly: gemini-mcp-live-ok" \
-  --model flash \
-  --thinking-level standard
+```text
+Generate a hero image for this landing page.        -> create
+Delete my old Gemini conversations.                 -> account
+Refactor the MCP repository.                        -> development
 ```
 
-Inspect both text and the structured domain result. Confirm:
+### Create positives
 
-- `ok=true` and terminal operation state;
-- requested/effective/observed backend fields are not conflated;
-- temporary/retention behavior is visible;
-- any created remote chat ID is recorded for direct cleanup.
-
-## 3. Independently Verified Local Image
-
-```bash
-REVIEWED_SHA=replace-with-reviewed-40-character-commit
-SOURCE="git+https://github.com/Luckycat133/gemini-web-mcp@${REVIEWED_SHA}"
-mkdir -p /tmp/gemini-mcp-images
-uvx --from "$SOURCE" gemini-mcp-onboarding image \
-  --allow-live-account \
-  --prompt "A clean blue circle on a white background" \
-  --output-dir /tmp/gemini-mcp-images
+```text
+Generate an icon and put it into the app assets.
+Edit this screenshot to remove the background.
+Create a short video and add it to the presentation.
+Generate background music for this game scene.
 ```
 
-The command should fail unless it receives a local image inside the requested directory with:
+### Create negatives
 
-- an existing non-empty file;
-- image MIME type;
-- positive width and height;
-- artifact `state=local`;
-- `verification.status=verified`.
+```text
+Explain what is wrong with this image.              -> assist
+Search my Gemini history for an old conversation.   -> account
+```
 
-Open the file rather than trusting response prose.
+### Account positives
 
-## 4. Connect a Real MCP Client
+```text
+Find the Gemini chat where I discussed the launch.
+Move this Gemini chat to a Notebook.
+Create a daily Gemini scheduled action.
+Delete this Gem after verifying it exists.
+```
 
-Replace the commit placeholder before copying this configuration:
+### Account negatives
+
+```text
+Use Gemini to critique my code.                     -> assist
+Generate a product image.                           -> create
+```
+
+Run trigger evaluation with paraphrases, mixed-language requests, indirect requests, and requests that mention multiple capabilities. The selected Skill should be the smallest one that can own the dominant user outcome.
+
+## Tool Naming
+
+Public tools use snake_case and a `gemini_` prefix.
+
+Good:
+
+```text
+gemini_ask
+gemini_search
+gemini_understand_image
+gemini_generate_image
+gemini_get_operation_status
+```
+
+Avoid public names such as:
+
+```text
+ask
+search
+create
+operation
+manage
+```
+
+Hosts may aggregate multiple servers, so generic names collide and reduce model selection quality.
+
+## Tool Granularity
+
+Choose a dedicated tool when the user intent, input schema, or completion contract is materially different.
+
+Keep `gemini_ask` separate from `gemini_understand` because pure text second-opinion work is common and should not require a mixed-input schema.
+
+Keep `gemini_understand_image` separate from `gemini_understand` because single-image tasks are frequent and deserve a simple schema.
+
+Use one shared operation service, but expose explicit status/result/cancel tools on primary dedicated surfaces. The compatibility low-token server may use an action facade while it remains supported.
+
+## Assistance Tool Contracts
+
+### `gemini_ask`
+
+Input:
+
+```text
+prompt
+optional context
+model / thinking controls
+```
+
+Output:
+
+```text
+answer
+requested/effective/observed backend evidence
+source conversation/lifecycle metadata when relevant
+```
+
+The calling agent compares or incorporates the answer; it should not merely quote it without completing the task.
+
+### `gemini_search`
+
+Input:
+
+```text
+query
+optional recency
+domains
+language
+max_results
+```
+
+Output:
+
+```text
+answer
+sources[]
+observed_at
+grounding_state
+```
+
+`grounding_state=grounded` requires observed source evidence. No-source responses are `answer_only`.
+
+### `gemini_understand_image`
+
+Input:
+
+```text
+image path/URI
+task
+```
+
+Output:
+
+```text
+analysis
+observations tied to the image
+input Artifact identity
+```
+
+### `gemini_understand`
+
+Input is a bounded typed list:
 
 ```json
 {
-  "mcpServers": {
-    "gemini": {
-      "command": "uvx",
-      "args": [
-        "--from",
-        "git+https://github.com/Luckycat133/gemini-web-mcp@REVIEWED_COMMIT_SHA",
-        "gemini-mcp-server"
-      ],
-      "env": {
-        "GEMINI_TOOLS": "model"
-      }
-    }
-  }
+  "task": "Compare the design with the implementation",
+  "inputs": [
+    {"id": "design", "kind": "image", "path": "..."},
+    {"id": "code", "kind": "file", "path": "..."},
+    {"id": "docs", "kind": "url", "url": "..."}
+  ]
 }
 ```
 
-Profile guidance:
+Output records per-input acceptance/failure plus synthesized analysis. Do not silently drop inputs.
 
-- `model`: smallest text/session starting surface;
-- `history`: typed history workflows;
-- `history-organize`: history plus Notebook organization;
-- `account-read`: read-only account inventory;
-- `core`: text, media, files, URLs, and research;
-- `scheduled-admin`: explicitly authorized scheduled mutations;
-- `all`: maintainer verification only;
-- `gemini-mcp-skill-server`: fixed eleven-tool compact discovery surface.
+### `gemini_research`
 
-Useful client prompts:
+Starts asynchronously by default. Input contains the research question and bounded options. Output returns an opaque `operation_id` plus observed upstream identifiers and initial state.
+
+## Creation Tool Contracts
+
+Each modality-specific tool starts the operation and returns either:
+
+- a completed Artifact;
+- a queued/running operation handle;
+- a truthful partial/empty/failed result.
+
+Image tools may often complete synchronously. Video/music should normally use OperationService.
+
+## Artifact Handoff
+
+Search and understanding normally return information. Creation and completed Research normally return files or resource links.
+
+The calling agent should use the Artifact in the user's requested destination:
+
+- image into website/app/document/slide;
+- edited image replacing the original;
+- video/audio into the project;
+- Markdown report read and cited in a deliverable.
+
+Technical fields are machine-facing acceptance evidence. Do not force the agent to recite MIME, dimensions, or paths to the user when it can directly use the file.
+
+Minimum Artifact evidence:
 
 ```text
-Use Gemini to critique this answer, then summarize where the two models disagree.
+artifact_id
+kind
+state
+uri/local_path
+mime_type
+size
+width/height or duration when relevant
+verification
+backend evidence
 ```
+
+## Operation UX
+
+Start returns immediately:
+
+```json
+{
+  "operation_id": "opaque",
+  "state": "queued",
+  "continuation_possible": true
+}
+```
+
+Status/result/cancel accept only explicit handles. Unknown and expired IDs return stable errors. Do not auto-start another job after a lookup failure.
+
+Do not expose a global unbounded operation list to ordinary assist/create agents. Account/maintenance diagnostics may expose a paginated owner-scoped list.
+
+## Compatibility Router
+
+The current `gemini-web-mcp` Skill must be useful now:
+
+- task-first capability lanes;
+- compact default when it can finish;
+- narrow primary profile for files/URLs/Research;
+- manifest only for discovery/recovery;
+- Artifact downstream use;
+- async Research guidance.
+
+Do not claim that dedicated Skills or entrypoints exist before implementation.
+
+## End-to-End Agent Evaluations
+
+Tool-unit tests are insufficient. Evaluate agents on complete tasks.
+
+### Assistance
+
+- finds current sources and includes observed URLs;
+- distinguishes source-free answer from grounded search;
+- interprets an error screenshot and edits the correct code;
+- compares design and implementation without losing input identity;
+- starts Research once and recovers it.
+
+### Creation
+
+- generates an image and inserts it into an actual document/app;
+- edits an existing image and uses the edited file;
+- starts video/music once, survives timeout/restart, retrieves the final Artifact;
+- does not declare queued work complete.
+
+### Account
+
+- selects the target through list/search before mutation;
+- does not read turn text unless the task requires it;
+- preserves IDs;
+- does not claim deletion/update without positive read-back.
+
+Record:
 
 ```text
-Ask Gemini to generate an image, save it locally, and report the verified path, MIME type, size, width, and height.
+client/model/version
+OS and package commit
+tool catalog exposed
+tool selected and arguments
+structured result
+number of retries/duplicate starts
+Artifact handoff outcome
+operation recovery outcome
+final user-task completion
 ```
 
-```text
-Start Deep Research without waiting. Return every operation or chat identifier and explain how to recover the result.
-```
-
-Observe whether the client selects the right tool without repository-specific coaching, preserves structured errors, and renders or locates artifacts usefully.
-
-## 5. Full Multimodal Experience From Source
-
-```bash
-git clone https://github.com/Luckycat133/gemini-web-mcp.git
-cd gemini-web-mcp
-python -m venv .venv
-. .venv/bin/activate
-pip install -e ".[all,dev]"
-
-python scripts/smoke_profiles.py
-python scripts/smoke_mcp_protocol.py
-GEMINI_TOOLS=core gemini-mcp-server
-```
-
-Run these workflows in order:
-
-1. one-shot temporary text;
-2. primary and compact multi-turn sessions;
-3. image generation and reference-image editing;
-4. video generation;
-5. music generation;
-6. local-file analysis;
-7. URL analysis;
-8. Deep Research in start-only and wait modes;
-9. history list/search/read/export;
-10. a disposable Gem, scheduled action, or Notebook move with read-back;
-11. direct-ID cleanup for every created resource.
-
-## 6. Modality Acceptance Matrix
-
-| Workflow | Minimum proof |
-| --- | --- |
-| Text | terminal structured result plus expected text |
-| Session | context preserved across turns; reset affects only the selected MCP/Gemini session |
-| Image | verified local file or usable remote URI; MIME, size, and dimensions |
-| Video | playable artifact; MIME, size, duration when observable, and terminal/queued state |
-| Music | playable artifact; MIME, size, duration when observable, and terminal/queued state |
-| File | source artifact identified and structured analysis result returned |
-| URL | requested URL preserved and structured webpage/analysis state returned |
-| Deep Research | operation/chat IDs, queued/running/completed/timed-out state, and result recovery path |
-| History | typed records, explicit pagination, and private-turn scanning only when authorized |
-| Mutation | authoritative read-back and no success text for ambiguous evidence |
-| Cleanup | every created ID accounted for; `verified_absent` when claiming deletion |
-
-## 7. Long-Operation Friction to Record
-
-Until the shared `start/status/result/cancel` API exists, record:
-
-- which tool started the operation;
-- returned provider/research/chat IDs;
-- whether the call timed out or returned queued/running;
-- how the result was recovered;
-- whether another client/process could resume it;
-- whether cancellation was requested and what was actually observed;
-- artifact identity from initial request through final result.
-
-This evidence should shape the shared operation service rather than creating modality-specific polling tools independently.
-
-## 8. Cleanup and History Verification
-
-Record every returned remote resource ID immediately. Gemini-generated titles may omit prompt markers, so marker search is only a fallback.
-
-A chat deletion is verified only when a complete fresh authoritative history-metadata read-back produces `verification.status=verified_absent` and the structured result reports deletion. These are not proof:
-
-- accepted upstream delete response alone;
-- `read_chat(None)`;
-- zero marker-search results when titles omitted the marker;
-- incomplete pagination;
-- read-back error;
-- still-present state.
-
-## 9. Record Product Friction
-
-For each real client test, record:
-
-- client/version, OS, Python version, protocol mode, commit SHA;
-- install time and first successful call;
-- profile and tool selected by the agent;
-- arguments without credentials or private content;
-- structured result, diagnostic ID, and compatibility text;
-- artifact path/URI and renderability;
-- timeout and recovery behavior;
-- account/entitlement mismatch;
-- cleanup and retention outcome.
-
-Turn reproducible friction into focused issues. Separate client UX failures, project defects, entitlement absence, and Gemini Web drift.
+A good evaluation asks whether the agent completed the task, not whether it called a particular tool by rote.

@@ -192,6 +192,28 @@ state management rather than a Gemini Web AI capability.
 
 ---
 
+## Dedicated Assist Surface
+
+The dedicated assistance entrypoint `gemini-mcp-assist` (server name
+`gemini_assist_mcp`) exposes exactly five tools. It deliberately exposes no
+history, Cookie, Scheduled, Gem, Prompt, manifest, or cleanup tools:
+
+| Tool | Purpose |
+|------|---------|
+| `gemini_ask` | One focused question with optional context, for second opinions, critique, or code/design review |
+| `gemini_search` | Grounded current-web search with observed `sources` and a truthful `grounding_state` (`grounded`, `answer_only`, `unavailable`, or `failed`) |
+| `gemini_understand_image` | Understand one image from a local path or http(s) image URI |
+| `gemini_understand` | Typed mixed-input understanding over text, image, file, and URL inputs (max 16), with per-input outcomes |
+| `gemini_research` | Start one Deep Research run asynchronously and return a preserved operation handle with upstream IDs |
+
+`gemini_search` and `gemini_understand` return information to the calling
+agent, not Artifacts. A completed Deep Research report stays in the retained
+Gemini chat and is recovered through the preserved upstream identifiers. Start
+this server with the `gemini-mcp-assist` console entrypoint; the `gemini-assist`
+Runtime Skill documents its trigger boundary.
+
+---
+
 ## Removed Or Merged Tools
 
 | Tool | Status |

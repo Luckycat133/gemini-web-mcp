@@ -147,6 +147,10 @@ COMPACT_TOOLS = frozenset(
     }
 )
 
+ASSIST_TOOLS = frozenset(
+    {"gemini_ask", "gemini_research", "gemini_search", "gemini_understand", "gemini_understand_image"}
+)
+
 
 async def _list_module_tools(module_name: str) -> list[str]:
     module = importlib.import_module(module_name)
@@ -213,6 +217,9 @@ def main() -> None:
 
     compact = _installed_surface("src.skill_server", "model")
     _require_exact_surface("compact", compact, COMPACT_TOOLS)
+
+    assist = _installed_surface("src.surfaces.assist", "model")
+    _require_exact_surface("assist", assist, ASSIST_TOOLS)
     print("Representative profile contracts: OK")
 
 

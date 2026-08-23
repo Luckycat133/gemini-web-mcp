@@ -32,6 +32,7 @@ def test_runtime_imports_have_direct_or_extra_dependency_intent():
         "mcp",
         "mcp_types",
         "orjson",
+        "pydantic",
     }
 
 

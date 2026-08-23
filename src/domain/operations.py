@@ -13,6 +13,7 @@ class LongOperationData:
 
     operation: str
     state: OperationState
+    operation_id: str | None = None
     upstream_operation_id: str | None = None
     upstream_chat_id: str | None = None
     title: str | None = None

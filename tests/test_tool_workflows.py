@@ -175,6 +175,7 @@ def test_intent_profiles_expose_focused_tool_surfaces():
 
 def test_deep_research_uses_default_transport_for_model_aliases(monkeypatch):
     import src.tools.research as research_tools
+    from src.services.research import null_scope
 
     calls = []
 
@@ -195,7 +196,7 @@ def test_deep_research_uses_default_transport_for_model_aliases(monkeypatch):
 
         def thinking_scope(self, model, thinking_level):
             calls.append(("thinking_scope", model, thinking_level))
-            return research_tools._null_scope()
+            return null_scope()
 
         async def create_deep_research_plan(self, query, chat=None, model=None):
             calls.append(("create_plan", query, model))
@@ -250,13 +251,13 @@ def test_deep_research_uses_default_transport_for_model_aliases(monkeypatch):
 
 
 def test_deep_research_clears_stale_default_chat_metadata():
-    import src.tools.research as research_tools
+    from src.services.research import start_fresh_research_chat
 
     class FakeClient:
         def start_chat(self, model=None):
             return SimpleNamespace(cid="c_old", rid="r_old", rcid="rc_old", model=model)
 
-    chat = research_tools._start_fresh_research_chat(FakeClient(), model="unspecified")
+    chat = start_fresh_research_chat(FakeClient(), model="unspecified")
 
     assert chat.cid == ""
     assert chat.rid == ""

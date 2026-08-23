@@ -2,7 +2,7 @@
   <img src="docs/assets/gemini-web-mcp-banner.svg" alt="Gemini Web MCP" width="100%">
 </p>
 
-<h1 align="center">Gemini Web MCP (v0.2.0)</h1>
+<h1 align="center">Gemini Web MCP (v0.2.1)</h1>
 
 <p align="center">
   An agent-first MCP Python SDK v2 gateway and skills for Gemini Web workflows.
@@ -37,7 +37,7 @@ The supported runtime is `mcp>=2,<3` plus `mcp-types>=2,<3`. CI exercises both c
 
 ## Install The Runtime Skill
 
-The repository runtime Skill is `0.2.0`. Install the public listing from ClawHub (and verify its displayed version when publication state matters):
+The repository runtime Skill is `0.2.1`. Install the public listing from ClawHub (and verify its displayed version when publication state matters):
 
 ```bash
 clawhub install gemini-web-mcp
@@ -120,6 +120,12 @@ Run the compact, low-token facade:
 gemini-mcp-skill-server
 ```
 
+Run the focused assistance surface (second opinions, grounded search, image/mixed-input understanding, async Deep Research):
+
+```bash
+gemini-mcp-assist
+```
+
 See [copyable Codex, Claude Desktop, Claude Code, and VS Code configurations plus verified text/image walkthroughs](docs/client-examples.md). Live examples require explicit account opt-in; no live Gemini request is part of PR CI.
 
 ## Tool Profiles
@@ -158,8 +164,8 @@ absence evidence from a complete fresh history-metadata read-back. An explicitly
 2026-08-08 validated Cookie initialization, temporary and retained text, multi-turn context, primary/compact typed history,
 and verified deletion of every created chat. It was not a dedicated-account full canary and did not cover media, files,
 URLs, Deep Research, or account mutations. Remaining work includes that broader live baseline, typed results for other
-management actions, durable cleanup, and a shared long-operation job contract. The active repository version is `0.2.0`
-across the Python package, runtime skill, and development skill. Rewritten Git history and release refs use the canonical `0.2.0` version.
+management actions, durable cleanup, and a shared long-operation job contract. The active repository version is `0.2.1`
+across the Python package, runtime skill, and development skill. The existing `v0.2.0` tag remains immutable; new release refs use `0.2.1`.
 
 See [Development status and next steps](docs/development-status.md) for the implemented, partial, deferred, and owner-decision
 boundaries. Offline CI or package success is not presented as current live Gemini behavior.
@@ -170,7 +176,8 @@ The current supported one-command path installs the reviewed `main` source (or a
 
 The tag release workflow builds:
 
-- `gemini-web-mcp-skill-*.zip`: standalone Codex skill package
+- `gemini-web-mcp-skill-*.zip`: standalone Codex compatibility skill package
+- `gemini-assist-skill-*.zip`: standalone Codex assistance skill package
 - `gemini_mcp_server-*-py3-none-any.whl`: Python wheel
 - `gemini_mcp_server-*.tar.gz`: source distribution with docs, evaluations, and public skill files
 

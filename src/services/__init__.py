@@ -24,7 +24,34 @@ from .chat import (
     StartSessionRequest,
 )
 from .lifecycle import ConversationLifecycleService, LifecycleResetAllData
+from .research import (
+    DEFAULT_RESEARCH_TIMEOUT_SECONDS,
+    RESEARCH_CLEANUP_SOURCE,
+    ResearchRequest,
+    ResearchService,
+    ResearchServiceDependencies,
+)
+from .search import (
+    DEFAULT_MAX_RESULTS,
+    GroundingState,
+    ObservedSource,
+    SearchOperationData,
+    SearchRequest,
+    SearchService,
+    observed_sources_from_response,
+)
 from .streams import StreamTextAccumulator
+from .understanding import (
+    MAX_UNDERSTAND_INPUTS,
+    UnderstandImageRequest,
+    UnderstandInput,
+    UnderstandInputKind,
+    UnderstandInputOutcome,
+    UnderstandOperationData,
+    UnderstandRequest,
+    UnderstandService,
+    UnderstandingOutcome,
+)
 
 __all__ = [
     "artifact_exception_result",
@@ -40,13 +67,34 @@ __all__ = [
     "CleanupStrategy",
     "ConversationLifecycleService",
     "classify_artifact_state",
+    "DEFAULT_MAX_RESULTS",
+    "DEFAULT_RESEARCH_TIMEOUT_SECONDS",
     "extract_response_artifacts",
+    "GroundingState",
     "is_response_queued",
     "LifecycleResetAllData",
+    "MAX_UNDERSTAND_INPUTS",
     "merge_artifacts",
+    "ObservedSource",
     "observed_backend_from_response",
+    "observed_sources_from_response",
+    "RESEARCH_CLEANUP_SOURCE",
+    "ResearchRequest",
+    "ResearchService",
+    "ResearchServiceDependencies",
     "response_chat_id",
+    "SearchOperationData",
+    "SearchRequest",
+    "SearchService",
     "SessionMessageRequest",
     "StartSessionRequest",
     "StreamTextAccumulator",
+    "UnderstandImageRequest",
+    "UnderstandInput",
+    "UnderstandInputKind",
+    "UnderstandInputOutcome",
+    "UnderstandOperationData",
+    "UnderstandRequest",
+    "UnderstandService",
+    "UnderstandingOutcome",
 ]

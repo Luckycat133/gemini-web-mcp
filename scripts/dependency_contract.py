@@ -17,6 +17,7 @@ REQUIRED_IMPORTS = {
     "mcp": "mcp",
     "mcp_types": "mcp-types",
     "orjson": "orjson",
+    "pydantic": "pydantic",
 }
 
 
@@ -36,6 +37,7 @@ EXPECTED_REQUIREMENTS = {
     "mcp": "mcp>=2.0.0,<3",
     "mcp-types": "mcp-types>=2.0.0,<3",
     "orjson": "orjson>=3.11.7,<4",
+    "pydantic": "pydantic>=2.0.0,<3",
 }
 
 EXPECTED_OPTIONAL_REQUIREMENTS = {

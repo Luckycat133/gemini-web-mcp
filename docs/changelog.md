@@ -9,11 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Removed
-- Deleted the legacy `docs/release-notes-2026-05-23.md` snapshot (fully superseded by this changelog) and its documentation-index link
-- Removed the external `python-mcp-server-generator` scaffolding skill from `.agents/skills/`, its `.claude/` and `.codex/` discovery symlinks, and its `skills-lock.json` entry; it generates new MCP servers and was unused by this repository
+### Added
+- Added the first focused product surface `gemini-assist`: the `gemini-mcp-assist` console entrypoint runs the `gemini_assist_mcp` server with a deterministic five-tool catalog — `gemini_ask`, `gemini_search`, `gemini_understand_image`, `gemini_understand`, and `gemini_research` — for second opinions, grounded current-web search, image/screenshot understanding, typed mixed-input understanding, and asynchronous Deep Research.
+- Added the truthful grounded-search contract: `grounding_state` is `grounded` only with observed source URLs, and source-free answers are reported as `answer_only` (with `unavailable` and `failed` as distinct states); reported sources are deduplicated, capped, and counted.
+- Added typed mixed-input understanding: `gemini_understand` accepts up to 16 typed inputs (text, image, file, URL) with stable caller-supplied ids and per-input `accepted`/`analyzed`/`skipped`/`failed` outcomes; `analyzed` requires per-input evidence (a referenced `[id]` or a sole accepted input) rather than request-level inference.
+- Added asynchronous Deep Research start: `gemini_research` returns an opaque high-entropy `operation_id` handle immediately, preserves `upstream_operation_id`/`upstream_chat_id` in structured metadata, and retains the research chat by default so the report stays recoverable.
+- Added the `gemini-assist` runtime Skill with an intent-based trigger description, offline trigger-boundary content contracts (positive assistance intents plus generation/account/development near-miss negatives), and packaging as a required `gemini-assist-skill-*.zip` release asset validated by CI and release workflows.
+- Added the assist entrypoint to the real stdio protocol smoke (modern and legacy negotiation modes) with a credential-free representative `gemini_search` call.
 
 ### Changed
+- Extracted the shared Deep Research start-phase workflow into `src/services/research.py`; the compatibility `gemini_deep_research` tool now reuses it with unchanged behavior, removing the duplicated start orchestration and the drifted timeout literal.
+- Declared `pydantic` as a direct runtime dependency to match the new typed `gemini_understand` input schema (`maxItems: 16`) and the repository dependency contract.
+- Updated the compatibility `gemini-web-mcp` runtime Skill to route pure assistance workloads to the focused `gemini-assist` Skill and to state that `gemini-create` and `gemini-account` are not implemented yet.
 - Finished the oversized-function cleanup: exception classification is now an ordered rule table, deep-research native execution and report-artifact creation delegate to phase helpers, the history deep-scan tool extracts notebook collection/source-summary/markdown rendering, skill-server create/edit share media result assembly, deletion verification payloads come from one builder, local-artifact probes split out, and chat registration is grouped into conversation/session/streaming helpers; no single-responsibility function exceeds 100 lines and no MCP tool surface changed
 - Consolidated doctor diagnostics: `services/doctor.py` owns the split payload implementation (static/cookie/profile/environment/recommendation steps behind injectable providers), and manage.py's byte-equivalent private twin was deleted in favor of the service exports
 - Split the remaining oversized tool bodies without behavior change: `gemini_generate_media` (260 lines) into a request-context dataclass with failure/recovery/outcome/finalization helpers, `gemini_manage_prompts` (124 lines) into six per-action helpers, and the upload/URL analysis tools onto shared response-assembly and failure-response helpers; the service cleanup payload gained the same two-phase split as its manage twin
@@ -21,8 +28,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Split `register_manage_tools` (1563 lines) into a shared conditional decorator factory plus 12 domain-scoped registration helpers called in the original order; in-process tool delegation resolves through an explicitly passed registry with precise typing
 - Restructured oversized functions without behavior change: doctor/cleanup payload builders split into step helpers, research deep-research helpers hoisted to module level, and skill-server history tool split into per-action helpers; no MCP tool name, schema, annotation, or response changed
 
+### Removed
+- Deleted the legacy `docs/release-notes-2026-05-23.md` snapshot (fully superseded by this changelog) and its documentation-index link
+- Removed the external `python-mcp-server-generator` scaffolding skill from `.agents/skills/`, its `.claude/` and `.codex/` discovery symlinks, and its `skills-lock.json` entry; it generates new MCP servers and was unused by this repository
+
 ### Fixed
 - Hardened research source extraction: percent-encoded gstatic icon paths (e.g. `/fav%69con.ico`) can no longer bypass the favicon filter, non-domain hostnames (IPv6 literals, embedded whitespace, invalid ports) are rejected, blank source titles are dropped, and duplicate sources are detected on a normalized scheme/host/default-port/path/query key instead of raw URL strings
+
+## [0.2.1] - 2026-08-21
+
+### Changed
+- Kept the existing `v0.2.0` tag immutable and advanced the active Python package, runtime Skill, development Skill, release assets, and current documentation to `0.2.1`.
+- Recorded the owner-approved development order: first establish a complete live Gemini baseline using maintainer-supplied account Cookies, then implement the shared long-operation service.
+- Settled local persistence on SQLite for long-operation recovery and delayed cleanup; the database remains local-only and stores recovery metadata rather than prompts, chat text, Cookies, or raw upstream responses.
+
+### Fixed
+- Added the repository AGPL-3.0-only license to wheel and source-distribution metadata and made release verification compare embedded license contents with the repository source.
+- Parsed Deep Research source URLs before matching exact Google asset hostnames, preventing path, userinfo, and lookalike-domain text from being mistaken for Google-hosted resources.
+- Refreshed the development Skill and status documentation so completed foundations are not repeatedly re-planned and settled owner decisions are no longer presented as open questions.
 
 ## [0.2.0] - 2026-08-13
 

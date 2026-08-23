@@ -9,7 +9,6 @@ import json
 import logging
 import os
 import re
-from collections.abc import Awaitable
 from types import SimpleNamespace
 from typing import Any, Literal
 from urllib.parse import unquote, urlsplit, urlunsplit
@@ -29,8 +28,6 @@ from ..domain import (
     ArtifactKind,
     ArtifactResultData,
     ArtifactState,
-    DomainErrorCode,
-    DomainResult,
     LongOperationData,
     OperationState,
 )
@@ -39,6 +36,17 @@ from ..services import (
     artifact_from_local_path,
     artifact_result,
     artifact_save_failure_result,
+)
+from ..services.research import (
+    await_before_deadline as _await_before_deadline,
+    format_research_query as _format_research_query,
+    has_native_research_api as _has_native_research_api,
+    operation_state_from_upstream as _operation_state_from_upstream,
+    research_domain_result as _research_domain_result,
+    research_operation_data as _research_operation_data,
+    research_timed_out_result as _research_timed_out_result,
+    resolve_deep_research_transport_model as _resolve_deep_research_transport_model,
+    run_deep_research_start_phase as _run_deep_research_start_phase,
 )
 from .annotations import MUTATES_LOCAL, MUTATES_REMOTE, READS_PRIVATE_REMOTE
 
@@ -54,519 +62,203 @@ _MD_TITLE_HEADING_RE = re.compile(r"^#\s+(.+)$")
 _SAFE_FILENAME_RE = re.compile(r"[^A-Za-z0-9._-]+")
 
 
-def _consume_finished_task(task: asyncio.Future[Any]) -> None:
-    """Observe a detached task result so late completion cannot leak warnings."""
-    try:
-        task.result()
-    except BaseException:
-        pass
+def register_research_tools(mcp: MCPServer):
 
-
-async def _await_before_deadline(
-    awaitable: Awaitable[Any],
-    *,
-    timeout: float,
-) -> Any:
-    """Await strictly until a deadline and never adopt a late completion.
-
-    ``asyncio.wait_for`` can continue waiting when a child suppresses its
-    cancellation.  Long-operation state must be final at the declared
-    deadline, so this helper detaches and consumes any such late result.
-    """
-    task = asyncio.ensure_future(awaitable)
-    try:
-        done, _pending = await asyncio.wait(
-            {task},
-            timeout=max(0.0, float(timeout)),
+    async def _run_native_deep_research(
+        client: Any,
+        query: str,
+        model: str,
+        model_name: str,
+        research_model: Any,
+        thinking_level: str,
+        model_note: str,
+        timeout_seconds: int,
+        poll_interval: int,
+        wait_for_completion: bool,
+        retain_chat: bool,
+        delete_after_seconds: int | None,
+    ) -> list[TextContent]:
+        """Run Deep Research via the client's native plan/start/wait API."""
+        start = await _run_deep_research_start_phase(
+            client,
+            query=query,
+            requested_model=model,
+            resolved_model=model_name,
+            research_model=research_model,
+            model_note=model_note,
+            thinking_level=thinking_level,
+            timeout_seconds=timeout_seconds,
+            operation="gemini_deep_research",
+            operation_id=None,
+            schedule_chat_cleanup=schedule_remote_chat_cleanup,
+            retain_chat=retain_chat,
+            delete_after_seconds=delete_after_seconds,
+            cleanup_source="gemini_deep_research",
         )
-    except BaseException:
-        if not task.done():
-            task.cancel()
-        task.add_done_callback(_consume_finished_task)
-        raise
-
-    if not done:
-        task.cancel()
-        task.add_done_callback(_consume_finished_task)
-        raise asyncio.TimeoutError
-    return await task
-
-
-def _nonempty_identifier(value: Any) -> str | None:
-    return value.strip() if isinstance(value, str) and value.strip() else None
-
-
-def _research_chat_id(
-    *,
-    plan: Any = None,
-    chat: Any = None,
-    response: Any = None,
-) -> str | None:
-    for owner in (chat, plan, response):
-        identifier = _nonempty_identifier(getattr(owner, "cid", None))
-        if identifier:
-            return identifier
-    metadata = getattr(response, "metadata", None)
-    if isinstance(metadata, list) and metadata:
-        return _nonempty_identifier(metadata[0])
-    return None
-
-
-def _upstream_state(value: Any) -> str | None:
-    if value is None:
-        return None
-    state = getattr(value, "state", value)
-    if isinstance(state, OperationState):
-        return state.value
-    if isinstance(state, str) and state.strip():
-        return state.strip().lower()
-    return None
-
-
-def _operation_state_from_upstream(value: Any) -> OperationState:
-    state = _upstream_state(value)
-    if state in {"accepted", "pending", "queued", "scheduled"}:
-        return OperationState.QUEUED
-    if state in {"complete", "completed", "done", "success", "succeeded"}:
-        return OperationState.COMPLETED
-    if state in {"timed_out", "timeout"}:
-        return OperationState.TIMED_OUT
-    if state in {"cancelled", "canceled"}:
-        return OperationState.CANCELLED
-    if state in {"failed", "error"}:
-        return OperationState.FAILED
-    return OperationState.RUNNING
-
-
-def _research_operation_data(
-    state: OperationState,
-    *,
-    plan: Any = None,
-    chat: Any = None,
-    response: Any = None,
-    upstream_result: Any = None,
-    latest_upstream_state: str | None = None,
-    poll_count: int | None = None,
-) -> LongOperationData:
-    if plan is None:
-        plan = getattr(upstream_result, "plan", None)
-    statuses = list(getattr(upstream_result, "statuses", []) or [])
-    if latest_upstream_state is None and statuses:
-        latest_upstream_state = _upstream_state(statuses[-1])
-    if poll_count is None:
-        poll_count = getattr(upstream_result, "poll_count", None)
-    if not isinstance(poll_count, int):
-        poll_count = len(statuses)
-
-    operation_id = _nonempty_identifier(getattr(plan, "research_id", None))
-    chat_id = _research_chat_id(plan=plan, chat=chat, response=response)
-    final_output = getattr(upstream_result, "final_output", None)
-    final_text = getattr(final_output, "text", "") if final_output else ""
-    report_available = (
-        state is OperationState.COMPLETED
-        and isinstance(final_text, str)
-        and bool(final_text.strip())
-    )
-    return LongOperationData(
-        operation="gemini_deep_research",
-        state=state,
-        upstream_operation_id=operation_id,
-        upstream_chat_id=chat_id,
-        title=_nonempty_identifier(getattr(plan, "title", None)),
-        latest_upstream_state=latest_upstream_state,
-        continuation_possible=bool(operation_id or chat_id),
-        report_available=report_available,
-        poll_count=max(0, poll_count),
-    )
-
-
-def _research_domain_result(
-    data: LongOperationData,
-    *,
-    message: str = "",
-) -> DomainResult[LongOperationData]:
-    details = {
-        "upstream_operation_id_observed": bool(data.upstream_operation_id),
-        "upstream_chat_id_observed": bool(data.upstream_chat_id),
-        "continuation_possible": data.continuation_possible,
-        "poll_count": data.poll_count,
-    }
-    if data.state is OperationState.TIMED_OUT:
-        return DomainResult.failure(
-            DomainErrorCode.TIMED_OUT,
-            message or "Deep Research did not complete before the configured deadline.",
-            data=data,
-            retryable=True,
-            suggested_action=(
-                "Use the preserved upstream chat ID to inspect the report later, or retry with a longer timeout."
-                if data.continuation_possible
-                else "Retry with a longer timeout."
-            ),
-            operation_state=OperationState.TIMED_OUT,
-            verification_status="completion_not_observed",
-            details=details,
-        )
-    if data.state in {
-        OperationState.FAILED,
-        OperationState.CANCELLED,
-        OperationState.UNAVAILABLE,
-    }:
-        error_code = (
-            DomainErrorCode.CANCELLED
-            if data.state is OperationState.CANCELLED
-            else DomainErrorCode.INTERNAL_ERROR
-        )
-        return DomainResult.failure(
-            error_code,
-            message or "Deep Research failed before completion.",
-            data=data,
-            retryable=data.state is not OperationState.CANCELLED,
-            suggested_action="Inspect server diagnostics and retry.",
-            operation_state=data.state,
-            verification_status="operation_failed",
-            details=details,
-        )
-    verification_status = {
-        OperationState.COMPLETED: "report_observed",
-        OperationState.QUEUED: "upstream_queued",
-        OperationState.RUNNING: "upstream_running",
-    }.get(data.state, "upstream_state_observed")
-    return DomainResult.success(
-        data,
-        operation_state=data.state,
-        verification_status=verification_status,
-        details=details,
-    )
-
-
-
-
-def _start_only_research_response(
-    query: str,
-    model: str,
-    research_model: Any,
-    model_note: str,
-    plan,
-    chat,
-    start_output,
-) -> list[TextContent]:
-    """Render the caller-requested start-only outcome without polling."""
-    state = _operation_state_from_upstream(getattr(start_output, "state", None))
-    status = SimpleNamespace(
-        state=state.value,
-        done=state is OperationState.COMPLETED,
-        notes=["caller requested start-only execution"],
-    )
-    upstream_result = SimpleNamespace(
-        plan=plan,
-        start_output=start_output,
-        final_output=None,
-        statuses=[status],
-        done=state is OperationState.COMPLETED,
-        poll_count=0,
-    )
-    data = _research_operation_data(
-        state,
-        plan=plan,
-        chat=chat,
-        upstream_result=upstream_result,
-        latest_upstream_state=state.value,
-        poll_count=0,
-    )
-    operation_result = _research_domain_result(data)
-    content = _format_deep_research_result(
-        query,
-        upstream_result,
-        model,
-        research_model,
-        model_note,
-        operation_state=state,
-        waited_for_completion=False,
-    )
-    return attach_domain_result([content], operation_result, use_result_data=True)
-
-
-async def _await_deep_research_outcome(
-    client: Any,
-    plan,
-    chat,
-    start_output,
-    poll_interval: int,
-    timeout_seconds: int,
-):
-    if getattr(plan, "research_id", None):
-        upstream_result = await _await_before_deadline(
-            client.wait_for_deep_research(
-                plan,
-                poll_interval=poll_interval,
-                timeout=timeout_seconds,
-            ),
-            timeout=timeout_seconds + poll_interval + 10,
-        )
-    else:
-        upstream_result = await _wait_for_deep_research_by_chat(
-            client=client,
-            plan=plan,
-            chat=chat,
-            start_output=start_output,
-            poll_interval=poll_interval,
-            timeout=timeout_seconds,
-        )
-    upstream_result.start_output = start_output
-    return upstream_result
-
-
-def _completed_research_response(
-    query: str,
-    model: str,
-    research_model: Any,
-    model_note: str,
-    plan,
-    chat,
-    upstream_result,
-) -> list[TextContent]:
-    state = (
-        OperationState.COMPLETED
-        if getattr(upstream_result, "done", False)
-        else OperationState.TIMED_OUT
-    )
-    data = _research_operation_data(
-        state,
-        plan=plan,
-        chat=chat,
-        upstream_result=upstream_result,
-    )
-    operation_result = _research_domain_result(data)
-    content = _format_deep_research_result(
-        query,
-        upstream_result,
-        model,
-        research_model,
-        model_note,
-        operation_state=state,
-        waited_for_completion=True,
-    )
-    return attach_domain_result([content], operation_result, use_result_data=True)
-
-
-async def _run_native_deep_research(
-    client: Any,
-    query: str,
-    model: str,
-    model_name: str,
-    research_model: Any,
-    thinking_level: str,
-    model_note: str,
-    timeout_seconds: int,
-    poll_interval: int,
-    wait_for_completion: bool,
-    retain_chat: bool,
-    delete_after_seconds: int | None,
-) -> list[TextContent]:
-    """Run Deep Research via the client's native plan/start/wait API."""
-    chat = _start_fresh_research_chat(client, research_model)
-    scope = _null_scope()
-    if not _is_default_deep_research_transport(research_model):
-        thinking_scope = getattr(client, "thinking_scope", None)
-        scope = (
-            thinking_scope(model_name, thinking_level)
-            if thinking_scope
-            else _null_scope()
-        )
-    plan = None
-    start_output = None
-    try:
-        with scope:
-            plan = await _await_before_deadline(
-                _create_deep_research_plan(
-                    client,
-                    _format_research_query(query, model, model_note),
-                    chat=chat,
-                    model=research_model,
-                ),
-                timeout=_phase_timeout(timeout_seconds),
+        if start.timed_out is not None:
+            return domain_text(
+                start.timed_out,
+                _deep_research_timeout_error(timeout_seconds).text,
+                use_result_data=True,
             )
-            start_output = await _start_deep_research_with_recovery(
-                client,
-                plan,
-                chat,
-                timeout=min(_phase_timeout(timeout_seconds), 120),
-            )
+        if start.error is not None:
+            raise start.error
+        chat, plan, start_output = start.chat, start.plan, start.start_output
 
         if not wait_for_completion:
-            return _start_only_research_response(query, model, research_model, model_note, plan, chat, start_output)
-
-        upstream_result = await _await_deep_research_outcome(
-            client,
-            plan,
-            chat,
-            start_output,
-            poll_interval,
-            timeout_seconds,
-        )
-        return _completed_research_response(query, model, research_model, model_note, plan, chat, upstream_result)
-    except asyncio.TimeoutError:
-        data = _research_operation_data(
-            OperationState.TIMED_OUT,
-            plan=plan,
-            chat=chat,
-            latest_upstream_state=_upstream_state(start_output),
-        )
-        return domain_text(
-            _research_domain_result(data),
-            _deep_research_timeout_error(timeout_seconds).text,
-            use_result_data=True,
-        )
-    finally:
-        if plan is not None:
-            schedule_remote_chat_cleanup(
-                _research_chat_id(plan=plan, chat=chat),
-                retain_chat=retain_chat,
-                delete_after_seconds=delete_after_seconds,
-                source="gemini_deep_research",
+            state = _operation_state_from_upstream(
+                getattr(start_output, "state", None),
+            )
+            status = SimpleNamespace(
+                state=state.value,
+                done=state is OperationState.COMPLETED,
+                notes=["caller requested start-only execution"],
+            )
+            upstream_result = SimpleNamespace(
+                plan=plan,
+                start_output=start_output,
+                final_output=None,
+                statuses=[status],
+                done=state is OperationState.COMPLETED,
+                poll_count=0,
+            )
+            data = _research_operation_data(
+                state,
+                plan=plan,
+                chat=chat,
+                upstream_result=upstream_result,
+                latest_upstream_state=state.value,
+                poll_count=0,
+            )
+            operation_result = _research_domain_result(data)
+            content = _format_deep_research_result(
+                query,
+                upstream_result,
+                model,
+                research_model,
+                model_note,
+                operation_state=state,
+                waited_for_completion=False,
+            )
+            return attach_domain_result(
+                [content],
+                operation_result,
+                use_result_data=True,
             )
 
-async def _run_fallback_deep_research(
-    client: Any,
-    query: str,
-    model: str,
-    model_name: str,
-    thinking_level: str,
-    model_note: str,
-    timeout_seconds: int,
-    retain_chat: bool,
-    delete_after_seconds: int | None,
-) -> list[TextContent]:
-    """Fallback when the client lacks the native plan/start/wait API."""
-    response = await _await_before_deadline(
-        client.generate_content(
-            _format_research_query(query, model, model_note),
-            model=model_name,
-            deep_research=True,
-            thinking_level=thinking_level,
-            timeout=timeout_seconds,
-        ),
-        timeout=timeout_seconds,
-    )
-    schedule_remote_chat_cleanup_from_response(
-        response,
-        retain_chat=retain_chat,
-        delete_after_seconds=delete_after_seconds,
-        source="gemini_deep_research:fallback",
-    )
-    data = _research_operation_data(
-        OperationState.RUNNING,
-        response=response,
-        latest_upstream_state="running",
-    )
-    operation_result = _research_domain_result(data)
-    text = (
-        f"# 📚 Deep Research 计划: {query}\n\n"
-        f"- 请求模型: {model}\n"
-        f"- 实际研究传输: {model_note}\n\n"
-        f"{response.text}\n\n"
-        "⚠️ 当前 gemini-webapi 客户端没有暴露完整研究轮询 API，"
-        "这里只能返回研究计划。"
-    )
-    return domain_text(operation_result, text, use_result_data=True)
-
-def _deep_research_timeout_error(timeout_seconds: int) -> TextContent:
-    return TextContent(
-        type="text",
-        text=f"❌ Deep Research 超时（{timeout_seconds}秒）。\n\n"
-        "请确认：\n1. 您的账户是否有 AI Plus 订阅？\n"
-        "2. 网络和认证状态是否正常？\n"
-        "3. 研究主题是否适合在较短超时时间内完成？"
-    )
-
-def _deep_research_generic_error(e: Exception) -> TextContent:
-    return TextContent(
-        type="text",
-        text=f"❌ Deep Research 失败: {str(e)}\n\n"
-        "请确认：\n1. 您的账户是否有 AI Plus 订阅？\n"
-        "2. 该功能在您所在的区域是否可用？"
-    )
-
-
-def _research_artifact_failure_response(
-    error: Exception,
-    chat_id: str,
-    artifact_type: str,
-) -> list[TextContent]:
-    if isinstance(error, OSError):
-        data = ArtifactResultData(
-            state=ArtifactState.FAILED,
-            request_model=artifact_type,
-            effective_backend="MCP local renderer",
-            observed_backend="filesystem",
-            source_chat_id=chat_id,
-            media_type="research_report",
+        try:
+            if getattr(plan, "research_id", None):
+                upstream_result = await _await_before_deadline(
+                    client.wait_for_deep_research(
+                        plan,
+                        poll_interval=poll_interval,
+                        timeout=timeout_seconds,
+                    ),
+                    timeout=timeout_seconds + poll_interval + 10,
+                )
+            else:
+                upstream_result = await _wait_for_deep_research_by_chat(
+                    client=client,
+                    plan=plan,
+                    chat=chat,
+                    start_output=start_output,
+                    poll_interval=poll_interval,
+                    timeout=timeout_seconds,
+                )
+        except asyncio.TimeoutError:
+            return domain_text(
+                _research_timed_out_result(plan=plan, chat=chat, start_output=start_output),
+                _deep_research_timeout_error(timeout_seconds).text,
+                use_result_data=True,
+            )
+        upstream_result.start_output = start_output
+        state = (
+            OperationState.COMPLETED
+            if getattr(upstream_result, "done", False)
+            else OperationState.TIMED_OUT
         )
-        result = artifact_save_failure_result(
-            error,
-            data,
-            logger=logger,
-            operation="gemini_create_from_research_report",
+        data = _research_operation_data(
+            state,
+            plan=plan,
+            chat=chat,
+            upstream_result=upstream_result,
         )
-        message = "❌ Research report artifact creation failed. Check the output directory and retry."
-    else:
-        data = ArtifactResultData(
-            state=ArtifactState.FAILED,
-            request_model=artifact_type,
-            effective_backend="MCP local renderer",
-            source_chat_id=chat_id,
-            media_type="research_report",
+        operation_result = _research_domain_result(data)
+        content = _format_deep_research_result(
+            query,
+            upstream_result,
+            model,
+            research_model,
+            model_note,
+            operation_state=state,
+            waited_for_completion=True,
         )
-        result = artifact_exception_result(
-            error,
-            data,
-            logger=logger,
-            operation="gemini_create_from_research_report",
-        )
-        message = "❌ Research report artifact creation failed. Inspect the diagnostic ID and retry."
-    return domain_text(result, message, use_result_data=True)
-
-
-def _research_artifact_success_response(
-    artifact: dict,
-    chat_id: str,
-    artifact_type: str,
-    response_format: str,
-) -> list[TextContent]:
-    typed_artifact = artifact_from_local_path(
-        _research_artifact_kind(artifact["path"]),
-        artifact["path"],
-        title=artifact["title"],
-        source_chat_id=chat_id,
-        request_model=artifact_type,
-        effective_backend="MCP local renderer",
-        observed_backend="filesystem",
-    )
-    data = ArtifactResultData(
-        state=typed_artifact.state,
-        artifacts=(typed_artifact,),
-        request_model=artifact_type,
-        effective_backend="MCP local renderer",
-        observed_backend="filesystem",
-        source_chat_id=chat_id,
-        media_type="research_report",
-    )
-    save_failures = ("post_write_verification",) if typed_artifact.state == ArtifactState.FAILED else ()
-    result = artifact_result(data, save_failures=save_failures)
-    if response_format == "json":
         return attach_domain_result(
-            [TextContent(type="text", text=json.dumps(artifact, ensure_ascii=False, indent=2))],
-            result,
+            [content],
+            operation_result,
             use_result_data=True,
         )
-    text = _format_research_report_artifact(artifact)
-    if typed_artifact.state == ArtifactState.FAILED:
-        text = f"❌ Research report artifact could not be verified.\n\n{text}"
-    content = append_artifact_block([TextContent(type="text", text=text)], data.artifacts)
-    return attach_domain_result(content, result, use_result_data=True)
 
+    async def _run_fallback_deep_research(
+        client: Any,
+        query: str,
+        model: str,
+        model_name: str,
+        thinking_level: str,
+        model_note: str,
+        timeout_seconds: int,
+        retain_chat: bool,
+        delete_after_seconds: int | None,
+    ) -> list[TextContent]:
+        """Fallback when the client lacks the native plan/start/wait API."""
+        response = await _await_before_deadline(
+            client.generate_content(
+                _format_research_query(query, model, model_note),
+                model=model_name,
+                deep_research=True,
+                thinking_level=thinking_level,
+                timeout=timeout_seconds,
+            ),
+            timeout=timeout_seconds,
+        )
+        schedule_remote_chat_cleanup_from_response(
+            response,
+            retain_chat=retain_chat,
+            delete_after_seconds=delete_after_seconds,
+            source="gemini_deep_research:fallback",
+        )
+        data = _research_operation_data(
+            OperationState.RUNNING,
+            response=response,
+            latest_upstream_state="running",
+        )
+        operation_result = _research_domain_result(data)
+        text = (
+            f"# 📚 Deep Research 计划: {query}\n\n"
+            f"- 请求模型: {model}\n"
+            f"- 实际研究传输: {model_note}\n\n"
+            f"{response.text}\n\n"
+            "⚠️ 当前 gemini-webapi 客户端没有暴露完整研究轮询 API，"
+            "这里只能返回研究计划。"
+        )
+        return domain_text(operation_result, text, use_result_data=True)
 
-def register_research_tools(mcp: MCPServer):
+    def _deep_research_timeout_error(timeout_seconds: int) -> TextContent:
+        return TextContent(
+            type="text",
+            text=f"❌ Deep Research 超时（{timeout_seconds}秒）。\n\n"
+            "请确认：\n1. 您的账户是否有 AI Plus 订阅？\n"
+            "2. 网络和认证状态是否正常？\n"
+            "3. 研究主题是否适合在较短超时时间内完成？"
+        )
+
+    def _deep_research_generic_error(e: Exception) -> TextContent:
+        return TextContent(
+            type="text",
+            text=f"❌ Deep Research 失败: {str(e)}\n\n"
+            "请确认：\n1. 您的账户是否有 AI Plus 订阅？\n"
+            "2. 该功能在您所在的区域是否可用？"
+        )
 
     @mcp.tool(annotations=MUTATES_REMOTE)
     async def gemini_deep_research(
@@ -606,15 +298,7 @@ def register_research_tools(mcp: MCPServer):
             logger.info(f"正在启动 Deep Research: {query[:50]}...")
             poll_interval = max(3, poll_interval_seconds)
 
-            has_native_api = all(
-                hasattr(client, attr)
-                for attr in (
-                    "create_deep_research_plan",
-                    "start_deep_research",
-                    "wait_for_deep_research",
-                )
-            )
-            if has_native_api:
+            if _has_native_research_api(client):
                 return await _run_native_deep_research(
                     client, query, model, model_name, research_model,
                     thinking_level, model_note, timeout_seconds, poll_interval,
@@ -715,109 +399,77 @@ def register_research_tools(mcp: MCPServer):
                 chat_id=chat_id,
                 output_dir=output_dir,
             )
+        except OSError as error:
+            data = ArtifactResultData(
+                state=ArtifactState.FAILED,
+                request_model=artifact_type,
+                effective_backend="MCP local renderer",
+                observed_backend="filesystem",
+                source_chat_id=chat_id,
+                media_type="research_report",
+            )
+            result = artifact_save_failure_result(
+                error,
+                data,
+                logger=logger,
+                operation="gemini_create_from_research_report",
+            )
+            return domain_text(
+                result,
+                "❌ Research report artifact creation failed. Check the output directory and retry.",
+                use_result_data=True,
+            )
         except Exception as error:
-            return _research_artifact_failure_response(error, chat_id, artifact_type)
+            data = ArtifactResultData(
+                state=ArtifactState.FAILED,
+                request_model=artifact_type,
+                effective_backend="MCP local renderer",
+                source_chat_id=chat_id,
+                media_type="research_report",
+            )
+            result = artifact_exception_result(
+                error,
+                data,
+                logger=logger,
+                operation="gemini_create_from_research_report",
+            )
+            return domain_text(
+                result,
+                "❌ Research report artifact creation failed. Inspect the diagnostic ID and retry.",
+                use_result_data=True,
+            )
 
-        return _research_artifact_success_response(artifact, chat_id, artifact_type, response_format)
-
-
-
-
-async def _create_deep_research_plan(client, query: str, chat, model):
-    try:
-        return await client.create_deep_research_plan(query, chat=chat, model=model)
-    except Exception as e:
-        if not _is_capability_probe_false_negative(e) or not all(
-            hasattr(client, attr)
-            for attr in ("_deep_research_preflight", "_collect_research_output")
-        ):
-            raise
-
-        logger.warning("Deep Research capability probe failed, trying direct research request: %s", e)
-        await client._deep_research_preflight()
-        output = await client._collect_research_output(chat, query)
-        plan = getattr(output, "deep_research_plan", None)
-        if not plan:
-            raise
-        plan.metadata = list(getattr(chat, "metadata", []) or [])
-        plan.cid = getattr(chat, "cid", "") or getattr(plan, "cid", "")
-        if not getattr(plan, "confirm_prompt", ""):
-            plan.confirm_prompt = "Start research"
-        if not getattr(plan, "response_text", ""):
-            plan.response_text = getattr(output, "text", "")
-        return plan
-
-
-def _start_fresh_research_chat(client, model):
-    """Create a chat that is not polluted by gemini_webapi's shared default metadata."""
-    chat = client.start_chat(model=model)
-    for attr in ("cid", "rid", "rcid"):
-        try:
-            setattr(chat, attr, "")
-        except Exception:
-            logger.debug("Could not clear fresh research chat %s", attr)
-    return chat
-
-
-async def _start_deep_research_with_recovery(client, plan, chat, timeout: int):
-    try:
-        return await _await_before_deadline(
-            client.start_deep_research(plan, chat=chat),
-            timeout=timeout,
+        typed_artifact = artifact_from_local_path(
+            _research_artifact_kind(artifact["path"]),
+            artifact["path"],
+            title=artifact["title"],
+            source_chat_id=chat_id,
+            request_model=artifact_type,
+            effective_backend="MCP local renderer",
+            observed_backend="filesystem",
         )
-    except asyncio.TimeoutError:
-        logger.warning("Deep Research start timed out; continuing with chat-history polling")
-        latest = None
-        cid = getattr(chat, "cid", None) or getattr(plan, "cid", None)
-        if cid and hasattr(client, "fetch_latest_chat_response"):
-            latest = await client.fetch_latest_chat_response(cid)
-        return latest or SimpleNamespace(text="", timeout_during_start=True)
-
-
-def _is_capability_probe_false_negative(error: Exception) -> bool:
-    text = str(error)
-    return "appears not eligible for deep research" in text and "Failed: []" in text
-
-
-def _is_default_deep_research_transport(model: Any) -> bool:
-    return getattr(model, "model_name", None) == "unspecified" or model == "unspecified"
-
-
-def _resolve_deep_research_transport_model(requested_model: str) -> tuple[Any, str]:
-    """Return the Gemini Web transport model that is stable for Deep Research."""
-    try:
-        from gemini_webapi.constants import Model
-    except ImportError:
-        return resolve_model_name(requested_model), resolve_model_name(requested_model)
-
-    resolved = resolve_model_name(requested_model)
-    if requested_model in {"", None}:
-        requested_model = "flash"
-
-    if str(requested_model).strip().lower() in {"flash-lite", "lite", "flash", "fast", "pro", "thinking"}:
-        return (
-            Model.UNSPECIFIED,
-            (
-                "Gemini Web default Deep Research mode "
-                f"(requested {requested_model}; explicit model header {resolved} is unstable for this workflow)"
-            ),
+        data = ArtifactResultData(
+            state=typed_artifact.state,
+            artifacts=(typed_artifact,),
+            request_model=artifact_type,
+            effective_backend="MCP local renderer",
+            observed_backend="filesystem",
+            source_chat_id=chat_id,
+            media_type="research_report",
         )
-    return resolved, resolved
-
-
-def _format_research_query(query: str, requested_model: str, model_note: str) -> str:
-    return (
-        f"{query}\n\n"
-        "Deep Research request metadata:\n"
-        f"- Requested MCP model alias: {requested_model}\n"
-        f"- Transport model selection: {model_note}\n"
-        "If Gemini Web allows model-specific Deep Research, use the requested alias; "
-        "otherwise proceed with the account's default Deep Research mode and state that limitation."
-    )
-
-
-def _phase_timeout(timeout_seconds: int) -> int:
-    return max(30, timeout_seconds)
+        save_failures = ("post_write_verification",) if typed_artifact.state == ArtifactState.FAILED else ()
+        result = artifact_result(data, save_failures=save_failures)
+        if response_format == "json":
+            return attach_domain_result(
+                [TextContent(type="text", text=json.dumps(artifact, ensure_ascii=False, indent=2))],
+                result,
+                use_result_data=True,
+            )
+        text = _format_research_report_artifact(artifact)
+        if typed_artifact.state == ArtifactState.FAILED:
+            text = f"❌ Research report artifact could not be verified.\n\n{text}"
+        content = append_artifact_block([TextContent(type="text", text=text)], data.artifacts)
+        return attach_domain_result(content, result, use_result_data=True)
 
 
 async def _wait_for_deep_research_by_chat(
@@ -1517,16 +1169,6 @@ def _title_from_markdown(markdown: str) -> str:
 def _safe_filename(value: str) -> str:
     value = _SAFE_FILENAME_RE.sub("-", value.strip())
     return value.strip("-._")
-
-
-class _null_scope:
-    """Context manager fallback for test doubles and older clients."""
-
-    def __enter__(self):
-        return None
-
-    def __exit__(self, exc_type, exc_value, traceback):
-        return False
 
 
 def _format_deep_research_result(

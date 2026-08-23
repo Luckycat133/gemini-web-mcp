@@ -20,6 +20,7 @@ from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 SKILL_ASSET_BASENAME = "gemini-web-mcp-skill"
+ASSIST_SKILL_ASSET_BASENAME = "gemini-assist-skill"
 CANONICAL_GIT_SOURCE = "git+https://github.com/Luckycat133/gemini-web-mcp@main"
 PROJECT_LICENSE_EXPRESSION = "AGPL-3.0-only"
 PROJECT_LICENSE_FILENAME = "LICENSE"
@@ -61,6 +62,7 @@ _RUNTIME_VERSION_FILES = (
 _SKILL_VERSION_FILES = (
     Path(".agents/skills/gemini-web-mcp/SKILL.md"),
     Path(".agents/skills/gemini-web-mcp-development/SKILL.md"),
+    Path(".agents/skills/gemini-assist/SKILL.md"),
 )
 _SKILL_VERSION = re.compile(
     r'^  version:\s*["\']?(?P<version>[0-9]+\.[0-9]+\.[0-9]+)["\']?\s*$',
@@ -88,6 +90,7 @@ class ReleaseMetadata:
     wheel_filename: str
     sdist_filename: str
     skill_filename: str
+    assist_skill_filename: str
 
 
 def load_release_metadata(project_root: Path = PROJECT_ROOT) -> ReleaseMetadata:
@@ -110,6 +113,7 @@ def load_release_metadata(project_root: Path = PROJECT_ROOT) -> ReleaseMetadata:
         wheel_filename=f"{distribution_basename}-{version}-py3-none-any.whl",
         sdist_filename=f"{distribution_basename}-{version}.tar.gz",
         skill_filename=f"{SKILL_ASSET_BASENAME}-{version}.zip",
+        assist_skill_filename=f"{ASSIST_SKILL_ASSET_BASENAME}-{version}.zip",
     )
 
 
@@ -360,15 +364,18 @@ def release_artifact_errors(
         metadata.wheel_filename,
         metadata.sdist_filename,
         metadata.skill_filename,
+        metadata.assist_skill_filename,
     }
-    required = {metadata.skill_filename}
+    required = {metadata.skill_filename, metadata.assist_skill_filename}
     if require_python:
         required.update({metadata.wheel_filename, metadata.sdist_filename})
 
     files = {path.name: path for path in outdir.iterdir() if path.is_file()} if outdir.is_dir() else {}
     errors = [f"{outdir}: missing release artifact {name}" for name in sorted(required - files.keys())]
 
-    known_asset = re.compile(r"(?:gemini_mcp_server-.+\.(?:whl|tar\.gz)|gemini-web-mcp-skill-.+\.zip)")
+    known_asset = re.compile(
+        r"(?:gemini_mcp_server-.+\.(?:whl|tar\.gz)|gemini-web-mcp-skill-.+\.zip|gemini-assist-skill-.+\.zip)"
+    )
     stale_assets = sorted(name for name in files if known_asset.fullmatch(name) and name not in expected_all)
     errors.extend(f"{outdir}: stale or mismatched release artifact {name}" for name in stale_assets)
 
@@ -398,4 +405,9 @@ def require_release_artifacts(
 def expected_release_artifacts(metadata: ReleaseMetadata) -> Sequence[str]:
     """Return deterministic release asset names for display and tests."""
 
-    return (metadata.wheel_filename, metadata.sdist_filename, metadata.skill_filename)
+    return (
+        metadata.wheel_filename,
+        metadata.sdist_filename,
+        metadata.skill_filename,
+        metadata.assist_skill_filename,
+    )

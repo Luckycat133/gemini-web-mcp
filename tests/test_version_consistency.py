@@ -56,12 +56,14 @@ def _write_valid_release_artifacts(tmp_path: Path, metadata) -> None:
         archive.addfile(info, io.BytesIO(license_contents))
 
     (tmp_path / metadata.skill_filename).touch()
+    (tmp_path / metadata.assist_skill_filename).touch()
 
 
 def _write_active_version_consumers(tmp_path: Path, metadata) -> None:
     for relative_path in (
         ".agents/skills/gemini-web-mcp/SKILL.md",
         ".agents/skills/gemini-web-mcp-development/SKILL.md",
+        ".agents/skills/gemini-assist/SKILL.md",
     ):
         target = tmp_path / relative_path
         target.parent.mkdir(parents=True, exist_ok=True)
@@ -249,6 +251,13 @@ def test_release_asset_names_and_wheel_metadata_are_derived_from_pyproject(tmp_p
         f"{tmp_path}: stale or mismatched release artifact {stale_asset.name}"
     ]
 
+    stale_assist_asset = tmp_path / "gemini-assist-skill-9.8.7.zip"
+    stale_assist_asset.touch()
+    assert release_artifact_errors(tmp_path, metadata) == [
+        f"{tmp_path}: stale or mismatched release artifact {stale_assist_asset.name}",
+        f"{tmp_path}: stale or mismatched release artifact {stale_asset.name}",
+    ]
+
 
 def test_release_artifacts_reject_missing_license_metadata_and_files(tmp_path):
     metadata = load_release_metadata(PROJECT_ROOT)
@@ -262,6 +271,7 @@ def test_release_artifacts_reject_missing_license_metadata_and_files(tmp_path):
     with tarfile.open(tmp_path / metadata.sdist_filename, "w:gz"):
         pass
     (tmp_path / metadata.skill_filename).touch()
+    (tmp_path / metadata.assist_skill_filename).touch()
 
     errors = release_artifact_errors(tmp_path, metadata)
 

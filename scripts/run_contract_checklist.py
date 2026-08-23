@@ -20,6 +20,7 @@ CONTRACT_TESTS = (
     "tests/test_artifacts.py",
     "tests/test_manage_gem_verification_contract.py",
     "tests/test_rpc_contracts.py",
+    "tests/test_upstream_compatibility.py",
     "tests/test_live_canary.py",
     "tests/test_package_integrity.py",
     "tests/test_onboarding.py",
@@ -28,6 +29,7 @@ CONTRACT_TESTS = (
     "tests/test_evaluations.py",
     "tests/test_development_skill.py",
     "tests/test_skill_packaging.py",
+    "tests/test_assist_skill.py",
     "tests/test_ci_contracts.py",
 )
 

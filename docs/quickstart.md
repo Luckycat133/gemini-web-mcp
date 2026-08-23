@@ -73,6 +73,7 @@ Codex、Claude Desktop、Claude Code 和 VS Code 的逐文件示例见
 | `GEMINI_TOOLS=model` | 文本/模型调用的首选起点 |
 | `GEMINI_TOOLS=core` | 图片、视频、音乐、文件、URL 或 Deep Research |
 | `gemini-mcp-skill-server` | 需要固定十一工具、低 token facade |
+| `gemini-mcp-assist` | 只需要第二意见、有据搜索、图像/混合输入理解或异步 Deep Research 的专注五工具面 |
 | `GEMINI_TOOLS=all` | 维护者验证账号、历史和管理能力；不适合作为通用默认 |
 
 ## 5. 显式实时验证

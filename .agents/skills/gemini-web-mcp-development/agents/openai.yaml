@@ -1,4 +1,4 @@
 interface:
   display_name: "Gemini Web MCP Development"
-  short_description: "Evolve and verify the current agent-first Gemini Web MCP gateway"
-  default_prompt: "Inspect the current tree, package/tag/ClawHub versions, latest CI, and live evidence. Treat the Cookie authentication boundary, single .agents skill source, compact low-token facade, and reliability-before-UI-parity direction as settled. Reproduce the requested defect or gap, change the lowest shared owner, add focused tests, run package/protocol/experience checks, and separate the remaining owner-level product decisions."
+  short_description: "Build focused Gemini assistance, creation, and account MCP products"
+  default_prompt: "Inspect the current tree and evidence, then implement the smallest vertical slice within the settled three-product architecture: gemini-assist, gemini-create, or gemini-account. Keep public tools gemini_-prefixed, catalogs small and deterministic, Skills task-first, execution in shared services, generated outputs Artifact-first, and long work restart-safe through explicit SQLite-backed operation handles. Add focused contracts, trigger and agent-use evaluations, protocol/package checks, and honest live evidence."

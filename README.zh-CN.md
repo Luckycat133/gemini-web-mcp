@@ -2,7 +2,7 @@
   <img src="docs/assets/gemini-web-mcp-banner.svg" alt="Gemini Web MCP" width="100%">
 </p>
 
-<h1 align="center">Gemini Web MCP Server (v0.2.0)</h1>
+<h1 align="center">Gemini Web MCP Server (v0.2.1)</h1>
 
 <p align="center">
   <a href="https://github.com/Luckycat133/gemini-web-mcp/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/Luckycat133/gemini-web-mcp/actions/workflows/ci.yml/badge.svg"></a>
@@ -62,12 +62,13 @@
 - 智能错误处理
 
 ### 📦 Skill 分发
-- 运行时 skill：`.agents/skills/gemini-web-mcp`
+- 运行时 skill：`.agents/skills/gemini-web-mcp`（兼容路由）
+- 专注 assistance skill：`.agents/skills/gemini-assist`（第二意见、有据搜索、图像/混合输入理解、异步 Deep Research，入口 `gemini-mcp-assist`）
 - 仓库开发 skill：`.agents/skills/gemini-web-mcp-development`
-- ClawHub 统一版本为 `0.2.0`，包含安全文案补丁；当前仓库运行时 skill 也为 `0.2.0`，可使用 `clawhub install gemini-web-mcp` 安装
+- ClawHub 统一版本为 `0.2.1`，包含安全文案补丁；当前仓库运行时 skill 也为 `0.2.1`，可使用 `clawhub install gemini-web-mcp` 安装
 - `.agents/skills` 是唯一仓库来源，避免同时扫描 `.agents` 与 `.codex` 的客户端重复发现同名 skill
-- 两个 skill 都可直接从 GitHub 安装，并在 CI 中验证
-- Tag release 工作流构建 standalone skill zip、wheel 和源码包
+- 各 skill 都可直接从 GitHub 安装，并在 CI 中验证
+- Tag release 工作流构建 standalone skill zip（`gemini-web-mcp` 与 `gemini-assist`）、wheel 和源码包
 - `docs/launch-kit.md` 提供社交媒体发布文案和分发清单
 
 ClawHub 上的三文件运行 skill 包按 MIT-0 分发；MCP 服务器源码和仓库开发 skill 继续使用
@@ -480,7 +481,7 @@ primary/compact 间共享 typed result，删除只有在回读确认后才算已
 聊天的 `verified_absent` 删除；该测试不是专用账号全量 canary，也未覆盖媒体、文件、URL、Deep Research
 或账号 mutation。仍需完成更广的 live 基线、其他管理动作的 typed result、跨重启持久化 cleanup，以及
 共享的长任务 job API。
-当前仓库的 Python 包、运行时 skill 与开发 skill 已统一为 `0.2.0`；重写后的 Git 历史与发布引用均使用统一的 `0.2.0` 版本。
+当前仓库的 Python 包、运行时 skill 与开发 skill 已统一为 `0.2.1`；重写后的 Git 历史与发布引用均使用统一的 `0.2.1` 版本。
 
 完整的“已实现 / 部分完成 / 延后 / owner 决策”边界见
 [开发状态与下一步](docs/development-status.md)。离线 CI 和打包通过不等于已经观察到当前 Gemini Web 行为。

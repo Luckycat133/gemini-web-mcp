@@ -29,7 +29,7 @@ else:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--tag", help="Release tag to compare with pyproject.toml (for example v0.2.0)")
+    parser.add_argument("--tag", help="Release tag to compare with pyproject.toml (for example v0.2.1)")
     parser.add_argument("--artifacts-dir", type=Path, help="Also validate built wheel/sdist/skill asset names")
     parser.add_argument(
         "--skip-python-assets",
