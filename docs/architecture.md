@@ -42,17 +42,22 @@
 ```
 gemini-mcp-server/
 ├── pyproject.toml          # 项目配置
+├── MANIFEST.in             # sdist 打包清单
+├── LICENSE                 # AGPL-3.0-only（runtime Skill 为 MIT-0）
 ├── README.md               # 项目文档（英文公开首页）
 ├── README.zh-CN.md         # 中文 README
 ├── AGENTS.md               # 仓库协作规范
 ├── .env.example            # 环境变量示例
 ├── .gitignore             # Git 忽略规则
+├── glama.json              # Glama 注册表元数据
+├── skills-lock.json        # 外部 skills CLI 锁文件
 ├── src/
 │   ├── __init__.py        # 包初始化（安装包元数据版本）
 │   ├── resources.py       # importlib.resources 包内数据入口
 │   ├── data/              # wheel 内不可变资源（默认 prompts）
 │   ├── server.py          # MCP 服务器主入口（primary surface）
 │   ├── skill_server.py    # 低 token skill 服务器（facade surface）
+│   ├── onboarding.py      # 安装自检入口（gemini-mcp-onboarding）
 │   ├── client_wrapper.py  # Gemini 客户端封装
 │   ├── client_manager.py  # 客户端生命周期管理
 │   ├── cookie_manager.py  # Cookie 加载/验证/刷新
@@ -78,6 +83,7 @@ gemini-mcp-server/
 │       ├── prompts.py     # 本地 prompt 管理
 │       └── manage.py      # 管理工具兼容注册适配器，不是 compact 依赖
 ├── tests/                 # pytest 测试套件（test_*.py）
+├── examples/clients/      # 可解析校验的客户端配置样例
 ├── evaluations/           # MCP contract evaluation prompts（gemini_web_mcp_contract.xml）
 ├── compatibility/         # Live canary 报告 schema 与上游依赖矩阵
 ├── scripts/               # 打包/发布、协议 smoke 与 opt-in canary CLI
@@ -86,18 +92,24 @@ gemini-mcp-server/
 └── docs/                  # 完整文档系统
     ├── README.md          # 文档中心
     ├── quickstart.md      # 快速开始
+    ├── client-examples.md # 客户端安装与验证配置
+    ├── cookie-setup.md    # Cookie 获取指南
+    ├── configuration.md   # 环境变量配置
     ├── tools.md           # 工具使用
     ├── models.md          # 模型选择
-    ├── configuration.md   # 配置说明
+    ├── api-reference.md   # 内部 API 参考
     ├── faq.md             # 常见问题
     ├── architecture.md    # 技术架构
+    ├── mcp-sdk-compatibility.md # MCP SDK 与客户端兼容性
     ├── changelog.md       # 更新历史
     ├── development-status.md # 已实现、部分完成与 owner 决策
     ├── troubleshooting.md # 故障排查
     ├── contributing.md    # 贡献指南
     ├── manual-testing.md  # 实机测试清单
     ├── live-ui-coverage.md # 网页端能力对照
-    └── launch-kit.md      # 发布分发套件
+    ├── live-canary.md     # 隔离 live 兼容性探针
+    ├── launch-kit.md      # 发布分发套件
+    └── assets/            # 文档图片资源
 ```
 
 ---
