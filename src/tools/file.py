@@ -1,7 +1,8 @@
 import asyncio
+from dataclasses import dataclass
 import logging
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 from urllib.parse import urlparse
 
 from ..adapters.mcp_sdk import MCPServer, TextContent
@@ -79,6 +80,56 @@ def _analysis_content(
     return append_artifact_block(content, data.artifacts, heading="Output artifacts")
 
 
+def _response_result_text(response: Any) -> str:
+    """Assemble the shared text body: upstream text plus images and chat id."""
+    result_text: str = response.text
+    if response.images:
+        result_text += "\n\n📷 Images in response:\n"
+        for i, img in enumerate(response.images, 1):
+            img_info = f"{i}. {img.title or 'Untitled image'}"
+            if hasattr(img, "url"):
+                img_info += f": {img.url}"
+            result_text += f"\n{img_info}"
+    remote_chat_id = response_chat_id(response)
+    if remote_chat_id:
+        result_text += f"\n\nRemote chat ID: {remote_chat_id}"
+    return result_text
+
+
+@dataclass(frozen=True)
+class _AnalysisContext:
+    """Shared identity fields for the upload/URL analysis tools."""
+
+    requested_model: str
+    request_model: str
+    effective_backend: str
+    media_type: str
+    operation: str
+    source_artifact: Artifact
+
+
+def _analysis_failure_response(error: Exception, context: _AnalysisContext, message: str) -> list[TextContent]:
+    data = ArtifactResultData(
+        state=ArtifactState.FAILED,
+        input_artifacts=(context.source_artifact,),
+        requested_model=context.requested_model,
+        request_model=context.request_model,
+        effective_backend=context.effective_backend,
+        media_type=context.media_type,
+    )
+    result = artifact_exception_result(
+        error,
+        data,
+        logger=logger,
+        operation=context.operation,
+    )
+    return attach_domain_result(
+        [TextContent(type="text", text=message)],
+        result,
+        use_result_data=True,
+    )
+
+
 def register_file_tools(mcp: MCPServer) -> None:
     """Register all file and URL related MCP tools.
 
@@ -136,6 +187,14 @@ def register_file_tools(mcp: MCPServer) -> None:
             request_model=model_name,
             effective_backend=model_name,
         )
+        context = _AnalysisContext(
+            requested_model=model,
+            request_model=model_name,
+            effective_backend=model_name,
+            media_type="file_analysis",
+            operation="gemini_upload_file",
+            source_artifact=source_artifact,
+        )
 
         logger.info(f"上传文件: {safe_file_path}")
 
@@ -153,7 +212,7 @@ def register_file_tools(mcp: MCPServer) -> None:
                 timeout=60,
             )
 
-            result_text = response.text
+            result_text = _response_result_text(response)
             schedule_remote_chat_cleanup_from_response(
                 response,
                 retain_chat=retain_chat,
@@ -161,17 +220,7 @@ def register_file_tools(mcp: MCPServer) -> None:
                 source="gemini_upload_file",
             )
 
-            if response.images:
-                result_text += "\n\n📷 Images in response:\n"
-                for i, img in enumerate(response.images, 1):
-                    img_info = f"{i}. {img.title or 'Untitled image'}"
-                    if hasattr(img, "url"):
-                        img_info += f": {img.url}"
-                    result_text += f"\n{img_info}"
             remote_chat_id = response_chat_id(response)
-            if remote_chat_id:
-                result_text += f"\n\nRemote chat ID: {remote_chat_id}"
-
             observed_backend = observed_backend_from_response(response)
             outputs = extract_response_artifacts(
                 response,
@@ -208,45 +257,9 @@ def register_file_tools(mcp: MCPServer) -> None:
             )
             return attach_domain_result(content, result, use_result_data=True)
         except asyncio.TimeoutError as error:
-            data = ArtifactResultData(
-                state=ArtifactState.FAILED,
-                input_artifacts=(source_artifact,),
-                requested_model=model,
-                request_model=model_name,
-                effective_backend=model_name,
-                media_type="file_analysis",
-            )
-            result = artifact_exception_result(
-                error,
-                data,
-                logger=logger,
-                operation="gemini_upload_file",
-            )
-            return attach_domain_result(
-                [TextContent(type="text", text="❌ Error: 文件分析超时，请检查认证状态或稍后重试。")],
-                result,
-                use_result_data=True,
-            )
+            return _analysis_failure_response(error, context, "❌ Error: 文件分析超时，请检查认证状态或稍后重试。")
         except Exception as e:
-            data = ArtifactResultData(
-                state=ArtifactState.FAILED,
-                input_artifacts=(source_artifact,),
-                requested_model=model,
-                request_model=model_name,
-                effective_backend=model_name,
-                media_type="file_analysis",
-            )
-            result = artifact_exception_result(
-                e,
-                data,
-                logger=logger,
-                operation="gemini_upload_file",
-            )
-            return attach_domain_result(
-                [TextContent(type="text", text=f"❌ Error: {str(e)}")],
-                result,
-                use_result_data=True,
-            )
+            return _analysis_failure_response(e, context, f"❌ Error: {str(e)}")
 
     @mcp.tool(annotations=MUTATES_REMOTE)
     async def gemini_analyze_url(
@@ -311,6 +324,15 @@ def register_file_tools(mcp: MCPServer) -> None:
 
         logger.info(f"分析 URL: {valid_url}")
 
+        context = _AnalysisContext(
+            requested_model=model,
+            request_model=model_name,
+            effective_backend=model_name,
+            media_type="url_analysis",
+            operation="gemini_analyze_url",
+            source_artifact=source_artifact,
+        )
+
         try:
             response = await asyncio.wait_for(
                 client.generate_content(
@@ -322,7 +344,7 @@ def register_file_tools(mcp: MCPServer) -> None:
                 timeout=60,
             )
 
-            result_text = response.text
+            result_text = _response_result_text(response)
             schedule_remote_chat_cleanup_from_response(
                 response,
                 retain_chat=retain_chat,
@@ -330,17 +352,7 @@ def register_file_tools(mcp: MCPServer) -> None:
                 source="gemini_analyze_url",
             )
 
-            if response.images:
-                result_text += "\n\n📷 Images in response:\n"
-                for i, img in enumerate(response.images, 1):
-                    img_info = f"{i}. {img.title or 'Untitled image'}"
-                    if hasattr(img, "url"):
-                        img_info += f": {img.url}"
-                    result_text += f"\n{img_info}"
             remote_chat_id = response_chat_id(response)
-            if remote_chat_id:
-                result_text += f"\n\nRemote chat ID: {remote_chat_id}"
-
             observed_backend = observed_backend_from_response(response)
             outputs = extract_response_artifacts(
                 response,
@@ -378,42 +390,6 @@ def register_file_tools(mcp: MCPServer) -> None:
                 use_result_data=True,
             )
         except asyncio.TimeoutError as error:
-            data = ArtifactResultData(
-                state=ArtifactState.FAILED,
-                input_artifacts=(source_artifact,),
-                requested_model=model,
-                request_model=model_name,
-                effective_backend=model_name,
-                media_type="url_analysis",
-            )
-            result = artifact_exception_result(
-                error,
-                data,
-                logger=logger,
-                operation="gemini_analyze_url",
-            )
-            return attach_domain_result(
-                [TextContent(type="text", text="❌ Error: URL 分析超时，请稍后重试。")],
-                result,
-                use_result_data=True,
-            )
+            return _analysis_failure_response(error, context, "❌ Error: URL 分析超时，请稍后重试。")
         except Exception as e:
-            data = ArtifactResultData(
-                state=ArtifactState.FAILED,
-                input_artifacts=(source_artifact,),
-                requested_model=model,
-                request_model=model_name,
-                effective_backend=model_name,
-                media_type="url_analysis",
-            )
-            result = artifact_exception_result(
-                e,
-                data,
-                logger=logger,
-                operation="gemini_analyze_url",
-            )
-            return attach_domain_result(
-                [TextContent(type="text", text=f"❌ Error: {str(e)}")],
-                result,
-                use_result_data=True,
-            )
+            return _analysis_failure_response(e, context, f"❌ Error: {str(e)}")

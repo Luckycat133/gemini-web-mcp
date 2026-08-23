@@ -4,6 +4,7 @@
 """
 
 from ..adapters.mcp_sdk import MCPServer, TextContent
+from dataclasses import dataclass
 from typing import Literal, Optional, Dict, List
 import json
 import os
@@ -125,6 +126,120 @@ def get_prompt_manager() -> PromptManager:
         return _prompt_manager
 
 
+
+@dataclass(frozen=True)
+class _PromptFields:
+    """Optional prompt attributes shared by the create/update actions."""
+
+    name: Optional[str]
+    content: Optional[str]
+    category: Optional[str]
+    description: Optional[str]
+
+
+def _prompt_list_text(manager: PromptManager, category: Optional[str]) -> list[TextContent]:
+    prompts = manager.list_prompts(category=category)
+    if not prompts:
+        cat_text = f" (分类: {category})" if category else ""
+        return [TextContent(type="text", text=f"暂无提示词{cat_text}。")]
+    
+    prompt_list = ["## 📝 预设提示词"]
+    if category:
+        prompt_list.append(f"**分类**: {category}")
+    prompt_list.append("")
+    
+    for i, item in enumerate(prompts, 1):
+        prompt_list.append(f"{i}. {item['name']} (ID: {item['id']})")
+        prompt_list.append(f"   分类: {item['category']}")
+        if item.get('description'):
+            prompt_list.append(f"   描述: {item['description']}")
+        prompt_list.append("")
+    
+    return [TextContent(type="text", text="\n".join(prompt_list))]
+
+
+def _prompt_categories_text(manager: PromptManager) -> list[TextContent]:
+    categories = manager.list_categories()
+    if not categories:
+        return [TextContent(type="text", text="暂无分类。")]
+    
+    category_list = ["## 🏷️ 提示词分类"]
+    for i, cat in enumerate(categories, 1):
+        count = len([p for p in manager.prompts.values() if p['category'] == cat])
+        category_list.append(f"{i}. {cat} ({count} 个提示词)")
+    
+    return [TextContent(type="text", text="\n".join(category_list))]
+
+
+def _prompt_get_text(manager: PromptManager, prompt_id: Optional[str]) -> list[TextContent]:
+    if not prompt_id:
+        return [TextContent(type="text", text="❌ 需要提供 prompt_id。")]
+    
+    prompt = manager.get_prompt(prompt_id)
+    if not prompt:
+        return [TextContent(type="text", text=f"❌ 未找到 ID 为 {prompt_id} 的提示词。")]
+    
+    prompt_detail = f"""## {prompt['name']}
+**ID**: {prompt['id']}
+**分类**: {prompt['category']}
+**创建时间**: {prompt['created_at']}
+**更新时间**: {prompt['updated_at']}
+
+### 描述
+{prompt.get('description', '无描述')}
+
+### 提示词内容
+```
+{prompt['content']}
+```
+"""
+    return [TextContent(type="text", text=prompt_detail)]
+
+
+def _prompt_create_text(manager: PromptManager, fields: _PromptFields) -> list[TextContent]:
+    if not fields.name or not fields.content:
+        return [TextContent(type="text", text="❌ 创建提示词需要提供 name 和 content。")]
+    
+    prompt_id = manager.create_prompt(
+        name=fields.name,
+        content=fields.content,
+        category=fields.category or "通用",
+        description=fields.description or ""
+    )
+    return [TextContent(
+        type="text",
+        text=f"✅ 提示词创建成功！\nID: {prompt_id}\n名称: {fields.name}\n分类: {fields.category or '通用'}"
+    )]
+
+
+def _prompt_update_text(manager: PromptManager, prompt_id: Optional[str], fields: _PromptFields) -> list[TextContent]:
+    if not prompt_id:
+        return [TextContent(type="text", text="❌ 更新提示词需要提供 prompt_id。")]
+    
+    success = manager.update_prompt(
+        prompt_id=prompt_id,
+        name=fields.name,
+        content=fields.content,
+        category=fields.category,
+        description=fields.description
+    )
+    if success:
+        return [TextContent(type="text", text=f"✅ 提示词 {prompt_id} 更新成功。")]
+    else:
+        return [TextContent(type="text", text=f"❌ 未找到 ID 为 {prompt_id} 的提示词。")]
+
+
+def _prompt_delete_text(manager: PromptManager, prompt_id: Optional[str]) -> list[TextContent]:
+    if not prompt_id:
+        return [TextContent(type="text", text="❌ 删除提示词需要提供 prompt_id。")]
+    
+    success = manager.delete_prompt(prompt_id)
+    if success:
+        return [TextContent(type="text", text=f"✅ 提示词 {prompt_id} 删除成功。")]
+    else:
+        return [TextContent(type="text", text=f"❌ 未找到 ID 为 {prompt_id} 的提示词。")]
+
+
 def register_prompts_tools(mcp: MCPServer):
 
     @mcp.tool(annotations=DESTRUCTIVE_LOCAL)
@@ -151,101 +266,17 @@ def register_prompts_tools(mcp: MCPServer):
 
         try:
             if action == "list":
-                prompts = manager.list_prompts(category=category)
-                if not prompts:
-                    cat_text = f" (分类: {category})" if category else ""
-                    return [TextContent(type="text", text=f"暂无提示词{cat_text}。")]
-                
-                prompt_list = ["## 📝 预设提示词"]
-                if category:
-                    prompt_list.append(f"**分类**: {category}")
-                prompt_list.append("")
-                
-                for i, item in enumerate(prompts, 1):
-                    prompt_list.append(f"{i}. {item['name']} (ID: {item['id']})")
-                    prompt_list.append(f"   分类: {item['category']}")
-                    if item.get('description'):
-                        prompt_list.append(f"   描述: {item['description']}")
-                    prompt_list.append("")
-                
-                return [TextContent(type="text", text="\n".join(prompt_list))]
-
-            elif action == "list_categories":
-                categories = manager.list_categories()
-                if not categories:
-                    return [TextContent(type="text", text="暂无分类。")]
-                
-                category_list = ["## 🏷️ 提示词分类"]
-                for i, cat in enumerate(categories, 1):
-                    count = len([p for p in manager.prompts.values() if p['category'] == cat])
-                    category_list.append(f"{i}. {cat} ({count} 个提示词)")
-                
-                return [TextContent(type="text", text="\n".join(category_list))]
-
-            elif action == "get":
-                if not prompt_id:
-                    return [TextContent(type="text", text="❌ 需要提供 prompt_id。")]
-                
-                prompt = manager.get_prompt(prompt_id)
-                if not prompt:
-                    return [TextContent(type="text", text=f"❌ 未找到 ID 为 {prompt_id} 的提示词。")]
-                
-                prompt_detail = f"""## {prompt['name']}
-**ID**: {prompt['id']}
-**分类**: {prompt['category']}
-**创建时间**: {prompt['created_at']}
-**更新时间**: {prompt['updated_at']}
-
-### 描述
-{prompt.get('description', '无描述')}
-
-### 提示词内容
-```
-{prompt['content']}
-```
-"""
-                return [TextContent(type="text", text=prompt_detail)]
-
-            elif action == "create":
-                if not name or not content:
-                    return [TextContent(type="text", text="❌ 创建提示词需要提供 name 和 content。")]
-                
-                prompt_id = manager.create_prompt(
-                    name=name,
-                    content=content,
-                    category=category or "通用",
-                    description=description or ""
-                )
-                return [TextContent(
-                    type="text",
-                    text=f"✅ 提示词创建成功！\nID: {prompt_id}\n名称: {name}\n分类: {category or '通用'}"
-                )]
-
-            elif action == "update":
-                if not prompt_id:
-                    return [TextContent(type="text", text="❌ 更新提示词需要提供 prompt_id。")]
-                
-                success = manager.update_prompt(
-                    prompt_id=prompt_id,
-                    name=name,
-                    content=content,
-                    category=category,
-                    description=description
-                )
-                if success:
-                    return [TextContent(type="text", text=f"✅ 提示词 {prompt_id} 更新成功。")]
-                else:
-                    return [TextContent(type="text", text=f"❌ 未找到 ID 为 {prompt_id} 的提示词。")]
-
-            elif action == "delete":
-                if not prompt_id:
-                    return [TextContent(type="text", text="❌ 删除提示词需要提供 prompt_id。")]
-                
-                success = manager.delete_prompt(prompt_id)
-                if success:
-                    return [TextContent(type="text", text=f"✅ 提示词 {prompt_id} 删除成功。")]
-                else:
-                    return [TextContent(type="text", text=f"❌ 未找到 ID 为 {prompt_id} 的提示词。")]
+                return _prompt_list_text(manager, category)
+            if action == "list_categories":
+                return _prompt_categories_text(manager)
+            if action == "get":
+                return _prompt_get_text(manager, prompt_id)
+            if action == "create":
+                return _prompt_create_text(manager, _PromptFields(name=name, content=content, category=category, description=description))
+            if action == "update":
+                return _prompt_update_text(manager, prompt_id, _PromptFields(name=name, content=content, category=category, description=description))
+            if action == "delete":
+                return _prompt_delete_text(manager, prompt_id)
 
             return [TextContent(type="text", text="❌ 无效的 action。")]
 

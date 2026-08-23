@@ -310,6 +310,201 @@ def _restore_client_timeouts(
         client.watchdog_timeout = previous_watchdog_timeout
 
 
+@dataclass(frozen=True)
+class _MediaJob:
+    """Immutable request context shared across media generation phases."""
+
+    prompt: str
+    media_type: str
+    requested_model: str
+    request_model: str | None
+    backend_label: str
+    effective_alias: str
+    note: str
+    files: list[str] | None
+    safe_image_path: str | None
+    input_artifacts: tuple[Artifact, ...]
+    timeout_seconds: int
+
+
+_GENERATION_PROMPTS = {
+    "image": "Generate an image. Prompt: {prompt}",
+    "video": "Generate a video using Gemini's video generation capability. Prompt: {prompt}",
+    "music": "Create music/audio using Gemini's music generation capability. Prompt: {prompt}",
+}
+
+
+def _generation_prompt(job: _MediaJob) -> str:
+    return _GENERATION_PROMPTS[job.media_type].format(prompt=job.prompt)
+
+
+def _media_failure_response(error: Exception, job: _MediaJob, message: str) -> list[TextContent]:
+    failure_data = ArtifactResultData(
+        state=ArtifactState.FAILED,
+        requested_model=job.requested_model,
+        request_model=job.request_model,
+        effective_backend=job.backend_label,
+        input_artifacts=job.input_artifacts,
+        media_type=job.media_type,
+    )
+    result = artifact_exception_result(
+        error,
+        failure_data,
+        logger=logger,
+        operation=f"gemini_generate_media:{job.media_type}",
+    )
+    return attach_domain_result([TextContent(type="text", text=message)], result, use_result_data=True)
+
+
+async def _recover_music_media(client: object, response: object, job: _MediaJob) -> tuple[list, tuple[Artifact, ...]]:
+    if job.media_type != "music" or (getattr(response, "media", None) or []):
+        return [], ()
+    remote_chat_id = response_chat_id(response)
+    try:
+        recovered_media = await _fetch_music_media_from_chat(client, remote_chat_id or "")
+    except Exception as e:
+        logger.warning("无法从远端 chat 恢复音乐媒体 URL: %s", e)
+        return [], ()
+    recovered_artifacts = extract_response_artifacts(
+        SimpleNamespace(
+            images=[],
+            videos=[],
+            media=recovered_media,
+            metadata=[remote_chat_id] if remote_chat_id else [],
+        ),
+        media_type=job.media_type,
+        requested_backend=job.requested_model,
+        request_model=job.request_model,
+        effective_backend=job.backend_label,
+        observed_backend=observed_backend_from_response(response),
+    )
+    return recovered_media, recovered_artifacts
+
+
+@dataclass(frozen=True)
+class _MediaOutcome:
+    parsed: list[TextContent]
+    artifacts_data: ArtifactResultData
+    result: DomainResult
+    save_outcome: "_MediaSaveOutcome"
+
+
+async def _build_media_outcome(
+    client: object,
+    response: object,
+    job: _MediaJob,
+    output_dir: Optional[str],
+    filename: Optional[str],
+) -> _MediaOutcome:
+    parsed = parse_response(response, job.effective_alias)
+    remote_chat_id = response_chat_id(response)
+    observed_backend = observed_backend_from_response(response)
+    remote_artifacts = extract_response_artifacts(
+        response,
+        media_type=job.media_type,
+        requested_backend=job.requested_model,
+        request_model=job.request_model,
+        effective_backend=job.backend_label,
+        observed_backend=observed_backend,
+    )
+    recovered_media, recovered_artifacts = await _recover_music_media(client, response, job)
+    save_outcome = await _save_generated_media(
+        response,
+        media_type=job.media_type,
+        output_dir=output_dir,
+        filename=filename,
+        prompt=job.prompt,
+        media_items=recovered_media or None,
+        requested_model=job.requested_model,
+        request_model=cast("str", job.request_model),
+        effective_backend=job.backend_label,
+        observed_backend=observed_backend,
+        source_chat_id=remote_chat_id,
+    )
+    if save_outcome.lines:
+        parsed[0].text = f"{parsed[0].text}\n\nSaved files:\n" + "\n".join(save_outcome.lines)
+    artifacts = merge_artifacts(
+        remote_artifacts,
+        recovered_artifacts,
+        save_outcome.artifacts,
+    )
+    input_artifacts = job.input_artifacts
+    if job.safe_image_path:
+        input_artifacts = (
+            artifact_from_local_path(
+                ArtifactKind.IMAGE,
+                job.safe_image_path,
+                title=Path(job.safe_image_path).name,
+                requested_backend=job.requested_model,
+                request_model=job.request_model,
+                effective_backend=job.backend_label,
+                observed_backend=observed_backend,
+                source_chat_id=remote_chat_id,
+            ),
+        )
+    artifact_state = classify_artifact_state(response, artifacts)
+    if artifact_state == ArtifactState.EMPTY and save_outcome.failures:
+        artifact_state = ArtifactState.FAILED
+    data = ArtifactResultData(
+        state=artifact_state,
+        artifacts=artifacts,
+        input_artifacts=input_artifacts,
+        requested_model=job.requested_model,
+        request_model=job.request_model,
+        effective_backend=job.backend_label,
+        observed_backend=observed_backend,
+        source_chat_id=remote_chat_id,
+        media_type=job.media_type,
+    )
+    result = artifact_result(data, save_failures=save_outcome.failures)
+    return _MediaOutcome(parsed=parsed, artifacts_data=data, result=result, save_outcome=save_outcome)
+
+
+def _finalize_media_content(
+    parsed: list[TextContent],
+    job: _MediaJob,
+    data: ArtifactResultData,
+    response: object,
+    save_outcome: "_MediaSaveOutcome",
+) -> list[TextContent]:
+    if save_outcome.failures and data.state != ArtifactState.FAILED:
+        parsed[0].text = (
+            f"{parsed[0].text}\n\n"
+            "⚠️ Local artifact save was incomplete; use the remote URI or retry with another output directory."
+        )
+    note_lines = [f"后端: {job.backend_label}"]
+    if job.note:
+        note_lines.append(job.note)
+    if job.media_type == "image":
+        note_lines.append("说明: Pro redo 属于网页生成后的二次操作，不是独立首轮生成模型。")
+    content = _prepend_backend_note(parsed, note_lines)
+    if data.state == ArtifactState.FAILED:
+        content[0].text = (
+            f"{content[0].text}\n\n"
+            f"❌ {job.media_type} 产物未能保存或通过本地验证。请检查输出目录后重试。"
+        )
+        return append_artifact_block(content, data.artifacts)
+    if data.state == ArtifactState.EMPTY:
+        empty_message = (
+            f"⚠️ {job.media_type} 请求已完成，但没有返回可验证的媒体产物。"
+            if (getattr(response, "text", "") or "").strip()
+            else f"⚠️ {job.media_type} 请求已完成，但没有返回文本、图片、视频或音乐资源。"
+        )
+        content[0].text = (
+            f"{content[0].text}\n\n"
+            f"{empty_message}"
+            "请换更明确的生成提示词，或稍后重试。"
+        )
+        return content
+    if data.state == ArtifactState.QUEUED:
+        content[0].text = (
+            f"{content[0].text}\n\n"
+            f"⏳ {job.media_type} 请求已进入上游队列，尚未返回可验证产物。"
+        )
+        return content
+    return append_artifact_block(content, data.artifacts)
+
+
 def register_media_tools(mcp: MCPServer):
 
     @mcp.tool(annotations=MUTATES_REMOTE)
@@ -342,27 +537,7 @@ def register_media_tools(mcp: MCPServer):
         await initialize_client()
         await cleanup_due_remote_chats(client)
         media_request = resolve_media_request(model, media_type, thinking_level)
-        model_name = media_request["request_model"]
         effective_timeout = _media_timeout(media_type, timeout_seconds)
-        prompts = {
-            "image": f"Generate an image. Prompt: {prompt}",
-            "video": (
-                "Generate a video using Gemini's video generation capability. "
-                f"Prompt: {prompt}"
-            ),
-            "music": (
-                "Create music/audio using Gemini's music generation capability. "
-                f"Prompt: {prompt}"
-            ),
-        }
-        logger.info(
-            "正在生成 %s，requested_model=%s effective_model=%s backend=%s",
-            media_type,
-            model,
-            media_request["effective_alias"],
-            media_request["backend_label"],
-        )
-        files = [safe_image_path] if safe_image_path else None
         input_artifacts: tuple[Artifact, ...] = ()
         if safe_image_path:
             input_artifacts = (
@@ -371,10 +546,30 @@ def register_media_tools(mcp: MCPServer):
                     safe_image_path,
                     title=Path(safe_image_path).name,
                     requested_backend=model,
-                    request_model=model_name,
+                    request_model=media_request["request_model"],
                     effective_backend=media_request["backend_label"],
                 ),
             )
+        job = _MediaJob(
+            prompt=prompt,
+            media_type=media_type,
+            requested_model=model,
+            request_model=media_request["request_model"],
+            backend_label=media_request["backend_label"],
+            effective_alias=media_request["effective_alias"],
+            note=media_request["note"],
+            files=[safe_image_path] if safe_image_path else None,
+            safe_image_path=safe_image_path,
+            input_artifacts=input_artifacts,
+            timeout_seconds=effective_timeout,
+        )
+        logger.info(
+            "正在生成 %s，requested_model=%s effective_model=%s backend=%s",
+            media_type,
+            model,
+            media_request["effective_alias"],
+            media_request["backend_label"],
+        )
         previous_timeout, previous_watchdog_timeout = _set_client_timeouts(
             client,
             effective_timeout,
@@ -382,66 +577,36 @@ def register_media_tools(mcp: MCPServer):
         try:
             response = await asyncio.wait_for(
                 client.generate_content(
-                    prompt=prompts[media_type],
-                    files=files,
-                    model=model_name,
+                    prompt=_generation_prompt(job),
+                    files=job.files,
+                    model=job.request_model,
                     thinking_level=thinking_level,
                     timeout=effective_timeout,
                 ),
                 timeout=effective_timeout,
             )
         except asyncio.TimeoutError as error:
-            failure_data = ArtifactResultData(
-                state=ArtifactState.FAILED,
-                requested_model=model,
-                request_model=model_name,
-                effective_backend=media_request["backend_label"],
-                input_artifacts=input_artifacts,
-                media_type=media_type,
-            )
-            result = artifact_exception_result(
+            return _media_failure_response(
                 error,
-                failure_data,
-                logger=logger,
-                operation=f"gemini_generate_media:{media_type}",
+                job,
+                (
+                    f"后端: {job.backend_label}\n"
+                    f"❌ {job.media_type} 生成超时: {job.timeout_seconds}s 内没有收到完整结果。"
+                    "视频/音乐通常需要更长时间或会被 Gemini Web 上游排队；"
+                    "可增大 timeout_seconds 后重试。"
+                ),
             )
-            return attach_domain_result([
-                TextContent(
-                    type="text",
-                    text=(
-                        f"后端: {media_request['backend_label']}\n"
-                        f"❌ {media_type} 生成超时: {effective_timeout}s 内没有收到完整结果。"
-                        "视频/音乐通常需要更长时间或会被 Gemini Web 上游排队；"
-                        "可增大 timeout_seconds 后重试。"
-                    ),
-                )
-            ], result, use_result_data=True)
         except Exception as e:
-            failure_data = ArtifactResultData(
-                state=ArtifactState.FAILED,
-                requested_model=model,
-                request_model=model_name,
-                effective_backend=media_request["backend_label"],
-                input_artifacts=input_artifacts,
-                media_type=media_type,
-            )
-            result = artifact_exception_result(
+            return _media_failure_response(
                 e,
-                failure_data,
-                logger=logger,
-                operation=f"gemini_generate_media:{media_type}",
+                job,
+                (
+                    f"后端: {job.backend_label}\n"
+                    f"❌ {job.media_type} 生成失败: {str(e)}\n"
+                    "说明: 当前封装通过 Gemini Web 的通用 generate_content 触发媒体能力，"
+                    "视频/音乐可能被上游静默中止或长时间排队。"
+                ),
             )
-            return attach_domain_result([
-                TextContent(
-                    type="text",
-                    text=(
-                        f"后端: {media_request['backend_label']}\n"
-                        f"❌ {media_type} 生成失败: {str(e)}\n"
-                        "说明: 当前封装通过 Gemini Web 的通用 generate_content 触发媒体能力，"
-                        "视频/音乐可能被上游静默中止或长时间排队。"
-                    ),
-                )
-            ], result, use_result_data=True)
         finally:
             _restore_client_timeouts(
                 client,
@@ -449,130 +614,15 @@ def register_media_tools(mcp: MCPServer):
                 previous_watchdog_timeout,
             )
 
-        parsed = parse_response(response, media_request["effective_alias"])
-        remote_chat_id = response_chat_id(response)
-        observed_backend = observed_backend_from_response(response)
-        remote_artifacts = extract_response_artifacts(
-            response,
-            media_type=media_type,
-            requested_backend=model,
-            request_model=model_name,
-            effective_backend=media_request["backend_label"],
-            observed_backend=observed_backend,
-        )
-        recovered_media = []
-        if media_type == "music" and not (getattr(response, "media", None) or []):
-            try:
-                recovered_media = await _fetch_music_media_from_chat(client, remote_chat_id or "")
-            except Exception as e:
-                logger.warning("无法从远端 chat 恢复音乐媒体 URL: %s", e)
-        recovered_artifacts: tuple[Artifact, ...] = ()
-        if recovered_media:
-            recovered_artifacts = extract_response_artifacts(
-                SimpleNamespace(
-                    images=[],
-                    videos=[],
-                    media=recovered_media,
-                    metadata=[remote_chat_id] if remote_chat_id else [],
-                ),
-                media_type=media_type,
-                requested_backend=model,
-                request_model=model_name,
-                effective_backend=media_request["backend_label"],
-                observed_backend=observed_backend,
-            )
-        save_outcome = await _save_generated_media(
-            response,
-            media_type=media_type,
-            output_dir=output_dir,
-            filename=filename,
-            prompt=prompt,
-            media_items=recovered_media or None,
-            requested_model=model,
-            request_model=model_name,
-            effective_backend=media_request["backend_label"],
-            observed_backend=observed_backend,
-            source_chat_id=remote_chat_id,
-        )
-        if save_outcome.lines:
-            parsed[0].text = f"{parsed[0].text}\n\nSaved files:\n" + "\n".join(save_outcome.lines)
-        artifacts = merge_artifacts(
-            remote_artifacts,
-            recovered_artifacts,
-            save_outcome.artifacts,
-        )
-        if safe_image_path:
-            input_artifacts = (
-                artifact_from_local_path(
-                    ArtifactKind.IMAGE,
-                    safe_image_path,
-                    title=Path(safe_image_path).name,
-                    requested_backend=model,
-                    request_model=model_name,
-                    effective_backend=media_request["backend_label"],
-                    observed_backend=observed_backend,
-                    source_chat_id=remote_chat_id,
-                ),
-            )
-        artifact_state = classify_artifact_state(response, artifacts)
-        if artifact_state == ArtifactState.EMPTY and save_outcome.failures:
-            artifact_state = ArtifactState.FAILED
-        data = ArtifactResultData(
-            state=artifact_state,
-            artifacts=artifacts,
-            input_artifacts=input_artifacts,
-            requested_model=model,
-            request_model=model_name,
-            effective_backend=media_request["backend_label"],
-            observed_backend=observed_backend,
-            source_chat_id=remote_chat_id,
-            media_type=media_type,
-        )
-        result = artifact_result(data, save_failures=save_outcome.failures)
+        outcome = await _build_media_outcome(client, response, job, output_dir, filename)
         schedule_remote_chat_cleanup_from_response(
             response,
             retain_chat=retain_chat,
             delete_after_seconds=delete_after_seconds,
-            source=f"gemini_generate_media:{media_type}",
+            source=f"gemini_generate_media:{job.media_type}",
         )
-        if save_outcome.failures and data.state != ArtifactState.FAILED:
-            parsed[0].text = (
-                f"{parsed[0].text}\n\n"
-                "⚠️ Local artifact save was incomplete; use the remote URI or retry with another output directory."
-            )
-        note_lines = [f"后端: {media_request['backend_label']}"]
-        if media_request["note"]:
-            note_lines.append(media_request["note"])
-        if media_type == "image":
-            note_lines.append("说明: Pro redo 属于网页生成后的二次操作，不是独立首轮生成模型。")
-        content = _prepend_backend_note(parsed, note_lines)
-        if data.state == ArtifactState.FAILED:
-            content[0].text = (
-                f"{content[0].text}\n\n"
-                f"❌ {media_type} 产物未能保存或通过本地验证。请检查输出目录后重试。"
-            )
-            content = append_artifact_block(content, data.artifacts)
-            return attach_domain_result(content, result, use_result_data=True)
-        if data.state == ArtifactState.EMPTY:
-            empty_message = (
-                f"⚠️ {media_type} 请求已完成，但没有返回可验证的媒体产物。"
-                if (getattr(response, "text", "") or "").strip()
-                else f"⚠️ {media_type} 请求已完成，但没有返回文本、图片、视频或音乐资源。"
-            )
-            content[0].text = (
-                f"{content[0].text}\n\n"
-                f"{empty_message}"
-                "请换更明确的生成提示词，或稍后重试。"
-            )
-            return attach_domain_result(content, result, use_result_data=True)
-        if data.state == ArtifactState.QUEUED:
-            content[0].text = (
-                f"{content[0].text}\n\n"
-                f"⏳ {media_type} 请求已进入上游队列，尚未返回可验证产物。"
-            )
-            return attach_domain_result(content, result, use_result_data=True)
-        content = append_artifact_block(content, data.artifacts)
-        return attach_domain_result(content, result, use_result_data=True)
+        content = _finalize_media_content(outcome.parsed, job, outcome.artifacts_data, response, outcome.save_outcome)
+        return attach_domain_result(content, outcome.result, use_result_data=True)
 
     @mcp.tool(annotations=MUTATES_REMOTE)
     async def gemini_generate_music(

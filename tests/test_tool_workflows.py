@@ -513,24 +513,24 @@ def test_skill_server_tools_have_mcp_annotations():
 
 
 def test_doctor_payload_reports_profile_alignment_without_cookie_values(monkeypatch):
-    import src.tools.manage as manage_tools
+    import shutil as shutil_module
+    import os as os_module
+
+    from src.services.doctor import doctor_payload
 
     monkeypatch.setenv("GEMINI_TOOLS", "core")
-    monkeypatch.setattr(
-        manage_tools,
-        "get_cookie_status",
-        lambda: {
+
+    def fake_cookie_status():
+        return {
             "available": True,
             "has_cookie": False,
             "needs_refresh": False,
             "status": "missing",
             "source": "none",
-        },
-    )
-    monkeypatch.setattr(
-        manage_tools,
-        "list_browser_cookie_profiles",
-        lambda browser, validate=False: [
+        }
+
+    def fake_profiles(browser, validate=False):
+        return [
             {
                 "browser": browser,
                 "profile": "Default",
@@ -551,12 +551,17 @@ def test_doctor_payload_reports_profile_alignment_without_cookie_values(monkeypa
                 "account_available": True if validate else None,
                 "scheduled_registry_count": 0 if validate else None,
             },
-        ],
-    )
-    monkeypatch.setattr(manage_tools.shutil, "which", lambda name: "/opt/homebrew/bin/ffprobe" if name == "ffprobe" else None)
-    monkeypatch.setattr(manage_tools.os.path, "isdir", lambda path: path.endswith("generated_media"))
+        ]
 
-    payload = manage_tools._doctor_payload(browser="chrome", validate_browser=True)
+    monkeypatch.setattr(shutil_module, "which", lambda name: "/opt/homebrew/bin/ffprobe" if name == "ffprobe" else None)
+    monkeypatch.setattr(os_module.path, "isdir", lambda path: path.endswith("generated_media"))
+
+    payload = doctor_payload(
+        browser="chrome",
+        validate_browser=True,
+        cookie_status_provider=fake_cookie_status,
+        profile_provider=fake_profiles,
+    )
     text = json.dumps(payload, ensure_ascii=False)
 
     assert payload["overall_status"] == "warn"

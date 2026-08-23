@@ -18,9 +18,9 @@ ffprobe/generated_media_dir 的 warn 路径与 recommendations 触发未测。
 """
 
 import json
-
-import src.tools.manage as manage_tools
-from src.tools.manage import (
+import os
+import shutil
+from src.services.doctor import (
     _doctor_check,
     _doctor_overall_status,
     _doctor_payload,
@@ -30,22 +30,20 @@ from src.tools.manage import (
 
 def _patch_doctor_env(monkeypatch, *, cookie_status, browser_profiles=None,
                       ffprobe_path="/opt/ffprobe", media_dir_exists=True):
-    """统一 patch doctor_payload 的 4 个外部依赖。"""
+    """打桩 ffprobe/media 目录；返回需显式注入 doctor_payload 的 provider kwargs。"""
     monkeypatch.setenv("GEMINI_TOOLS", "core")
-    monkeypatch.setattr(manage_tools, "get_cookie_status", lambda: cookie_status)
+    providers: dict = {"cookie_status_provider": lambda: cookie_status}
     if browser_profiles is not None:
-        monkeypatch.setattr(
-            manage_tools, "list_browser_cookie_profiles",
-            lambda browser, validate=False: browser_profiles,
-        )
+        providers["profile_provider"] = lambda browser, validate=False: browser_profiles
     monkeypatch.setattr(
-        manage_tools.shutil, "which",
+        shutil, "which",
         lambda name: ffprobe_path if name == "ffprobe" else None,
     )
     monkeypatch.setattr(
-        manage_tools.os.path, "isdir",
+        os.path, "isdir",
         lambda path: media_dir_exists if path.endswith("generated_media") else False,
     )
+    return providers
 
 
 # ---------------------------------------------------------------------------
@@ -187,8 +185,8 @@ def test_format_doctor_markdown_detail_whitelist_only_renders_four_keys():
 
 def test_payload_cookie_status_manager_unavailable(monkeypatch):
     """cookie manager 不可用 → cookie_status check 为 warn，details 为空。"""
-    _patch_doctor_env(monkeypatch, cookie_status={"available": False})
-    payload = _doctor_payload(browser="", validate_browser=False)
+    env = _patch_doctor_env(monkeypatch, cookie_status={"available": False})
+    payload = _doctor_payload(browser="", validate_browser=False, **env)
     cookie_check = next(c for c in payload["checks"] if c["name"] == "cookie_status")
     assert cookie_check["status"] == "warn"
     assert "unavailable" in cookie_check["message"].lower()
@@ -197,11 +195,11 @@ def test_payload_cookie_status_manager_unavailable(monkeypatch):
 
 def test_payload_cookie_status_needs_refresh(monkeypatch):
     """needs_refresh=True → warn，details 含 source 与 cookie_status。"""
-    _patch_doctor_env(monkeypatch, cookie_status={
+    env = _patch_doctor_env(monkeypatch, cookie_status={
         "available": True, "has_cookie": True, "needs_refresh": True,
         "status": "expiring", "source": "browser_chrome",
     })
-    payload = _doctor_payload(browser="", validate_browser=False)
+    payload = _doctor_payload(browser="", validate_browser=False, **env)
     cookie_check = next(c for c in payload["checks"] if c["name"] == "cookie_status")
     assert cookie_check["status"] == "warn"
     assert "refreshed" in cookie_check["message"].lower()
@@ -211,11 +209,11 @@ def test_payload_cookie_status_needs_refresh(monkeypatch):
 
 def test_payload_cookie_status_ok(monkeypatch):
     """has_cookie=True + needs_refresh=False → ok，details 含 source。"""
-    _patch_doctor_env(monkeypatch, cookie_status={
+    env = _patch_doctor_env(monkeypatch, cookie_status={
         "available": True, "has_cookie": True, "needs_refresh": False,
         "status": "loaded", "source": "env",
     })
-    payload = _doctor_payload(browser="", validate_browser=False)
+    payload = _doctor_payload(browser="", validate_browser=False, **env)
     cookie_check = next(c for c in payload["checks"] if c["name"] == "cookie_status")
     assert cookie_check["status"] == "ok"
     assert cookie_check["details"].get("source") == "env"
@@ -228,8 +226,8 @@ def test_payload_cookie_status_ok(monkeypatch):
 
 def test_payload_browser_empty_skips_browser_check(monkeypatch):
     """browser='' → browser_profiles check 为 skip，browser_profiles 列表为空。"""
-    _patch_doctor_env(monkeypatch, cookie_status={"available": True, "has_cookie": True, "needs_refresh": False})
-    payload = _doctor_payload(browser="", validate_browser=False)
+    env = _patch_doctor_env(monkeypatch, cookie_status={"available": True, "has_cookie": True, "needs_refresh": False})
+    payload = _doctor_payload(browser="", validate_browser=False, **env)
     browser_check = next(c for c in payload["checks"] if c["name"] == "browser_profiles")
     assert browser_check["status"] == "skip"
     assert "disabled" in browser_check["message"].lower()
@@ -237,17 +235,17 @@ def test_payload_browser_empty_skips_browser_check(monkeypatch):
 
 
 def test_payload_browser_all_errors_warn(monkeypatch):
-    """list_browser_cookie_profiles 抛异常 → fallback error 条目，check 为 warn(errors)。"""
+    """profile_provider 抛异常 → fallback error 条目，check 为 warn(errors)。"""
     def raise_error(browser, validate=False):
         raise RuntimeError("permission denied")
-    monkeypatch.setenv("GEMINI_TOOLS", "core")
-    monkeypatch.setattr(manage_tools, "get_cookie_status",
-                       lambda: {"available": True, "has_cookie": True, "needs_refresh": False})
-    monkeypatch.setattr(manage_tools, "list_browser_cookie_profiles", raise_error)
-    monkeypatch.setattr(manage_tools.shutil, "which", lambda name: "/ff")
-    monkeypatch.setattr(manage_tools.os.path, "isdir", lambda path: True)
+    env = _patch_doctor_env(
+        monkeypatch,
+        cookie_status={"available": True, "has_cookie": True, "needs_refresh": False},
+        browser_profiles=None,
+    )
+    env["profile_provider"] = raise_error
 
-    payload = _doctor_payload(browser="chrome", validate_browser=False)
+    payload = _doctor_payload(browser="chrome", validate_browser=False, **env)
     browser_check = next(c for c in payload["checks"] if c["name"] == "browser_profiles")
     assert browser_check["status"] == "warn"
     assert "errors" in browser_check["details"]
@@ -257,11 +255,11 @@ def test_payload_browser_all_errors_warn(monkeypatch):
 
 def test_payload_browser_no_psid_warn(monkeypatch):
     """所有 profile 都无 psid → browser_profiles check 为 warn(profiles)。"""
-    _patch_doctor_env(monkeypatch, cookie_status={"available": True, "has_cookie": True, "needs_refresh": False},
+    env = _patch_doctor_env(monkeypatch, cookie_status={"available": True, "has_cookie": True, "needs_refresh": False},
                       browser_profiles=[
                           {"browser": "chrome", "profile": "Default", "has_psid": False, "has_psidts": False, "cookie_count": 0},
                       ])
-    payload = _doctor_payload(browser="chrome", validate_browser=False)
+    payload = _doctor_payload(browser="chrome", validate_browser=False, **env)
     browser_check = next(c for c in payload["checks"] if c["name"] == "browser_profiles")
     assert browser_check["status"] == "warn"
     assert "profiles" in browser_check["details"]
@@ -269,14 +267,14 @@ def test_payload_browser_no_psid_warn(monkeypatch):
 
 def test_payload_browser_alignment_ok(monkeypatch):
     """selected profile 有 psid → browser_profile_alignment check 为 ok。"""
-    _patch_doctor_env(monkeypatch, cookie_status={"available": True, "has_cookie": True, "needs_refresh": False},
+    env = _patch_doctor_env(monkeypatch, cookie_status={"available": True, "has_cookie": True, "needs_refresh": False},
                       browser_profiles=[
                           {"browser": "chrome", "profile": "Default", "has_psid": True, "has_psidts": True,
                            "cookie_count": 10, "chrome_selected_profile": True,
                            "chrome_selected_profile_directory": "Default",
                            "account_available": True, "scheduled_registry_count": 2},
                       ])
-    payload = _doctor_payload(browser="chrome", validate_browser=False)
+    payload = _doctor_payload(browser="chrome", validate_browser=False, **env)
     alignment_check = next(c for c in payload["checks"] if c["name"] == "browser_profile_alignment")
     assert alignment_check["status"] == "ok"
     assert alignment_check["details"].get("selected_profile") == "Default"
@@ -289,9 +287,9 @@ def test_payload_browser_alignment_ok(monkeypatch):
 
 def test_payload_ffprobe_missing_warns_and_recommends(monkeypatch):
     """ffprobe 缺失 → ffprobe check 为 warn，recommendations 含安装提示。"""
-    _patch_doctor_env(monkeypatch, cookie_status={"available": True, "has_cookie": True, "needs_refresh": False},
+    env = _patch_doctor_env(monkeypatch, cookie_status={"available": True, "has_cookie": True, "needs_refresh": False},
                       browser_profiles=[], ffprobe_path=None)
-    payload = _doctor_payload(browser="", validate_browser=False)
+    payload = _doctor_payload(browser="", validate_browser=False, **env)
     ffprobe_check = next(c for c in payload["checks"] if c["name"] == "ffprobe")
     assert ffprobe_check["status"] == "warn"
     assert "path" not in ffprobe_check["details"]  # None 被过滤
@@ -300,9 +298,9 @@ def test_payload_ffprobe_missing_warns_and_recommends(monkeypatch):
 
 def test_payload_generated_media_dir_missing_warns(monkeypatch):
     """generated_media 目录不存在 → generated_media_dir check 为 warn。"""
-    _patch_doctor_env(monkeypatch, cookie_status={"available": True, "has_cookie": True, "needs_refresh": False},
+    env = _patch_doctor_env(monkeypatch, cookie_status={"available": True, "has_cookie": True, "needs_refresh": False},
                       browser_profiles=[], media_dir_exists=False)
-    payload = _doctor_payload(browser="", validate_browser=False)
+    payload = _doctor_payload(browser="", validate_browser=False, **env)
     media_check = next(c for c in payload["checks"] if c["name"] == "generated_media_dir")
     assert media_check["status"] == "warn"
     assert "does not exist" in media_check["message"]
@@ -310,41 +308,41 @@ def test_payload_generated_media_dir_missing_warns(monkeypatch):
 
 def test_payload_validate_browser_false_recommends_validation(monkeypatch):
     """validate_browser=False → recommendations 含 'validate_browser=true' 提示。"""
-    _patch_doctor_env(monkeypatch, cookie_status={"available": True, "has_cookie": True, "needs_refresh": False},
+    env = _patch_doctor_env(monkeypatch, cookie_status={"available": True, "has_cookie": True, "needs_refresh": False},
                       browser_profiles=[])
-    payload = _doctor_payload(browser="", validate_browser=False)
+    payload = _doctor_payload(browser="", validate_browser=False, **env)
     assert any("validate_browser=true" in r for r in payload["recommendations"])
 
 
 def test_payload_overall_status_warn_when_cookie_warn(monkeypatch):
     """cookie_status 为 warn 时 overall_status 也为 warn（即使其他全 ok）。"""
-    _patch_doctor_env(monkeypatch, cookie_status={"available": False},
+    env = _patch_doctor_env(monkeypatch, cookie_status={"available": False},
                       browser_profiles=[])
-    payload = _doctor_payload(browser="", validate_browser=False)
+    payload = _doctor_payload(browser="", validate_browser=False, **env)
     assert payload["overall_status"] == "warn"
 
 
 def test_payload_overall_status_ok_when_all_ok(monkeypatch):
     """所有 check 为 ok 时 overall_status 为 ok。"""
-    _patch_doctor_env(monkeypatch, cookie_status={"available": True, "has_cookie": True, "needs_refresh": False},
+    env = _patch_doctor_env(monkeypatch, cookie_status={"available": True, "has_cookie": True, "needs_refresh": False},
                       browser_profiles=[
                           {"browser": "chrome", "profile": "Default", "has_psid": True, "has_psidts": True,
                            "cookie_count": 5, "chrome_selected_profile": True,
                            "chrome_selected_profile_directory": "Default",
                            "account_available": True, "scheduled_registry_count": 0},
                       ])
-    payload = _doctor_payload(browser="chrome", validate_browser=False)
+    payload = _doctor_payload(browser="chrome", validate_browser=False, **env)
     assert payload["overall_status"] == "ok"
 
 
 def test_payload_does_not_leak_cookie_values(monkeypatch):
     """_doctor_payload 归一化 browser_profiles 时丢弃非白名单字段（如 cookie_value）。"""
-    _patch_doctor_env(monkeypatch, cookie_status={"available": True, "has_cookie": True, "needs_refresh": False},
+    env = _patch_doctor_env(monkeypatch, cookie_status={"available": True, "has_cookie": True, "needs_refresh": False},
                       browser_profiles=[
                           {"browser": "chrome", "profile": "Default", "has_psid": True,
                            "cookie_value": "__Secure-1PSID=secret", "extra_field": "leak"},
                       ])
-    payload = _doctor_payload(browser="chrome", validate_browser=False)
+    payload = _doctor_payload(browser="chrome", validate_browser=False, **env)
     text = json.dumps(payload, ensure_ascii=False)
     assert "secret" not in text.lower()
     assert "__Secure-1PSID" not in text
