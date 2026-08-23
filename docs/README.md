@@ -33,6 +33,7 @@
 - [环境变量配置](./configuration.md) - 环境变量与常量说明
 - [MCP Contract Evaluation](../evaluations/gemini_web_mcp_contract.xml) - 只读工具选择与安全元数据评估
 - [运行时 Skill](../.agents/skills/gemini-web-mcp/SKILL.md) - 操作已安装 MCP 工具的 agent 使用流程
+- [Assistance Skill](../.agents/skills/gemini-assist/SKILL.md) - 专注 assistance 服务器（`gemini-mcp-assist`）的 agent 使用流程
 - [开发 Skill](../.agents/skills/gemini-web-mcp-development/SKILL.md) - 仓库架构、测试、打包和发布流程
 
 ### 参考资料
@@ -63,6 +64,7 @@
 | 媒体生成 | 图像(Nano Banana 2), 视频(Veo 3.1), 音乐(Lyria 3 / Lyria 3 Pro) |
 | 推荐工具面 | 文本从 `model` 开始，多模态用 `core`，低 token 用 compact，`all` 仅维护验证 |
 | Deep Research | ✅ AI Plus 支持 |
+| Assistance 专用面 | ✅ `gemini-mcp-assist`：五工具确定性目录（ask/搜索/图像理解/混合理解/异步 Research） |
 | Gem 管理 | ✅ 自定义助手管理 |
 | MCP 评估 | ✅ 17 个只读 contract-level QA |
 | Agent Skills | ✅ 运行时/开发 skill 分离，`.agents/skills` 为唯一仓库来源 |

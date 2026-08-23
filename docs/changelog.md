@@ -9,6 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Added the first focused product surface `gemini-assist`: the `gemini-mcp-assist` console entrypoint runs the `gemini_assist_mcp` server with a deterministic five-tool catalog — `gemini_ask`, `gemini_search`, `gemini_understand_image`, `gemini_understand`, and `gemini_research` — for second opinions, grounded current-web search, image/screenshot understanding, typed mixed-input understanding, and asynchronous Deep Research.
+- Added the truthful grounded-search contract: `grounding_state` is `grounded` only with observed source URLs, and source-free answers are reported as `answer_only` (with `unavailable` and `failed` as distinct states); reported sources are deduplicated, capped, and counted.
+- Added typed mixed-input understanding: `gemini_understand` accepts up to 16 typed inputs (text, image, file, URL) with stable caller-supplied ids and per-input `accepted`/`analyzed`/`skipped`/`failed` outcomes; `analyzed` requires per-input evidence (a referenced `[id]` or a sole accepted input) rather than request-level inference.
+- Added asynchronous Deep Research start: `gemini_research` returns an opaque high-entropy `operation_id` handle immediately, preserves `upstream_operation_id`/`upstream_chat_id` in structured metadata, and retains the research chat by default so the report stays recoverable.
+- Added the `gemini-assist` runtime Skill with an intent-based trigger description, offline trigger-boundary content contracts (positive assistance intents plus generation/account/development near-miss negatives), and packaging as a required `gemini-assist-skill-*.zip` release asset validated by CI and release workflows.
+- Added the assist entrypoint to the real stdio protocol smoke (modern and legacy negotiation modes) with a credential-free representative `gemini_search` call.
+
+### Changed
+- Extracted the shared Deep Research start-phase workflow into `src/services/research.py`; the compatibility `gemini_deep_research` tool now reuses it with unchanged behavior, removing the duplicated start orchestration and the drifted timeout literal.
+- Declared `pydantic` as a direct runtime dependency to match the new typed `gemini_understand` input schema (`maxItems: 16`) and the repository dependency contract.
+- Updated the compatibility `gemini-web-mcp` runtime Skill to route pure assistance workloads to the focused `gemini-assist` Skill and to state that `gemini-create` and `gemini-account` are not implemented yet.
+
 ## [0.2.1] - 2026-08-21
 
 ### Changed

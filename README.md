@@ -120,6 +120,12 @@ Run the compact, low-token facade:
 gemini-mcp-skill-server
 ```
 
+Run the focused assistance surface (second opinions, grounded search, image/mixed-input understanding, async Deep Research):
+
+```bash
+gemini-mcp-assist
+```
+
 See [copyable Codex, Claude Desktop, Claude Code, and VS Code configurations plus verified text/image walkthroughs](docs/client-examples.md). Live examples require explicit account opt-in; no live Gemini request is part of PR CI.
 
 ## Tool Profiles
