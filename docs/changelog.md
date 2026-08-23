@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Removed
+- Deleted the legacy `docs/release-notes-2026-05-23.md` snapshot (fully superseded by this changelog) and its documentation-index link
+- Removed the external `python-mcp-server-generator` scaffolding skill from `.agents/skills/`, its `.claude/` and `.codex/` discovery symlinks, and its `skills-lock.json` entry; it generates new MCP servers and was unused by this repository
+
+### Changed
+- Deduplicated `src/tools/manage.py`: 14 helpers byte-equivalent to `services/history` / `services/account` implementations are now imported instead of re-implemented (~130 lines removed); behavior verified by the typed-parity contract
+- Split `register_manage_tools` (1563 lines) into a shared conditional decorator factory plus 12 domain-scoped registration helpers called in the original order; in-process tool delegation resolves through an explicitly passed registry with precise typing
+- Restructured oversized functions without behavior change: doctor/cleanup payload builders split into step helpers, research deep-research helpers hoisted to module level, and skill-server history tool split into per-action helpers; no MCP tool name, schema, annotation, or response changed
+
 ### Fixed
 - Hardened research source extraction: percent-encoded gstatic icon paths (e.g. `/fav%69con.ico`) can no longer bypass the favicon filter, non-domain hostnames (IPv6 literals, embedded whitespace, invalid ports) are rejected, blank source titles are dropped, and duplicate sources are detected on a normalized scheme/host/default-port/path/query key instead of raw URL strings
 
