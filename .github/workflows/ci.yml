@@ -175,7 +175,7 @@ jobs:
       - name: Verify generated asset names and wheel metadata
         run: python scripts/check_version_consistency.py --artifacts-dir dist
       - name: Set up pinned uv
-        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
       - name: Verify one-command onboarding in an isolated uv environment
         working-directory: ${{ runner.temp }}
         run: uvx --from "$GITHUB_WORKSPACE"/dist/*.whl gemini-mcp-onboarding
@@ -195,7 +195,7 @@ jobs:
           cd "$RUNNER_TEMP"
           "$RUNNER_TEMP/gemini-wheel-smoke/bin/python" "$GITHUB_WORKSPACE/scripts/smoke_mcp_protocol.py"
       - name: Upload verified distributions for inspection
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: distributions-${{ github.sha }}
           path: dist/*
