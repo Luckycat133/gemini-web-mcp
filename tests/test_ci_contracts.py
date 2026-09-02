@@ -17,7 +17,7 @@ CI_WORKFLOW = PROJECT_ROOT / ".github" / "workflows" / "ci.yml"
 RELEASE_WORKFLOW = PROJECT_ROOT / ".github" / "workflows" / "release.yml"
 LIVE_CANARY_WORKFLOW = PROJECT_ROOT / ".github" / "workflows" / "live-canary.yml"
 SKILLS_REF_SHA = "38a2ff82958afee88dadf4831509e6f7e9d8ef4e"
-SETUP_UV_SHA = "08807647e7069bb48b6ef5acd8ec9567f424441b"
+SETUP_UV_SHA = "20cfd1bf945f4377ade1205e4dbc17946fc9a30d"
 SKILLS_CLI_VERSION = "1.5.21"
 
 
@@ -172,7 +172,7 @@ def test_live_canary_is_opt_in_offline_separated_and_reports_drift_to_one_issue(
     assert "vars.GEMINI_LIVE_CANARY_DEDICATED_ACCOUNT == 'true'" in workflow
     assert "inputs.run_live == true" in workflow
     assert "--allow-live-account" in workflow
-    assert "actions/upload-artifact@v4" in workflow
+    assert "actions/upload-artifact@v7" in workflow
     assert "actions/github-script@v9" in workflow
     assert 'const title = "[live-canary] Gemini Web compatibility drift"' in workflow
     assert "issues.createComment" in workflow
