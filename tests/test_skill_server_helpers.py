@@ -57,6 +57,7 @@ from src.skill_server import (
     _init_default_prompts,
     _normalize_media_type,
     _normalize_model,
+    _skill_media_result,
     _scheduled_create,
     _scheduled_delete,
     _scheduled_get,
@@ -195,6 +196,22 @@ def test_normalize_media_type_is_case_insensitive():
 def _ns(**kwargs):
     """构造带属性访问的 SimpleNamespace response。"""
     return SimpleNamespace(**kwargs)
+
+
+def test_compact_video_empty_result_points_to_dedicated_mode():
+    response = _ns(text="Video is not available in this chat", images=[], videos=[], media=[])
+    data, result = _skill_media_result(
+        response,
+        (),
+        requested_model="flash",
+        request_model="gemini-3-flash",
+        effective_backend="Gemini Web generic chat",
+        media_type="video",
+    )
+    assert data.state.value == "empty"
+    assert result.error is not None
+    assert result.error.retryable is False
+    assert "https://gemini.google.com/videos" in result.error.suggested_action
 
 
 def test_format_response_text_only():
@@ -1282,6 +1299,38 @@ def test_create_returns_error_when_image_invalid(monkeypatch):
     assert result[0].text == "Error: bad image"
 
 
+def test_compact_creation_rejects_blank_prompt_and_edit_path_before_client(monkeypatch):
+    monkeypatch.setattr(
+        skill_server,
+        "get_gemini_client",
+        lambda: (_ for _ in ()).throw(AssertionError("client must not be accessed")),
+    )
+    for result in (
+        _run(skill_server.create(prompt="  ")),
+        _run(skill_server.edit(image_path="reference.png", prompt="  ")),
+        _run(skill_server.edit(image_path="  ", prompt="make it blue")),
+    ):
+        assert result[0].meta["domain_result"]["error"]["code"] == "INVALID_ARGUMENT"
+
+
+def test_compact_creation_retains_unfinished_chat(monkeypatch):
+    response = _ns(text="queued", images=[], videos=[], media=[], status="processing", metadata=["c_pending"])
+    client = SimpleNamespace(generate_content=AsyncMock(return_value=response))
+    _patch_client_seams(monkeypatch, client)
+    scheduled = []
+    monkeypatch.setattr(skill_server, "validate_optional_image_path", lambda _path: (True, None, None))
+    monkeypatch.setattr(
+        skill_server,
+        "schedule_remote_chat_cleanup_from_response",
+        lambda _response, **kwargs: scheduled.append(kwargs),
+    )
+
+    result = _run(skill_server.create(prompt="a short video", type="video"))
+
+    assert result[0].meta["domain_result"]["data"]["state"] == "queued"
+    assert scheduled == [{"retain_chat": True, "source": "skill_create:video"}]
+
+
 def test_create_top_level_exception(monkeypatch):
     """resolve_media_request 抛异常 → _error_text(e, 'Create')。"""
     monkeypatch.setattr(skill_server, "validate_optional_image_path",
@@ -1301,10 +1350,10 @@ def test_edit_returns_error_when_image_invalid(monkeypatch):
 
 
 def test_edit_top_level_exception(monkeypatch):
-    """resolve_model_name 抛异常 → _error_text(e, 'Edit')。"""
+    """图片路由失败时返回明确的 Edit 错误。"""
     monkeypatch.setattr(skill_server, "validate_optional_image_path",
                         lambda _p: (True, "safe", None))
-    monkeypatch.setattr(skill_server, "resolve_model_name",
+    monkeypatch.setattr(skill_server, "resolve_media_request",
                         lambda *a: (_ for _ in ()).throw(ValueError("bad model")))
     _patch_client_seams(monkeypatch, SimpleNamespace())
     result = _run(skill_server.edit(image_path="x", prompt="y"))
@@ -1565,7 +1614,12 @@ def test_edit_happy_path(monkeypatch):
     _patch_client_seams(monkeypatch, client)
     monkeypatch.setattr(skill_server, "validate_optional_image_path",
                         lambda _p: (True, "/safe/path.png", None))
-    monkeypatch.setattr(skill_server, "resolve_model_name", lambda m: "gemini-3-flash")
+    monkeypatch.setattr(skill_server, "resolve_media_request",
+                        lambda model, media_type, thinking_level: {
+                            "request_model": "gemini-3-flash",
+                            "backend_label": "Nano Banana 2",
+                            "note": "image route",
+                        })
     monkeypatch.setattr(skill_server, "schedule_remote_chat_cleanup_from_response",
                         lambda _r, source: None)
     result = _run(skill_server.edit(image_path="/tmp/x.png", prompt="make it blue"))
@@ -1573,6 +1627,7 @@ def test_edit_happy_path(monkeypatch):
     kwargs = client.generate_content.call_args.kwargs
     assert kwargs["files"] == ["/safe/path.png"]
     assert "Edit this image: make it blue" in kwargs["prompt"]
+    assert "Nano Banana 2" in result[0].text
 
 
 def test_session_create_happy_path(monkeypatch):

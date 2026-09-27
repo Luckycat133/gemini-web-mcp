@@ -486,6 +486,49 @@ def parse_mutation_ack(body: Any, **_: Any) -> RPCParseResult:
     return RPCParseResult("success", value=body)
 
 
+def parse_music_chat(body: Any, **_: Any) -> RPCParseResult:
+    """Extract generated music cards from one read-back chat body."""
+    if not isinstance(body, list) or not body or not isinstance(body[0], list):
+        return RPCParseResult("changed_shape", raw_type=type(body).__name__)
+    turns = body[0]
+    media: list[dict[str, str]] = []
+    for turn in turns:
+        if not isinstance(turn, list):
+            return RPCParseResult("changed_shape", raw_type=type(turn).__name__)
+        rid = _nested(turn, [0, 1])
+        candidates = _nested(turn, [3, 0])
+        if candidates is None:
+            continue
+        if not isinstance(candidates, list):
+            return RPCParseResult("changed_shape", raw_type=type(candidates).__name__)
+        for candidate in candidates:
+            if not isinstance(candidate, list):
+                return RPCParseResult("changed_shape", raw_type=type(candidate).__name__)
+            rcid = _nested(candidate, [0])
+            card_group = _nested(candidate, [12, 0])
+            if card_group is None:
+                continue
+            if not isinstance(card_group, dict):
+                return RPCParseResult("changed_shape", raw_type=type(card_group).__name__)
+            cards = card_group.get("87", [])
+            if not isinstance(cards, list):
+                return RPCParseResult("changed_shape", raw_type=type(cards).__name__)
+            for card in cards:
+                title = _nested(card, [1, 2])
+                url = _nested(card, [1, 7, 1])
+                if not isinstance(url, str) or not url.strip():
+                    continue
+                media.append(
+                    {
+                        "title": title if isinstance(title, str) else "[Media]",
+                        "url": url.strip(),
+                        "rid": rid if isinstance(rid, str) else "",
+                        "rcid": rcid if isinstance(rcid, str) else "",
+                    }
+                )
+    return RPCParseResult("success" if media else "empty", value=media)
+
+
 PARSER_FUNCTIONS: Mapping[str, Callable[..., RPCParseResult]] = {
     "conversation_page": parse_conversation_page,
     "remy_goals_page": parse_remy_goals_page,
@@ -500,6 +543,7 @@ PARSER_FUNCTIONS: Mapping[str, Callable[..., RPCParseResult]] = {
     "tool_modes": parse_tool_modes,
     "opaque": parse_opaque,
     "mutation_ack": parse_mutation_ack,
+    "music_chat": parse_music_chat,
 }
 
 

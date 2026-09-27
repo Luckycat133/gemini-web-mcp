@@ -1,29 +1,10 @@
-"""media 模块的 gemini_generate_media 与 gemini_generate_music 行为契约测试。
+"""媒体工具的集成契约测试。
 
-调研发现这两个工具此前仅有 5 个 happy/edge 间接用例（test_tool_workflows.py），
-关键集成契约零断言：
+覆盖请求路由、超时与清理、产物保存和结构化状态。图片按当前
+Flash-Lite/Flash 路由；音乐只报告上游可验证的 Lyria 信息；视频空产物
+应说明通用聊天请求未证实进入 Gemini Omni 的专用模式。
 
-- schedule_remote_chat_cleanup_from_response 的 source 字符串（应为
-  "gemini_generate_media:{media_type}"，gemini_generate_music 转发后 source 仍为
-  "gemini_generate_media:music" 而非 "gemini_generate_music"——潜在不一致）
-- cleanup_due_remote_chats 接收 client 对象
-- _media_timeout 默认值（image=180 / 其他=600）+ timeout_seconds 覆盖
-- _set_client_timeouts / _restore_client_timeouts 在 finally 块往返
-- 异常分支不调 schedule cleanup，但空响应仍调（与 chat_stream 的
-  `if final_response:` 守卫不同）
-- gemini_generate_music 默认 thinking_level="extended"（与 generate_media 默认
-  "standard" 不同），导致 music+pro 默认走 Lyria 3 Pro
-- music 回收路径：response.media 为空时调 _fetch_music_media_from_chat，异常吞咽
-- 后端路由：image 恒用 gemini-3-flash；music 非 pro=Lyria 3 / pro+standard=Lyria 3
-  / pro+extended=Lyria 3 Pro；video=Gemini Web default
-
-纯 helper（_media_timeout / _set_client_timeouts / _media_from_music_card /
-_safe_media_filename / _prepend_backend_note / resolve_media_request）已在
-test_tool_helpers.py 充分覆盖，本文件专注工具集成层。
-
-mock 边界：4 个 client_wrapper 接缝（get_gemini_client / initialize_client /
-cleanup_due_remote_chats / schedule_remote_chat_cleanup_from_response）+ 可选
-_probe_duration（隔离 ffprobe subprocess）。parse_response 走真实实现。
+测试在 client_wrapper 接缝使用替身，parse_response 走真实实现。
 """
 
 import asyncio
@@ -80,6 +61,15 @@ class _FakeSavedImage:
                 "iVBORw0KGgoAAAANSUhEUgAAAAIAAAABAQMAAADO7O3JAAAAIGNIUk0AAHomAACAhAAA+gAAAIDoAAB1MAAA6mAAADqYAAAXcJy6UTwAAAAGUExURf8AAP///0EdNBEAAAABYktHRAH/Ai3eAAAAB3RJTUUH6ggDByA1n7aAbwAAAApJREFUCNdjYAAAAAIAAeIhvDMAAAAASUVORK5CYII="
             )
         )
+        return str(path)
+
+
+class _FakeSavedJpegWithPngName(_FakeSavedImage):
+    async def save(self, **kwargs):
+        destination = Path(kwargs["path"])
+        destination.mkdir(parents=True, exist_ok=True)
+        path = destination / kwargs["filename"]
+        path.write_bytes(b"\xff\xd8\xff\xe0" + b"jpeg-content")
         return str(path)
 
 
@@ -193,6 +183,49 @@ def test_generate_media_invalid_image_path_short_circuits_before_client(monkeypa
     result = asyncio.run(run())
     assert len(result) == 1
     assert result[0].text.startswith("❌")
+
+
+@pytest.mark.parametrize(
+    ("arguments", "message"),
+    [
+        ({"prompt": "  "}, "prompt must not be blank"),
+        ({"prompt": "cat", "filename": "../escape.png"}, "filename must be"),
+        ({"prompt": "cat", "filename": "folder\\escape.png"}, "filename must be"),
+    ],
+)
+def test_generate_media_rejects_invalid_request_before_client(monkeypatch, arguments, message):
+    monkeypatch.setattr(
+        media_tools,
+        "get_gemini_client",
+        lambda: (_ for _ in ()).throw(AssertionError("client must not be accessed")),
+    )
+    mcp = _make_mcp()
+
+    async def run():
+        return await _call_tool(mcp, "gemini_generate_media", media_type="image", **arguments)
+
+    result = asyncio.run(run())
+    assert message in result[0].text
+    assert result[0].meta["domain_result"]["error"]["code"] == "INVALID_ARGUMENT"
+
+
+def test_generate_media_initialization_failure_returns_typed_error(monkeypatch):
+    client = _FakeMediaClient()
+    _patch_media_env(monkeypatch, client)
+
+    async def fail_initialization():
+        raise RuntimeError("authentication expired")
+
+    monkeypatch.setattr(media_tools, "initialize_client", fail_initialization)
+    mcp = _make_mcp()
+
+    async def run():
+        return await _call_tool(mcp, "gemini_generate_media", prompt="cat", media_type="image")
+
+    result = asyncio.run(run())
+    assert result[0].meta["domain_result"]["ok"] is False
+    assert result[0].meta["domain_result"]["data"]["state"] == "failed"
+    assert client.captured_generate_kwargs is None
 
 
 # ---------------------------------------------------------------------------
@@ -441,8 +474,8 @@ def test_generate_media_image_returns_nano_banana_2_backend_label(monkeypatch):
     assert "Pro redo 属于网页生成后的二次操作" in text
 
 
-def test_generate_media_music_flash_routes_to_lyria_3(monkeypatch):
-    """music + flash → 后端 Lyria 3（非 Pro），不含 'Lyria 3 Pro'。"""
+def test_generate_media_music_flash_uses_unversioned_lyria_label(monkeypatch):
+    """Music results do not claim a backend version the response did not expose."""
     client = _FakeMediaClient(response_text="ok")
     _patch_media_env(monkeypatch, client)
 
@@ -453,12 +486,11 @@ def test_generate_media_music_flash_routes_to_lyria_3(monkeypatch):
                                 prompt="x", media_type="music", model="flash")
 
     result = asyncio.run(run())
-    assert "后端: Lyria 3" in result[0].text
+    assert "后端: Lyria" in result[0].text
     assert "Lyria 3 Pro" not in result[0].text
 
 
-def test_generate_media_music_pro_standard_routes_to_lyria_3(monkeypatch):
-    """music + pro + standard → 后端 Lyria 3（非 Pro）。"""
+def test_generate_media_music_pro_standard_keeps_unversioned_label(monkeypatch):
     client = _FakeMediaClient(response_text="ok")
     _patch_media_env(monkeypatch, client)
 
@@ -470,12 +502,11 @@ def test_generate_media_music_pro_standard_routes_to_lyria_3(monkeypatch):
                                 thinking_level="standard")
 
     result = asyncio.run(run())
-    assert "后端: Lyria 3" in result[0].text
+    assert "后端: Lyria" in result[0].text
     assert "Lyria 3 Pro" not in result[0].text
 
 
-def test_generate_media_music_pro_extended_routes_to_lyria_3_pro(monkeypatch):
-    """music + pro + extended → 后端 Lyria 3 Pro。"""
+def test_generate_media_music_pro_extended_does_not_invent_backend(monkeypatch):
     client = _FakeMediaClient(response_text="ok")
     _patch_media_env(monkeypatch, client)
 
@@ -487,11 +518,12 @@ def test_generate_media_music_pro_extended_routes_to_lyria_3_pro(monkeypatch):
                                 thinking_level="extended")
 
     result = asyncio.run(run())
-    assert "后端: Lyria 3 Pro" in result[0].text
+    assert "后端: Lyria" in result[0].text
+    assert "Lyria 3 Pro" not in result[0].text
 
 
 def test_generate_media_video_routes_to_default_backend(monkeypatch):
-    """video → 后端 'Gemini Web default'。"""
+    """A text-only video response names the dedicated Omni recovery route."""
     client = _FakeMediaClient(response_text="ok")
     _patch_media_env(monkeypatch, client)
 
@@ -502,7 +534,12 @@ def test_generate_media_video_routes_to_default_backend(monkeypatch):
                                 prompt="x", media_type="video")
 
     result = asyncio.run(run())
-    assert "后端: Gemini Web default" in result[0].text
+    assert "后端: Gemini Web generic chat" in result[0].text
+    assert "https://gemini.google.com/videos" in result[0].text
+    domain = result[0].meta["domain_result"]
+    assert domain["error"]["code"] == "ARTIFACT_NOT_RETURNED"
+    assert domain["error"]["retryable"] is False
+    assert "https://gemini.google.com/videos" in domain["error"]["suggested_action"]
 
 
 # ---------------------------------------------------------------------------
@@ -571,7 +608,7 @@ def test_generate_media_generic_exception_returns_error_message_with_backend(mon
 
     result = asyncio.run(run())
     text = result[0].text
-    assert "后端: Gemini Web default" in text
+    assert "后端: Gemini Web generic chat" in text
     assert "❌ video 生成失败: upstream aborted" in text
     assert "通用 generate_content" in text
 
@@ -639,7 +676,8 @@ def test_generate_media_queued_response_is_not_reported_as_empty(monkeypatch):
         videos=[],
         response_status="processing",
     )
-    _patch_media_env(monkeypatch, client)
+    scheduled = []
+    _patch_media_env(monkeypatch, client, captured_schedule=scheduled)
     mcp = _make_mcp()
 
     async def run():
@@ -651,6 +689,21 @@ def test_generate_media_queued_response_is_not_reported_as_empty(monkeypatch):
     assert domain["ok"] is True
     assert domain["data"]["state"] == "queued"
     assert domain["meta"]["operation_state"] == "queued"
+    assert scheduled[0]["retain_chat"] is True
+
+
+def test_empty_media_response_retains_chat_for_recovery(monkeypatch):
+    client = _FakeMediaClient(response_text="no media")
+    scheduled = []
+    _patch_media_env(monkeypatch, client, captured_schedule=scheduled)
+    mcp = _make_mcp()
+
+    async def run():
+        return await _call_tool(mcp, "gemini_generate_media", prompt="cat", media_type="image")
+
+    result = asyncio.run(run())
+    assert result[0].meta["domain_result"]["data"]["state"] == "empty"
+    assert scheduled[0]["retain_chat"] is True
 
 
 def test_generate_media_remote_uri_includes_backend_evidence(monkeypatch):
@@ -704,10 +757,7 @@ def test_generate_media_appends_remote_chat_id(monkeypatch):
 
 
 def test_generate_media_renders_response_media_with_lyria_label(monkeypatch):
-    """music + pro+extended + response.media 非空 → 文本含 '🎵 音乐 1 (Lyria 3 Pro)'。
-
-    parse_response 收到 effective_alias='pro'，故音乐块标 'Lyria 3 Pro'。
-    """
+    """A media card labels its family without inventing an exact version."""
     media = _FakeMedia(title="song")
     client = _FakeMediaClient(response_text="ok", media=[media])
     _patch_media_env(monkeypatch, client)
@@ -720,7 +770,7 @@ def test_generate_media_renders_response_media_with_lyria_label(monkeypatch):
                                 thinking_level="extended")
 
     result = asyncio.run(run())
-    assert "🎵 音乐 1 (Lyria 3 Pro)" in result[0].text
+    assert "🎵 音乐 1 (Lyria)" in result[0].text
 
 
 # ---------------------------------------------------------------------------
@@ -868,6 +918,86 @@ def test_generate_media_saves_and_verifies_image_string_result(monkeypatch, tmp_
     assert artifact["verification"]["status"] == "verified"
 
 
+def test_generated_image_extension_matches_actual_jpeg_bytes(monkeypatch, tmp_path):
+    image = _FakeSavedJpegWithPngName()
+    client = _FakeMediaClient(response_text="done", images=[image])
+    _patch_media_env(monkeypatch, client)
+    mcp = _make_mcp()
+
+    async def run():
+        return await _call_tool(
+            mcp,
+            "gemini_generate_media",
+            prompt="onboarding",
+            media_type="image",
+            output_dir=str(tmp_path),
+            filename="mismatch.png",
+        )
+
+    result = asyncio.run(run())
+    artifact = result[0].meta["domain_result"]["data"]["artifacts"][0]
+    assert artifact["local_path"] == str((tmp_path / "mismatch.jpg").resolve())
+    assert artifact["mime_type"] == "image/jpeg"
+    assert not (tmp_path / "mismatch.png").exists()
+
+
+def test_generated_image_suffix_fix_does_not_replace_existing_file(tmp_path):
+    existing = tmp_path / "mismatch.jpg"
+    existing.write_bytes(b"keep")
+    saved = tmp_path / "mismatch.png"
+    saved.write_bytes(b"\xff\xd8\xff\xe0" + b"jpeg-content")
+
+    normalized = media_tools._normalize_saved_image_extension(str(saved))
+
+    assert normalized == str(tmp_path / "mismatch_2.jpg")
+    assert existing.read_bytes() == b"keep"
+    assert not saved.exists()
+
+
+def test_named_image_save_does_not_replace_existing_file(monkeypatch, tmp_path):
+    existing = tmp_path / "example.png"
+    existing.write_bytes(b"keep")
+    image = _FakeSavedImage()
+    client = _FakeMediaClient(response_text="done", images=[image])
+    _patch_media_env(monkeypatch, client)
+    mcp = _make_mcp()
+
+    async def run():
+        return await _call_tool(
+            mcp,
+            "gemini_generate_media",
+            prompt="cat",
+            media_type="image",
+            output_dir=str(tmp_path),
+            filename="example.png",
+        )
+
+    result = asyncio.run(run())
+    artifact = result[0].meta["domain_result"]["data"]["artifacts"][0]
+    assert existing.read_bytes() == b"keep"
+    assert artifact["local_path"] == str((tmp_path / "example_2.png").resolve())
+
+
+def test_multiple_images_insert_index_before_requested_extension(monkeypatch, tmp_path):
+    client = _FakeMediaClient(response_text="done", images=[_FakeSavedImage(), _FakeSavedImage()])
+    _patch_media_env(monkeypatch, client)
+    mcp = _make_mcp()
+
+    async def run():
+        return await _call_tool(
+            mcp,
+            "gemini_generate_media",
+            prompt="two images",
+            media_type="image",
+            output_dir=str(tmp_path),
+            filename="double.png",
+        )
+
+    asyncio.run(run())
+    assert (tmp_path / "double_1.png").is_file()
+    assert (tmp_path / "double_2.png").is_file()
+
+
 def test_generate_music_keeps_audio_and_video_artifacts_distinct(monkeypatch, tmp_path):
     audio_path = tmp_path / "song.mp3"
     video_path = tmp_path / "song.mp4"
@@ -957,7 +1087,7 @@ def test_generate_media_music_recovery_failure_logs_warning_and_continues(monkey
 
     result = asyncio.run(run())
     # 不崩溃，返回正常 parsed 文本（无 Saved files）
-    assert "后端: Lyria 3" in result[0].text
+    assert "后端: Lyria" in result[0].text
     assert "Saved files:" not in result[0].text
 
 
@@ -1002,12 +1132,8 @@ def test_generate_music_delegates_to_generate_media_with_music_prompt(monkeypatc
     )
 
 
-def test_generate_music_default_thinking_level_is_extended_routes_to_lyria_3_pro(monkeypatch):
-    """gemini_generate_music(model='pro') 不传 thinking_level → 默认 extended → Lyria 3 Pro。
-
-    这是与 gemini_generate_media(media_type='music', model='pro') 的关键差异：
-    后者默认 standard → Lyria 3。两个工具对 '用 pro 生成音乐' 给出不同后端。
-    """
+def test_generate_music_default_thinking_level_is_extended(monkeypatch):
+    """The music facade retains its extended thinking default without a backend claim."""
     client = _FakeMediaClient(response_text="ok")
     _patch_media_env(monkeypatch, client)
 
@@ -1019,7 +1145,6 @@ def test_generate_music_default_thinking_level_is_extended_routes_to_lyria_3_pro
 
     asyncio.run(run())
     assert client.captured_generate_kwargs["thinking_level"] == "extended"
-    # 后端是 Lyria 3 Pro（默认 extended 触发 Pro 分支）
 
 
 def test_generate_music_source_string_is_generate_media_music_not_generate_music(monkeypatch):
@@ -1044,11 +1169,8 @@ def test_generate_music_source_string_is_generate_media_music_not_generate_music
     assert schedule_calls[0]["source"] != "gemini_generate_music"
 
 
-def test_generate_music_default_thinking_level_routes_to_lyria_3_pro_in_response(monkeypatch):
-    """gemini_generate_music(model='pro') → 返回文本含 '后端: Lyria 3 Pro'。
-
-    与上一个测试互补：上一个断言 thinking_level 入参，这个断言返回文本。
-    """
+def test_generate_music_default_thinking_level_does_not_invent_backend(monkeypatch):
+    """A Pro music request is still labeled Lyria until backend evidence exists."""
     client = _FakeMediaClient(response_text="ok")
     _patch_media_env(monkeypatch, client)
 
@@ -1058,4 +1180,5 @@ def test_generate_music_default_thinking_level_routes_to_lyria_3_pro_in_response
         return await _call_tool(mcp, "gemini_generate_music", prompt="x", model="pro")
 
     result = asyncio.run(run())
-    assert "后端: Lyria 3 Pro" in result[0].text
+    assert "后端: Lyria" in result[0].text
+    assert "Lyria 3 Pro" not in result[0].text

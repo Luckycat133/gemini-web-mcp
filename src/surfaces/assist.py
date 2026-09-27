@@ -186,6 +186,8 @@ async def gemini_ask(
             include_temporary_argument=False,
         )
     )
+    if not result.ok:
+        return domain_text(result, domain_failure_text(result), use_result_data=True)
     assert result.data is not None
     return attach_domain_result(
         parse_response(result.data.response, model),
@@ -361,6 +363,8 @@ def _render_research_start(data: LongOperationData) -> list[TextContent]:
         sections.append(f"Upstream chat ID: {data.upstream_chat_id}")
     if data.state in {OperationState.QUEUED, OperationState.RUNNING}:
         sections.append("This call returned immediately and did not wait for the final report.")
+    elif data.state is OperationState.COMPLETED and not data.report_available:
+        sections.append("The upstream run completed, but this start call did not return a report.")
     return [TextContent(type="text", text="\n".join(sections))]
 
 

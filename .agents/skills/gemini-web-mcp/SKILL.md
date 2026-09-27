@@ -1,8 +1,8 @@
 ---
 name: gemini-web-mcp
-description: "Use this skill when an agent should extend itself with Gemini Web: get a second opinion, search current web sources, understand images/files/URLs, run Deep Research, generate or edit image/video/music artifacts, or explicitly work with Gemini account data. Route by user intent instead of loading every tool. This skill is the compatibility router; prefer the focused gemini-assist skill when only assistance and understanding are needed. Do not use for repository implementation, tests, CI, packaging, or releases—use gemini-web-mcp-development instead."
+description: "Use this skill when an agent should extend itself with Gemini Web: get a second opinion, search current web sources, understand images/files/URLs, run Deep Research, generate image/video/music artifacts, edit images, or explicitly work with Gemini account data. Route by user intent instead of loading every tool. This skill is the compatibility router; prefer the focused gemini-assist skill when only assistance and understanding are needed. Do not use for repository implementation, tests, CI, packaging, or releases—use gemini-web-mcp-development instead."
 license: MIT-0
-compatibility: "Requires Python 3.11+ and an installed Gemini Web MCP server. The low-token server covers common chat, image, generation, and account workflows; the primary core profile is currently required for local files, URLs, and Deep Research. Live calls require Gemini Web account Cookies."
+compatibility: "Requires Python 3.11+ and a connected Gemini Web MCP server. The focused assist server handles assistance, files, URLs, and Deep Research; compatibility servers cover chat, image/music generation, and explicit account work. Video currently uses Gemini Web's dedicated browser mode. Live calls require Gemini Web account Cookies."
 metadata:
   version: "0.2.1"
   openclaw:
@@ -45,26 +45,27 @@ The product priority is:
 3. Explicit Gemini account management
 ```
 
-Choose one lane for the current task. Do not expose or load account-management tools merely because they exist.
+Choose the next capability for the user's task; switch lanes when the task needs several steps. Do not expose account-management tools merely because they exist.
 
 ## Choose the Capability Lane
 
 | User intent | Preferred current route | What success means |
 | --- | --- | --- |
-| Second opinion, critique, code/design review | low-token `chat`; primary `gemini_chat` when exact controls are needed | useful Gemini result incorporated into the agent's work |
-| Quick current-web lookup | `chat` or `gemini_chat` with an explicit request for current sources | answer plus observed source URLs; otherwise label it ungrounded or escalate to Research |
-| Understand one image or screenshot | low-token `chat(image_path=...)`; primary `gemini_chat(image_paths=[...])` | analysis returned to the agent and used in the surrounding task |
-| Understand files, URLs, or mixed evidence | primary `gemini_upload_file`, `gemini_analyze_url`, and image chat as needed | source identity preserved and conclusions synthesized |
-| Deep, multi-source research | primary `gemini_deep_research(wait_for_completion=false, retain_chat=true)` | an opaque operation/chat handle is preserved immediately; a later result yields a report |
-| Generate or edit images | low-token `create(type="image")` / `edit`; primary media tools when exact controls are needed | a usable image Artifact, preferably a verified local file |
-| Generate video or music | low-token `create(type="video"|"music")` or primary media tools | queued/completed state plus recoverable IDs and a usable media Artifact |
-| History, Notebook, Scheduled, Gem, Prompt, usage, or cleanup | low-token account facades or narrow primary profiles | only the explicitly requested account operation is performed |
+| Second opinion, critique, code/design review | focused `gemini_ask`; fallback compact `chat` or primary `gemini_chat` | useful Gemini result incorporated into the agent's work |
+| Quick current-web lookup | focused `gemini_search`; fallback chat with an explicit sourcing request | `grounded` only with structured source evidence; verify any links in answer text before citing them |
+| Understand one image or screenshot | focused `gemini_understand_image`; fallback compact or primary image chat | analysis returned to the agent and used in the surrounding task |
+| Understand files, URLs, or mixed evidence | focused `gemini_understand`; fallback primary file/URL/image tools | each source identity and outcome preserved before synthesis |
+| Deep, multi-source research | dedicated `gemini_research`; primary `gemini_deep_research(wait_for_completion=false, retain_chat=true)` | preserve the upstream chat ID for later report retrieval; the dedicated tool also returns a local correlation ID |
+| Generate or edit images | low-token `create(type="image")` / `edit`; primary `gemini_generate_media(..., output_dir=...)` when a local file is needed | a usable image Artifact, preferably a verified local file |
+| Generate music | low-token `create(type="music")` or primary media tools | use a verified audio/video Artifact; do not infer the exact Lyria version from a model alias |
+| Generate video | Gemini Web's dedicated [Videos page](https://gemini.google.com/videos) in an authorized browser | use the finished video file; the current generic MCP video path returned no Artifact in the 2026-09-26 live check |
+| History, Notebook, Scheduled, Gem, Prompt, usage, or cleanup | compact account facades where supported; otherwise a narrow primary profile | only the explicitly requested account operation is performed |
 
 Load [workflows.md](references/workflows.md) for detailed task routes.
 
 ## Default Server Choice
 
-Use `gemini-mcp-skill-server` for the smallest current tool surface when it can complete the task.
+Use `gemini-mcp-assist` for assistance and understanding. Use `gemini-mcp-skill-server` for a compact compatibility surface when it can complete generation or explicit account work.
 
 Use the primary server only for a narrow profile:
 
@@ -72,16 +73,20 @@ Use the primary server only for a narrow profile:
 - `GEMINI_TOOLS=core` for files, URLs, media, and Deep Research;
 - `GEMINI_TOOLS=history` or `history-organize` for explicit history work;
 - `GEMINI_TOOLS=account-read` for explicit account inventory;
-- `GEMINI_TOOLS=scheduled-admin` only for requested scheduled mutations.
+- `GEMINI_TOOLS=scheduled-admin` only for requested scheduled mutations;
+- `GEMINI_TOOLS=manage:gems` only for requested Gem operations;
+- `GEMINI_TOOLS=history,manage:history-write` only for requested history deletion or cleanup after identifying the target.
 
 Do not use `GEMINI_TOOLS=all` as a general-agent default.
 
 The repository is migrating toward three dedicated products. `gemini-assist` is now implemented as the dedicated `gemini-mcp-assist` server (`gemini_ask`, `gemini_search`, `gemini_understand_image`, `gemini_understand`, `gemini_research`) with its own `gemini-assist` Skill; `gemini-create` and `gemini-account` are not implemented yet. This Skill remains the compatibility router until they land.
 
+The Skill supplies routing instructions; an MCP server must also be connected. If no Gemini tools are available, load [recovery.md](references/recovery.md) for a credential-free connection check and client setup. Do not ask for Cookie values in chat or put them in command arguments.
+
 ## Standard Workflow
 
-1. Identify the user's intended outcome.
-2. Choose exactly one capability lane.
+1. Identify the user's intended outcome and the next Gemini step.
+2. Choose the capability and connected surface that can perform that step.
 3. Call the narrowest current tool that can complete it.
 4. Read the structured result before trusting compatibility prose.
 5. Continue the user's actual task with the result or Artifact.
@@ -109,11 +114,11 @@ A path, URI, or success sentence alone is not completion. Load [artifacts.md](re
 
 ## Long Operations
 
-Deep Research, video, and music are long operations. Start them asynchronously by default.
+Deep Research, video, and music can take a long time. Start Deep Research without waiting for completion. Current music compatibility tools may wait for the upstream response or return a queued state; they do not provide a durable operation handle. Use Gemini's dedicated Videos page for video until a verified MCP video route is available.
 
 Preserve every returned `operation_id`, `upstream_operation_id`, `upstream_chat_id`, and Artifact identity. Do not start a duplicate operation merely because one MCP call timed out.
 
-Until the shared local operation registry lands, use start-only/current typed states and retain the upstream IDs. The target contract is an opaque, restart-safe handle stored in local SQLite with no prompt, chat, Cookie, or raw-response content.
+There is currently no `status`, `result`, or `cancel` tool for a local operation ID. The dedicated Research ID is a correlation ID, not a queryable recovery handle. Retain `upstream_chat_id` and inspect that chat later; a completed report may require the primary report extraction tool. The target contract is an opaque, restart-safe handle stored in local SQLite with no prompt, chat, Cookie, or raw-response content.
 
 Load [operations.md](references/operations.md) before running or recovering a long operation.
 
@@ -123,7 +128,7 @@ Only load or use account operations when the user explicitly asks to work with G
 
 Start with list/search/read actions, identify the exact object, then mutate or delete it. A remote request being accepted is not proof that the target state changed; require positive read-back before claiming success.
 
-For browser Cookie export, obtain explicit user approval because it can create sensitive account-authentication material in a local cache. Session reset changes only MCP/Gemini conversation state; it never changes agent memory or agent instructions.
+For browser Cookie export, ensure the user has explicitly authorized access to their signed-in browser account for the task; authorization already given in the conversation still applies. Export can create sensitive account-authentication material in a local cache. Session reset changes only MCP/Gemini conversation state; it never changes agent memory or agent instructions.
 
 Load [tool_surface.md](references/tool_surface.md) only when detailed account, privacy, destructive, or profile information is needed.
 

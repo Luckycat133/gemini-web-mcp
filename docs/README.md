@@ -60,9 +60,9 @@
 | 特性 | 说明 |
 |------|------|
 | 模型 | 旧别名 + 运行时模型发现 |
-| 媒体生成 | 图像(Nano Banana 2), 视频(Veo 3.1), 音乐(Lyria 3 / Lyria 3 Pro) |
+| 媒体生成 | MCP 图片和音乐已实机产出文件；视频目前通过 Gemini Omni 专用网页模式，MCP 路线待修复 |
 | 推荐工具面 | 文本从 `model` 开始，多模态用 `core`，低 token 用 compact，`all` 仅维护验证 |
-| Deep Research | ✅ AI Plus 支持 |
+| Deep Research | 需要当前账号具备相应权限；完成报告须另行验证 |
 | Assistance 专用面 | ✅ `gemini-mcp-assist`：五工具确定性目录（ask/搜索/图像理解/混合理解/异步 Research） |
 | Gem 管理 | ✅ 自定义助手管理 |
 | MCP 评估 | ✅ 17 个只读 contract-level QA |

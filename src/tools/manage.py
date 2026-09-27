@@ -3,7 +3,6 @@
 """
 
 import json
-from dataclasses import dataclass
 from ..adapters import attach_domain_result, domain_text, exception_text
 from ..adapters.mcp_sdk import MCPServer, TextContent
 from collections.abc import Coroutine
@@ -34,6 +33,12 @@ from ..infrastructure.rpc_parsers import (
     summarize_rpc_response as summarize_registered_rpc_response,
 )
 from ..services.account import sanitize_account_status
+from ..services.cleanup import (
+    cleanup_test_artifacts_payload as cleanup_test_artifacts_payload_service,
+    format_cleanup_markdown,
+    marker_hits,
+    split_cleanup_markers,
+)
 from ..services.compatibility import sanitized_error_code, sanitized_error_type
 from ..services.gems import (
     _find_gem_by_id as registered_find_gem_by_id,
@@ -53,7 +58,6 @@ from ..services.history import (
     list_chats_result,
     paginate_items,
     read_chat_result,
-    read_chat_turns,
     search_chats_result,
 )
 from ..services.manifest import (
@@ -829,143 +833,8 @@ async def _fetch_recent_conversation_metadata(
 
 
 
-def _split_cleanup_markers(markers: str) -> list[str]:
-    values = [item.strip() for item in markers.split(",")]
-    return [item for item in values if item]
-
-
-def _marker_hits(text: object, markers: list[str]) -> list[str]:
-    haystack = str(text or "").lower()
-    return [marker for marker in markers if marker.lower() in haystack]
-
-
-@dataclass(frozen=True)
-class _CleanupScanOptions:
-    """Immutable inputs shared by both cleanup scan phases."""
-
-    markers: list[str]
-    chat_limit: int
-    scan_turns: bool
-    dry_run: bool
-
-
-async def _cleanup_matching_chats(
-    client: object,
-    options: _CleanupScanOptions,
-) -> tuple[list[dict[str, Any]], list[dict[str, str]]]:
-    matched_chats: list[dict[str, Any]] = []
-    errors: list[dict[str, str]] = []
-    if not hasattr(client, "list_chats"):
-        errors.append({"target": "chats", "error": "list_chats unavailable"})
-        return matched_chats, errors
-
-    chats = (client.list_chats() or [])[: options.chat_limit]
-    for chat in chats:
-        item = chat_to_dict(chat)
-        matched_fields: list[str] = []
-        matched_markers = _marker_hits(item.get("id"), options.markers)
-        if matched_markers:
-            matched_fields.append("id")
-        title_hits = _marker_hits(item.get("title"), options.markers)
-        if title_hits:
-            matched_fields.append("title")
-            matched_markers.extend(title_hits)
-
-        if options.scan_turns and item.get("id") and hasattr(client, "read_chat"):
-            try:
-                _history, turns = await read_chat_turns(client, item["id"], 20, 300)
-                for turn in turns:
-                    turn_hits = _marker_hits(turn.get("text"), options.markers)
-                    if turn_hits:
-                        matched_fields.append("turn")
-                        matched_markers.extend(turn_hits)
-                        break
-            except Exception as e:
-                errors.append({"target": f"chat:{item.get('id')}", "error": f"{type(e).__name__}: {e}"})
-
-        if matched_fields:
-            deleted = False
-            delete_error = ""
-            if not options.dry_run:
-                if not hasattr(client, "delete_chat"):
-                    delete_error = "delete_chat unavailable"
-                else:
-                    try:
-                        await client.delete_chat(item["id"])
-                        deleted = True
-                    except Exception as e:
-                        delete_error = f"{type(e).__name__}: {e}"
-            matched_chats.append(
-                {
-                    "id": item.get("id"),
-                    "title": item.get("title"),
-                    "matched_fields": sorted(set(matched_fields)),
-                    "matched_markers": sorted(set(matched_markers)),
-                    "deleted": deleted,
-                    "delete_error": delete_error,
-                }
-            )
-    return matched_chats, errors
-
-
-async def _cleanup_matching_scheduled(
-    client: object,
-    options: _CleanupScanOptions,
-) -> tuple[list[dict[str, Any]], list[dict[str, str]]]:
-    matched_scheduled: list[dict[str, Any]] = []
-    errors: list[dict[str, str]] = []
-    if not hasattr(client, "_batch_execute"):
-        errors.append({"target": "scheduled", "error": "_batch_execute unavailable"})
-        return matched_scheduled, errors
-
-    try:
-        entries, diagnostic = await _fetch_scheduled_registry(client, 300)
-        for item in entries:
-            search_text = "\n".join(
-                str(item.get(key, ""))
-                for key in ("id", "title", "instructions", "schedule_label")
-            )
-            matched_markers = _marker_hits(search_text, options.markers)
-            if not matched_markers:
-                continue
-            deleted = False
-            delete_error = ""
-            verification_status = "dry_run"
-            if not options.dry_run:
-                try:
-                    delete_result = await delete_action_service(
-                        client,
-                        action_id=item["id"],
-                        max_chars=300,
-                        fetch_registry=_fetch_scheduled_registry,
-                        fetch_by_id=_fetch_scheduled_task_by_id,
-                        extract_bodies=_extract_rpc_bodies,
-                    )
-                    verification_status = delete_result["verification_status"]
-                    deleted = bool(
-                        delete_result["ok"]
-                        and (
-                            delete_result.get("deleted_by_id_after_delete") is True
-                            or delete_result.get("visible_after_delete") is not True
-                        )
-                    )
-                except Exception as e:
-                    delete_error = f"{type(e).__name__}: {e}"
-                    verification_status = "delete_error"
-            matched_scheduled.append(
-                {
-                    "id": item.get("id"),
-                    "title": item.get("title"),
-                    "task_state": item.get("task_state"),
-                    "matched_markers": sorted(set(matched_markers)),
-                    "deleted": deleted,
-                    "verification_status": verification_status,
-                    "delete_error": delete_error,
-                }
-            )
-    except Exception as e:
-        errors.append({"target": "scheduled", "error": f"{type(e).__name__}: {e}"})
-    return matched_scheduled, errors
+_split_cleanup_markers = split_cleanup_markers
+_marker_hits = marker_hits
 
 
 async def _cleanup_test_artifacts_payload(
@@ -976,84 +845,21 @@ async def _cleanup_test_artifacts_payload(
     max_chats: int = 25,
     scan_turns: bool = False,
 ) -> dict[str, Any]:
-    marker_list = _split_cleanup_markers(markers)
-    if not marker_list:
-        marker_list = ["codex-"]
-
-    options = _CleanupScanOptions(
-        markers=marker_list,
-        chat_limit=clamp_int(max_chats, default=25, minimum=1, maximum=100),
-        scan_turns=scan_turns,
+    """Compatibility adapter over the shared cleanup service."""
+    return await cleanup_test_artifacts_payload_service(
+        client,
+        markers=markers,
+        target=target,
         dry_run=dry_run,
+        max_chats=max_chats,
+        scan_turns=scan_turns,
+        fetch_registry=_fetch_scheduled_registry,
+        fetch_by_id=_fetch_scheduled_task_by_id,
+        extract_bodies=_extract_rpc_bodies,
     )
 
-    matched_chats: list[dict[str, Any]] = []
-    matched_scheduled: list[dict[str, Any]] = []
-    errors: list[dict[str, str]] = []
-    if target in {"all", "chats"}:
-        matched_chats, chat_errors = await _cleanup_matching_chats(client, options)
-        errors.extend(chat_errors)
-    if target in {"all", "scheduled"}:
-        matched_scheduled, scheduled_errors = await _cleanup_matching_scheduled(client, options)
-        errors.extend(scheduled_errors)
 
-    return {
-        "name": "gemini_cleanup_test_artifacts",
-        "dry_run": dry_run,
-        "target": target,
-        "markers": marker_list,
-        "scan_turns": scan_turns,
-        "max_chats": options.chat_limit,
-        "matched_chat_count": len(matched_chats),
-        "matched_scheduled_count": len(matched_scheduled),
-        "deleted_chat_count": sum(1 for item in matched_chats if item.get("deleted")),
-        "deleted_scheduled_count": sum(1 for item in matched_scheduled if item.get("deleted")),
-        "matched_chats": matched_chats,
-        "matched_scheduled_actions": matched_scheduled,
-        "errors": errors,
-    }
-
-
-def _format_cleanup_markdown(payload: dict[str, Any]) -> str:
-    lines = [
-        "## Gemini Test Artifact Cleanup",
-        f"Dry run: {payload['dry_run']} · Target: {payload['target']} · Markers: {', '.join(payload['markers'])}",
-        (
-            f"Matches: chats={payload['matched_chat_count']}, "
-            f"scheduled={payload['matched_scheduled_count']} · "
-            f"Deleted: chats={payload['deleted_chat_count']}, scheduled={payload['deleted_scheduled_count']}"
-        ),
-    ]
-    if payload["matched_chats"]:
-        lines.extend(["", "### Chats"])
-        for item in payload["matched_chats"]:
-            status = "deleted" if item.get("deleted") else "matched"
-            if item.get("delete_error"):
-                status = f"error={item['delete_error']}"
-            lines.append(
-                f"- {item.get('title') or '(untitled)'} ({item.get('id')}) "
-                f"[{status}; fields={','.join(item.get('matched_fields', []))}]"
-            )
-    if payload["matched_scheduled_actions"]:
-        lines.extend(["", "### Scheduled Actions"])
-        for item in payload["matched_scheduled_actions"]:
-            status = item.get("verification_status") or ("deleted" if item.get("deleted") else "matched")
-            if item.get("delete_error"):
-                status = f"error={item['delete_error']}"
-            lines.append(f"- {item.get('title') or '(untitled)'} ({item.get('id')}) [{status}]")
-    if payload["errors"]:
-        lines.extend(["", "### Errors"])
-        for item in payload["errors"]:
-            lines.append(f"- {item['target']}: {item['error']}")
-    if payload["dry_run"]:
-        lines.extend(["", "Set dry_run=false to delete the matched test artifacts."])
-    return "\n".join(lines)
-
-
-
-
-
-
+_format_cleanup_markdown = format_cleanup_markdown
 
 
 # Central contract/parser implementations are rebound at the compatibility
@@ -2157,7 +1963,7 @@ def _register_notebook_tools(mcp: MCPServer, enabled_tool_names: set[str], tool_
                         text=f"✅ 已移动聊天 {clean_chat_id} 到笔记本: {notebook.get('title')} ({notebook.get('id')})",
                     )
                 ]
-            if payload["ok"]:
+            if payload.get("accepted"):
                 return [
                     TextContent(
                         type="text",
@@ -2167,6 +1973,15 @@ def _register_notebook_tools(mcp: MCPServer, enabled_tool_names: set[str], tool_
                         ),
                     )
                 ]
+            if payload.get("status_code") == 200:
+                return [TextContent(
+                    type="text",
+                    text=(
+                        f"⚠️ 移动请求未获确认: {clean_chat_id}；"
+                        f"RPC 解析状态: {payload['parser_status']}，读回状态: {payload['verification_status']}。"
+                        "请用 gemini_list_notebook_chats 复查。"
+                    ),
+                )]
             return [TextContent(type="text", text=f"❌ 移动聊天失败: {clean_chat_id}")]
         except Exception as e:
             logger.error(f"Gemini Notebook 移动失败: {e}")
@@ -2346,21 +2161,31 @@ def _register_scheduled_tools(mcp: MCPServer, enabled_tool_names: set[str], tool
             if payload["ok"]:
                 label = f" ({payload['schedule_label']})" if payload.get("schedule_label") else ""
                 if payload["visible_in_registry"]:
-                    visibility = ""
-                elif payload["readable_by_id_after_create"]:
-                    visibility = "；按 ID 可读取，但当前 registry 未显示，请核对 Gemini 账号/profile 上下文。"
-                else:
-                    visibility = " ⚠️ 但当前 cookie/session 的列表校验尚未看到它，请用 gemini_list_scheduled_actions 核对账号上下文。"
-                return [
-                    TextContent(
+                    return [TextContent(type="text", text=f"✅ 已创建 Gemini 定时操作: {payload['title']} [{payload['id']}]{label}")]
+                if payload["readable_by_id_after_create"]:
+                    return [TextContent(
                         type="text",
-                        text=f"✅ 已创建 Gemini 定时操作: {payload['title']} [{payload['id']}]{label}{visibility}",
-                    )
-                ]
+                        text=(
+                            f"✅ 已创建 Gemini 定时操作: {payload['title']} [{payload['id']}]{label}；"
+                            "按 ID 可读取，但当前 registry 未显示，请核对 Gemini 账号/profile 上下文。"
+                        ),
+                    )]
+                return [TextContent(
+                    type="text",
+                    text=(
+                        f"⚠️ 创建请求返回定时操作 ID {payload['id']}，但读回尚未证实创建；"
+                        f"校验状态: {payload['verification_status']}。"
+                        "请用 gemini_list_scheduled_actions 核对 cookie/session 的账号上下文。"
+                    ),
+                )]
             return [
                 TextContent(
                     type="text",
-                    text="⚠️ 创建请求已发送，但未在响应中解析到定时操作 id。请用 gemini_list_scheduled_actions 核对。",
+                    text=(
+                        "⚠️ 创建请求未获确认；"
+                        + ("未在响应中解析到定时操作 id。" if not payload["id"] else f"响应中返回 ID {payload['id']}。")
+                        + "请用 gemini_list_scheduled_actions 核对。"
+                    ),
                 )
             ]
         except Exception as e:
@@ -2397,6 +2222,8 @@ def _register_scheduled_tools(mcp: MCPServer, enabled_tool_names: set[str], tool
             if payload["ok"]:
                 if payload["deleted_by_id_after_delete"] is True:
                     return [TextContent(type="text", text=f"✅ 已删除 Gemini 定时操作: {clean_id}；按 ID 校验状态为 deleted。")]
+                if payload["verification_status"] == "not_visible_not_readable_by_id":
+                    return [TextContent(type="text", text=f"✅ 已删除 Gemini 定时操作: {clean_id}；列表和按 ID 读回均未找到。")]
                 if payload["readable_by_id_after_delete"] is True:
                     return [
                         TextContent(
@@ -2407,11 +2234,9 @@ def _register_scheduled_tools(mcp: MCPServer, enabled_tool_names: set[str], tool
                             ),
                         )
                     ]
-                if payload["verification_status"] in {"not_visible_in_nonempty_registry", "not_visible_not_readable_by_id"}:
-                    return [TextContent(type="text", text=f"✅ 已删除 Gemini 定时操作: {clean_id}")]
                 if payload["verification_status"] in {"registry_empty_unverified", "registry_empty_not_readable_by_id"}:
-                    return [TextContent(type="text", text=f"✅ 删除请求已被 Gemini 接受: {clean_id}；当前 registry 为空，按 ID 校验状态: {payload['verification_status']}。")]
-                return [TextContent(type="text", text=f"✅ 删除请求已被 Gemini 接受: {clean_id}；校验状态: {payload['verification_status']}")]
+                    return [TextContent(type="text", text=f"⚠️ 删除请求已被 Gemini 接受: {clean_id}；当前 registry 为空，按 ID 校验状态: {payload['verification_status']}。")]
+                return [TextContent(type="text", text=f"⚠️ 删除请求已被 Gemini 接受: {clean_id}；校验状态: {payload['verification_status']}")]
             return [TextContent(type="text", text=f"⚠️ 删除请求已发送，但响应无法确认: {clean_id}")]
         except Exception as e:
             logger.error(f"定时操作删除失败: {e}")
@@ -2497,11 +2322,11 @@ def _register_model_tools(mcp: MCPServer, enabled_tool_names: set[str], tool_fun
         """列出所有可用模型及其说明"""
         aliases = """🤖 MCP 模型别名:
 
-1. flash-lite / lite → 3.1 Flash-Lite
+1. flash-lite / lite → Web UI 3.5 Flash-Lite (request name: Flash-Lite)
    - 网页端极速模型
 
 2. flash / fast → gemini-3-flash
-   - 网页端 3.5 Flash；fast 保留为兼容别名
+   - 2026-09-26 网页端 3.8 Flash；fast 保留为兼容别名
 
 3. pro → gemini-3-pro
    - 网页端 3.1 Pro，是否可用取决于当前账户
@@ -2510,8 +2335,9 @@ def _register_model_tools(mcp: MCPServer, enabled_tool_names: set[str], tool_fun
    - 旧兼容别名；新网页思考等级请用 thinking_level=standard/extended
 
 媒体规则:
-- 图像首轮生成始终使用 Nano Banana 2
-- 音乐: flash 系列 → Lyria 3, pro → Lyria 3 Pro
+- 图像: Flash-Lite → Nano Banana 2 Lite；Flash / Pro → Nano Banana 2
+- 音乐: Lyria；网页公告为 3.5，MCP 结果未必标明实际版本
+- 视频: 当前普通聊天请求不等于 Gemini Omni 视频模式；需要验证实际视频产物
 
 ---
 

@@ -163,6 +163,22 @@ def test_search_classifies_source_free_prose_as_answer_only():
     assert data.answer == "unsourced prose"
 
 
+def test_search_does_not_treat_model_written_links_as_retrieval_evidence():
+    response = _response(
+        text="See [the official notes](https://docs.python.org/3/whatsnew/3.13.html).",
+        citations=[],
+    )
+    stub = _StubChatService(response=response)
+
+    result = _search(stub, query="Python 3.13 release notes")
+
+    assert result.ok is True
+    assert result.data is not None
+    assert result.data.grounding_state is GroundingState.ANSWER_ONLY
+    assert result.data.sources == ()
+    assert result.data.answer == response.text
+
+
 def test_search_reports_unavailable_when_the_answer_is_empty():
     stub = _StubChatService(response=_response(text="   ", citations=[]))
 

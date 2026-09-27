@@ -44,8 +44,8 @@ mcp = MCPServer(
 # Gemini Web MCP Server (v{__version__})
 
 ## 可用模型
-- flash-lite → Web UI 3.1 Flash-Lite
-- flash / fast → Web UI 3.5 Flash
+- flash-lite → Web UI 3.5 Flash-Lite
+- flash / fast → Web UI 3.8 Flash
 - pro → Web UI 3.1 Pro
 - 三个 Web UI 模型都支持 thinking_level=standard/extended
 - thinking 保留为旧兼容别名
@@ -64,9 +64,9 @@ Cookie 辅助工具始终可用，不依赖额外工具组。
 
 ## 主要功能
 - 💬 对话: 单次对话、多轮会话、Temporary chat、Gem 对话
-- 🎨 媒体生成: 图像、视频、音乐
--   图像首轮生成统一走 Nano Banana 2
--   音乐按模型分流：flash 系列 → Lyria 3，pro → Lyria 3 Pro
+- 🎨 媒体生成: 图像、音乐；视频请求须以实际产物验证
+-   图像: Flash-Lite → Nano Banana 2 Lite，Flash / Pro → Nano Banana 2
+-   音乐为 Lyria；具体版本以可观察的上游证据为准
 - 🖼️ 参考图像: 媒体生成可附带图像输入
 - 📎 文件/URL 分析
 - 🔎 Deep Research

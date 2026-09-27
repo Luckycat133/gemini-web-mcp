@@ -1,10 +1,11 @@
 # Gemini Web Tool Surface Reference
 
 Compact safety/group map of the Gemini Web MCP tools. Load this only when you need
-to pick tools by safety tier or group. The **live** source of truth is
+to pick tools by safety tier or group. The connected server's source of truth is
 `gemini_get_tool_manifest` (primary server) and `account(action="manifest")`
 (low-token server) — re-check those at runtime because `GEMINI_TOOLS` controls
-which tools are actually registered in the current process.
+which primary tools are registered in the current process. The focused
+`gemini-mcp-assist` server exposes only its fixed five-tool catalog.
 
 ## Annotation legend
 
@@ -18,11 +19,11 @@ which tools are actually registered in the current process.
 
 | Tool | Group | Purpose |
 |---|---|---|
-| `gemini_reset_session` | core | Clear an MCP/Gemini session and optionally delete its remote chat; never changes agent memory or agent instructions |
+| `gemini_reset_session` | core | Clear one MCP/Gemini session and its configured remote-chat lifecycle; never changes agent memory or agent instructions |
 | `gemini_cleanup_test_artifacts` | history | Find and optionally delete test chats/scheduled actions by marker |
 | `gemini_delete_chat` | history | Request remote chat deletion and report read-back evidence |
 | `gemini_delete_scheduled_action` | account | Delete a scheduled action by id |
-| `gemini_manage_gems` | gems | List/create/update/delete Gems (delete is destructive) |
+| `gemini_manage_gems` | gems | List/create/update/delete Gems; use an explicit account request for mutation |
 
 ### Reads private chat text (require explicit user intent)
 
@@ -76,7 +77,13 @@ which tools are actually registered in the current process.
 | `gemini_list_scheduled_actions` / `gemini_get_scheduled_action` | account | `reads_private_scheduled_action_*` |
 | `gemini_create_scheduled_action` | account | `creates_private_scheduled_action` (mutates) |
 | `gemini_get_tool_mode_status` | account | `reads_mode_status_only` |
-| `gemini_get_cookie_from_browser` | cookie | With explicit user approval, caches sensitive account-authentication material locally; restrict file access and never log, back up, or share it |
+
+### Authentication and local state
+
+| Tool | Group | Effect |
+|---|---|---|
+| `gemini_get_cookie_from_browser` | cookie | With explicit user approval already given for this task or earlier in the conversation, caches sensitive account-authentication material locally; restrict file access and never log, back up, or share it |
+| `gemini_reset` | always | Resets the local Gemini client connection; it does not delete agent memory or instructions |
 
 ## Low-token skill server facade (`src.skill_server`)
 
@@ -84,10 +91,14 @@ Fewer, broader tools with `action` parameters. Same safety tiers apply.
 
 | Tool | Annotations | Notes |
 |---|---|---|
+| `chat` | `MUTATES_REMOTE` | text/image chat; sends user content to Gemini |
 | `account` | `READS_PRIVATE_REMOTE` | `action="manifest\|capabilities"` are auth-free; other actions read private inventory |
 | `history` | `DESTRUCTIVE_REMOTE` | `action="list\|search\|read\|export"` read-only; `action="delete"` destructive |
 | `scheduled` | `DESTRUCTIVE_REMOTE` | `action="list\|get"` read-only; `action="create\|delete"` mutate/destroy |
-| `create` | `MUTATES_REMOTE` | media/music creation |
+| `create` | `MUTATES_REMOTE` | image/music generation; video argument is compatibility-only, not a verified Gemini Omni route |
+| `edit` | `MUTATES_REMOTE` | image editing |
+| `session` | `DESTRUCTIVE_REMOTE` | create/send/list/reset actions; reset affects Gemini conversation state |
+| `prompts` | `DESTRUCTIVE_LOCAL` | local prompt list/get/create/delete |
 | `cookie` | `MUTATES_LOCAL` | `action="profiles"` read-only; `action="get"` requires explicit user approval because it caches sensitive account-authentication material locally; restrict file access and remove the cache when no longer needed |
 | `doctor` | `READ_ONLY_LOCAL` | local preflight |
 | `cleanup` | `DESTRUCTIVE_REMOTE` | `dry_run=true` is safe; `dry_run=false` deletes |
@@ -107,9 +118,11 @@ store for `browser-cookie3`; the workflow does not inspect arbitrary credential 
 |---|---|---|
 | `model` / `chat` | chat | model-only agents |
 | `history` | manage:history-read | read-only history |
-| `history-organize` | manage:history-read + notebooks | history + notebook moves |
+| `history-organize` | manage:history-read + notebooks-read/write | history + notebook moves |
 | `account-read` | manage:account-read | read-only inventory |
 | `scheduled-admin` | manage:scheduled-read + scheduled-write | authorized scheduled CRUD |
+| `manage:gems` | manage:gems | explicit Gem list/create/update/delete |
+| `history,manage:history-write` | manage:history-read + history-write | identify a chat, then explicitly delete it or clean test artifacts |
+| `prompts` | prompts | local saved prompts |
 | `core` (default) | chat + media + file + research | broad content workflow |
-| `prompts` | prompts + manifest/cookie helpers | local prompt management |
 | `all` | everything + manage:all | maintenance/verification only |

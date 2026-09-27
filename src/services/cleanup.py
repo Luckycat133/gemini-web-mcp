@@ -3,12 +3,16 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Literal
+from typing import Any, Awaitable, Callable, Literal
 
-from .history import chat_to_dict, clamp_int, read_chat_turns
-from .scheduled import delete_action, fetch_scheduled_registry
+from ..infrastructure.rpc_parsers import extract_rpc_bodies
+from .history import chat_to_dict, clamp_int, delete_chat_result, read_chat_turns
+from .scheduled import delete_action, fetch_scheduled_registry, fetch_scheduled_task_by_id
 
 CleanupTarget = Literal["all", "chats", "scheduled"]
+FetchRegistry = Callable[[Any, int], Awaitable[tuple[list[dict[str, Any]], dict[str, Any]]]]
+FetchByID = Callable[[Any, str, int], Awaitable[tuple[dict[str, Any] | None, dict[str, Any]]]]
+ExtractBodies = Callable[[str, str], list[Any]]
 
 
 def split_cleanup_markers(markers: str) -> list[str]:
@@ -65,15 +69,21 @@ async def _cleanup_matching_chats(
         if matched_fields:
             deleted = False
             delete_error = ""
+            verification_status = "dry_run" if options.dry_run else "not_attempted"
             if not options.dry_run:
                 if not hasattr(client, "delete_chat"):
                     delete_error = "delete_chat unavailable"
+                    verification_status = "capability_unavailable"
                 else:
                     try:
-                        await client.delete_chat(item["id"])  # type: ignore[attr-defined]
-                        deleted = True
+                        result = await delete_chat_result(client, item["id"])
+                        deleted = bool(result.data and result.data.get("deleted") is True)
+                        verification_status = result.meta.verification_status
+                        if not result.ok and result.error is not None:
+                            delete_error = f"{result.error.code.value}: {result.error.message}"
                     except Exception as exc:
                         delete_error = f"{type(exc).__name__}: {exc}"
+                        verification_status = "delete_error"
             matched_chats.append(
                 {
                     "id": item.get("id"),
@@ -81,6 +91,7 @@ async def _cleanup_matching_chats(
                     "matched_fields": sorted(set(matched_fields)),
                     "matched_markers": sorted(set(matched_markers)),
                     "deleted": deleted,
+                    "verification_status": verification_status,
                     "delete_error": delete_error,
                 }
             )
@@ -90,6 +101,10 @@ async def _cleanup_matching_chats(
 async def _cleanup_matching_scheduled(
     client: object,
     options: _CleanupScanOptions,
+    *,
+    fetch_registry: FetchRegistry,
+    fetch_by_id: FetchByID,
+    extract_bodies: ExtractBodies,
 ) -> tuple[list[dict[str, Any]], list[dict[str, str]]]:
     matched_scheduled: list[dict[str, Any]] = []
     errors: list[dict[str, str]] = []
@@ -98,7 +113,7 @@ async def _cleanup_matching_scheduled(
         return matched_scheduled, errors
 
     try:
-        entries, _diagnostic = await fetch_scheduled_registry(client, 300)
+        entries, _diagnostic = await fetch_registry(client, 300)
         for item in entries:
             search_text = "\n".join(
                 str(item.get(key, "")) for key in ("id", "title", "instructions", "schedule_label")
@@ -111,13 +126,20 @@ async def _cleanup_matching_scheduled(
             verification_status = "dry_run"
             if not options.dry_run:
                 try:
-                    result = await delete_action(client, action_id=str(item["id"]), max_chars=300)
+                    result = await delete_action(
+                        client,
+                        action_id=str(item["id"]),
+                        max_chars=300,
+                        fetch_registry=fetch_registry,
+                        fetch_by_id=fetch_by_id,
+                        extract_bodies=extract_bodies,
+                    )
                     verification_status = str(result["verification_status"])
                     deleted = bool(
                         result["ok"]
                         and (
                             result.get("deleted_by_id_after_delete") is True
-                            or result.get("visible_after_delete") is not True
+                            or verification_status == "not_visible_not_readable_by_id"
                         )
                     )
                 except Exception as exc:
@@ -146,6 +168,10 @@ async def cleanup_test_artifacts_payload(
     dry_run: bool = True,
     max_chats: int = 25,
     scan_turns: bool = False,
+    *,
+    fetch_registry: FetchRegistry = fetch_scheduled_registry,
+    fetch_by_id: FetchByID = fetch_scheduled_task_by_id,
+    extract_bodies: ExtractBodies = extract_rpc_bodies,
 ) -> dict[str, Any]:
     marker_list = split_cleanup_markers(markers) or ["codex-"]
     options = _CleanupScanOptions(
@@ -162,7 +188,13 @@ async def cleanup_test_artifacts_payload(
         matched_chats, chat_errors = await _cleanup_matching_chats(client, options)
         errors.extend(chat_errors)
     if target in {"all", "scheduled"}:
-        matched_scheduled, scheduled_errors = await _cleanup_matching_scheduled(client, options)
+        matched_scheduled, scheduled_errors = await _cleanup_matching_scheduled(
+            client,
+            options,
+            fetch_registry=fetch_registry,
+            fetch_by_id=fetch_by_id,
+            extract_bodies=extract_bodies,
+        )
         errors.extend(scheduled_errors)
 
     return {
@@ -195,7 +227,7 @@ def format_cleanup_markdown(payload: dict[str, Any]) -> str:
     if payload["matched_chats"]:
         lines.extend(["", "### Chats"])
         for item in payload["matched_chats"]:
-            status = "deleted" if item.get("deleted") else "matched"
+            status = "deleted" if item.get("deleted") else item.get("verification_status") or "matched"
             if item.get("delete_error"):
                 status = f"error={item['delete_error']}"
             lines.append(

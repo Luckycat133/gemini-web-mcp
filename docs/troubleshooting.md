@@ -119,9 +119,9 @@ mcp dev src/server.py
 ### 媒体生成失败
 
 1. 装图像依赖：`pip install -e ".[image]"`（Pillow）
-2. 图像首轮固定 Nano Banana 2，`pro` 不会换首轮模型——这是网页端规则，不是 bug
-3. 视频最长 60s（Veo 3.1）
-4. 音乐按模型分流：`flash` 系 → Lyria 3，`pro` → Lyria 3 Pro
+2. 图像首轮：Flash-Lite 使用 Nano Banana 2 Lite，Flash / Pro 使用 Nano Banana 2；检查本地 Artifact 与 `observed_backend`
+3. 视频若返回 `ARTIFACT_NOT_RETURNED`，检查上游聊天是否只给了文本；当前已验证的生成入口是 Gemini Web 的专用 Omni 视频模式
+4. 音乐结果只报告 Lyria 家族；实际版本以可观察证据为准
 5. 地区限制：部分功能在某些区域不可用，错误文本会提示
 
 ### 模型不可用 / 返回空

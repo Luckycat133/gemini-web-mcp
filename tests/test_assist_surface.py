@@ -35,6 +35,7 @@ import src.services.research as research_service
 import src.surfaces.assist as assist
 
 from src import __version__
+from src.domain import DomainErrorCode, DomainResult
 from src.services.research import phase_timeout
 
 
@@ -446,10 +447,10 @@ def test_gemini_ask_normalizes_model_alias_before_resolving(monkeypatch):
 
     content = asyncio.run(_call_tool("gemini_ask", prompt="Hi", model="lite"))
 
-    assert client.captured_generate_kwargs["model"] == "3.1 Flash-Lite"
+    assert client.captured_generate_kwargs["model"] == "Flash-Lite"
     domain_result = content[0].meta["domain_result"]
     assert domain_result["data"]["requested_model"] == "lite"
-    assert domain_result["data"]["effective_model"] == "3.1 Flash-Lite"
+    assert domain_result["data"]["effective_model"] == "Flash-Lite"
 
 
 def test_gemini_ask_blank_prompt_is_rejected_before_client_use(monkeypatch):
@@ -480,6 +481,25 @@ def test_gemini_ask_failure_is_typed_by_the_error_boundary(monkeypatch):
     assert domain_result["ok"] is False
     assert domain_result["error"]["code"] == "INTERNAL_ERROR"
     assert domain_result["meta"]["verification_status"] == "exception_classified"
+
+
+def test_gemini_ask_preserves_shared_chat_failure(monkeypatch):
+    async def fail_with_typed_result(_request):
+        return DomainResult.failure(
+            DomainErrorCode.AUTH_EXPIRED,
+            "Gemini authentication expired.",
+            suggested_action="Refresh the browser session.",
+            verification_status="authentication_expired",
+        )
+
+    monkeypatch.setattr(assist._chat_service, "generate", fail_with_typed_result)
+    content = asyncio.run(_call_tool("gemini_ask", prompt="Hi"))
+
+    domain_result = content[0].meta["domain_result"]
+    assert domain_result["ok"] is False
+    assert domain_result["error"]["code"] == "AUTH_EXPIRED"
+    assert domain_result["meta"]["verification_status"] == "authentication_expired"
+    assert "Refresh the browser session." in content[0].text
 
 
 # ---------------------------------------------------------------------------
@@ -1130,6 +1150,26 @@ def test_gemini_research_preserves_upstream_ids_in_structured_metadata(monkeypat
     assert "Upstream chat ID: c_plan_unique" in content[0].text
 
 
+def test_gemini_research_recovers_chat_id_from_start_response(monkeypatch):
+    class _StartResponseHasChatId(_FakeResearchClient):
+        async def start_deep_research(self, plan, chat=None):
+            return SimpleNamespace(text="Research started", metadata=["c_start_response", "r_start"])
+
+    client = _StartResponseHasChatId(plan_cid="")
+    captured_schedule = []
+    _patch_research_client_env(monkeypatch, client, captured_schedule=captured_schedule)
+
+    content = asyncio.run(_call_tool("gemini_research", query="Study this."))
+
+    domain_result = content[0].meta["domain_result"]
+    assert domain_result["ok"] is True
+    assert domain_result["data"]["upstream_chat_id"] == "c_start_response"
+    assert domain_result["data"]["continuation_possible"] is True
+    assert captured_schedule == [
+        {"cid": "c_start_response", "retain_chat": True, "delete_after_seconds": None, "source": "gemini_research"}
+    ]
+
+
 def test_gemini_research_maps_upstream_state_to_typed_states(monkeypatch):
     queued = _FakeResearchClient(start_state="accepted")
     running = _FakeResearchClient(start_state="in_progress")
@@ -1152,6 +1192,20 @@ def test_gemini_research_maps_upstream_state_to_typed_states(monkeypatch):
     assert failed_result["error"]["code"] == "INTERNAL_ERROR"
     assert failed_result["data"]["state"] == "failed"
     assert failed_result["meta"]["operation_state"] == "failed"
+
+
+def test_gemini_research_does_not_claim_report_observed_from_start_state_alone(monkeypatch):
+    client = _FakeResearchClient(start_state="completed")
+    _patch_research_client_env(monkeypatch, client)
+
+    content = asyncio.run(_call_tool("gemini_research", query="Study this."))
+
+    domain_result = content[0].meta["domain_result"]
+    assert domain_result["ok"] is True
+    assert domain_result["data"]["state"] == "completed"
+    assert domain_result["data"]["report_available"] is False
+    assert domain_result["meta"]["verification_status"] == "upstream_completed_report_not_observed"
+    assert "did not return a report" in content[0].text
 
 
 def test_gemini_research_schedules_cleanup_with_retain_chat_default_true(monkeypatch):
@@ -1296,6 +1350,51 @@ def test_gemini_research_plan_phase_hang_returns_timed_out_with_issued_handle(mo
     assert captured_schedule == []
     # Compatibility text stays derived from the typed failure.
     assert "TIMED_OUT" in content[0].text
+
+
+def test_gemini_research_start_timeout_without_readback_is_not_reported_running(monkeypatch):
+    class _HangingStartClient(_FakeResearchClient):
+        async def start_deep_research(self, plan, chat=None):
+            await asyncio.Event().wait()
+
+    client = _HangingStartClient()
+    captured_schedule = []
+    _patch_research_client_env(monkeypatch, client, captured_schedule=captured_schedule)
+    monkeypatch.setattr(research_service, "phase_timeout", lambda timeout_seconds: 0.05)
+
+    content = asyncio.run(_call_tool("gemini_research", query="Slow start.", timeout_seconds=1))
+
+    domain_result = content[0].meta["domain_result"]
+    assert domain_result["ok"] is False
+    assert domain_result["error"]["code"] == "TIMED_OUT"
+    assert domain_result["meta"]["operation_state"] == "timed_out"
+    assert domain_result["meta"]["verification_status"] == "completion_not_observed"
+    data = domain_result["data"]
+    assert re.fullmatch(r"op_[0-9a-f]{32}", data["operation_id"])
+    assert data["upstream_operation_id"] == "r_123"
+    assert data["upstream_chat_id"] == "c_plan1"
+    assert data["continuation_possible"] is True
+    assert captured_schedule == [
+        {"cid": "c_plan1", "retain_chat": True, "delete_after_seconds": None, "source": "gemini_research"}
+    ]
+
+
+def test_gemini_research_fresh_chat_failure_keeps_issued_handle(monkeypatch):
+    class _FailingFreshChatClient(_FakeResearchClient):
+        def start_chat(self, model=None):
+            raise RuntimeError("fresh chat could not be created")
+
+    client = _FailingFreshChatClient()
+    _patch_research_client_env(monkeypatch, client)
+
+    content = asyncio.run(_call_tool("gemini_research", query="Study this."))
+
+    domain_result = content[0].meta["domain_result"]
+    assert domain_result["ok"] is False
+    assert domain_result["error"]["code"] == "INTERNAL_ERROR"
+    assert domain_result["data"]["state"] == "failed"
+    assert re.fullmatch(r"op_[0-9a-f]{32}", domain_result["data"]["operation_id"])
+    assert domain_result["data"]["upstream_chat_id"] is None
 
 
 def test_gemini_research_timeout_seconds_keeps_thirty_second_phase_floor():

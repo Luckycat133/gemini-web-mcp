@@ -40,7 +40,7 @@ Authoritative configuration references: [Codex MCP](https://developers.openai.co
 | Surface | Select it when | Trade-off |
 | --- | --- | --- |
 | Primary + `GEMINI_TOOLS=model` | Text/model calls are the goal | Recommended starting point; smallest primary model surface |
-| Primary + `GEMINI_TOOLS=core` | Images, video, music, files, URLs, or Deep Research are needed | Broader content surface and longer tool timeouts |
+| Primary + `GEMINI_TOOLS=core` | Images, music, files, URLs, or Deep Research are needed | Broader content surface and longer tool timeouts; use Gemini Web's dedicated Videos page for video until its MCP route returns a verified artifact |
 | `gemini-mcp-skill-server` | The client benefits from a fixed, low-token facade | Eleven workflow tools; compact presentation, shared service semantics |
 | Primary + `GEMINI_TOOLS=all` | A maintainer is verifying account/history/admin coverage | Largest and most sensitive surface; not a general default |
 

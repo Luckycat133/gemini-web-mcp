@@ -2,129 +2,18 @@
 
 Load this reference for Deep Research, video, music, and future asynchronous generation.
 
-## Default Behavior
+## Current Tools
 
-Start long work asynchronously and return an opaque handle immediately.
+- `gemini_research` starts Deep Research asynchronously and returns `operation_id`, `upstream_operation_id`, and `upstream_chat_id` when observed. The local `operation_id` is a correlation ID only: no current tool accepts it for status, result, or cancellation.
+- Primary `gemini_deep_research(wait_for_completion=false, retain_chat=true)` starts without waiting and returns observed upstream IDs. It does not create a durable local handle.
+- Compact `create(type="music")` and primary music tools may wait for a response or return `queued`. They do not have a separate status/result/cancel tool. Generic video tools remain registered for compatibility, but the current live check did not produce a video Artifact; use Gemini's dedicated Videos page.
 
-The model must not depend on implicit MCP connection state. Every later action accepts the explicit `operation_id`.
+For Research, retain the chat and use the observed `upstream_chat_id` to inspect it later through compact `history(action="read", chat_id=...)` or primary `gemini_history(action="read", chat_id=...)` in the `history` profile. These reads can truncate long turns or show only a completion notice. When the report text is absent, primary `gemini_create_from_research_report(chat_id=..., artifact_type="webpage")` in the `core` profile can attempt to extract a local report webpage. Check the resulting Artifact state and content; an unreadable or unfinished chat is inconclusive. If no chat ID was observed, report that recovery is unavailable through the current surface. Do not start the same query again automatically.
 
-Target lifecycle:
+There is no `operation(...)`, `gemini_get_operation_status`, `gemini_get_operation_result`, or `gemini_cancel_operation` tool in the current release.
 
-```text
-start -> operation_id
-status(operation_id)
-result(operation_id)
-cancel(operation_id)
-```
+## During a Long Call
 
-The operation's initial modality-specific tool—`gemini_research`, `gemini_generate_video`, or `gemini_generate_music`—performs `start`.
+Preserve every observed upstream identifier and Artifact identity. `timed_out` describes the local wait, not proof that Gemini stopped. A `queued` response is not a completed Artifact. Do not automatically repeat a generation request after a timeout, because it may create a duplicate.
 
-Dedicated primary surfaces expose:
-
-```text
-gemini_get_operation_status
-gemini_get_operation_result
-gemini_cancel_operation
-```
-
-The legacy low-token compatibility server exposes:
-
-```text
-operation(action="status"|"result"|"cancel", operation_id=...)
-```
-
-Do not add an unbounded agent-facing operation list to assist/create surfaces. A paginated diagnostics list may exist only in the account/maintenance surface.
-
-## Local Persistence
-
-Use a local SQLite database. It is local product state, not a cloud service.
-
-Recommended tables:
-
-```text
-operations
-cleanup_jobs
-```
-
-Operation rows may contain only recovery metadata:
-
-```text
-operation_id
-operation_type
-provider_operation_id
-upstream_chat_id
-state
-created_at
-updated_at
-expires_at
-attempt_count
-error_code
-verification_status
-artifact_id
-artifact_uri or artifact_path
-```
-
-Do not persist:
-
-```text
-Cookies
-prompts
-chat text
-research report text
-raw Gemini responses
-generated file bytes
-```
-
-Default operation retention is seven days unless a workflow explicitly requires a shorter lifetime.
-
-## Handles
-
-Operation IDs must be:
-
-- opaque;
-- high-entropy;
-- stable across process restarts;
-- independent of connection/session identity;
-- rejected cleanly when unknown or expired.
-
-Always preserve provider/research/chat identifiers in structured results when observed.
-
-## States
-
-Use a stable state set:
-
-```text
-queued
-running
-completed
-timed_out
-cancel_requested
-cancelled
-failed
-expired
-```
-
-`timed_out` means one wait ended; it does not prove the upstream job stopped.
-
-`cancel_requested` means cooperative cancellation was requested.
-
-Only report `cancelled` when the observable contract supports that terminal state. If the upstream work completes before cancellation takes effect, preserve the observed terminal result.
-
-## Idempotency
-
-- `status` is read-only and idempotent.
-- `result` is read-only and idempotent.
-- repeated `cancel` calls must not create additional upstream work;
-- retries must reuse the same operation handle whenever continuation is possible;
-- never start a new operation automatically because a status request failed.
-
-## Current Compatibility Runtime
-
-Until the SQLite OperationService is implemented:
-
-1. start Deep Research with `wait_for_completion=false`;
-2. preserve `upstream_operation_id` and `upstream_chat_id`;
-3. preserve queued/running/timed-out state;
-4. avoid duplicate starts;
-5. use retained chat/report actions for recovery where available;
-6. state clearly when restart-safe recovery is not yet implemented.
+The planned SQLite OperationService will add restart-safe `status`, `result`, and `cancel` by explicit operation ID. Those tools and durable handles are not available in the current release.

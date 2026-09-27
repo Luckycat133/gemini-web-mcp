@@ -235,6 +235,10 @@ def artifact_from_local_path(
         dimensions_probe,
     )
 
+    detected_image_mime = detect_image_mime_type(file_path) if kind == ArtifactKind.IMAGE else None
+    if detected_image_mime:
+        methods.append("image_mime_signature")
+
     return Artifact(
         id=identity,
         kind=kind,
@@ -242,7 +246,7 @@ def artifact_from_local_path(
         title=title,
         uri=uri,
         local_path=resolved_path,
-        mime_type=_guess_mime_type(resolved_path),
+        mime_type=detected_image_mime or _guess_mime_type(resolved_path),
         size_bytes=size_bytes,
         width=width,
         height=height,
@@ -403,6 +407,8 @@ def artifact_result(
     data: ArtifactResultData,
     *,
     save_failures: Sequence[str] = (),
+    empty_suggested_action: str | None = None,
+    empty_retryable: bool = True,
 ) -> DomainResult[ArtifactResultData]:
     details = {
         "artifact_state": data.state.value,
@@ -417,8 +423,8 @@ def artifact_result(
             DomainErrorCode.ARTIFACT_NOT_RETURNED,
             "The upstream response did not include a usable artifact.",
             data=data,
-            retryable=True,
-            suggested_action="Retry with a clearer prompt or inspect the upstream chat later.",
+            retryable=empty_retryable,
+            suggested_action=empty_suggested_action or "Retry with a clearer prompt or inspect the upstream chat later.",
             requested_backend=data.requested_model,
             effective_backend=data.effective_backend,
             verification_status="artifact_absent",
@@ -565,6 +571,24 @@ def _guess_mime_type(location: str) -> str | None:
     path = urlparse(location).path if "://" in location else location
     mime_type, _encoding = mimetypes.guess_type(path)
     return mime_type
+
+
+def detect_image_mime_type(path: str | Path) -> str | None:
+    """Identify common image formats from bytes, independent of file suffix."""
+    try:
+        with Path(path).open("rb") as image_file:
+            header = image_file.read(16)
+    except OSError:
+        return None
+    if header.startswith(b"\x89PNG\r\n\x1a\n"):
+        return "image/png"
+    if header.startswith(b"\xff\xd8\xff"):
+        return "image/jpeg"
+    if header.startswith((b"GIF87a", b"GIF89a")):
+        return "image/gif"
+    if header.startswith(b"RIFF") and header[8:12] == b"WEBP":
+        return "image/webp"
+    return None
 
 
 def _normalized_local_path(path: str) -> str:

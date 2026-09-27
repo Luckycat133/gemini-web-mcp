@@ -44,6 +44,14 @@
     <answer>pro</answer>
   </qa_pair>
   <qa_pair>
+    <question>Inspect the observed Web capability manifest. Which MCP model alias maps to the displayed Gemini Web model named 3.8 Flash? Answer with the alias only.</question>
+    <answer>flash</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>When a generic Gemini MCP video request returns only chat text and ARTIFACT_NOT_RETURNED, which dedicated Gemini Web page has a verified video-generation mode? Answer with the URL.</question>
+    <answer>https://gemini.google.com/videos</answer>
+  </qa_pair>
+  <qa_pair>
     <question>Inspect the observed Web capability manifest. What is the RPC id for the tool or mode status probe observed around Canvas and Guided Learning toggles? Answer with the RPC id only.</question>
     <answer>MyzX6c</answer>
   </qa_pair>

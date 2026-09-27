@@ -999,19 +999,19 @@ def test_current_web_models_resolve_thinking_mode_buckets():
         resolve_thinking_mode_id,
     )
 
-    assert resolve_model_name("flash-lite") == "3.1 Flash-Lite"
-    assert resolve_model_name("lite") == "3.1 Flash-Lite"
-    assert resolve_thinking_mode_id("3.1 Flash-Lite") == 6
-    assert resolve_thinking_mode_id("3.5 Flash") == 1
+    assert resolve_model_name("flash-lite") == "Flash-Lite"
+    assert resolve_model_name("lite") == "Flash-Lite"
+    assert resolve_thinking_mode_id("3.5 Flash-Lite") == 6
+    assert resolve_thinking_mode_id("3.8 Flash") == 1
     assert resolve_thinking_mode_id("3.1 Pro") == 3
     assert resolve_thinking_level_id("standard") == 1
     assert resolve_thinking_level_id("extended") == 2
-    assert resolve_media_request("flash-lite", "image")["backend_label"] == "Nano Banana 2"
-    assert resolve_media_request("flash-lite", "music", "standard")["backend_label"] == "Lyria 3"
-    assert resolve_media_request("flash-lite", "video")["request_model"] == "3.1 Flash-Lite"
+    assert resolve_media_request("flash-lite", "image")["backend_label"] == "Nano Banana 2 Lite"
+    assert resolve_media_request("flash-lite", "music", "standard")["backend_label"] == "Lyria"
+    assert resolve_media_request("flash-lite", "video")["request_model"] == "Flash-Lite"
     assert resolve_media_request("flash", "music", "extended")["request_model"] == "gemini-3-flash"
-    assert resolve_media_request("flash", "music", "extended")["backend_label"] == "Lyria 3"
-    assert resolve_media_request("pro", "music", "extended")["backend_label"] == "Lyria 3 Pro"
+    assert resolve_media_request("flash", "music", "extended")["backend_label"] == "Lyria"
+    assert resolve_media_request("pro", "music", "extended")["backend_label"] == "Lyria"
     assert resolve_learning_mode_config("quiz")["id"] == 18
     assert resolve_learning_mode_config("study-guide")["x9b_value"] == 4
 
@@ -1078,7 +1078,11 @@ def test_skill_server_uses_v2_file_attachment_contract(monkeypatch, tmp_path):
             prompt="make it brighter",
             model="pro",
         )
-        assert result[0].text == "ok"
+        assert result[0].text.endswith("ok")
+        assert "Backend: Nano Banana 2" in result[0].text
+        data = result[0].meta["domain_result"]["data"]
+        assert data["request_model"] == "gemini-3-flash"
+        assert data["effective_backend"] == "Nano Banana 2"
 
     asyncio.run(run())
 
@@ -1086,7 +1090,7 @@ def test_skill_server_uses_v2_file_attachment_contract(monkeypatch, tmp_path):
         (
             "Edit this image: make it brighter",
             [str(reference_path.resolve())],
-            "gemini-3-pro",
+            "gemini-3-flash",
         )
     ]
     assert scheduled == ["skill_edit"]
@@ -1166,7 +1170,7 @@ def test_skill_server_create_routes_current_media_backends(monkeypatch):
             thinking_level="extended",
         )
         assert "Backend: Nano Banana 2" in image_result[0].text
-        assert "Backend: Lyria 3 Pro" in music_result[0].text
+        assert "Backend: Lyria" in music_result[0].text
 
     asyncio.run(run())
 
@@ -2753,7 +2757,7 @@ def test_media_tool_reports_empty_media_response(monkeypatch):
             },
         )
         text = _tool_text(result)
-        assert "后端: Lyria 3" in text
+        assert "后端: Lyria" in text
         assert "没有返回文本、图片、视频或音乐资源" in text
 
     asyncio.run(run())
@@ -2816,6 +2820,7 @@ def test_media_tool_recovers_music_urls_from_raw_chat_card():
     import orjson
 
     import src.tools.media as media_tools
+    from src.infrastructure.rpc_contracts import get_contract
 
     mp3_url = "https://contribution.usercontent.google.com/download?filename=song.mp3"
     mp4_url = "https://contribution.usercontent.google.com/download?filename=song.mp4"
@@ -2835,7 +2840,8 @@ def test_media_tool_recovers_music_urls_from_raw_chat_card():
     ]
     conv_turn = [[None, "r_1"], None, None, [[candidate]]]
     body = [[conv_turn]]
-    raw = [[None, None, orjson.dumps(body).decode("utf-8")]]
+    rpc_id = get_contract("media.music_chat").rpc_id
+    raw = [["wrb.fr", rpc_id, orjson.dumps(body).decode("utf-8")]]
 
     class FakeResponse:
         text = orjson.dumps(raw).decode("utf-8")
@@ -2843,7 +2849,9 @@ def test_media_tool_recovers_music_urls_from_raw_chat_card():
     class FakeClient:
         proxy = None
 
-        async def _batch_execute(self, calls):
+        async def _batch_execute(self, calls, **kwargs):
+            assert calls[0].rpcid == rpc_id
+            assert kwargs["source_path"] == "/app"
             return FakeResponse()
 
     async def run():
@@ -2893,7 +2901,7 @@ def test_media_tool_routes_music_and_image_to_current_web_backends(monkeypatch):
 
         assert "后端: Nano Banana 2" in _tool_text(image_result)
         assert "Pro redo" in _tool_text(image_result)
-        assert "后端: Lyria 3 Pro" in _tool_text(music_result)
+        assert "后端: Lyria" in _tool_text(music_result)
 
     asyncio.run(run())
 

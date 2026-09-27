@@ -65,14 +65,29 @@ def test_load_prompts_skips_when_file_absent(tmp_path):
     assert mgr.prompts == {}
 
 
-def test_load_prompts_swallows_invalid_json_and_logs(tmp_path, caplog):
-    """文件存在但 JSON 非法 → 记录错误日志，prompts 回退为空。"""
+def test_load_prompts_rejects_invalid_json_without_overwriting_it(tmp_path):
+    """A corrupt library must not become an empty writable library."""
     target = tmp_path / "bad.json"
     target.write_text("{not valid json", encoding="utf-8")
-    with caplog.at_level("ERROR", logger="src.tools.prompts"):
-        mgr = prompts_tools.PromptManager(str(target))
-    assert mgr.prompts == {}
-    assert any("加载提示词失败" in rec.message for rec in caplog.records)
+    try:
+        prompts_tools.PromptManager(str(target))
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("Corrupt prompt storage must stop writes")
+    assert target.read_text(encoding="utf-8") == "{not valid json"
+
+
+def test_load_prompts_rejects_invalid_document_shape(tmp_path):
+    target = tmp_path / "bad-shape.json"
+    target.write_text('{"prompts": []}', encoding="utf-8")
+    try:
+        prompts_tools.PromptManager(str(target))
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("A non-mapping prompt library must stop writes")
+    assert target.read_text(encoding="utf-8") == '{"prompts": []}'
 
 
 def test_load_prompts_reads_existing_prompts(tmp_path):
@@ -100,13 +115,78 @@ def test_load_prompts_reads_existing_prompts(tmp_path):
 # ---------------------------------------------------------------------------
 
 
-def test_save_prompts_swallows_write_exception(tmp_path, caplog):
-    """写入到不存在目录 → open 抛 FileNotFoundError，被吞咽并记录日志。"""
+def test_save_prompts_propagates_write_exception(tmp_path):
+    """Writing to a missing directory must not report success."""
     target = tmp_path / "no_such_dir" / "prompts.json"
     mgr = prompts_tools.PromptManager(str(target))
-    with caplog.at_level("ERROR", logger="src.tools.prompts"):
+    try:
         mgr._save_prompts()
-    assert any("保存提示词失败" in rec.message for rec in caplog.records)
+    except OSError:
+        pass
+    else:
+        raise AssertionError("A failed write must propagate")
+
+
+def test_prompt_mutations_roll_back_memory_when_persistence_fails(tmp_path, monkeypatch):
+    target = tmp_path / "p.json"
+    mgr = prompts_tools.PromptManager(str(target))
+    prompt_id = mgr.create_prompt(name="Original", content="Keep")
+    saved = target.read_text(encoding="utf-8")
+
+    def failed_save():
+        raise OSError("disk unavailable")
+
+    monkeypatch.setattr(mgr, "_save_prompts", failed_save)
+    for mutation in (
+        lambda: mgr.create_prompt(name="New", content="Discard"),
+        lambda: mgr.update_prompt(prompt_id, name="Changed"),
+        lambda: mgr.delete_prompt(prompt_id),
+    ):
+        try:
+            mutation()
+        except OSError:
+            pass
+        else:
+            raise AssertionError("A failed save must propagate")
+        assert list(mgr.prompts) == [prompt_id]
+        assert mgr.prompts[prompt_id]["name"] == "Original"
+        assert target.read_text(encoding="utf-8") == saved
+
+
+def test_failed_serialization_preserves_existing_prompt_file(tmp_path, monkeypatch):
+    target = tmp_path / "p.json"
+    mgr = prompts_tools.PromptManager(str(target))
+    mgr.create_prompt(name="Original", content="Keep")
+    saved = target.read_text(encoding="utf-8")
+
+    def partial_dump(_payload, file, **_kwargs):
+        file.write("partial")
+        raise OSError("serialization interrupted")
+
+    monkeypatch.setattr(prompts_tools.json, "dump", partial_dump)
+    try:
+        mgr.create_prompt(name="New", content="Discard")
+    except OSError:
+        pass
+    else:
+        raise AssertionError("A partial serialization must fail")
+
+    assert target.read_text(encoding="utf-8") == saved
+    assert sorted(path.name for path in tmp_path.iterdir()) == ["p.json"]
+
+
+def test_tool_create_reports_storage_failure_and_keeps_memory_empty(tmp_path):
+    mgr = prompts_tools.PromptManager(str(tmp_path / "missing" / "p.json"))
+    _set_singleton(mgr)
+    try:
+        mcp = _make_mcp()
+        text = asyncio.run(_call_tool(
+            mcp, "gemini_manage_prompts", action="create", name="New", content="Keep",
+        ))[0].text
+        assert text.startswith("❌ 失败:")
+        assert mgr.prompts == {}
+    finally:
+        _reset_singleton()
 
 
 # ---------------------------------------------------------------------------

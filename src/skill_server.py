@@ -163,8 +163,9 @@ mcp = MCPServer(
 - thinking_level: standard or extended
 
 ## Media behavior
-- image: always Nano Banana 2 on first generation
-- music: flash series -> Lyria 3, pro -> Lyria 3 Pro
+- image: Flash-Lite -> Nano Banana 2 Lite; Flash / Pro -> Nano Banana 2
+- music: Lyria; upstream responses may not expose the exact version
+- video: a generic chat prompt may return text only; require a verified video artifact
 
 ## Quick
 chat(message="hi")
@@ -1008,7 +1009,22 @@ def _skill_media_result(
         source_chat_id=response_chat_id(response),
         media_type=media_type,
     )
-    return data, artifact_result(data)
+    video_empty_action = (
+        (
+            "Inspect the retained upstream chat. "
+            if data.source_chat_id
+            else "No upstream chat ID was observed. "
+        )
+        + "Generic chat has not been verified to enter Gemini Omni video mode. "
+        "Use https://gemini.google.com/videos in an authorized browser."
+        if media_type == "video" and data.state == ArtifactState.EMPTY
+        else None
+    )
+    return data, artifact_result(
+        data,
+        empty_suggested_action=video_empty_action,
+        empty_retryable=media_type != "video",
+    )
 
 
 @mcp.tool(annotations=MUTATES_REMOTE)
@@ -1020,6 +1036,8 @@ async def create(
     image_path: Optional[str] = None,
 ) -> list[TextContent]:
     """Generate image/video/music."""
+    if not prompt.strip():
+        return domain_text(_invalid_argument_result("prompt must not be blank."), "Error: prompt must not be blank.")
     requested_model = model
     media_type = _normalize_media_type(type)
     request_model: str | None = None
@@ -1057,7 +1075,6 @@ async def create(
             model=request_model,
             thinking_level=thinking_level,
         )
-        _schedule_skill_response_cleanup(response, f"skill_create:{media_type}")
         input_artifacts = _skill_input_artifacts(
             safe_image_path,
             requested_model,
@@ -1074,6 +1091,14 @@ async def create(
             effective_backend=effective_backend,
             media_type=media_type,
         )
+        if data.state in {ArtifactState.QUEUED, ArtifactState.EMPTY}:
+            schedule_remote_chat_cleanup_from_response(
+                response,
+                retain_chat=True,
+                source=f"skill_create:{media_type}",
+            )
+        else:
+            _schedule_skill_response_cleanup(response, f"skill_create:{media_type}")
         content = _format_response(
             response,
             media_type,
@@ -1082,6 +1107,8 @@ async def create(
         )
         if data.state == ArtifactState.EMPTY:
             content[0].text += "\n\nArtifact state: empty (no usable media URI was returned)."
+            if media_type == "video":
+                content[0].text += " Use the dedicated Gemini Videos page after inspecting this chat."
         elif data.state == ArtifactState.QUEUED:
             content[0].text += "\n\nArtifact state: queued (no completed media is available yet)."
         content = append_artifact_block(content, data.artifacts)
@@ -1117,8 +1144,13 @@ async def edit(
     thinking_level: str = "standard",
 ) -> list[TextContent]:
     """Edit existing image."""
+    if not prompt.strip():
+        return domain_text(_invalid_argument_result("prompt must not be blank."), "Error: prompt must not be blank.")
+    if not image_path.strip():
+        return domain_text(_invalid_argument_result("image_path must not be blank."), "Error: image_path must not be blank.")
     requested_model = model
     request_model: str | None = None
+    effective_backend: str | None = None
     input_artifacts: tuple[Artifact, ...] = ()
     try:
         valid_image, safe_image_path, image_error = validate_optional_image_path(image_path)
@@ -1133,12 +1165,14 @@ async def edit(
         await cleanup_due_remote_chats(client)
 
         model = _normalize_model(model)
-        request_model = resolve_model_name(model)
+        media_request = resolve_media_request(model, "image", thinking_level)
+        request_model = media_request["request_model"]
+        effective_backend = media_request["backend_label"]
         input_artifacts = _skill_input_artifacts(
             safe_image_path or image_path,
             requested_model,
             request_model,
-            request_model,
+            effective_backend,
         )
 
         response = await client.generate_content(
@@ -1147,12 +1181,11 @@ async def edit(
             model=request_model,
             thinking_level=thinking_level,
         )
-        _schedule_skill_response_cleanup(response, "skill_edit")
         input_artifacts = _skill_input_artifacts(
             safe_image_path or image_path,
             requested_model,
             request_model,
-            request_model,
+            effective_backend,
             observed_backend=observed_backend_from_response(response),
             source_chat_id=response_chat_id(response),
         )
@@ -1161,10 +1194,19 @@ async def edit(
             input_artifacts,
             requested_model=requested_model,
             request_model=request_model,
-            effective_backend=request_model,
+            effective_backend=effective_backend,
             media_type="image_edit",
         )
-        content = _format_response(response, "image")
+        if data.state in {ArtifactState.QUEUED, ArtifactState.EMPTY}:
+            schedule_remote_chat_cleanup_from_response(response, retain_chat=True, source="skill_edit")
+        else:
+            _schedule_skill_response_cleanup(response, "skill_edit")
+        content = _format_response(
+            response,
+            "image",
+            backend_label=effective_backend,
+            backend_note=media_request["note"],
+        )
         content = append_artifact_block(content, data.artifacts)
         return attach_domain_result(content, result, use_result_data=True)
 
@@ -1173,7 +1215,7 @@ async def edit(
             state=ArtifactState.FAILED,
             requested_model=requested_model,
             request_model=request_model,
-            effective_backend=request_model,
+            effective_backend=effective_backend,
             input_artifacts=input_artifacts,
             media_type="image_edit",
         )

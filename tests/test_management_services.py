@@ -87,3 +87,53 @@ def test_notebook_move_reports_verified_read_back():
         assert result["verified_in_target_notebook"] is True
 
     asyncio.run(run())
+
+
+def test_notebook_move_changed_rpc_shape_without_read_back_is_not_accepted():
+    class Client:
+        async def _batch_execute(self, payloads, *, source_path, close_on_error):
+            return SimpleNamespace(status_code=200, text="response")
+
+    async def fetch_notebooks(_client, _locale):
+        return ([{"id": "notebook-1", "title": "Work", "project_type": 2}], {})
+
+    async def fetch_chats(_client, _notebook_id, _limit, _offset):
+        return ([], {"count": 0})
+
+    result = asyncio.run(move_chat_to_notebook(
+        Client(),
+        chat_id="chat-1",
+        notebook_id="notebook-1",
+        fetch_notebooks=fetch_notebooks,
+        fetch_chats=fetch_chats,
+        extract_bodies=lambda _text, _rpc_id: [[None, "unexpected"]],
+    ))
+
+    assert result["parser_status"] == "changed_shape"
+    assert result["verified_in_target_notebook"] is False
+    assert result["ok"] is False
+
+
+def test_notebook_move_acceptance_without_read_back_is_not_success():
+    class Client:
+        async def _batch_execute(self, payloads, *, source_path, close_on_error):
+            return SimpleNamespace(status_code=200, text="response")
+
+    async def fetch_notebooks(_client, _locale):
+        return ([{"id": "notebook-1", "title": "Work", "project_type": 2}], {})
+
+    async def fetch_chats(_client, _notebook_id, _limit, _offset):
+        return ([], {"count": 0})
+
+    result = asyncio.run(move_chat_to_notebook(
+        Client(),
+        chat_id="chat-1",
+        notebook_id="notebook-1",
+        fetch_notebooks=fetch_notebooks,
+        fetch_chats=fetch_chats,
+        extract_bodies=lambda _text, _rpc_id: [[None, ["chat-1", "Chat"]]],
+    ))
+
+    assert result["accepted"] is True
+    assert result["ok"] is False
+    assert result["verification_status"] == "read_back_not_observed"

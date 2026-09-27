@@ -34,14 +34,14 @@ class ModelConfig(TypedDict):
 
 MODEL_CONFIG: dict[str, ModelConfig] = {
     "flash-lite": {
-        "name": "3.1 Flash-Lite",
+        "name": "Flash-Lite",
         "hex_id": "8c46e95b1a07cecc",
         "capacity_tail": 1,
         "advanced_only": False,
         "thinking_mode_id": 6,
     },
     "lite": {
-        "name": "3.1 Flash-Lite",
+        "name": "Flash-Lite",
         "hex_id": "8c46e95b1a07cecc",
         "capacity_tail": 1,
         "advanced_only": False,
@@ -85,11 +85,13 @@ THINKING_LEVEL_IDS = {
 }
 
 THINKING_MODE_IDS = {
+    "3.5 flash-lite": 6,
     "3.1 flash-lite": 6,
     "flash-lite": 6,
     "lite": 6,
     "8c46e95b1a07cecc": 6,
     "3.5 flash": 1,
+    "3.8 flash": 1,
     "flash": 1,
     "fast": 1,
     "thinking": 1,
@@ -148,9 +150,17 @@ LEARNING_MODE_CONFIG: dict[str, LearningModeConfig] = {
 }
 
 
-def resolve_model_name(model: str) -> str:
+def resolve_model_name(model: str | None) -> str:
     """Resolve MCP aliases while keeping runtime Gemini model names intact."""
-    config = MODEL_CONFIG.get(model)
+    if model is None:
+        return ""
+    current_web_names = {
+        "3.5 flash-lite": "flash-lite",
+        "3.8 flash": "flash",
+        "3.1 pro": "pro",
+    }
+    alias = current_web_names.get(model.strip().lower(), model)
+    config = MODEL_CONFIG.get(alias)
     return config["name"] if config else model
 
 
@@ -160,9 +170,9 @@ def normalize_model_alias(model: str | None) -> str:
         return "flash"
 
     alias = model.strip().lower()
-    if alias in {"3.1 flash-lite", "flash-lite", "lite"}:
+    if alias in {"3.1 flash-lite", "3.5 flash-lite", "flash-lite", "lite"}:
         return "flash-lite"
-    if alias in {"3.5 flash", "flash", "fast"}:
+    if alias in {"3.5 flash", "3.8 flash", "flash", "fast"}:
         return "flash"
     if alias in {"3.1 pro", "pro"}:
         return "pro"
@@ -178,35 +188,46 @@ def resolve_media_request(
 ) -> dict[str, str]:
     """Resolve the effective Gemini Web backend behavior for media generation."""
     alias = normalize_model_alias(model)
-    thinking = (thinking_level or "standard").strip().lower()
 
     if media_type == "image":
+        if alias == "flash-lite":
+            return {
+                "requested_alias": alias,
+                "effective_alias": alias,
+                "request_model": resolve_model_name(alias),
+                "backend_label": "Nano Banana 2 Lite",
+                "note": "Gemini Web 的 Flash-Lite 图片模式使用 Nano Banana 2 Lite。",
+            }
         return {
             "requested_alias": alias,
             "effective_alias": "flash",
             "request_model": resolve_model_name("flash"),
             "backend_label": "Nano Banana 2",
             "note": (
-                "Gemini Web 当前首轮图像生成统一走 Nano Banana 2；"
-                "flash-lite / flash / pro 不会改变首轮图像后端。"
+                "Gemini Web 的 Flash / Pro 首轮图像生成使用 Nano Banana 2；"
+                "Pro redo 是生成后的二次操作。"
             ),
         }
 
     if media_type == "music":
-        if alias == "pro" and thinking in {"extended", "扩展"}:
-            return {
-                "requested_alias": alias,
-                "effective_alias": "pro",
-                "request_model": resolve_model_name(alias),
-                "backend_label": "Lyria 3 Pro",
-                "note": "实测当前 MCP/Web RPC 中 pro + extended / 扩展 对应 Lyria 3 fullsong。",
-            }
         return {
             "requested_alias": alias,
-            "effective_alias": "flash",
+            "effective_alias": alias,
             "request_model": resolve_model_name(alias),
-            "backend_label": "Lyria 3",
-            "note": "实测当前 MCP/Web RPC 中非 pro+extended 音乐请求返回 Lyria 3 clip。",
+            "backend_label": "Lyria",
+            "note": (
+                "当前 Gemini Web 公告使用 Lyria 3.5；此 MCP 响应不一定提供实际版本。"
+                "完整曲目由网页的模型和时长选项决定，thinking_level 不代表音乐版本。"
+            ),
+        }
+
+    if media_type == "video":
+        return {
+            "requested_alias": alias,
+            "effective_alias": alias,
+            "request_model": resolve_model_name(alias),
+            "backend_label": "Gemini Web generic chat",
+            "note": "当前通用聊天请求未证实进入 Gemini Omni 视频模式；需验证视频产物。",
         }
 
     return {

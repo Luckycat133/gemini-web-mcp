@@ -5,6 +5,44 @@ account session on 2026-06-18 and maps it to the primary MCP server in
 `src.server`. Browser extension UI injected into Gemini was ignored during this
 pass.
 
+## 2026-09-26 Chrome and MCP Recheck
+
+A signed-in Chrome session showed `3.5 Flash-Lite`, `3.8 Flash`, and `3.1 Pro`
+in the model picker. The upload/tools menu exposed Create image, Create video,
+and Create music. The dedicated `/videos` page displayed Gemini Omni with a
+16:9 option and produced a downloadable 10-second MP4 in this account.
+
+The same account's MCP calls produced verified local images with Flash and
+Flash-Lite, and verified MP3 plus MP4 music files with Flash. The media response
+did not identify the exact image or music backend (`observed_backend=null`).
+Compact `edit` returned a remote image URI; primary image generation with an
+input image saved a local 2048×2048 edited image, visually retaining the cat while
+changing the mug from blue to green.
+The image saver initially wrote JPEG bytes under a caller-supplied `.png` name.
+After the MIME/extension fix, a fresh live call saved `mime-check.jpg` with
+`image/jpeg` metadata, and the file signature confirmed JPEG.
+The generic MCP video call completed with `ARTIFACT_NOT_RETURNED`: its retained
+chat contained only text saying that this chat could not render video. This is
+evidence of a missing MCP mode route, not an account entitlement failure.
+
+A later authenticated Chrome/MCP music regression call on the same day returned
+`ARTIFACT_NOT_RETURNED`. The newly created test chat displayed Gemini's own
+technical-error message for music generation and no media Artifact. The earlier
+verified MP3/MP4 result remains valid evidence of a successful run; this later
+result shows the upstream music path was not consistently available.
+The subsequent image regression succeeded: a 2.7 MB JPEG was saved as
+`image-check_2.jpg` without replacing an existing file and was visually checked
+against the prompt (orange cat, blue cup, white background).
+
+Current Google help distinguishes Nano Banana 2 Lite for Flash-Lite images and
+Nano Banana 2 for Flash/Pro images. Google documents Gemini Omni for video and
+announced Lyria 3.5 for music. These are current Web product descriptions;
+they are not backend identifiers observed in the MCP response. See the
+[image](https://support.google.com/gemini/answer/14286560),
+[video](https://support.google.com/gemini/answer/16126339), and
+[music](https://blog.google/innovation-and-ai/products/gemini-app/better-tracks-lyria-gemini/)
+sources.
+
 ## Observed Native UI
 
 The chat surface exposed:
@@ -41,7 +79,8 @@ NotebookLM, help/feedback, and location entries.
 | Gems | Covered in part | CRUD and chat use via `gemini_manage_gems` and `gem_id` |
 | Upload file | Covered | Local files use `gemini_upload_file` |
 | Import code | Covered in part | Local code files can be uploaded; UI import workflows are not replicated |
-| Create image/video/music | Covered in part | Generic web generation plus response parsing; account/UI gates still apply |
+| Create image/music | Covered in part | Generic web generation plus response parsing; account/UI gates still apply |
+| Create video | Web UI only | Dedicated Gemini Omni mode works in Chrome; generic MCP chat route did not return a video Artifact |
 | Deep Research | Covered | Full workflow when the installed client exposes research helpers |
 | Dynamic model discovery | Covered | `gemini_list_models` reports the account model registry after init |
 | Observed Web Pro capability manifest | Covered | `gemini_get_web_capabilities` returns observed models, thinking levels, menu entries, and MCP coverage |
@@ -199,14 +238,20 @@ Use `learning_mode` only when the desired output is a learning artifact or
 guided study flow; leave it unset for ordinary chat.
 
 The visible model names in Gemini Web can drift faster than the package enum.
-Treat the runtime registry as the source of truth for an authenticated account.
+In the 2026-09-26 run, the runtime registry exposed generic `Flash-Lite`,
+`Flash`, and `Pro` names without the full UI version labels. Check both the
+runtime request names and the signed-in Web model picker when updating aliases.
 
 ## Media Routing Notes
 
-- Image generation currently ignores the selected chat model for the first pass
-  and lands on `Nano Banana 2`.
+- Flash-Lite image generation is routed to `Flash-Lite` and labeled
+  `Nano Banana 2 Lite`; Flash/Pro first pass routes to `gemini-3-flash` and is
+  labeled `Nano Banana 2`. The exact observed backend remains null unless the
+  response exposes it.
 - A `pro` image redo is a post-generation UI action and is not exposed as a
   separate first-pass MCP model.
-- Music generation currently splits by model family:
-  `flash-lite` / `flash` / `fast` / `thinking` land on `Lyria 3`,
-  while `pro` lands on `Lyria 3 Pro`.
+- Music generation returns `Lyria` as the family label until the response
+  identifies a version. The 2026-09-26 Flash result contained usable audio and
+  cover video; the old `Lyria 3`/`Lyria 3 Pro` version inference is retired.
+- Generic MCP video prompting did not enter the currently visible Gemini Omni
+  mode. Use the dedicated Web Videos page until a verified MCP route exists.

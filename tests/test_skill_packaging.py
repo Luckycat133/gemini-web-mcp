@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 import re
 from pathlib import Path
 
@@ -43,7 +44,7 @@ def test_project_skill_frontmatter_and_progressive_disclosure_are_complete() -> 
     assert re.search(r"^name: gemini-web-mcp$", frontmatter, re.MULTILINE)
     assert "get a second opinion" in frontmatter
     assert "understand images/files/URLs" in frontmatter
-    assert "generate or edit image/video/music artifacts" in frontmatter
+    assert "generate image/video/music artifacts, edit images" in frontmatter
     assert 'version: "0.2.1"' in frontmatter
     assert "license: MIT-0" in frontmatter
     assert "openclaw:" in frontmatter
@@ -88,10 +89,13 @@ def test_runtime_skill_is_task_first_and_artifact_aware() -> None:
         "gemini-account",
         "Do **not** call the manifest before every known workflow",
         "pass that file or URI to the next relevant tool",
-        "Start them asynchronously by default",
+        "Start Deep Research without waiting for completion",
+        "There is currently no `status`, `result`, or `cancel` tool",
+        "The Skill supplies routing instructions; an MCP server must also be connected",
         "opaque, restart-safe handle",
         "local SQLite",
         "grounding_state = grounded | answer_only | unavailable | failed",
+        "Markdown links written in the answer are model text, not grounding evidence",
         "gemini_understand_image",
         "gemini_understand",
     ):
@@ -99,6 +103,58 @@ def test_runtime_skill_is_task_first_and_artifact_aware() -> None:
 
     assert "Prefer `gemini_get_tool_manifest` before choosing" not in text
     assert "current_enabled first" not in text
+
+
+def test_runtime_skill_focused_assist_examples_match_registered_arguments() -> None:
+    workflows = (PUBLIC_SKILL_DIR / "references" / "workflows.md").read_text(encoding="utf-8")
+    assist_source = (PROJECT_ROOT / "src" / "surfaces" / "assist.py").read_text(encoding="utf-8")
+    module = ast.parse(assist_source)
+    registered = {
+        node.name: {arg.arg for arg in node.args.args}
+        for node in module.body
+        if isinstance(node, ast.AsyncFunctionDef)
+        and any(
+            isinstance(decorator, ast.Call)
+            and isinstance(decorator.func, ast.Attribute)
+            and decorator.func.attr == "tool"
+            for decorator in node.decorator_list
+        )
+    }
+    examples = {
+        name: argument
+        for name, argument in re.findall(r"focused: (gemini_\w+)\((\w+)=", workflows)
+    }
+
+    assert examples == {
+        "gemini_ask": "prompt",
+        "gemini_understand_image": "image",
+        "gemini_understand": "task",
+    }
+    assert all(argument in registered[name] for name, argument in examples.items())
+
+
+def test_compact_tool_reference_lists_exactly_the_registered_tools() -> None:
+    reference = (PUBLIC_SKILL_DIR / "references" / "tool_surface.md").read_text(encoding="utf-8")
+    compact_section = reference.split("## Low-token skill server facade", 1)[1].split(
+        "## Tool group selection", 1
+    )[0]
+    documented = set(re.findall(r"^\| `(\w+)` \|", compact_section, re.MULTILINE))
+    module = ast.parse((PROJECT_ROOT / "src" / "skill_server.py").read_text(encoding="utf-8"))
+    registered = {
+        node.name
+        for node in module.body
+        if isinstance(node, ast.AsyncFunctionDef)
+        and any(
+            isinstance(decorator, ast.Call)
+            and isinstance(decorator.func, ast.Attribute)
+            and decorator.func.attr == "tool"
+            and isinstance(decorator.func.value, ast.Name)
+            and decorator.func.value.id == "mcp"
+            for decorator in node.decorator_list
+        )
+    }
+
+    assert documented == registered
 
 
 def test_clawhub_security_audit_findings_are_addressed() -> None:
@@ -118,9 +174,9 @@ def test_project_skill_openai_metadata_is_task_first() -> None:
 
     assert 'display_name: "Gemini Web MCP"' in metadata
     assert "$gemini-web-mcp" in metadata
-    assert "choose one user-intent lane" in metadata
-    assert "continue the user's workflow" in metadata
-    assert "Use the manifest only for discovery or recovery" in metadata
+    assert "choose the next Gemini capability" in metadata
+    assert "use returned files in the user's task" in metadata
+    assert "use the manifest only for discovery or recovery" in metadata
     assert "current_enabled first" not in metadata
     assert "TODO" not in metadata
 

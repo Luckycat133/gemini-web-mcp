@@ -131,6 +131,7 @@ class ResearchService:
             operation_id=operation_id,
             plan=start.plan,
             chat=start.chat,
+            response=start.start_output,
             latest_upstream_state=state.value,
             poll_count=0,
         )
@@ -190,11 +191,12 @@ async def run_deep_research_start_phase(
     classifier, and schedules retention-aware chat cleanup exactly once in
     ``finally``.
     """
-    chat = start_fresh_research_chat(client, research_model)
-    scope = research_thinking_scope(client, research_model, resolved_model, thinking_level)
+    chat = None
     plan = None
     start_output = None
     try:
+        chat = start_fresh_research_chat(client, research_model)
+        scope = research_thinking_scope(client, research_model, resolved_model, thinking_level)
         with scope:
             plan = await await_before_deadline(
                 create_deep_research_plan(
@@ -211,6 +213,19 @@ async def run_deep_research_start_phase(
                 chat,
                 timeout=min(phase_timeout(timeout_seconds), RESEARCH_START_TIMEOUT_SECONDS),
             )
+            if getattr(start_output, "timeout_during_start", False):
+                return DeepResearchStart(
+                    chat,
+                    plan,
+                    start_output,
+                    timed_out=research_timed_out_result(
+                        operation=operation,
+                        operation_id=operation_id,
+                        plan=plan,
+                        chat=chat,
+                        start_output=start_output,
+                    ),
+                )
     except asyncio.TimeoutError:
         return DeepResearchStart(
             chat,
@@ -231,9 +246,10 @@ async def run_deep_research_start_phase(
         # wait-for-report wait runs on the returned handle. That is benign
         # under default retention: retain_chat only records the chat for the
         # retention-aware cleanup pass, it does not schedule a deletion.
-        if plan is not None:
+        chat_id = research_chat_id(plan=plan, chat=chat, response=start_output)
+        if plan is not None and chat_id is not None:
             schedule_chat_cleanup(
-                research_chat_id(plan=plan, chat=chat),
+                chat_id,
                 retain_chat=retain_chat,
                 delete_after_seconds=delete_after_seconds,
                 source=cleanup_source,
@@ -373,6 +389,8 @@ def research_operation_data(
 ) -> LongOperationData:
     if plan is None:
         plan = getattr(upstream_result, "plan", None)
+    if response is None:
+        response = getattr(upstream_result, "start_output", None)
     statuses = list(getattr(upstream_result, "statuses", []) or [])
     if latest_upstream_state is None and statuses:
         latest_upstream_state = upstream_state(statuses[-1])
@@ -453,7 +471,9 @@ def research_domain_result(
             details=details,
         )
     verification_status = {
-        OperationState.COMPLETED: "report_observed",
+        OperationState.COMPLETED: (
+            "report_observed" if data.report_available else "upstream_completed_report_not_observed"
+        ),
         OperationState.QUEUED: "upstream_queued",
         OperationState.RUNNING: "upstream_running",
     }.get(data.state, "upstream_state_observed")
@@ -480,6 +500,7 @@ def research_timed_out_result(
         operation_id=operation_id,
         plan=plan,
         chat=chat,
+        response=start_output,
         latest_upstream_state=upstream_state(start_output),
     )
     return research_domain_result(data)

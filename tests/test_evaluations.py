@@ -14,7 +14,7 @@ def _qa_pairs():
 def test_gemini_web_mcp_contract_evaluation_shape():
     pairs = _qa_pairs()
 
-    assert len(pairs) == 18
+    assert len(pairs) == 20
     for pair in pairs:
         question = pair.findtext("question")
         answer = pair.findtext("answer")

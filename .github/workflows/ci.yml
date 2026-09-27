@@ -121,7 +121,9 @@ jobs:
       - name: Snapshot representative full and compact profiles
         run: python scripts/smoke_profiles.py
       - name: Initialize and list tools over real MCP stdio
-        run: python scripts/smoke_mcp_protocol.py
+        run: |
+          python scripts/smoke_mcp_protocol.py
+          python scripts/smoke_mcp_protocol.py --profile core
 
   skills:
     name: Agent Skill validation and repository install
@@ -194,6 +196,7 @@ jobs:
         run: |
           cd "$RUNNER_TEMP"
           "$RUNNER_TEMP/gemini-wheel-smoke/bin/python" "$GITHUB_WORKSPACE/scripts/smoke_mcp_protocol.py"
+          "$RUNNER_TEMP/gemini-wheel-smoke/bin/python" "$GITHUB_WORKSPACE/scripts/smoke_mcp_protocol.py" --profile core
       - name: Upload verified distributions for inspection
         uses: actions/upload-artifact@v7
         with:

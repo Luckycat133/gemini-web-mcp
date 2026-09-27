@@ -311,7 +311,7 @@ def test_move_chat_to_notebook_not_ok_renders_failure(monkeypatch):
 
 
 def test_move_chat_to_notebook_empty_bodies_makes_not_ok(monkeypatch):
-    """bodies 为空 → body_present=False → ok=False。"""
+    """An HTTP response without an RPC body leaves the move unconfirmed."""
     client = _FakeBatchClient(responses=["resp"], status_code=200)
     _patch_seams(monkeypatch, client)
     notebooks = [_notebook("n_1", "Math")]
@@ -327,7 +327,7 @@ def test_move_chat_to_notebook_empty_bodies_makes_not_ok(monkeypatch):
     mcp = _make_mcp()
     result = _run(_call(mcp, "gemini_move_chat_to_notebook",
                         chat_id="c_1", notebook_id="n_1"))
-    assert "❌ 移动聊天失败: c_1" in result[0].text
+    assert "⚠️ 移动请求未获确认: c_1" in result[0].text
 
 
 def test_move_chat_to_notebook_json_payload_ok_verified(monkeypatch):

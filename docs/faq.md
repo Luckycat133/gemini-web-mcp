@@ -34,25 +34,24 @@
 ### Q: Pro 模型需要付费吗？
 **A:** 以当前账户运行时模型注册表和 Gemini Web 限额为准。先用 `gemini_list_models` 查看当前认证账户可见的模型。
 
-### Q: 哪些功能是免费的？
-**A:**
-- 对话：以网页端可见的 Flash-Lite、Flash、Pro 及账户限额为准
-- 图像生成：所有模型
-- 视频生成：所有模型
-- 音乐：flash 系列对应 Lyria 3，pro 对应 Lyria 3 Pro
-- Deep Research：需要 AI Plus
+### Q: 哪些功能可用？
+**A:** 以当前账户的网页入口、订阅及用量限制为准。本项目已在一个登录账号上
+通过 MCP 保存图片和音乐产物；视频在网页 Gemini Omni 专用模式中成功，
+当前通用 MCP 视频路线尚未验证。
 
 ### Q: 音乐生成选哪个模型？
-**A:**
-- `flash-lite` / `flash` / `fast` / `thinking`：Lyria 3
-- `pro`：Lyria 3 Pro
-- `extended` 思考等级不等于音乐模型
+**A:** 网页帮助说明 Pro 模型可选完整曲目，还可设置时长等选项。
+当前 MCP 结果没有报告精确的 Lyria 版本；选择模型后，以实际产物与曲长为准。
+`extended` 思考等级不等于音乐版本。
 
 ### Q: 图像生成时 `pro` 为什么没有直接换模型？
-**A:** 当前网页端首轮图像生成统一走 Nano Banana 2。`pro` 相关的图像增强属于网页生成后的 Pro redo，不是独立首轮模型。
+**A:** Flash 与 Pro 的首轮图像请求走 Nano Banana 2；Flash-Lite 使用 Nano Banana 2 Lite。
+`pro` 相关的图像增强属于网页生成后的 Pro redo，不是独立首轮模型。
 
-### Q: 视频生成最长多长？
-**A:** 60秒（Veo 3.1）。
+### Q: 视频怎么生成？
+**A:** 当前已验证路径是 Gemini Web 的专用 Gemini Omni 视频模式。
+2026-09-26 实机生成了 10 秒 MP4；通用 MCP 视频请求只返回聊天文字，
+请按 `ARTIFACT_NOT_RETURNED` 处理，不要宣称已生成文件。
 
 ---
 

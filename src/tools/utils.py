@@ -134,14 +134,7 @@ def parse_response(
 
     if hasattr(response, "media") and response.media:
         for i, m in enumerate(response.media, 1):
-            music_type = {
-                "flash-lite": "Lyria 3",
-                "flash": "Lyria 3",
-                "fast": "Lyria 3",
-                "thinking": "Lyria 3",
-                "pro": "Lyria 3 Pro",
-            }.get(model, "时长取决于当前模型")
-            info = f"\n\n🎵 音乐 {i} ({music_type}): {m.title or 'Untitled'}"
+            info = f"\n\n🎵 音乐 {i} (Lyria): {m.title or 'Untitled'}"
             if hasattr(m, "mp3_url") and m.mp3_url:
                 info += f"\nMP3: {m.mp3_url}"
             if hasattr(m, "url") and m.url:

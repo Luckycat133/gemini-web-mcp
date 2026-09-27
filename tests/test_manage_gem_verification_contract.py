@@ -116,6 +116,30 @@ def test_verified_create_keeps_success_text(monkeypatch):
     assert "读回校验: verified" in text
 
 
+def test_create_rejects_read_back_with_wrong_content():
+    class Client:
+        async def create_gem(self, name, prompt, description):
+            return SimpleNamespace(id="g-created", name=name, prompt=prompt, description=description)
+
+        async def fetch_gems(self):
+            return {
+                "g-created": SimpleNamespace(
+                    id="g-created",
+                    name="Different",
+                    prompt="Different instructions",
+                    description="Different description",
+                )
+            }
+
+    try:
+        _run(create_gem(Client(), name="Writer", description="Drafts", instructions="Write"))
+    except GemMutationNotVerified as error:
+        assert error.verification_status == "read_back_mismatch"
+        assert set(error.mismatched_fields) == {"name", "description", "instructions"}
+    else:
+        raise AssertionError("A matching ID alone must not verify the requested Gem content")
+
+
 def test_update_mismatch_is_not_presented_as_verified_success(monkeypatch):
     class Client:
         async def update_gem(self, **_kwargs):

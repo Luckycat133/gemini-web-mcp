@@ -25,6 +25,7 @@ from types import SimpleNamespace
 import pytest
 from src.adapters.mcp_sdk import MCPServer
 
+import src.services.research as research_service
 import src.tools.research as research_tools
 from src.services.research import null_scope
 
@@ -845,6 +846,70 @@ def test_native_can_return_running_without_waiting_for_completion(monkeypatch):
     assert payload["data"]["operation_id"] is None
     assert client.captured_wait_plan is None
     assert "本次调用未等待最终报告" in content.text
+
+
+def test_native_non_waiting_call_recovers_chat_id_from_start_response(monkeypatch):
+    class _StartResponseHasChatId(_FakeNativeResearchClient):
+        async def start_deep_research(self, plan, chat=None):
+            return SimpleNamespace(text="Research started", metadata=["c_start_response", "r_start"])
+
+    client = _StartResponseHasChatId(plan_cid="")
+    schedule_calls = []
+    _patch_research_env(monkeypatch, client, captured_schedule=schedule_calls)
+    mcp = _make_mcp()
+
+    content = asyncio.run(_call_tool(
+        mcp,
+        "gemini_deep_research",
+        query="x",
+        timeout_seconds=30,
+        wait_for_completion=False,
+    ))[0]
+
+    payload = _domain_payload(content)
+    assert payload["data"]["upstream_chat_id"] == "c_start_response"
+    assert payload["data"]["continuation_possible"] is True
+    assert schedule_calls[0]["cid"] == "c_start_response"
+
+
+def test_native_non_waiting_start_timeout_without_readback_is_typed(monkeypatch):
+    class _HangingStartClient(_FakeNativeResearchClient):
+        async def start_deep_research(self, plan, chat=None):
+            await asyncio.Event().wait()
+
+    client = _HangingStartClient()
+    _patch_research_env(monkeypatch, client)
+    monkeypatch.setattr(research_service, "phase_timeout", lambda timeout_seconds: 0.05)
+    mcp = _make_mcp()
+
+    content = asyncio.run(_call_tool(
+        mcp,
+        "gemini_deep_research",
+        query="x",
+        timeout_seconds=1,
+        wait_for_completion=False,
+    ))[0]
+
+    payload = _domain_payload(content)
+    assert payload["ok"] is False
+    assert payload["error"]["code"] == "TIMED_OUT"
+    assert payload["meta"]["operation_state"] == "timed_out"
+    assert payload["data"]["upstream_chat_id"] == "c_plan1"
+
+
+def test_research_start_timeout_keeps_chat_id_from_response_metadata():
+    result = research_service.research_timed_out_result(
+        operation="gemini_research",
+        operation_id="op_timeout",
+        plan=SimpleNamespace(research_id="r_timeout", cid=""),
+        chat=SimpleNamespace(cid=""),
+        start_output=SimpleNamespace(metadata=["c_response_only", "r_timeout"]),
+    )
+
+    assert result.ok is False
+    assert result.data is not None
+    assert result.data.upstream_chat_id == "c_response_only"
+    assert result.data.continuation_possible is True
 
 
 def test_native_non_waiting_call_preserves_observed_queued_state(monkeypatch):

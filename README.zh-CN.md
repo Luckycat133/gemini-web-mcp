@@ -32,17 +32,17 @@
 ## ✨ 主要功能
 
 ### 🤖 模型支持
-- **flash-lite** → Web UI `3.1 Flash-Lite`
-- **flash** / **fast** → Web UI `3.5 Flash`
+- **flash-lite** → Web UI `3.5 Flash-Lite`
+- **flash** / **fast** → Web UI `3.8 Flash`
 - **pro** → Web UI `3.1 Pro`
 - 上述三个模型都支持 `thinking_level=standard` / `extended`
 - **thinking** 仍保留为旧兼容别名
 - `learning_mode` 可触发网页 `学习辅导` companion：互动测验、抽认卡、模拟测试、备考/学习指南
 
 ### 🎨 媒体生成
-- **图像**: 首轮生成固定为 Nano Banana 2；`pro` 只对应网页生成后的 Pro redo 语义
-- **视频**: Veo 3.1 (最长60秒，所有模型)
-- **音乐**: `flash` 系列 → Lyria 3，`pro` → Lyria 3 Pro
+- **图像**: Flash-Lite 首轮使用 Nano Banana 2 Lite，Flash / Pro 首轮使用 Nano Banana 2；Pro redo 是后续网页操作
+- **视频**: 已验证 Gemini Web 专用 Omni 页面；通用 MCP 视频请求尚未返回可用产物
+- **音乐**: MCP 已保存 MP3 和 MP4；返回结果未标明实际 Lyria 版本，后续一次请求遇到上游技术错误
 
 ### 💬 对话功能
 - 单次对话（支持图片输入，并可收集 Gemini 上游流）
@@ -65,7 +65,7 @@
 - 运行时 skill：`.agents/skills/gemini-web-mcp`（兼容路由）
 - 专注 assistance skill：`.agents/skills/gemini-assist`（第二意见、有据搜索、图像/混合输入理解、异步 Deep Research，入口 `gemini-mcp-assist`）
 - 仓库开发 skill：`.agents/skills/gemini-web-mcp-development`
-- ClawHub 统一版本为 `0.2.1`，包含安全文案补丁；当前仓库运行时 skill 也为 `0.2.1`，可使用 `clawhub install gemini-web-mcp` 安装
+- 当前仓库运行时 skill 元数据为 `0.2.1`；可使用 `clawhub install gemini-web-mcp` 安装公开版本，实际版本以 ClawHub 列表为准
 - `.agents/skills` 是唯一仓库来源，避免同时扫描 `.agents` 与 `.codex` 的客户端重复发现同名 skill
 - 各 skill 都可直接从 GitHub 安装，并在 CI 中验证
 - Tag release 工作流构建 standalone skill zip（`gemini-web-mcp` 与 `gemini-assist`）、wheel 和源码包
@@ -73,6 +73,7 @@
 
 ClawHub 上的三文件运行 skill 包按 MIT-0 分发；MCP 服务器源码和仓库开发 skill 继续使用
 [AGPL-3.0-only](LICENSE)。
+当前仓库 `Unreleased` 的改动可从 `main` 或指定 commit 安装；公开 Skill 列表可能要到下次发布才同步。
 
 ---
 
@@ -196,7 +197,8 @@ gemini-mcp-skill-server
 | `prompts` | 本地提示词库存取 | 可选附加能力 | 低 |
 | `all` | `core` + `manage` | 完整维护/验证工具面 | 高 |
 
-文本调用优先从 `model` 开始；图片、视频、音乐、文件、URL 或 Deep Research 使用 `core`；
+文本调用优先从 `model` 开始；图片、音乐、文件、URL 或 Deep Research 使用 `core`；
+视频使用已验证的 Gemini Web 专用 Omni 页面，直到 MCP 路线有可用视频产物；
 需要固定十一工具、低 token facade 时使用 `gemini-mcp-skill-server`；`all` 只适合维护验证，不是通用默认值。
 
 ---
@@ -294,8 +296,8 @@ Gemini Web `学习辅导` 输入模式。
 默认情况下，工具调用产生的 Gemini 网页端对话会在一段时间后自动删除。需要保留时传入 `retain_chat=true`；需要调整本次调用保留时间时传入 `delete_after_seconds`。
 
 ### 媒体工具
-- `gemini_generate_media`: 图像/视频/音乐生成；视频/音乐是 Gemini Web 长任务，建议设置较长 `timeout_seconds`
-- `gemini_generate_music`: 音乐生成便捷工具；默认走 `flash` → Lyria 3
+- `gemini_generate_media`: 图像/音乐生成；`media_type="video"` 仅保留兼容入口，必须检查实际产物
+- `gemini_generate_music`: 音乐生成便捷工具；不要从模型别名推断精确 Lyria 版本
 
 ### 文件和 URL
 - `gemini_upload_file`: 上传并分析本地文件
@@ -476,12 +478,11 @@ mcp dev src/server.py
 ## 📍 开发状态
 
 当前基线可用，但开发 skill 不是已经全部完成的功能清单。history 的 list/search/read/export/delete 已在
-primary/compact 间共享 typed result，删除只有在回读确认后才算已验证。2026-08-08 的一次显式授权定向实机
-测试已验证 Cookie 初始化、temporary/retained 文本、多轮上下文、两套入口的 typed history，以及所有测试
-聊天的 `verified_absent` 删除；该测试不是专用账号全量 canary，也未覆盖媒体、文件、URL、Deep Research
-或账号 mutation。仍需完成更广的 live 基线、其他管理动作的 typed result、跨重启持久化 cleanup，以及
-共享的长任务 job API。
-当前仓库的 Python 包、运行时 skill 与开发 skill 已统一为 `0.2.1`；重写后的 Git 历史与发布引用均使用统一的 `0.2.1` 版本。
+primary/compact 间共享 typed result，删除只有在回读确认后才算已验证。2026-08-08 的授权定向测试覆盖
+文本、会话和历史；2026-09-26 的登录 Chrome 定向测试得到 MCP 图片和音乐文件，并从 Gemini Omni 专用
+网页下载视频。通用 MCP 视频请求没有返回视频文件，稍后的音乐重试遇到上游技术错误。两次测试均不等于
+专用账号全量 canary。后续仍需持久化的长任务/清理恢复、更多账号结果验证，以及专注的创作和账号产品。
+当前包与 Skill 元数据仍为 `0.2.1`；此标签之后的改动记在 Changelog 的 `Unreleased` 节。
 
 完整的“已实现 / 部分完成 / 延后 / owner 决策”边界见
 [开发状态与下一步](docs/development-status.md)。离线 CI 和打包通过不等于已经观察到当前 Gemini Web 行为。

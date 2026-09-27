@@ -81,7 +81,8 @@ class SearchService:
     The service reuses the shared :class:`~src.services.chat.ChatService` for
     request construction, execution, and cleanup scheduling, then derives the
     grounding contract from what the upstream response actually observed:
-    ``grounded`` only when at least one source URL was observed, otherwise
+    ``grounded`` only when at least one structured citation URL was observed.
+    Links written in model prose are not retrieval evidence. Otherwise use
     ``answer_only`` for prose, ``unavailable`` for an empty answer, and
     ``failed`` when the attempted search errored.
     """
@@ -188,7 +189,7 @@ class SearchService:
 
 
 def observed_sources_from_response(response: Any) -> tuple[ObservedSource, ...]:
-    """Collect deduplicated http(s) source URLs observed on one upstream response."""
+    """Collect structured citations, never treating model-written links as grounding."""
     sources: list[ObservedSource] = []
     seen: set[str] = set()
     for citation in getattr(response, "citations", None) or ():

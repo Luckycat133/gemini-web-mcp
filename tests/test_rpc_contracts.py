@@ -62,6 +62,9 @@ def test_registry_owns_probe_payloads_and_evidence():
 
 
 def test_parameterized_payload_builders_preserve_observed_shapes():
+    assert json.loads(get_contract("media.music_chat").build_payload(chat_id="c_1")) == [
+        "c_1", 10, None, 1, [1], [4], None, 1,
+    ]
     assert json.loads(
         get_contract("history.page").build_payload(
             filter_payload=[False, None, True],
@@ -82,6 +85,20 @@ def test_parameterized_payload_builders_preserve_observed_shapes():
     ]
     assert json.loads(get_contract("scheduled.get").build_payload(action_id="task-1")) == ["task-1"]
     assert json.loads(get_contract("scheduled.delete").build_payload(action_id="task-1")) == [None, ["task-1"]]
+
+
+def test_music_chat_parser_keeps_media_identity_without_raw_response():
+    body = PARSER_FIXTURES["music_chat"]["cases"]["success"]["body"]
+    parsed = parse_contract_body("media.music_chat", body)
+    assert parsed.status == "success"
+    assert parsed.value == [
+        {
+            "title": "song.mp3",
+            "url": "https://cdn.example/song.mp3",
+            "rid": "r_1",
+            "rcid": "rc_1",
+        }
+    ]
 
 
 def test_rpc_envelope_preserves_rejection_evidence_without_raw_handler_logic():

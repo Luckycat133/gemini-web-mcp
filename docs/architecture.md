@@ -445,7 +445,7 @@ client = GeminiClient(psid, psidts, ...)
 ### 模型映射表
 
 ```python
-"flash-lite" -> {"name": "3.1 Flash-Lite", ...}
+"flash-lite" -> {"name": "Flash-Lite", ...}
 "flash"      -> {"name": "gemini-3-flash", ...}
 "fast"       -> {"name": "gemini-3-flash", ...}  # compatible alias
 "pro"        -> {"name": "gemini-3-pro", ...}
@@ -457,13 +457,15 @@ client = GeminiClient(psid, psidts, ...)
 
 ### 媒体模型绑定
 
-| 聊天模型 | 图像模型 | 视频模型 | 音乐模型 |
+| 聊天模型 | 图像路由标签 | 当前 MCP 视频状态 | 音乐路由标签 |
 |---------|---------|---------|---------|
-| flash-lite | Nano Banana 2 | Veo 3.1 | Lyria 3 |
-| flash | Nano Banana 2 | Veo 3.1 | Lyria 3 |
-| pro | Nano Banana 2 | Veo 3.1 | Lyria 3 Pro |
+| flash-lite | Nano Banana 2 Lite | 通用聊天路线未验证 | Lyria |
+| flash | Nano Banana 2 | 通用聊天路线未验证 | Lyria |
+| pro | Nano Banana 2 | 通用聊天路线未验证 | Lyria |
 
-实现上，`image` 首轮请求会统一落到 `Nano Banana 2`，而不是沿用聊天模型。
+实现上，Flash-Lite 图片请求保留 `Flash-Lite` 运行时模型名；Flash / Pro 首轮
+请求走 `gemini-3-flash`。后端标签与 `observed_backend` 独立，响应不提供实际
+版本时后者保持空值。
 `pro` 图像 redo 属于网页生成后的二次 UI 动作，不作为单独首轮模型暴露。
 
 ---

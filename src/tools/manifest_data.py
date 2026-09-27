@@ -11,20 +11,20 @@ from typing import Any
 from ..infrastructure.rpc_contracts import WEB_FEATURE_PROBES as RPC_WEB_FEATURE_PROBES
 
 WEB_UI_CAPABILITIES = {
-    "observed_at": "2026-06-18",
+    "observed_at": "2026-09-26",
     "account_tier": "Gemini Web Pro",
     "locale": "zh-CN",
     "models": [
         {
             "alias": "flash-lite",
-            "display_name": "3.1 Flash-Lite",
+            "display_name": "3.5 Flash-Lite",
             "description": "极速回答",
             "thinking_mode_id": 6,
             "advanced_only": False,
         },
         {
             "alias": "flash",
-            "display_name": "3.5 Flash",
+            "display_name": "3.8 Flash",
             "description": "全方位帮助",
             "thinking_mode_id": 1,
             "advanced_only": False,
@@ -32,7 +32,7 @@ WEB_UI_CAPABILITIES = {
         {
             "alias": "pro",
             "display_name": "3.1 Pro",
-            "description": "高等数学与代码",
+            "description": "高级推理",
             "thinking_mode_id": 3,
             "advanced_only": True,
         },
@@ -56,7 +56,7 @@ WEB_UI_CAPABILITIES = {
         {"name": "google_drive", "label": "从云端硬盘添加", "coverage": "ui_only"},
         {"name": "import_code", "label": "导入代码", "coverage": "gemini_upload_file"},
         {"name": "create_image", "label": "图片", "coverage": "gemini_generate_media"},
-        {"name": "create_video", "label": "视频", "coverage": "gemini_generate_media"},
+        {"name": "create_video", "label": "视频", "coverage": "web_ui_only"},
         {"name": "canvas", "label": "Canvas", "coverage": "library_capability"},
         {"name": "deep_research", "label": "Deep Research", "coverage": "gemini_deep_research"},
         {"name": "create_music", "label": "音乐", "coverage": "gemini_generate_music"},
@@ -84,6 +84,7 @@ WEB_UI_CAPABILITIES = {
         {"name": "location", "label": "位置", "coverage": "ui_only"},
     ],
     "notes": [
+        "Model picker and image/video/music entries were rechecked in a signed-in Chrome session on 2026-09-26; other menu and settings entries retain older evidence.",
         "Runtime model registry is still preferred when available.",
         "Drive picker, link mutation, settings mutation, and memory import mutation are not automated without a safer confirmed RPC contract.",
         "Scheduled actions support daily create and explicit delete through observed Web RPCs; edit/toggle remain disabled until stable RPC contracts are confirmed.",
@@ -165,7 +166,7 @@ TOOL_MANIFEST: list[dict[str, Any]] = [
     {
         "name": "gemini_generate_media",
         "group": "media",
-        "purpose": "Generate image, video, or music through Gemini Web generation surfaces.",
+        "purpose": "Generate image or music artifacts; the generic video argument is compatibility-only and is not a verified Gemini Omni route.",
         "read_only": False,
         "destructive": False,
         "privacy": "sends_user_prompt_and_optional_reference_files",
@@ -174,7 +175,7 @@ TOOL_MANIFEST: list[dict[str, Any]] = [
     {
         "name": "gemini_generate_music",
         "group": "media",
-        "purpose": "Convenience music-generation wrapper using the observed Flash/Pro backend split.",
+        "purpose": "Convenience music-generation wrapper; exact Lyria version requires upstream evidence.",
         "read_only": False,
         "destructive": False,
         "privacy": "sends_user_prompt",

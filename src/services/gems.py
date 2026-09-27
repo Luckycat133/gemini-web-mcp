@@ -23,10 +23,15 @@ class GemMutationNotVerified(RuntimeError):
         self.mismatched_fields = tuple(mismatched_fields or ())
 
         if operation == "create":
+            mismatch = (
+                f"mismatched_fields={','.join(self.mismatched_fields)}；"
+                if self.mismatched_fields
+                else ""
+            )
             if gem_id:
                 message = (
-                    f"Gem 创建请求返回 ID {gem_id}，但尚未读回验证；"
-                    f"verification_status={verification_status}。请重新列出 Gems 核对。"
+                    f"Gem 创建请求返回 ID {gem_id}，但读回验证未通过；"
+                    f"{mismatch}verification_status={verification_status}。请重新列出 Gems 核对。"
                 )
             else:
                 message = (
@@ -161,6 +166,17 @@ async def create_gem(
             "",
         )
     )
+    mismatches: list[str] = []
+    if observed is not None:
+        actual = gem_to_dict(observed)
+        expected = {
+            "name": clean_name,
+            "description": description or "",
+            "instructions": instructions,
+        }
+        mismatches = [key for key, value in expected.items() if actual.get(key) != value]
+        if mismatches:
+            verification_status = "read_back_mismatch"
     payload = {
         "ok": bool(created_id),
         "id": created_id,
@@ -168,6 +184,7 @@ async def create_gem(
         "gem": gem_to_dict(observed or created),
         "verification_status": verification_status,
         "verification_error": verification_error,
+        "mismatched_fields": mismatches,
     }
     return _require_verified("create", payload, expected_status="verified")
 

@@ -47,6 +47,7 @@ jobs:
         run: |
           python scripts/smoke_profiles.py
           python scripts/smoke_mcp_protocol.py
+          python scripts/smoke_mcp_protocol.py --profile core
       - name: Build versioned release assets
         run: python scripts/package_release.py --outdir dist --tag "$GITHUB_REF_NAME"
       - name: Verify generated asset names and wheel metadata
@@ -68,6 +69,7 @@ jobs:
           "$RUNNER_TEMP/gemini-release-smoke/bin/python" "$GITHUB_WORKSPACE/scripts/smoke_installed_wheel.py"
           "$RUNNER_TEMP/gemini-release-smoke/bin/python" "$GITHUB_WORKSPACE/scripts/smoke_profiles.py"
           "$RUNNER_TEMP/gemini-release-smoke/bin/python" "$GITHUB_WORKSPACE/scripts/smoke_mcp_protocol.py"
+          "$RUNNER_TEMP/gemini-release-smoke/bin/python" "$GITHUB_WORKSPACE/scripts/smoke_mcp_protocol.py" --profile core
       - name: Stage verified release assets
         uses: actions/upload-artifact@v7
         with:

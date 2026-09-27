@@ -307,12 +307,15 @@ report 本地产物；history 的 list/search/read/export/delete 也在 primary 
 - `image_path`: str - 可选参考图片
 
 **真实网页行为：**
-- `image`: 首轮生成始终走 `Nano Banana 2`
-- `music`: `flash` 系列走 `Lyria 3`，`pro` 走 `Lyria 3 Pro`
+- `image`: Flash-Lite 使用 `Nano Banana 2 Lite`；Flash / Pro 使用 `Nano Banana 2`
+- `music`: 返回 Lyria 产物；当前 MCP 响应没有提供可验证的具体版本
+- `video`: 当前通用聊天路线可能只返回文本；需要结构化视频 Artifact 才算成功，已验证的网页入口是 Gemini Omni 专用视频模式
 - `image + model=pro` 不会直接切换首轮图像后端；Pro redo 是网页生成后的二次操作
 
 **artifact 行为：** 成功响应会公开远端 URI；指定输出目录后，实际写入的文件会再检查存在性、
 非零大小、MIME，以及可用的尺寸/时长。排队、空响应和保存失败有独立结构化状态。
+`prompt` 不可为空；`filename` 只能是单个文件名，若目标文件已存在会另取不冲突的名字。
+排队或未返回媒体的聊天会保留以便回看，结构化结果中的 `source_chat_id` 只在上游实际提供时出现。
 
 ### gemini_generate_music
 
@@ -597,6 +600,8 @@ Gemini Web 原生笔记本只读聚合入口。推荐给 `history-organize` 使�
 
 把已有 Gemini Web 对话移动到 Gemini 原生笔记本。该工具会修改远端聊天元数据，
 但不删除聊天；移动后会读取目标笔记本最近对话列表进行校验。
+JSON 输出中的 `accepted=true` 仅表示 RPC 返回了可解析的确认；只有在目标笔记本
+读回该聊天时才返回 `ok=true`、`verification_status="verified"`。
 
 **参数：**
 - `chat_id`: str - 要移动的 Gemini Web 聊天 ID

@@ -3,15 +3,18 @@
 支持提示词的 CRUD 操作和分类管理
 """
 
-from ..adapters.mcp_sdk import MCPServer, TextContent
-from dataclasses import dataclass
-from typing import Literal, Optional, Dict, List
 import json
-import os
 import logging
+import os
+import tempfile
 import threading
 import uuid
+from contextlib import suppress
+from dataclasses import dataclass
 from datetime import datetime
+from typing import Dict, List, Literal, Optional
+
+from ..adapters.mcp_sdk import MCPServer, TextContent
 
 from .annotations import DESTRUCTIVE_LOCAL
 
@@ -24,28 +27,47 @@ class PromptManager:
     def __init__(self, file_path: str = DEFAULT_PROMPTS_FILE):
         self.file_path = file_path
         self.prompts: Dict[str, dict] = {}
+        self._lock = threading.RLock()
         self._load_prompts()
 
     def _load_prompts(self):
-        if os.path.exists(self.file_path):
-            try:
-                with open(self.file_path, 'r', encoding='utf-8') as f:
-                    data = json.load(f)
-                    self.prompts = data.get('prompts', {})
-            except Exception as e:
-                logger.error(f"加载提示词失败: {e}")
-                self.prompts = {}
+        try:
+            with open(self.file_path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            if not isinstance(data, dict) or not isinstance(data.get('prompts'), dict):
+                raise ValueError("提示词库格式无效")
+            self.prompts = data['prompts']
+        except FileNotFoundError:
+            return
+        except (OSError, ValueError) as e:
+            logger.error(f"加载提示词失败: {e}")
+            raise ValueError("无法加载提示词库；原文件已保留，请先修复后重试。") from e
 
     def _save_prompts(self):
+        temp_path = ""
         try:
-            with open(self.file_path, 'w', encoding='utf-8') as f:
-                json.dump({
-                    'version': '1.0',
-                    'updated_at': datetime.now().isoformat(),
-                    'prompts': self.prompts
-                }, f, ensure_ascii=False, indent=2)
+            with self._lock:
+                directory = os.path.dirname(os.path.abspath(self.file_path))
+                prefix = f".{os.path.basename(self.file_path)}."
+                with tempfile.NamedTemporaryFile(
+                    mode='w', encoding='utf-8', dir=directory, prefix=prefix, suffix='.tmp', delete=False,
+                ) as f:
+                    temp_path = f.name
+                    json.dump({
+                        'version': '1.0',
+                        'updated_at': datetime.now().isoformat(),
+                        'prompts': self.prompts
+                    }, f, ensure_ascii=False, indent=2)
+                    f.flush()
+                    os.fsync(f.fileno())
+                os.replace(temp_path, self.file_path)
         except Exception as e:
             logger.error(f"保存提示词失败: {e}")
+            raise
+        finally:
+            if temp_path:
+                with suppress(OSError):
+                    os.unlink(temp_path)
 
     def create_prompt(
         self,
@@ -54,18 +76,27 @@ class PromptManager:
         category: str = "通用",
         description: str = ""
     ) -> str:
-        prompt_id = str(uuid.uuid4())
-        self.prompts[prompt_id] = {
-            'id': prompt_id,
-            'name': name,
-            'content': content,
-            'category': category,
-            'description': description,
-            'created_at': datetime.now().isoformat(),
-            'updated_at': datetime.now().isoformat()
-        }
-        self._save_prompts()
-        return prompt_id
+        with self._lock:
+            prompt_id = str(uuid.uuid4())
+            original = self.prompts
+            self.prompts = {
+                **original,
+                prompt_id: {
+                    'id': prompt_id,
+                    'name': name,
+                    'content': content,
+                    'category': category,
+                    'description': description,
+                    'created_at': datetime.now().isoformat(),
+                    'updated_at': datetime.now().isoformat()
+                },
+            }
+            try:
+                self._save_prompts()
+            except Exception:
+                self.prompts = original
+                raise
+            return prompt_id
 
     def get_prompt(self, prompt_id: str) -> Optional[dict]:
         return self.prompts.get(prompt_id)
@@ -88,30 +119,42 @@ class PromptManager:
         category: Optional[str] = None,
         description: Optional[str] = None
     ) -> bool:
-        if prompt_id not in self.prompts:
-            return False
+        with self._lock:
+            if prompt_id not in self.prompts:
+                return False
 
-        prompt = self.prompts[prompt_id]
-        # 使用 `is not None` 检查，允许显式设置空字符串等 falsy 值
-        if name is not None:
-            prompt['name'] = name
-        if content is not None:
-            prompt['content'] = content
-        if category is not None:
-            prompt['category'] = category
-        if description is not None:
-            prompt['description'] = description
-        prompt['updated_at'] = datetime.now().isoformat()
-
-        self._save_prompts()
-        return True
+            original = self.prompts
+            prompt = dict(original[prompt_id])
+            # 使用 `is not None` 检查，允许显式设置空字符串等 falsy 值
+            if name is not None:
+                prompt['name'] = name
+            if content is not None:
+                prompt['content'] = content
+            if category is not None:
+                prompt['category'] = category
+            if description is not None:
+                prompt['description'] = description
+            prompt['updated_at'] = datetime.now().isoformat()
+            self.prompts = {**original, prompt_id: prompt}
+            try:
+                self._save_prompts()
+            except Exception:
+                self.prompts = original
+                raise
+            return True
 
     def delete_prompt(self, prompt_id: str) -> bool:
-        if prompt_id not in self.prompts:
-            return False
-        del self.prompts[prompt_id]
-        self._save_prompts()
-        return True
+        with self._lock:
+            if prompt_id not in self.prompts:
+                return False
+            original = self.prompts
+            self.prompts = {key: value for key, value in original.items() if key != prompt_id}
+            try:
+                self._save_prompts()
+            except Exception:
+                self.prompts = original
+                raise
+            return True
 
 
 _prompt_manager: Optional[PromptManager] = None
@@ -262,9 +305,8 @@ def register_prompts_tools(mcp: MCPServer):
         - category: 分类（可选，默认"通用"）
         - description: 描述（可选）
         """
-        manager = get_prompt_manager()
-
         try:
+            manager = get_prompt_manager()
             if action == "list":
                 return _prompt_list_text(manager, category)
             if action == "list_categories":

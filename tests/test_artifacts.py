@@ -98,6 +98,16 @@ def test_local_artifact_verifies_file_metadata_dimensions_and_duration(tmp_path)
     assert "duration_probe" in audio.verification.methods
 
 
+def test_local_image_mime_uses_signature_when_suffix_is_wrong(tmp_path):
+    image_path = tmp_path / "actually-jpeg.png"
+    image_path.write_bytes(b"\xff\xd8\xff\xe0" + b"jpeg-content")
+
+    image = artifact_from_local_path(ArtifactKind.IMAGE, str(image_path))
+
+    assert image.mime_type == "image/jpeg"
+    assert "image_mime_signature" in image.verification.methods
+
+
 def test_local_artifact_marks_missing_and_empty_files_failed(tmp_path):
     missing = artifact_from_local_path(ArtifactKind.FILE, str(tmp_path / "missing.bin"))
     empty_path = tmp_path / "empty.bin"

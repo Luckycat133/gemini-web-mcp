@@ -203,8 +203,10 @@ async def move_chat_to_notebook(
         except Exception as exc:
             verification_status = "read_back_error"
             verification_error = f"{type(exc).__name__}: {exc}"
+    status_ok = getattr(response, "status_code", None) == 200
     return {
-        "ok": getattr(response, "status_code", None) == 200 and bool(bodies),
+        "ok": status_ok and verified,
+        "accepted": status_ok and parsed.status == "success",
         "chat_id": chat_id,
         "notebook": notebook,
         "source_rpc": contract.rpc_id,

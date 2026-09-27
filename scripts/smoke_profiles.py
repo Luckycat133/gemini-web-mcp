@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+from concurrent.futures import ThreadPoolExecutor
 import importlib
 import json
 import os
@@ -13,6 +14,30 @@ import tempfile
 from pathlib import Path
 
 PRIMARY_PROFILE_TOOLS = {
+    "core": frozenset(
+        {
+            "gemini_analyze_url",
+            "gemini_chat",
+            "gemini_chat_stream",
+            "gemini_create_from_research_report",
+            "gemini_deep_research",
+            "gemini_doctor",
+            "gemini_generate_media",
+            "gemini_generate_music",
+            "gemini_get_cookie_from_browser",
+            "gemini_get_cookie_status",
+            "gemini_get_tool_manifest",
+            "gemini_list_browser_cookie_profiles",
+            "gemini_list_research_report_actions",
+            "gemini_list_sessions",
+            "gemini_reset",
+            "gemini_reset_session",
+            "gemini_send_message",
+            "gemini_send_message_stream",
+            "gemini_start_chat",
+            "gemini_upload_file",
+        }
+    ),
     "model": frozenset(
         {
             "gemini_chat",
@@ -211,15 +236,23 @@ def main() -> None:
         _probe(args.probe)
         return
 
-    for profile, expected in PRIMARY_PROFILE_TOOLS.items():
-        actual = _installed_surface("src.server", profile)
-        _require_exact_surface(f"primary/{profile}", actual, expected)
-
-    compact = _installed_surface("src.skill_server", "model")
-    _require_exact_surface("compact", compact, COMPACT_TOOLS)
-
-    assist = _installed_surface("src.surfaces.assist", "model")
-    _require_exact_surface("assist", assist, ASSIST_TOOLS)
+    jobs = [
+        (f"primary/{profile}", "src.server", profile, expected)
+        for profile, expected in PRIMARY_PROFILE_TOOLS.items()
+    ]
+    jobs.extend(
+        [
+            ("compact", "src.skill_server", "model", COMPACT_TOOLS),
+            ("assist", "src.surfaces.assist", "model", ASSIST_TOOLS),
+        ]
+    )
+    # Profile probes use separate interpreters to preserve import-time tool
+    # registration. Run a bounded number together so the contract check stays
+    # practical on slower development machines without changing isolation.
+    with ThreadPoolExecutor(max_workers=4) as executor:
+        futures = [executor.submit(_installed_surface, module, profile) for _, module, profile, _ in jobs]
+        for (label, _module, _profile, expected), future in zip(jobs, futures):
+            _require_exact_surface(label, future.result(), expected)
     print("Representative profile contracts: OK")
 
 

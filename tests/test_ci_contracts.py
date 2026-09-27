@@ -62,6 +62,7 @@ def test_targeted_contract_checklist_covers_stable_architecture_boundaries() -> 
 
 def test_representative_profile_snapshots_are_explicit_and_exhaustive() -> None:
     assert set(PRIMARY_PROFILE_TOOLS) == {
+        "core",
         "model",
         "history",
         "history-organize",

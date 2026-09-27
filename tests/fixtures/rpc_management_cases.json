@@ -1,4 +1,13 @@
 {
+  "music_chat": {
+    "contract_key": "media.music_chat",
+    "cases": {
+      "success": {"body": [[[[null, "r_1"], null, null, [[["rc_1", null, null, null, null, null, null, null, null, null, null, null, [{"87": [[null, [null, 4, "song.mp3", null, null, null, null, ["thumb", "https://cdn.example/song.mp3"]]]]}]]]]]]]},
+      "empty": {"body": [[]]},
+      "rejected": {"body": [], "reject_code": 7},
+      "changed_shape": {"body": {"unexpected": true}}
+    }
+  },
   "conversation_page": {
     "contract_key": "history.page",
     "cases": {

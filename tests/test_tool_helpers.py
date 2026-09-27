@@ -272,8 +272,8 @@ def test_parse_response_includes_video_block():
     assert "https://x/clip.mp4" in text
 
 
-def test_parse_response_music_label_depends_on_model():
-    """media 块的音乐后端标签随 model 变化（pro → Lyria 3 Pro，flash → Lyria 3）。"""
+def test_parse_response_music_label_does_not_invent_backend_version():
+    """Music cards do not identify their Lyria version from the model alias."""
     media = [_media(title="Song", mp3_url="https://x/song.mp3")]
     pro_text = parse_response(
         SimpleNamespace(text="t", images=[], videos=[], media=media, metadata=None),
@@ -283,9 +283,9 @@ def test_parse_response_music_label_depends_on_model():
         SimpleNamespace(text="t", images=[], videos=[], media=media, metadata=None),
         model="flash",
     )[0].text
-    assert "Lyria 3 Pro" in pro_text
-    assert "Lyria 3 Pro" not in flash_text
-    assert "Lyria 3" in flash_text
+    assert "🎵 音乐 1 (Lyria)" in pro_text
+    assert "🎵 音乐 1 (Lyria)" in flash_text
+    assert "Lyria 3" not in pro_text + flash_text
 
 
 def test_parse_response_appends_remote_chat_id():
@@ -332,7 +332,9 @@ def test_get_stream_text_piece_falls_back_when_text_delta_is_falsy():
 def test_resolve_model_name_known_alias_returns_configured_name():
     assert resolve_model_name("flash") == "gemini-3-flash"
     assert resolve_model_name("pro") == "gemini-3-pro"
-    assert resolve_model_name("flash-lite") == "3.1 Flash-Lite"
+    assert resolve_model_name("flash-lite") == "Flash-Lite"
+    assert resolve_model_name("3.5 Flash-Lite") == "Flash-Lite"
+    assert resolve_model_name("3.8 Flash") == "gemini-3-flash"
 
 
 def test_resolve_model_name_unknown_passthrough():
@@ -349,8 +351,10 @@ def test_normalize_model_alias_known_aliases():
     """各种大小写/别名 → 归一化到稳定 key。"""
     assert normalize_model_alias("Flash") == "flash"
     assert normalize_model_alias("3.5 flash") == "flash"
+    assert normalize_model_alias("3.8 flash") == "flash"
     assert normalize_model_alias("fast") == "flash"
     assert normalize_model_alias("lite") == "flash-lite"
+    assert normalize_model_alias("3.5 flash-lite") == "flash-lite"
     assert normalize_model_alias("3.1 pro") == "pro"
     assert normalize_model_alias("thinking") == "thinking"
 
@@ -381,9 +385,13 @@ def test_supported_learning_modes_returns_expected_string():
 # ---------------------------------------------------------------------------
 
 
-def test_resolve_media_request_image_always_nano_banana_2():
-    """image 类型 → 后端固定 Nano Banana 2，effective_alias=flash。"""
-    for alias in ("flash-lite", "flash", "pro"):
+def test_resolve_media_request_image_uses_current_web_model_family():
+    """Flash-Lite image requests keep the Lite route; Flash and Pro use NB2."""
+    lite = resolve_media_request("flash-lite", "image")
+    assert lite["backend_label"] == "Nano Banana 2 Lite"
+    assert lite["effective_alias"] == "flash-lite"
+    assert lite["request_model"] == "Flash-Lite"
+    for alias in ("flash", "pro"):
         out = resolve_media_request(alias, "image")
         assert out["backend_label"] == "Nano Banana 2"
         assert out["effective_alias"] == "flash"
@@ -391,34 +399,33 @@ def test_resolve_media_request_image_always_nano_banana_2():
         assert out["requested_alias"] == alias
 
 
-def test_resolve_media_request_music_non_pro_returns_lyria_3():
-    """非 pro 模型 → Lyria 3。"""
+def test_resolve_media_request_music_does_not_claim_unobserved_version():
+    """The Web response may produce music without exposing its version."""
     out = resolve_media_request("flash", "music")
-    assert out["backend_label"] == "Lyria 3"
+    assert out["backend_label"] == "Lyria"
     assert out["effective_alias"] == "flash"
     assert out["requested_alias"] == "flash"
 
 
-def test_resolve_media_request_music_pro_standard_returns_lyria_3():
-    """pro + standard → Lyria 3（非 Pro）。"""
+def test_resolve_media_request_music_pro_standard_keeps_pro_model():
     out = resolve_media_request("pro", "music", thinking_level="standard")
-    assert out["backend_label"] == "Lyria 3"
-    assert out["effective_alias"] == "flash"
+    assert out["backend_label"] == "Lyria"
+    assert out["effective_alias"] == "pro"
+    assert out["request_model"] == "gemini-3-pro"
 
 
-def test_resolve_media_request_music_pro_extended_returns_lyria_3_pro():
-    """pro + extended → Lyria 3 Pro。"""
+def test_resolve_media_request_music_thinking_level_does_not_claim_backend():
     out = resolve_media_request("pro", "music", thinking_level="extended")
-    assert out["backend_label"] == "Lyria 3 Pro"
+    assert out["backend_label"] == "Lyria"
     assert out["effective_alias"] == "pro"
 
 
-def test_resolve_media_request_unknown_type_passthrough():
-    """未知 media_type → 默认后端 + 空 note。"""
+def test_resolve_media_request_video_does_not_claim_omni_mode():
+    """通用聊天的视频参数不能冒充 Omni 视频模式。"""
     out = resolve_media_request("flash", "video")
-    assert out["backend_label"] == "Gemini Web default"
+    assert out["backend_label"] == "Gemini Web generic chat"
     assert out["effective_alias"] == "flash"
-    assert out["note"] == ""
+    assert "未证实" in out["note"]
 
 
 # ---------------------------------------------------------------------------
@@ -583,16 +590,15 @@ def test_prepend_backend_note_prepends_to_first_text():
 
 
 def _music_card(title, url):
-    """构造 _media_from_music_card 期望的嵌套 list 结构。"""
-    # title 在 [1, 2]，url 在 [1, 7, 1]
-    return [None, [None, None, title, None, None, None, None, [None, url]]]
+    """Construct an already parsed music card."""
+    return {"title": title, "url": url, "rid": "r_1", "rcid": "rc_1"}
 
 
 def test_media_from_music_card_mp3_branch():
     """title 不以 .mp4 结尾 → mp3_url=media_url, url(mp4)=''。"""
     card = _music_card("My Song", "https://x/song.mp3")
     media = _media_from_music_card(
-        card, client=SimpleNamespace(proxy="http://proxy"), cid="c_1", rid="r_1", rcid="rc_1"
+        card, client=SimpleNamespace(proxy="http://proxy"), cid="c_1"
     )
     assert media is not None
     assert media.title == "My Song"
@@ -609,7 +615,7 @@ def test_media_from_music_card_mp4_branch():
     """title 以 .mp4 结尾 → url(mp4)=media_url, mp3_url=''。"""
     card = _music_card("clip.mp4", "https://x/clip.mp4")
     media = _media_from_music_card(
-        card, client=SimpleNamespace(proxy=None), cid="c_1", rid="r_1", rcid="rc_1"
+        card, client=SimpleNamespace(proxy=None), cid="c_1"
     )
     assert media is not None
     assert media.mp3_url == ""
@@ -621,7 +627,7 @@ def test_media_from_music_card_no_url_returns_none():
     """media_url 为空 → 返回 None。"""
     card = _music_card("Empty", "")
     media = _media_from_music_card(
-        card, client=SimpleNamespace(), cid="c_1", rid="r_1", rcid="rc_1"
+        card, client=SimpleNamespace(), cid="c_1"
     )
     assert media is None
 
@@ -630,7 +636,7 @@ def test_media_from_music_card_empty_title_uses_media_placeholder():
     """title 为空 → 回退到 '[Media]'。"""
     card = _music_card("", "https://x/song.mp3")
     media = _media_from_music_card(
-        card, client=SimpleNamespace(), cid="c_1", rid="r_1", rcid="rc_1"
+        card, client=SimpleNamespace(), cid="c_1"
     )
     assert media is not None
     assert media.title == "[Media]"

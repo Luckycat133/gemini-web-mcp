@@ -88,13 +88,16 @@ Current Gemini Web media routing:
 
 | Request | Effective backend |
 |---------|-------------------|
-| `media_type=image` | First pass always reports `Nano Banana 2` |
-| `media_type=music`, `model=flash-lite` / `flash` / `fast` / `thinking` | `Lyria 3` |
-| `media_type=music`, `model=pro` | `Lyria 3 Pro` |
-| `media_type=video` | Gemini Web default video path, currently documented as Veo 3.1 |
+| `media_type=image`, `model=flash-lite` | `Nano Banana 2 Lite` route; exact observed backend may be unavailable |
+| `media_type=image`, `model=flash` / `pro` | First pass reports `Nano Banana 2`; Pro redo is separate |
+| `media_type=music` | `Lyria` family; exact version is unverified unless upstream identifies it |
+| `media_type=video` | Generic chat route is not a verified Omni video mode; require a video Artifact |
 
-`model=pro` does not directly select a different first-pass image backend.
-The Pro image redo control is a post-generation Gemini Web UI action.
+`model=pro` does not directly select a different first-pass image backend than
+Flash. The Pro image redo control is a post-generation Gemini Web UI action.
+The signed-in 2026-09-26 live check produced images and music through MCP, while
+generic MCP video returned `ARTIFACT_NOT_RETURNED`; Gemini Web's dedicated
+Videos page produced a downloadable Omni video.
 
 ### File And URL
 

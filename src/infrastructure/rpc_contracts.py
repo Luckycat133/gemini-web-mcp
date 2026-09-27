@@ -139,6 +139,10 @@ def _scheduled_delete_payload(*, action_id: str) -> str:
     return _compact([None, [action_id]])
 
 
+def _music_chat_payload(*, chat_id: str) -> str:
+    return _compact([chat_id, 10, None, 1, [1], [4], None, 1])
+
+
 def _contract(
     key: str,
     surface: str,
@@ -169,6 +173,17 @@ def _contract(
 
 
 _CONTRACT_LIST = [
+    _contract(
+        "media.music_chat",
+        "media",
+        "music_chat_readback",
+        "hNvQHb",
+        "/app",
+        _music_chat_payload,
+        "music_chat",
+        "2026-09-26 gemini-webapi READ_CHAT response and maintainer music recovery",
+        stability="preview",
+    ),
     _contract(
         "history.recent",
         "remy",

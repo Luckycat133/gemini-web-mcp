@@ -236,8 +236,12 @@ def test_payload_chats_dry_run_no_match():
 
 
 def test_payload_chats_dry_run_false_deletes_successfully():
-    """dry_run=False + delete_chat 成功 → deleted=True，delete_chat 被调用。"""
+    """Only a complete remote history read-back counts as deleted."""
     client = _make_client_with_chats([{"id": "codex-1", "title": "T"}])
+    body = [None, None, []]
+    client._batch_execute = AsyncMock(return_value=SimpleNamespace(
+        text=json.dumps([["wrb.fr", "MaZiqc", json.dumps(body), None, None, None, "generic"]]),
+    ))
 
     payload = asyncio.run(_cleanup_test_artifacts_payload(
         client, markers="codex-", target="chats", dry_run=False,
@@ -246,6 +250,20 @@ def test_payload_chats_dry_run_false_deletes_successfully():
     assert payload["deleted_chat_count"] == 1
     assert payload["matched_chats"][0]["deleted"] is True
     assert payload["matched_chats"][0]["delete_error"] == ""
+    client.delete_chat.assert_awaited_once_with("codex-1")
+
+
+def test_payload_chats_accepted_without_read_back_is_not_counted_deleted():
+    client = _make_client_with_chats([{"id": "codex-1", "title": "T"}])
+    del client._batch_execute
+
+    payload = asyncio.run(_cleanup_test_artifacts_payload(
+        client, markers="codex-", target="chats", dry_run=False,
+    ))
+
+    assert payload["deleted_chat_count"] == 0
+    assert payload["matched_chats"][0]["deleted"] is False
+    assert payload["matched_chats"][0]["verification_status"] == "not_available"
     client.delete_chat.assert_awaited_once_with("codex-1")
 
 
@@ -431,6 +449,24 @@ def test_payload_scheduled_dry_run_false_deletes(monkeypatch):
     assert payload["deleted_scheduled_count"] == 1
     assert payload["matched_scheduled_actions"][0]["deleted"] is True
     assert payload["matched_scheduled_actions"][0]["verification_status"] == "deleted_state_by_id"
+
+
+def test_payload_scheduled_failed_read_back_is_not_counted_deleted(monkeypatch):
+    client = MagicMock()
+    client._batch_execute = AsyncMock(return_value=SimpleNamespace(text="response", status_code=200))
+    entry = {"id": "task-codex-1", "title": "Codex", "instructions": "", "schedule_label": ""}
+    registry = AsyncMock(side_effect=[([entry], {}), RuntimeError("read-back unavailable")])
+    monkeypatch.setattr(manage_tools, "_fetch_scheduled_registry", registry)
+    monkeypatch.setattr(manage_tools, "_fetch_scheduled_task_by_id", AsyncMock(return_value=(None, {})))
+    monkeypatch.setattr(manage_tools, "_extract_rpc_bodies", lambda *_args: [["ok"]])
+
+    payload = asyncio.run(_cleanup_test_artifacts_payload(
+        client, markers="codex-", target="scheduled", dry_run=False,
+    ))
+
+    assert payload["deleted_scheduled_count"] == 0
+    assert payload["matched_scheduled_actions"][0]["deleted"] is False
+    assert payload["matched_scheduled_actions"][0]["verification_status"] == "verification_error"
 
 
 def test_payload_scheduled_delete_error(monkeypatch):

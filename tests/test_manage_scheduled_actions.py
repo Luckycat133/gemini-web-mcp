@@ -441,6 +441,7 @@ def test_create_scheduled_action_not_visible_in_nonempty_registry(monkeypatch):
                         title="T", instructions="I", hour=9))
     # ok=True (有 id) 但 not visible + not readable → ⚠️ visibility 警告
     assert "⚠️" in result[0].text
+    assert "✅ 已创建" not in result[0].text
     assert "cookie/session" in result[0].text
 
 
@@ -705,7 +706,7 @@ def test_delete_scheduled_action_deleted_state_by_id(monkeypatch):
 
 
 def test_delete_scheduled_action_still_visible_in_registry(monkeypatch):
-    """registry 仍可见 + task None → still_visible_in_registry → ✅ 接受 + 校验状态。"""
+    """A still-visible action must not be presented as deleted."""
     client = _FakeBatchClient(responses=["resp"])
     _patch_seams(monkeypatch, client)
 
@@ -718,7 +719,8 @@ def test_delete_scheduled_action_still_visible_in_registry(monkeypatch):
 
     mcp = _make_mcp()
     result = _run(_call(mcp, "gemini_delete_scheduled_action", action_id=action_id))
-    assert "✅ 删除请求已被 Gemini 接受" in result[0].text
+    assert "⚠️ 删除请求已被 Gemini 接受" in result[0].text
+    assert "✅" not in result[0].text
     assert "still_visible_in_registry" in result[0].text
 
 
@@ -739,7 +741,7 @@ def test_delete_scheduled_action_not_visible_not_readable(monkeypatch):
 
 
 def test_delete_scheduled_action_registry_empty_not_readable(monkeypatch):
-    """registry 空 + task None → registry_empty_not_readable_by_id → ✅ registry 为空。"""
+    """An empty registry and unreadable ID do not confirm deletion."""
     client = _FakeBatchClient(responses=["resp"])
     _patch_seams(monkeypatch, client)
 
@@ -751,7 +753,8 @@ def test_delete_scheduled_action_registry_empty_not_readable(monkeypatch):
 
     mcp = _make_mcp()
     result = _run(_call(mcp, "gemini_delete_scheduled_action", action_id="a_1"))
-    assert "✅ 删除请求已被 Gemini 接受" in result[0].text
+    assert "⚠️ 删除请求已被 Gemini 接受" in result[0].text
+    assert "✅" not in result[0].text
     assert "registry 为空" in result[0].text
 
 
@@ -804,8 +807,9 @@ def test_delete_scheduled_action_verification_error(monkeypatch):
 
     mcp = _make_mcp()
     result = _run(_call(mcp, "gemini_delete_scheduled_action", action_id="a_1"))
-    # verification_error + task None → readable False → 走 else ✅ 接受分支
-    assert "✅ 删除请求已被 Gemini 接受" in result[0].text
+    # A failed read-back leaves the deletion unverified.
+    assert "⚠️ 删除请求已被 Gemini 接受" in result[0].text
+    assert "✅" not in result[0].text
     assert "verification_error" in result[0].text
 
 
@@ -822,8 +826,9 @@ def test_delete_scheduled_action_get_task_error(monkeypatch):
 
     mcp = _make_mcp()
     result = _run(_call(mcp, "gemini_delete_scheduled_action", action_id="a_1"))
-    # still_visible_in_registry + get_task 失败 → readable None (falsy) → else 分支
-    assert "✅ 删除请求已被 Gemini 接受" in result[0].text
+    # Still visible in the registry, so success cannot be claimed.
+    assert "⚠️ 删除请求已被 Gemini 接受" in result[0].text
+    assert "✅" not in result[0].text
     assert "still_visible_in_registry" in result[0].text
 
 

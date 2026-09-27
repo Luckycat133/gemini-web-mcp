@@ -63,6 +63,8 @@ npx --yes skills@1.5.21 add \
 
 The two roles are intentionally separate: `gemini-web-mcp` is for tool use; `gemini-web-mcp-development` owns implementation, tests, packaging, compatibility, and releases. `.agents/skills` is the single repository source so clients that scan both `.agents` and `.codex` do not discover duplicate names.
 
+Changes listed under **Unreleased** are available from the current repository source; a published Skill listing may lag behind `main` until its next release.
+
 The three-file runtime skill bundle is released on ClawHub under MIT-0. The MCP server source and the
 repository-development skill remain [AGPL-3.0-only](LICENSE).
 
@@ -149,7 +151,7 @@ Use `model` as the primary starting profile for text-only work, `core` for multi
 | --- | --- |
 | Models | Gemini Web model aliases for Flash-Lite, Flash, Pro, thinking levels, and guided learning modes |
 | Chat | One-shot chat, normalized collection of Gemini upstream streams, local sessions, temporary chat, saved Gem usage |
-| Media | Image generation/editing, Veo video generation, Lyria 3 / Lyria 3 Pro music routing |
+| Media | Image generation/editing and music through MCP with verified local artifacts; video through Gemini Web's dedicated Omni mode while the generic MCP route remains unverified |
 | History | List, scan, search, read, export, delete, and cleanup test artifacts |
 | Notebooks | List native Gemini notebooks, inspect notebook chats, move chats into notebooks |
 | Account Inventory | Public links, usage limits, library capabilities, modes, models, scheduled actions |
@@ -159,13 +161,13 @@ Use `model` as the primary starting profile for text-only work, `core` for multi
 ## Development Status
 
 The maintained baseline is usable, but the development skill is not a completed feature checklist. Primary and compact
-history list/search/read/export/delete now share typed results; a chat deletion is only called verified after positive
-absence evidence from a complete fresh history-metadata read-back. An explicitly authorized targeted live run on
-2026-08-08 validated Cookie initialization, temporary and retained text, multi-turn context, primary/compact typed history,
-and verified deletion of every created chat. It was not a dedicated-account full canary and did not cover media, files,
-URLs, Deep Research, or account mutations. Remaining work includes that broader live baseline, typed results for other
-management actions, durable cleanup, and a shared long-operation job contract. The active repository version is `0.2.1`
-across the Python package, runtime skill, and development skill. The existing `v0.2.0` tag remains immutable; new release refs use `0.2.1`.
+history list/search/read/export/delete share typed results; deletion is verified only after positive read-back evidence.
+An authorized 2026-08-08 run checked text, sessions, and history. A separate signed-in Chrome check on 2026-09-26
+produced MCP image and music files and a video through Gemini Web's dedicated Omni page; the generic MCP video call
+returned no video artifact, and a later music retry showed an upstream technical error. These targeted observations are
+not a dedicated-account full canary. Remaining work includes durable operation/cleanup recovery, more account-result
+verification, and the focused creation/account products. The active package and Skill metadata remain `0.2.1`; these
+post-tag changes are recorded under **Unreleased**.
 
 See [Development status and next steps](docs/development-status.md) for the implemented, partial, deferred, and owner-decision
 boundaries. Offline CI or package success is not presented as current live Gemini behavior.
