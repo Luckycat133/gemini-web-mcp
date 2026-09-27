@@ -28,6 +28,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+from scripts.release_metadata import load_release_metadata
 from scripts.smoke_profiles import ASSIST_TOOLS
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -245,7 +246,7 @@ def test_assist_skill_frontmatter_is_complete() -> None:
     lines = text.splitlines()
 
     assert re.search(r"^name: gemini-assist$", frontmatter, re.MULTILINE)
-    assert 'version: "0.2.1"' in frontmatter
+    assert f'version: "{load_release_metadata(PROJECT_ROOT).version}"' in frontmatter
     assert "license: MIT-0" in frontmatter
     assert "license: AGPL-3.0-only" not in frontmatter
     assert "openclaw:" in frontmatter

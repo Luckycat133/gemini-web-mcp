@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.2] - 2026-09-27
+
 ### Changed
 - Routed the compatibility Runtime Skill through the installed five-tool assist server, the compact image/music and explicit-account facade, and narrow primary profiles. Removed examples for the not-yet-implemented dedicated creation/account servers, aligned long-operation/source/artifact/browser-video recovery with observed behavior, and added a credential-free MCP connection check.
 - Centralized the music chat read-back RPC and its four response-shape fixtures in the infrastructure contract/parser boundary, with shared media handling for primary and compact surfaces.

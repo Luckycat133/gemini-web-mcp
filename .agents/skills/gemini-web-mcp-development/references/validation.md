@@ -247,7 +247,7 @@ SOURCE="git+https://github.com/Luckycat133/gemini-web-mcp@${REVIEWED_SHA}"
 uvx --from "$SOURCE" gemini-mcp-onboarding
 ```
 
-The active package and public Skills use `0.2.1`; preserve `v0.2.0` as immutable history.
+The active package and all three repository Skills use `0.2.2`; preserve published tags as immutable history.
 
 ## Compatibility Runtime Skill
 

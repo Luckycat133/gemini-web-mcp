@@ -20,7 +20,7 @@ Routine bug fixes and bounded migrations should proceed without reopening settle
 - Search and understanding normally return information to the calling agent rather than mandatory files.
 - Manifest is for discovery and recovery, not a mandatory call before every known workflow.
 - Compatibility servers and the umbrella Runtime Skill remain during migration.
-- Preserve `v0.2.0`; publish this patch line as `v0.2.1`.
+- Preserve published tags; derive each new release tag from the active package version.
 
 ## Package A — Task-First Compatibility Skill
 
@@ -190,7 +190,7 @@ Acceptance criteria:
 - add modality onboarding commands;
 - add task-level evaluations for real agents;
 - exercise official client/OS matrix;
-- release `v0.2.1`, then evolve versioning normally.
+- complete the release gates for each new version and keep published tags immutable.
 
 ## Package I — Selected UI Parity
 

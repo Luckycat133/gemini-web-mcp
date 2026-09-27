@@ -2,7 +2,7 @@
 
 ``pyproject.toml`` is the authoritative source for the active project version.
 This module derives runtime-adjacent release names from it and verifies that
-both public Skills, the current changelog section, tagged release references,
+all three repository Skills, the current changelog section, tagged release references,
 and the evergreen source-install path stay aligned.
 """
 

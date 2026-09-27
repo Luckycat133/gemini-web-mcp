@@ -2,7 +2,7 @@
   <img src="docs/assets/gemini-web-mcp-banner.svg" alt="Gemini Web MCP" width="100%">
 </p>
 
-<h1 align="center">Gemini Web MCP (v0.2.1)</h1>
+<h1 align="center">Gemini Web MCP (v0.2.2)</h1>
 
 <p align="center">
   An agent-first MCP Python SDK v2 gateway and skills for Gemini Web workflows.
@@ -37,7 +37,7 @@ The supported runtime is `mcp>=2,<3` plus `mcp-types>=2,<3`. CI exercises both c
 
 ## Install The Runtime Skill
 
-The repository runtime Skill is `0.2.1`. Install the public listing from ClawHub (and verify its displayed version when publication state matters):
+The repository runtime Skill is `0.2.2`. Install the public listing from ClawHub (and verify its displayed version when publication state matters):
 
 ```bash
 clawhub install gemini-web-mcp
@@ -166,8 +166,8 @@ An authorized 2026-08-08 run checked text, sessions, and history. A separate sig
 produced MCP image and music files and a video through Gemini Web's dedicated Omni page; the generic MCP video call
 returned no video artifact, and a later music retry showed an upstream technical error. These targeted observations are
 not a dedicated-account full canary. Remaining work includes durable operation/cleanup recovery, more account-result
-verification, and the focused creation/account products. The active package and Skill metadata remain `0.2.1`; these
-post-tag changes are recorded under **Unreleased**.
+verification, and the focused creation/account products. The active package and Skill metadata are `0.2.2`; the
+changes from the 2026-09-26 live check are recorded in the `0.2.2` changelog section.
 
 See [Development status and next steps](docs/development-status.md) for the implemented, partial, deferred, and owner-decision
 boundaries. Offline CI or package success is not presented as current live Gemini behavior.
