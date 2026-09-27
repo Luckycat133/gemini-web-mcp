@@ -4,6 +4,8 @@ import ast
 import re
 from pathlib import Path
 
+from scripts.release_metadata import load_release_metadata
+
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 PUBLIC_SKILL_DIR = PROJECT_ROOT / ".agents" / "skills" / "gemini-web-mcp"
@@ -45,7 +47,7 @@ def test_project_skill_frontmatter_and_progressive_disclosure_are_complete() -> 
     assert "get a second opinion" in frontmatter
     assert "understand images/files/URLs" in frontmatter
     assert "generate image/video/music artifacts, edit images" in frontmatter
-    assert 'version: "0.2.1"' in frontmatter
+    assert f'version: "{load_release_metadata(PROJECT_ROOT).version}"' in frontmatter
     assert "license: MIT-0" in frontmatter
     assert "openclaw:" in frontmatter
     assert "- uvx" in frontmatter

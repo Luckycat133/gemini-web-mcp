@@ -4,7 +4,7 @@ description: "Use this skill when the user wants a second opinion, critique, cod
 license: MIT-0
 compatibility: "Requires Python 3.11+ and the dedicated gemini-mcp-assist MCP server. Run it with uvx --from git+https://github.com/Luckycat133/gemini-web-mcp@main gemini-mcp-assist. Live calls require Gemini Web account Cookies."
 metadata:
-  version: "0.2.1"
+  version: "0.2.2"
   openclaw:
     emoji: "♊️"
     homepage: https://github.com/Luckycat133/gemini-web-mcp

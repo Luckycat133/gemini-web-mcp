@@ -7,7 +7,7 @@ metadata:
   author: Luckycat133
   project: gemini-web-mcp
   scope: development
-  version: "0.2.1"
+  version: "0.2.2"
 ---
 
 # Gemini Web MCP Development
@@ -42,7 +42,7 @@ git log --oneline -20
 
 Also inspect the affected source/tests, `pyproject.toml`, current tags/releases, changelog, development status, open PRs/issues, CI/CodeQL, live-canary evidence, and public Skill state.
 
-The active package and both current public Skills declare `0.2.1`. Preserve the existing `v0.2.0` tag and use `v0.2.1` for the audited patch release.
+The active package and all three repository Skills declare `0.2.2`. Preserve the published `v0.2.0` and `v0.2.1` tags as immutable history.
 
 A green offline suite proves repository contracts. It does not prove current Gemini Web behavior.
 
@@ -245,7 +245,7 @@ Do not claim a live capability from fixtures, package smoke, a skipped canary, o
 - Do not add tools only to mirror every observed Gemini UI entry.
 - Do not scatter volatile RPC IDs or response indices outside the registry/parser boundary.
 - Do not hardcode volatile passing-test counts.
-- Preserve `v0.2.0`; use `v0.2.1` for this patch line.
+- Preserve published tags; derive each new release tag from the active package version.
 
 ## References
 

@@ -2,7 +2,7 @@
 
 Updated: 2026-09-27
 
-The active package and Skill metadata remain `0.2.1`. Changes after the existing `v0.2.1` tag are recorded under **Unreleased**; neither `v0.2.0` nor `v0.2.1` is rewritten.
+The active package and Skill metadata are `0.2.2`. The `v0.2.0` and `v0.2.1` tags remain immutable; changes since `v0.2.1` are recorded in the `0.2.2` changelog section.
 
 ## Current Runtime
 
