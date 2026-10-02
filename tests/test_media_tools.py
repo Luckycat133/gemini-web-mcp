@@ -16,6 +16,7 @@ import pytest
 from src.adapters.mcp_sdk import MCPServer
 
 import src.tools.media as media_tools
+from tests.media_fixtures import write_audio, write_image, write_video
 
 
 # ---------------------------------------------------------------------------
@@ -69,7 +70,7 @@ class _FakeSavedJpegWithPngName(_FakeSavedImage):
         destination = Path(kwargs["path"])
         destination.mkdir(parents=True, exist_ok=True)
         path = destination / kwargs["filename"]
-        path.write_bytes(b"\xff\xd8\xff\xe0" + b"jpeg-content")
+        write_image(path, format="JPEG")
         return str(path)
 
 
@@ -83,7 +84,7 @@ class _FakeMediaClient:
     """模拟 Gemini 客户端，捕获 generate_content 入参并控制返回值/异常。
 
     与 _FakeChatClient / _FakeFileClient 不同：media 全用关键字传参，
-    且需要可控的 timeout / watchdog_timeout 属性以验证 _set_client_timeouts。
+    且需要可控的 timeout / watchdog_timeout 属性以验证请求未改写全局默认。
     """
 
     def __init__(self, *, response_text="done", images=None, videos=None,
@@ -106,7 +107,7 @@ class _FakeMediaClient:
 
     async def generate_content(self, **kwargs):
         self.captured_generate_kwargs = dict(kwargs)
-        # 捕获调用期间的 client.timeout（验证 _set_client_timeouts 写回）
+        # 捕获调用期间的全局默认，确认请求不会临时改写 singleton。
         self.captured_generate_during_timeout = self.timeout
         if self._raise_exc is not None:
             raise self._raise_exc
@@ -124,7 +125,7 @@ class _FakeMediaClient:
 
 
 def _patch_media_env(monkeypatch, client, *, captured_schedule=None,
-                     captured_cleanup=None, probe_duration=None,
+                     captured_cleanup=None,
                      fetch_music=None):
     """统一 patch media 工具的外部接缝。"""
     monkeypatch.setattr(media_tools, "get_gemini_client", lambda: client)
@@ -148,9 +149,6 @@ def _patch_media_env(monkeypatch, client, *, captured_schedule=None,
             })
     monkeypatch.setattr(media_tools, "schedule_remote_chat_cleanup_from_response",
                         fake_schedule)
-
-    if probe_duration is not None:
-        monkeypatch.setattr(media_tools, "_probe_duration", probe_duration)
 
     if fetch_music is not None:
         monkeypatch.setattr(media_tools, "_fetch_music_media_from_chat", fetch_music)
@@ -257,7 +255,7 @@ def test_generate_media_passes_all_fields_to_generate_content(monkeypatch):
 def test_generate_media_passes_safe_image_path_as_files(monkeypatch, tmp_path):
     """有效 image_path → files=[resolved_abs_path]。"""
     img = tmp_path / "ref.png"
-    img.write_bytes(b"x")
+    write_image(img)
 
     client = _FakeMediaClient()
     _patch_media_env(monkeypatch, client)
@@ -381,8 +379,8 @@ def test_generate_media_zero_or_negative_timeout_falls_back_to_default(monkeypat
 # ---------------------------------------------------------------------------
 
 
-def test_generate_media_sets_and_restores_client_timeouts(monkeypatch):
-    """请求期间 client.timeout 提升到 max(previous, requested)；返回后恢复。"""
+def test_generate_media_does_not_mutate_generic_client_timeouts(monkeypatch):
+    """请求 timeout 显式传参；兼容 client 的全局默认从未被改写。"""
     client = _FakeMediaClient(timeout=100.0, watchdog_timeout=200.0)
     _patch_media_env(monkeypatch, client)
 
@@ -394,8 +392,8 @@ def test_generate_media_sets_and_restores_client_timeouts(monkeypatch):
                                 timeout_seconds=300)
 
     asyncio.run(run())
-    # 调用期间被提升到 300
-    assert client.captured_generate_during_timeout == 300.0
+    assert client.captured_generate_during_timeout == 100.0
+    assert client.captured_generate_kwargs["timeout"] == 300
     # 返回后恢复原值
     assert client.timeout == 100.0
     assert client.watchdog_timeout == 200.0
@@ -572,7 +570,7 @@ def test_generate_media_timeout_returns_timeout_message_with_backend(monkeypatch
 
 def test_generate_media_timeout_retains_reference_image_identity(monkeypatch, tmp_path):
     reference = tmp_path / "reference.png"
-    reference.write_bytes(b"image bytes")
+    write_image(reference)
     client = _FakeMediaClient(raise_exc=asyncio.TimeoutError())
     _patch_media_env(monkeypatch, client)
     mcp = _make_mcp()
@@ -661,7 +659,7 @@ def test_generate_media_empty_response_still_schedules_cleanup(monkeypatch):
 
     result = asyncio.run(run())
     text = result[0].text
-    assert "⚠️ image 请求已完成，但没有返回文本、图片、视频或音乐资源" in text
+    assert "⚠️ image 请求已返回，但没有返回可用的 image 产物" in text
     assert len(schedule_calls) == 1  # 关键：空响应仍调 cleanup
     domain = result[0].meta["domain_result"]
     assert domain["error"]["code"] == "ARTIFACT_NOT_RETURNED"
@@ -832,7 +830,7 @@ def test_generate_media_music_recovers_media_when_response_media_empty(monkeypat
     """
     client = _FakeMediaClient(response_text="ok", media=[])
     recovered_path = tmp_path / "recovered.mp3"
-    recovered_path.write_bytes(b"audio")
+    write_audio(recovered_path)
     recovered = _FakeMedia(
         title="recovered song",
         save_return={"audio": str(recovered_path)},
@@ -859,14 +857,14 @@ def test_generate_media_music_recovers_media_when_response_media_empty(monkeypat
 
 def test_generate_media_verifies_saved_file_metadata(monkeypatch, tmp_path):
     saved_path = tmp_path / "saved.mp3"
-    saved_path.write_bytes(b"audio bytes")
+    write_audio(saved_path, duration=9.25)
     media = _FakeMedia(
         title="saved song",
         mp3_url="https://cdn.example.test/saved.mp3",
         save_return={"audio": str(saved_path)},
     )
     client = _FakeMediaClient(response_text="done", media=[media])
-    _patch_media_env(monkeypatch, client, probe_duration=lambda _path: 9.25)
+    _patch_media_env(monkeypatch, client)
     mcp = _make_mcp()
 
     async def run():
@@ -879,8 +877,8 @@ def test_generate_media_verifies_saved_file_metadata(monkeypatch, tmp_path):
     assert domain["meta"]["verification_status"] == "artifact_saved_and_verified"
     assert artifact["local_path"] == str(saved_path.resolve())
     assert artifact["uri"] == "https://cdn.example.test/saved.mp3"
-    assert artifact["size_bytes"] == len(b"audio bytes")
-    assert artifact["mime_type"] == "audio/mpeg"
+    assert artifact["size_bytes"] == saved_path.stat().st_size
+    assert artifact["mime_type"] == "audio/wav"
     assert artifact["duration_seconds"] == 9.25
     assert artifact["verification"]["status"] == "verified"
 
@@ -918,6 +916,31 @@ def test_generate_media_saves_and_verifies_image_string_result(monkeypatch, tmp_
     assert artifact["verification"]["status"] == "verified"
 
 
+def test_downloaded_html_is_not_reported_as_a_verified_generated_image(monkeypatch, tmp_path):
+    class LoginPageImage(_FakeSavedImage):
+        async def save(self, **kwargs):
+            destination = Path(kwargs["path"])
+            destination.mkdir(parents=True, exist_ok=True)
+            path = destination / "image.png"
+            path.write_text("<html>Login required</html>")
+            return str(path)
+
+    client = _FakeMediaClient(images=[LoginPageImage()])
+    _patch_media_env(monkeypatch, client)
+
+    async def run():
+        return await _call_tool(_make_mcp(), "gemini_generate_media", prompt="cat", media_type="image", output_dir=str(tmp_path))
+
+    domain = asyncio.run(run())[0].meta["domain_result"]
+    assert domain["data"]["state"] == "remote"
+    assert domain["meta"]["operation_state"] == "partial"
+    assert domain["meta"]["verification_status"] == "remote_uri_observed_unverified"
+    assert domain["meta"]["details"]["save_failure_count"] == 1
+    assert domain["data"]["artifacts"][0]["local_path"] is None
+    assert domain["data"]["artifacts"][0]["size_bytes"] is None
+    assert domain["data"]["artifacts"][0]["verification"]["status"] == "unverified"
+
+
 def test_generated_image_extension_matches_actual_jpeg_bytes(monkeypatch, tmp_path):
     image = _FakeSavedJpegWithPngName()
     client = _FakeMediaClient(response_text="done", images=[image])
@@ -945,7 +968,7 @@ def test_generated_image_suffix_fix_does_not_replace_existing_file(tmp_path):
     existing = tmp_path / "mismatch.jpg"
     existing.write_bytes(b"keep")
     saved = tmp_path / "mismatch.png"
-    saved.write_bytes(b"\xff\xd8\xff\xe0" + b"jpeg-content")
+    write_image(saved, format="JPEG")
 
     normalized = media_tools._normalize_saved_image_extension(str(saved))
 
@@ -1001,8 +1024,8 @@ def test_multiple_images_insert_index_before_requested_extension(monkeypatch, tm
 def test_generate_music_keeps_audio_and_video_artifacts_distinct(monkeypatch, tmp_path):
     audio_path = tmp_path / "song.mp3"
     video_path = tmp_path / "song.mp4"
-    audio_path.write_bytes(b"audio")
-    video_path.write_bytes(b"video")
+    write_audio(audio_path)
+    write_video(video_path)
     media = _FakeMedia(
         title="song",
         mp3_url="https://cdn.example.test/song.mp3",
@@ -1010,7 +1033,7 @@ def test_generate_music_keeps_audio_and_video_artifacts_distinct(monkeypatch, tm
         save_return={"audio": str(audio_path), "video": str(video_path)},
     )
     client = _FakeMediaClient(response_text="done", media=[media])
-    _patch_media_env(monkeypatch, client, probe_duration=lambda _path: 4.0)
+    _patch_media_env(monkeypatch, client)
     mcp = _make_mcp()
 
     async def run():

@@ -246,8 +246,13 @@ compact: src/skill_server.py┘
 适配器差异是显式配置：primary 继续传递 `gem` / `temporary`，compact 继续保持原有精简请求形状；
 两边共享同一类型化 `DomainResult[ChatOperationData]`。迁移后的聊天处理器不再复制上游请求与清理逻辑。
 history 的 list/search/read/export/delete 也由 `src/services/history.py` 统一执行；primary 与 compact
-只保留展示差异。`skill_server.py` 中仍有 account、prompt、cookie、doctor、cleanup 等管理域的
-adapter-owned 逻辑，将在后续 bounded slice 中处理。
+只保留展示差异。Prompt 存储由 `src/services/prompts.py` 统一管理原子替换、失败回滚和跨进程事务锁；两个表面保留参数/文本兼容适配。
+
+Cookie 更新的通知发生在数据锁之外，单独的更新锁保持通知顺序，避免与客户端锁反向等待。
+认证上下文用无凭据的 generation 标识：真正切换账号时退役旧客户端、拆离旧会话并取消旧清理；迟到响应和后台任务核对 generation，不能把旧资源排到新账号。相同材料刷新不变更 generation。
+清理任务以新鲜 metadata read-back 为删除依据，调用方取消通过 shield 与共用删除隔离。会话过期时跳过正在发送的会话，发送完成后恢复清理资格。
+
+媒体超时/watchdog 使用按任务和客户端实例隔离的 ContextVar scope，重连不把单次参数写回全局默认。生成、恢复、异步保存和在线程中执行的本地验证共同消耗操作 deadline。
 
 `cookie_manager.py` 在 macOS 调用 `browser-cookie3` 时临时安装带锁、可恢复的 Keychain reader，
 用 `GEMINI_BROWSER_COOKIE_TIMEOUT_SECONDS` 限制依赖中原本无界的 `security` 子进程等待。超时结果只保留

@@ -1,6 +1,6 @@
 # Development Status and Next Steps
 
-Updated: 2026-09-27
+Updated: 2026-10-02
 
 The active package and Skill metadata are `0.2.2`. The `v0.2.0` and `v0.2.1` tags remain immutable; changes since `v0.2.1` are recorded in the `0.2.2` changelog section.
 
@@ -36,6 +36,12 @@ The broad and low-token servers remain compatibility surfaces while the create a
 - the dedicated `gemini_assist_mcp` five-tool surface (`gemini_ask`, `gemini_search`, `gemini_understand_image`, `gemini_understand`, `gemini_research`) with shared Search/Understand/Research services and the `gemini-assist` Runtime Skill with offline trigger-boundary content contracts (description vocabulary and routing-table presence checks);
 - wheel/sdist/runtime-Skill packaging, embedded license checks, clean install, and onboarding;
 - CI, CodeQL, Skill validation, profile snapshots, and protocol smoke.
+
+## Full Review Fixes (2026-10-02)
+
+The full review produced 26 product findings and two issues in the vendored evaluator. Repairs cover authentication ownership, cancellation and cleanup read-back, atomic cross-process Prompt storage, strict RPC child rows and scheduled-action verification, media type/file validation, bounded recovery/save, isolated timeout configuration, Research completion evidence, history coverage, Doctor diagnostics, and scoped Notebook discovery. The maintained evaluator bridge adapts SDK v2 without changing the upstream Skill package. See [review fixes and evidence](code-review-fixes.md).
+
+These repairs are checked with offline regressions, real auth-free MCP protocol calls, and installed-package checks. The dated live observations below remain separate; this repair pass does not establish a new signed-in Gemini baseline. Release publication still requires the release PR's review gate.
 
 ## Targeted Live Evidence (2026-09-26)
 

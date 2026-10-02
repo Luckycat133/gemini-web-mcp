@@ -93,6 +93,8 @@ Verify list/read versus mutation semantics remain distinguishable in structured 
 
 Golden catalogs and schemas are reviewed contracts. Do not regenerate them automatically after failure.
 
+For model-backed evaluation of `evaluations/gemini_web_mcp_contract.xml`, use `scripts/run_mcp_builder_evaluation.py`. It bridges SDK v2 to the unchanged upstream evaluator and requires an explicitly selected provider model and the optional `anthropic` dependency. See `docs/agent-verification.md` for the command and evidence limits. Do not edit vendored evaluator files individually to repair SDK compatibility.
+
 ## Assistance Tests
 
 ### `gemini_ask`
@@ -128,6 +130,9 @@ Golden catalogs and schemas are reviewed contracts. Do not regenerate them autom
 - preserves upstream IDs;
 - no duplicate start after timeout;
 - report result becomes an Artifact.
+- start recovery, no-ID polling, immersive retrieval, and follow-up share their phase's remaining deadline;
+- changed progress text or quota refusal is not report completion;
+- upstream failed/cancelled/unavailable states remain non-success terminal states.
 
 ## Skill Tests
 
@@ -199,6 +204,8 @@ Cover:
 - temporary-chat bypass;
 - no private content in storage.
 
+The current in-memory cleanup manager additionally needs rejection/read-back error retries, shared-task cancellation isolation, busy-session expiry protection, and cancellation of old jobs when authentication changes. Late responses from an old authentication context must not schedule deletion against the new account. Same-material cookie refresh should preserve current sessions and jobs.
+
 ## Artifact Tests
 
 For image/video/audio/report:
@@ -214,6 +221,8 @@ For image/video/audio/report:
 - source Artifact identity for edits;
 - operation-to-result Artifact identity continuity;
 - downstream handoff in an agent-use evaluation.
+
+Match output kinds to the requested modality; an unrelated image is insufficient for video/music. Check decodable image/WAV content or audio/video stream evidence before `verified`. A missing decoder yields `unverified`, and malformed bytes yield failure. Exercise total recovery/save deadlines, independent audio/video filenames, and timeout scope isolation, including reconnects.
 
 ## Mutation Tests
 

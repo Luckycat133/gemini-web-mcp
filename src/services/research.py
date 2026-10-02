@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from types import SimpleNamespace
@@ -372,6 +373,8 @@ def operation_state_from_upstream(value: Any) -> OperationState:
         return OperationState.CANCELLED
     if state in {"failed", "error"}:
         return OperationState.FAILED
+    if state in {"unavailable", "not_available"}:
+        return OperationState.UNAVAILABLE
     return OperationState.RUNNING
 
 
@@ -542,19 +545,129 @@ def start_fresh_research_chat(client: Any, model: Any):
     return chat
 
 
-async def start_deep_research_with_recovery(client: Any, plan: Any, chat: Any, timeout: int):
+async def start_deep_research_with_recovery(client: Any, plan: Any, chat: Any, timeout: float):
+    deadline = asyncio.get_running_loop().time() + max(0.0, timeout)
     try:
         return await await_before_deadline(
             client.start_deep_research(plan, chat=chat),
             timeout=timeout,
         )
     except asyncio.TimeoutError:
-        logger.warning("Deep Research start timed out; continuing with chat-history polling")
+        logger.warning("Deep Research start timed out; inspecting recoverable state within the deadline")
         latest = None
         cid = getattr(chat, "cid", None) or getattr(plan, "cid", None)
-        if cid and hasattr(client, "fetch_latest_chat_response"):
-            latest = await client.fetch_latest_chat_response(cid)
+        remaining = deadline - asyncio.get_running_loop().time()
+        if remaining > 0 and cid and hasattr(client, "fetch_latest_chat_response"):
+            try:
+                latest = await await_before_deadline(
+                    client.fetch_latest_chat_response(cid), timeout=remaining,
+                )
+            except asyncio.TimeoutError:
+                pass
         return latest or SimpleNamespace(text="", timeout_during_start=True)
+
+
+def is_research_start_message(text: str) -> bool:
+    lower = text.lower()
+    return any(marker in lower for marker in (
+        "i'm on it", "i’ll let you know", "i'll let you know", "research is finished",
+        "while i'm researching", "leave this chat", "i've finished the research",
+        "i have finished the research", "我已经完成了研究", "研究完成后", "我这就开始",
+    ))
+
+
+def is_research_completion_message(text: str) -> bool:
+    lower = text.lower()
+    return any(marker in lower for marker in (
+        "i've finished the research", "i have finished the research", "我已经完成了研究",
+    ))
+
+
+def _followup_report_observed(output: Any) -> bool:
+    """Accept a report response, rather than a changed acknowledgement or refusal."""
+    text = getattr(output, "text", "")
+    if not isinstance(text, str) or not text.strip() or is_research_start_message(text):
+        return False
+    if operation_state_from_upstream(getattr(output, "state", None)) in {
+        OperationState.FAILED, OperationState.CANCELLED, OperationState.UNAVAILABLE,
+    }:
+        return False
+    if nonempty_identifier(getattr(output, "report_id", None)):
+        return True
+    if getattr(output, "sources", None) or getattr(output, "deep_research_sources", None):
+        return True
+    # A pasted report may lose provider metadata. Require report structure and
+    # an observed source trail after the explicit completion observation.
+    return bool(
+        len(text.strip()) >= 1000
+        and re.search(r"^#{1,6}\s+\S", text, re.MULTILINE)
+        and re.search(r"https?://[^\s<>]+", text)
+    )
+
+
+async def wait_for_deep_research_by_chat(
+    client: Any,
+    plan: Any,
+    chat: Any,
+    start_output: Any,
+    *,
+    poll_interval: float,
+    timeout: float,
+    fetch_report: Callable[[Any, str], Awaitable[Any]],
+    request_report: Callable[[Any], Awaitable[Any]],
+) -> Any:
+    """Poll a no-ID operation under one deadline, requiring report evidence."""
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + max(0.0, timeout)
+    cid = research_chat_id(plan=plan, chat=chat, response=start_output)
+    checks = 0
+
+    def result(state: OperationState, note: str, output: Any = None) -> Any:
+        return SimpleNamespace(
+            plan=plan, start_output=start_output, final_output=output,
+            statuses=[SimpleNamespace(state=state.value, done=state is OperationState.COMPLETED, notes=[note])],
+            done=state is OperationState.COMPLETED, poll_count=checks,
+        )
+
+    async def before_deadline(awaitable: Awaitable[Any]) -> Any:
+        return await await_before_deadline(awaitable, timeout=max(0.0, deadline - loop.time()))
+
+    try:
+        while loop.time() < deadline:
+            if cid and hasattr(client, "fetch_latest_chat_response"):
+                latest = await before_deadline(client.fetch_latest_chat_response(cid))
+                checks += 1
+                text = getattr(latest, "text", "") or ""
+                state = operation_state_from_upstream(getattr(latest, "state", None))
+                if state in {OperationState.FAILED, OperationState.CANCELLED, OperationState.UNAVAILABLE}:
+                    return result(state, "upstream research reached a non-success terminal state")
+                if state is OperationState.COMPLETED or is_research_completion_message(text):
+                    if _followup_report_observed(latest):
+                        return result(OperationState.COMPLETED, "report observed in completed chat response", latest)
+                    report = await before_deadline(fetch_report(client, cid))
+                    report_text = getattr(report, "text", "") if report is not None else ""
+                    if isinstance(report_text, str) and report_text.strip():
+                        return result(
+                            OperationState.COMPLETED,
+                            f"retrieved immersive report from raw chat payload after {checks} checks", report,
+                        )
+                    report = await before_deadline(request_report(chat))
+                    if _followup_report_observed(report):
+                        return result(
+                            OperationState.COMPLETED,
+                            f"retrieved completed report by follow-up after {checks} checks", report,
+                        )
+            else:
+                checks += 1
+            remaining = deadline - loop.time()
+            if remaining > 0:
+                await asyncio.sleep(min(max(0.0, poll_interval), remaining))
+    except asyncio.TimeoutError:
+        pass
+    return result(
+        OperationState.RUNNING,
+        f"research_id was not present in Gemini's plan; checked chat history {checks} times; report not observed",
+    )
 
 
 def is_capability_probe_false_negative(error: Exception) -> bool:

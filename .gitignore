@@ -8,6 +8,8 @@ __pycache__/
 cookies.json
 prompts.json
 .prompts.json.*.tmp
+.prompts.json.lock
+.library.json.lock
 *.log
 .DS_Store
 artifacts/

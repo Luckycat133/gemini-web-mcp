@@ -21,6 +21,8 @@ timeout 关键字），FakeClient 用 *args + **kwargs 捕获。包在 asyncio.w
 import asyncio
 from types import SimpleNamespace
 
+import pytest
+
 from src.adapters.mcp_sdk import MCPServer
 
 import src.tools.file as file_tools
@@ -90,6 +92,30 @@ def _make_mcp():
     mcp = MCPServer("test")
     file_tools.register_file_tools(mcp)
     return mcp
+
+
+@pytest.mark.parametrize("response_text", ["", "  \n\t"])
+@pytest.mark.parametrize("tool", ["gemini_upload_file", "gemini_analyze_url"])
+def test_empty_analysis_does_not_succeed_from_input_location(monkeypatch, tmp_path, response_text, tool):
+    client = _FakeFileClient(response_text=response_text)
+    _patch_file_client_env(monkeypatch, client)
+    path = tmp_path / "input.txt"
+    path.write_text("content to analyze")
+    arguments = {"file_path": str(path)} if tool == "gemini_upload_file" else {"url": "https://example.test/article"}
+
+    async def run():
+        return await _call_tool(_make_mcp(), tool, **arguments)
+
+    content = asyncio.run(run())
+    domain = content[0].meta["domain_result"]
+    assert domain["ok"] is False
+    assert domain["data"]["state"] == "empty"
+    assert domain["error"]["code"] == "ARTIFACT_NOT_RETURNED"
+    assert domain["meta"]["operation_state"] != "completed"
+    assert domain["data"]["source_chat_id"] == "c_file1"
+    assert domain["data"]["input_artifacts"][0]["state"] in {"local", "remote"}
+    assert "Successfully analyzed" not in content[0].text
+    assert "no analysis text" in content[0].text
 
 
 # ---------------------------------------------------------------------------

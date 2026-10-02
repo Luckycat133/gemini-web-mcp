@@ -313,7 +313,7 @@ def _tool_availability(tool: dict[str, Any]) -> list[str]:
     if name in HISTORY_FACADE_TOOL_NAMES:
         return ["history", "history-organize", "manage", "all"]
     if name in NOTEBOOKS_FACADE_TOOL_NAMES:
-        return ["history-organize", "account-read", "manage", "all"]
+        return ["history-organize", "manage", "all"]
     if name in ACCOUNT_INVENTORY_TOOL_NAMES:
         return ["account-read", "manage", "all"]
     if name in HISTORY_READ_TOOL_NAMES:
@@ -362,7 +362,10 @@ def tool_manifest_payload(scope: ManifestScope = "all") -> dict[str, Any]:
         if filter_scope == "all"
         or item["group"] == filter_scope
         or (filter_scope == "core" and item["group"] == "core")
-        or (filter_scope == "notebooks" and item["name"] in NOTEBOOKS_READ_TOOL_NAMES | NOTEBOOKS_WRITE_TOOL_NAMES)
+        or (
+            filter_scope == "notebooks"
+            and item["name"] in NOTEBOOKS_FACADE_TOOL_NAMES | NOTEBOOKS_READ_TOOL_NAMES | NOTEBOOKS_WRITE_TOOL_NAMES
+        )
         or (filter_scope == "scheduled" and item["name"] in SCHEDULED_READ_TOOL_NAMES | SCHEDULED_WRITE_TOOL_NAMES)
     ]
     groups: dict[str, int] = {}

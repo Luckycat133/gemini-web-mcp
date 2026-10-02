@@ -28,6 +28,8 @@ surface-local copy of request construction. These tests pin:
 """
 
 import asyncio
+
+from tests.media_fixtures import write_image
 import re
 from types import SimpleNamespace
 
@@ -715,7 +717,7 @@ def test_gemini_search_passes_constraints_into_the_composed_prompt(monkeypatch):
 
 def test_gemini_understand_image_uploads_local_image_with_task_and_cleanup_source(monkeypatch, tmp_path):
     image = tmp_path / "screenshot.png"
-    image.write_bytes(b"fake image bytes")
+    write_image(image)
     client = _FakeUnderstandClient()
     captured_schedule = []
     _patch_ask_client_env(monkeypatch, client, captured_schedule=captured_schedule)
@@ -742,7 +744,7 @@ def test_gemini_understand_image_uploads_local_image_with_task_and_cleanup_sourc
 
 def test_gemini_understand_image_uses_default_task_when_task_is_omitted(monkeypatch, tmp_path):
     image = tmp_path / "photo.png"
-    image.write_bytes(b"fake image bytes")
+    write_image(image)
     client = _FakeUnderstandClient()
     _patch_ask_client_env(monkeypatch, client)
 
@@ -770,7 +772,7 @@ def test_gemini_understand_image_references_remote_uri_without_uploading(monkeyp
 
 def test_gemini_understand_image_records_outcome_and_input_artifact_identity(monkeypatch, tmp_path):
     image = tmp_path / "shot.png"
-    image.write_bytes(b"fake image bytes")
+    write_image(image)
     client = _FakeUnderstandClient(response_text="A TypeError dialog.", observed_backend="gemini-3-pro")
     _patch_ask_client_env(monkeypatch, client)
 
@@ -815,7 +817,7 @@ def test_gemini_understand_image_blank_image_is_rejected_before_client_use(monke
 
 def test_gemini_understand_image_failure_is_typed_by_the_error_boundary(monkeypatch, tmp_path):
     image = tmp_path / "shot.png"
-    image.write_bytes(b"fake image bytes")
+    write_image(image)
 
     class _ExplodingClient:
         async def generate_content(self, **kwargs):
@@ -839,7 +841,7 @@ def test_gemini_understand_image_failure_is_typed_by_the_error_boundary(monkeypa
 
 def test_gemini_understand_accepts_mixed_typed_inputs_in_one_request(monkeypatch, tmp_path):
     design = tmp_path / "design.png"
-    design.write_bytes(b"fake image bytes")
+    write_image(design)
     spec = tmp_path / "spec.md"
     spec.write_text("# spec")
     client = _FakeUnderstandClient(response_text="The [design] matches the [spec], and [docs] and [notes] agree.")
@@ -903,7 +905,7 @@ def test_gemini_understand_marks_only_referenced_inputs_analyzed(monkeypatch, tm
     # input the analysis references by [id] is analyzed; the rest stay accepted
     # with an acknowledgment-not-observed warning instead of overstating.
     design = tmp_path / "design.png"
-    design.write_bytes(b"fake image bytes")
+    write_image(design)
     client = _FakeUnderstandClient(response_text="[design] matches the implementation; nothing else was mentioned.")
     _patch_ask_client_env(monkeypatch, client)
 
@@ -942,7 +944,7 @@ def test_gemini_understand_marks_only_referenced_inputs_analyzed(monkeypatch, tm
 
 def test_gemini_understand_keeps_identity_and_records_skipped_inputs(monkeypatch, tmp_path):
     design = tmp_path / "design.png"
-    design.write_bytes(b"fake image bytes")
+    write_image(design)
     client = _FakeUnderstandClient(response_text="Only the design was usable.")
     _patch_ask_client_env(monkeypatch, client)
 
@@ -1031,7 +1033,7 @@ def test_gemini_understand_reports_typed_rejection_when_every_input_is_skipped(m
 
 def test_gemini_understand_failure_marks_accepted_inputs_failed(monkeypatch, tmp_path):
     design = tmp_path / "design.png"
-    design.write_bytes(b"fake image bytes")
+    write_image(design)
 
     class _ExplodingClient:
         async def generate_content(self, **kwargs):
@@ -1058,7 +1060,7 @@ def test_gemini_understand_failure_marks_accepted_inputs_failed(monkeypatch, tmp
 
 def test_gemini_understand_keeps_input_artifact_identity_stable_across_calls(monkeypatch, tmp_path):
     design = tmp_path / "design.png"
-    design.write_bytes(b"fake image bytes")
+    write_image(design)
     client = _FakeUnderstandClient()
     _patch_ask_client_env(monkeypatch, client)
 

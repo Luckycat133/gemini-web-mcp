@@ -46,6 +46,8 @@ If it still fails, report the authentication blocker without exposing values.
 
 Authentication recovery is separate from user-facing task design. Resume the original workflow after the runtime is configured.
 
+If an explicit browser profile fails, preserve that failure and refresh the selected profile. Do not substitute another account. A changed authentication context cancels old sessions and their cleanup; retain cancelled resource IDs as diagnostics, and do not interpret cancellation as deletion. Re-select the original account before any explicitly authorized follow-up cleanup.
+
 ## Entitlement Unavailable
 
 Classify a missing account entitlement separately from:
@@ -81,6 +83,8 @@ If quick search returns an answer but no observed sources:
 3. retry local save without repeating upstream generation when possible;
 4. do not claim a file exists until verified;
 5. return the next action.
+
+For local `unverified` media, inspect the decoder diagnostic and install/repair the relevant local decoder before acceptance. An existing non-empty file or a mismatched media kind cannot substitute for verification. File/URL input artifacts only identify what was submitted; an empty response remains empty.
 
 For `media_type="video"`, a text-only response can mean the generic MCP call
 stayed in chat mode. Inspect the retained chat, then use the native

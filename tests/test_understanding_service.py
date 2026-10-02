@@ -11,6 +11,8 @@ MCP presentation layer.
 """
 
 import asyncio
+
+from tests.media_fixtures import write_image
 from types import SimpleNamespace
 
 from src.domain import DomainErrorCode, DomainResult
@@ -81,7 +83,7 @@ def _outcomes(result):
 
 def test_understand_reuses_the_shared_chat_service_request_shape(tmp_path):
     image = tmp_path / "design.png"
-    image.write_bytes(b"fake image bytes")
+    write_image(image)
     stub = _StubChatService(response=_response())
 
     result = _understand(
@@ -107,7 +109,7 @@ def test_understand_reuses_the_shared_chat_service_request_shape(tmp_path):
 
 def test_understand_composes_each_input_kind_into_one_message(tmp_path):
     image = tmp_path / "design.png"
-    image.write_bytes(b"fake image bytes")
+    write_image(image)
     spec = tmp_path / "spec.md"
     spec.write_text("# spec")
     stub = _StubChatService(response=_response())
@@ -159,7 +161,7 @@ def test_understand_separates_adjacent_inline_text_blocks():
 
 def test_understand_image_delegates_with_default_task_and_cleanup_source(tmp_path):
     image = tmp_path / "shot.png"
-    image.write_bytes(b"fake image bytes")
+    write_image(image)
     stub = _StubChatService(response=_response())
 
     result = asyncio.run(
@@ -293,7 +295,7 @@ def test_understand_marks_every_input_analyzed_when_each_is_referenced():
 
 def test_understand_preserves_input_order_and_ids_with_mixed_outcomes(tmp_path):
     image = tmp_path / "design.png"
-    image.write_bytes(b"fake image bytes")
+    write_image(image)
     stub = _StubChatService(response=_response())
 
     result = _understand(
@@ -560,7 +562,7 @@ def test_understand_reports_backend_and_lifecycle_evidence():
 
 def test_understanding_input_artifact_identity_is_stable_and_location_backed(tmp_path):
     image = tmp_path / "design.png"
-    image.write_bytes(b"fake image bytes")
+    write_image(image)
     stub = _StubChatService(response=_response())
 
     first = _understand(

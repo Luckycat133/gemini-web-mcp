@@ -14,7 +14,7 @@ def _qa_pairs():
 def test_gemini_web_mcp_contract_evaluation_shape():
     pairs = _qa_pairs()
 
-    assert len(pairs) == 20
+    assert len(pairs) == 30
     for pair in pairs:
         question = pair.findtext("question")
         answer = pair.findtext("answer")
@@ -41,6 +41,10 @@ def test_gemini_web_mcp_contract_answers_match_static_manifest():
     assert tools["gemini_doctor"]["availability"] == ["always"]
     assert tools["gemini_doctor"]["read_only"] is True
     assert pairs["gemini_doctor"]
+    assert tools["gemini_reset"]["destructive"] is True
+    assert tools["gemini_reset"]["read_only"] is False
+    assert tools["gemini_reset"]["privacy"] == "deletes_non_retained_remote_chats"
+    assert pairs["destructiveHint=true and openWorldHint=true"]
 
     assert history_tools["gemini_delete_chat"]["destructive"] is True
     assert pairs["gemini_delete_chat"]
@@ -86,6 +90,9 @@ def test_gemini_web_mcp_contract_answers_match_static_manifest():
     assert pairs["gemini_list_library_capabilities"]
     assert account_tools["gemini_account_inventory"]["read_only"] is True
     assert account_tools["gemini_notebooks"]["read_only"] is True
+    notebooks = _tool_manifest_payload("notebooks")
+    assert "gemini_notebooks" in {tool["name"] for tool in notebooks["tools"]}
+    assert pairs["gemini_notebooks"]
     assert account_tools["gemini_move_chat_to_notebook"]["read_only"] is False
     assert account_tools["gemini_move_chat_to_notebook"]["destructive"] is False
     assert account_tools["gemini_move_chat_to_notebook"]["privacy"] == "moves_private_chat_metadata"

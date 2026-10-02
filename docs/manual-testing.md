@@ -102,11 +102,11 @@
 | 4.2 | `media_type="image", model="flash-lite"` | 使用运行时 `Flash-Lite` 路线；返回可验证图片，按网页帮助标注 Nano Banana 2 Lite |
 | 4.3 | `media_type="image", model="pro"` | 首轮仍走 Nano Banana 2；Pro redo 是网页二次操作 |
 | 4.4 | `gemini_generate_media(..., media_type="video")` | 仅在结构化结果包含可验证视频 Artifact 时通过；2026-09-26 通用聊天路线返回 `ARTIFACT_NOT_RETURNED`，当前需要 Gemini Omni 专用网页模式 |
-| 4.5 | `gemini_generate_music(prompt="轻快钢琴", model="flash")` | 返回可验证音频或封面视频文件；无上游版本证据时只报告 Lyria |
+| 4.5 | `gemini_generate_music(prompt="轻快钢琴", model="flash")` | 返回可验证音频，封面视频为辅助产物；无上游版本证据时只报告 Lyria |
 | 4.6 | `gemini_generate_music(prompt="交响乐", model="pro")` | 返回可验证产物；不要从 `thinking_level` 推断 Lyria 版本或曲长 |
 | 4.7 | `image_path="/abs/ref.jpg"` 作为参考图 | 不崩；如果上游不支持参考图，错误要明确 |
 | 4.8 | 用 MCP Inspector 查看一次成功图片/音乐结果的 `_meta.domain_result.data` | `state=remote` 或 `local`；`artifacts[].id/uri/kind` 完整，primary 与 compact 对同一 URI 的 ID 一致 |
-| 4.9 | 指定 `output_dir` 保存产物并检查对应 artifact | 文件真实存在且非零，`verification.status=verified`，MIME/bytes 与磁盘一致；图片有尺寸、音视频在 ffprobe 可用时有时长 |
+| 4.9 | 指定 `output_dir` 保存产物并检查对应 artifact | 格式/流证据正确才为 `verified`；缺解码器为 `unverified` / `partial`，损坏或 HTML 内容验证失败；音乐音频/视频路径不同 |
 | 4.10 | 观测一次上游 queued/empty，或用离线 fixture 重放 | queued 为 `ok=true/operation_state=queued`；empty 为 `ARTIFACT_NOT_RETURNED`，两者不混淆 |
 | 4.11 | 使用不可写输出目录测试一个仍返回远端 URI 的请求 | 远端 artifact 保留，结果为 `partial` 并带 `ARTIFACT_SAVE_PARTIAL`；不得宣称本地保存成功 |
 | 4.12 | 指定 `filename="image.png"`，上游实际返回 JPEG 字节 | 落盘后缀调整为 `.jpg`，结构化 `mime_type=image/jpeg`，与文件签名一致 |
@@ -324,8 +324,9 @@
 
 | # | 步骤 | 预期 |
 |---|---|---|
-| 20.1 | `pytest tests/test_evaluations.py -v` | 2 个测试通过，17 个 QA 答案与 manifest 一致 |
-| 20.2 | 人工读 [evaluations/gemini_web_mcp_contract.xml](../evaluations/gemini_web_mcp_contract.xml) | 17 个 qa_pair，问题/答案与当前工具面一致 |
+| 20.1 | `pytest tests/test_evaluations.py -v` | 评估 XML 与 manifest / 安全契约一致 |
+| 20.2 | 人工读 [evaluations/gemini_web_mcp_contract.xml](../evaluations/gemini_web_mcp_contract.xml) | 问题/答案与当前工具面及实际结果状态一致 |
+| 20.3 | `python scripts/run_mcp_builder_evaluation.py --help` | SDK v2 评估入口可用；真实模型评估依赖与命令见 [验证说明](agent-verification.md)，与离线通过分开记录 |
 
 ### 21. 自动 Live Canary（专用账号、显式 opt-in）
 

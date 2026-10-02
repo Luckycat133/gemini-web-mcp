@@ -41,12 +41,15 @@ from ..services.research import (
     await_before_deadline as _await_before_deadline,
     format_research_query as _format_research_query,
     has_native_research_api as _has_native_research_api,
+    is_research_completion_message as _completion_message,
+    is_research_start_message as _is_research_start_message,
     operation_state_from_upstream as _operation_state_from_upstream,
     research_domain_result as _research_domain_result,
     research_operation_data as _research_operation_data,
     research_timed_out_result as _research_timed_out_result,
     resolve_deep_research_transport_model as _resolve_deep_research_transport_model,
     run_deep_research_start_phase as _run_deep_research_start_phase,
+    wait_for_deep_research_by_chat as _wait_by_chat,
 )
 from .annotations import MUTATES_LOCAL, MUTATES_REMOTE, READS_PRIVATE_REMOTE
 
@@ -154,7 +157,7 @@ def register_research_tools(mcp: MCPServer):
                         poll_interval=poll_interval,
                         timeout=timeout_seconds,
                     ),
-                    timeout=timeout_seconds + poll_interval + 10,
+                    timeout=timeout_seconds,
                 )
             else:
                 upstream_result = await _wait_for_deep_research_by_chat(
@@ -172,9 +175,10 @@ def register_research_tools(mcp: MCPServer):
                 use_result_data=True,
             )
         upstream_result.start_output = start_output
-        state = (
-            OperationState.COMPLETED
-            if getattr(upstream_result, "done", False)
+        statuses = list(getattr(upstream_result, "statuses", []) or [])
+        last_state = _operation_state_from_upstream(statuses[-1] if statuses else None)
+        state = OperationState.COMPLETED if getattr(upstream_result, "done", False) else (
+            last_state if last_state in {OperationState.FAILED, OperationState.CANCELLED, OperationState.UNAVAILABLE}
             else OperationState.TIMED_OUT
         )
         data = _research_operation_data(
@@ -480,123 +484,17 @@ async def _wait_for_deep_research_by_chat(
     poll_interval: int,
     timeout: int,
 ):
-    """Fallback for Gemini Web responses that omit research_id in the plan."""
-    start_text = (getattr(start_output, "text", "") or "").strip()
-    cid = getattr(chat, "cid", "") or getattr(plan, "cid", "")
-    started = asyncio.get_running_loop().time()
-    checks = 0
-    latest_output = None
-
-    while (asyncio.get_running_loop().time() - started) < timeout:
-        if cid and hasattr(client, "fetch_latest_chat_response"):
-            latest_output = await client.fetch_latest_chat_response(cid)
-            latest_text = (getattr(latest_output, "text", "") or "").strip()
-            if latest_text and _is_research_completion_message(latest_text):
-                report_output = await _fetch_deep_research_immersive_report(client, cid)
-                report_text = (getattr(report_output, "text", "") or "").strip() if report_output else ""
-                if report_text:
-                    return SimpleNamespace(
-                        plan=plan,
-                        start_output=start_output,
-                        final_output=report_output,
-                        statuses=[
-                            SimpleNamespace(
-                                state="completed",
-                                done=True,
-                                notes=[f"retrieved immersive report from raw chat payload after {checks + 1} checks"],
-                            )
-                        ],
-                        done=True,
-                        poll_count=checks + 1,
-                    )
-                report_output = await _request_completed_research_report(chat)
-                report_text = (getattr(report_output, "text", "") or "").strip() if report_output else ""
-                if report_text and not _is_research_start_message(report_text):
-                    return SimpleNamespace(
-                        plan=plan,
-                        start_output=start_output,
-                        final_output=report_output,
-                        statuses=[
-                            SimpleNamespace(
-                                state="completed",
-                                done=True,
-                                notes=[f"retrieved completed report by follow-up after {checks + 1} checks"],
-                            )
-                        ],
-                        done=True,
-                        poll_count=checks + 1,
-                    )
-            if latest_text and latest_text != start_text and not _is_research_start_message(latest_text):
-                return SimpleNamespace(
-                    plan=plan,
-                    start_output=start_output,
-                    final_output=latest_output,
-                    statuses=[
-                        SimpleNamespace(
-                            state="completed",
-                            done=True,
-                            notes=[f"chat history produced final output after {checks + 1} checks"],
-                        )
-                    ],
-                    done=True,
-                    poll_count=checks + 1,
-                )
-        checks += 1
-        elapsed = asyncio.get_running_loop().time() - started
-        remaining = max(0.0, timeout - elapsed)
-        await asyncio.sleep(min(poll_interval, remaining))
-
-    return SimpleNamespace(
-        plan=plan,
-        start_output=start_output,
-        final_output=None,
-        statuses=[
-            SimpleNamespace(
-                state="running",
-                done=False,
-                notes=[
-                    (
-                        "research_id was not present in Gemini's plan; "
-                        f"checked chat history {checks} times"
-                    )
-                ],
-            )
-        ],
-        done=False,
-        poll_count=checks,
+    """Compatibility adapter for the shared, deadline-bounded research poller."""
+    return await _wait_by_chat(
+        client, plan, chat, start_output,
+        poll_interval=poll_interval,
+        timeout=timeout,
+        fetch_report=_fetch_deep_research_immersive_report,
+        request_report=_request_completed_research_report,
     )
-
-
-def _is_research_start_message(text: str) -> bool:
-    lower = text.lower()
-    return any(
-        marker in lower
-        for marker in (
-            "i'm on it",
-            "i’ll let you know",
-            "i'll let you know",
-            "research is finished",
-            "while i'm researching",
-            "leave this chat",
-            "i've finished the research",
-            "i have finished the research",
-            "我已经完成了研究",
-            "研究完成后",
-            "我这就开始",
-        )
-    )
-
 
 def _is_research_completion_message(text: str) -> bool:
-    lower = text.lower()
-    return any(
-        marker in lower
-        for marker in (
-            "i've finished the research",
-            "i have finished the research",
-            "我已经完成了研究",
-        )
-    )
+    return _completion_message(text)
 
 
 async def _request_completed_research_report(chat):

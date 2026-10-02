@@ -1019,7 +1019,7 @@ def test_wait_for_deep_research_by_chat_returns_followup_when_immersive_empty(mo
         AsyncMock(return_value=None),
     )
     # followup 返回有文本
-    followup = SimpleNamespace(text="followup report body")
+    followup = SimpleNamespace(text="followup report body", report_id="report_test")
     monkeypatch.setattr(
         research_tools, "_request_completed_research_report",
         AsyncMock(return_value=followup),
@@ -1038,7 +1038,7 @@ def test_wait_for_deep_research_by_chat_skips_followup_when_start_message(monkey
     plan = SimpleNamespace()
     chat = SimpleNamespace(cid="c1")
     start_output = SimpleNamespace(text="I'm on it, researching now")
-    # 第一次返回 completion message，第二次返回与 start 不同的非 start/completion 文本
+    # 完成提示后拿不到报告；后续变化文字仍不能证明报告完成。
     call_count = {"n": 0}
     completion = SimpleNamespace(text="I've finished the research")
     other = SimpleNamespace(text="Here is the actual content")
@@ -1063,16 +1063,15 @@ def test_wait_for_deep_research_by_chat_skips_followup_when_start_message(monkey
     monkeypatch.setattr(research_tools, "_request_completed_research_report", fake_followup)
 
     result = _run(_wait_for_deep_research_by_chat(
-        client, plan, chat, start_output, poll_interval=1, timeout=10,
+        client, plan, chat, start_output, poll_interval=.001, timeout=.02,
     ))
-    # 第二次轮询：latest_text="Here is the actual content" 与 start_text 不同 + 非 start message → 返回
-    assert result.done is True
-    assert result.final_output is other
-    assert "chat history produced final output" in result.statuses[0].notes[0]
+    assert result.done is False
+    assert result.final_output is None
+    assert call_count["n"] > 1
 
 
-def test_wait_for_deep_research_by_chat_returns_latest_when_text_differs_from_start(monkeypatch):
-    """latest_text 与 start_text 不同 + 非 start message → 返回 latest_output（lines 438-451）。"""
+def test_wait_for_deep_research_by_chat_does_not_complete_on_changed_text(monkeypatch):
+    """Changed ordinary chat text is not report evidence."""
     plan = SimpleNamespace()
     chat = SimpleNamespace(cid="c1")
     start_output = SimpleNamespace(text="I'm on it, researching now")
@@ -1082,11 +1081,11 @@ def test_wait_for_deep_research_by_chat_returns_latest_when_text_differs_from_st
     )
 
     result = _run(_wait_for_deep_research_by_chat(
-        client, plan, chat, start_output, poll_interval=1, timeout=10,
+        client, plan, chat, start_output, poll_interval=.001, timeout=.02,
     ))
-    assert result.done is True
-    assert result.final_output is latest_output
-    assert "chat history produced final output" in result.statuses[0].notes[0]
+    assert result.done is False
+    assert result.final_output is None
+    assert "report not observed" in result.statuses[0].notes[0]
 
 
 def test_wait_for_deep_research_by_chat_returns_running_status_on_timeout(monkeypatch):

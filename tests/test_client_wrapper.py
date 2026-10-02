@@ -235,7 +235,7 @@ def test_reset_session_deletes_unretained_remote_chat(monkeypatch):
         return True
 
     monkeypatch.setattr(cw, "_session_manager", fake)
-    monkeypatch.setattr(cw, "delete_remote_chat", fake_delete)
+    monkeypatch.setattr(cw, "delete_remote_chat_result", fake_delete)
 
     result = _run(cw.reset_session("sess_x"))
     assert result.session is data
@@ -254,7 +254,7 @@ def test_reset_session_preserves_retained_chat(monkeypatch):
         raise AssertionError("retained chat must not be deleted")
 
     monkeypatch.setattr(cw, "_session_manager", fake)
-    monkeypatch.setattr(cw, "delete_remote_chat", explode)
+    monkeypatch.setattr(cw, "delete_remote_chat_result", explode)
 
     result = _run(cw.reset_session("sess_x"))
     assert result.session is data
@@ -271,7 +271,7 @@ def test_reset_session_without_remote_id_has_no_client_side_effect(monkeypatch):
         raise AssertionError("missing remote ID must not initialize a client or attempt deletion")
 
     monkeypatch.setattr(cw, "_session_manager", fake)
-    monkeypatch.setattr(cw, "delete_remote_chat", explode)
+    monkeypatch.setattr(cw, "delete_remote_chat_result", explode)
 
     result = _run(cw.reset_session("sess_x"))
     assert result.session is data
@@ -287,7 +287,7 @@ def test_reset_session_unknown_id_has_no_remote_side_effect(monkeypatch):
         raise AssertionError("unknown session must not trigger remote deletion")
 
     monkeypatch.setattr(cw, "_session_manager", fake)
-    monkeypatch.setattr(cw, "delete_remote_chat", explode)
+    monkeypatch.setattr(cw, "delete_remote_chat_result", explode)
 
     assert _run(cw.reset_session("missing")) is expected
 
@@ -447,7 +447,7 @@ def test_delete_remote_chat_with_none_client_fetches_and_inits(monkeypatch):
     assert result is True
     assert init_calls == ["init"]
     name, args, kwargs = fake.calls[0]
-    assert kwargs["client"] == "fetched-client"
+    assert kwargs["client"] == "inited"
 
 
 def test_cleanup_due_remote_chats_with_explicit_client_skips_init(monkeypatch):
@@ -476,7 +476,7 @@ def test_cleanup_due_remote_chats_with_none_client_fetches_and_inits(monkeypatch
     assert result == 2
     assert init_calls == ["init"]
     name, args, kwargs = fake.calls[0]
-    assert kwargs["client"] == "fetched-client"
+    assert kwargs["client"] == "inited"
 
 
 def test_list_pending_remote_chat_cleanup_maps_cleanup_tasks(monkeypatch):
@@ -518,7 +518,7 @@ def test_list_pending_remote_chat_cleanup_empty(monkeypatch):
 
 def test_on_cookie_update_resets_client_and_sets_env(monkeypatch):
     reset_calls = []
-    monkeypatch.setattr(cw, "reset_client", lambda: reset_calls.append("reset"))
+    monkeypatch.setattr(cw._client_manager, "reset", lambda: reset_calls.append("reset"))
     monkeypatch.delenv("GEMINI_PSID", raising=False)
     monkeypatch.delenv("GEMINI_PSIDTS", raising=False)
 
@@ -532,7 +532,7 @@ def test_on_cookie_update_resets_client_and_sets_env(monkeypatch):
 
 def test_on_cookie_update_skips_psidts_when_falsy(monkeypatch):
     reset_calls = []
-    monkeypatch.setattr(cw, "reset_client", lambda: reset_calls.append("reset"))
+    monkeypatch.setattr(cw._client_manager, "reset", lambda: reset_calls.append("reset"))
     monkeypatch.delenv("GEMINI_PSID", raising=False)
     monkeypatch.setenv("GEMINI_PSIDTS", "stale-value")
 

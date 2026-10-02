@@ -79,4 +79,44 @@
     <question>Inspect the manifest workflows. Which workflow should an agent use after explicit authorization to create, verify, and clean up a scheduled action? Answer with the workflow name.</question>
     <answer>scheduled_action_create_and_cleanup</answer>
   </qa_pair>
+  <qa_pair>
+    <question>Inspect gemini_reset annotations and manifest metadata. Can this client reset delete non-retained remote chats? Answer with its destructiveHint and openWorldHint boolean values.</question>
+    <answer>destructiveHint=true and openWorldHint=true</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>If client reset succeeds locally but remote chat cleanup fails, which operation state must the agent preserve instead of claiming complete cleanup? Answer with the state only.</question>
+    <answer>partial</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>After authentication material changes, what happens to cleanup work belonging to the previous authentication context? Answer with the state and cancellation reason.</question>
+    <answer>cancelled and authentication_context_changed</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>Does an HTTP 200 delete response followed by a malformed or wrong-ID read-back prove that a chat or scheduled action is absent? Answer yes or no.</question>
+    <answer>no</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>Can an image returned for a video or music request satisfy that requested media operation? Answer yes or no.</question>
+    <answer>no</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>When a recognizable local audio/video container cannot be checked because the media decoder is unavailable, what Artifact verification status applies? Answer with the status only.</question>
+    <answer>unverified</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>Can changed chat text or a quota refusal alone prove that no-ID Deep Research completed a report? Answer yes or no.</question>
+    <answer>no</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>Which read-only facade must the scoped notebooks manifest include when history-organize enables it? Answer with the exact tool name.</question>
+    <answer>gemini_notebooks</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>When the bounded history source cannot advance despite more remote records, what operation state and next_offset value should the agent inspect? Answer with both values.</question>
+    <answer>partial and next_offset=null</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>Can a content search with failed chat reads be treated as complete evidence that no matches exist? Answer yes or no.</question>
+    <answer>no</answer>
+  </qa_pair>
 </evaluation>

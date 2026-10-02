@@ -6,11 +6,57 @@ from typing import Any, Awaitable, Callable
 
 from ..infrastructure.rpc_contracts import RawRPCData, execute_contract, get_contract
 from ..infrastructure.rpc_parsers import (
+    RPCParseResult,
     extract_rpc_bodies,
     parse_contract_body,
+    parse_rpc_envelope,
     parse_scheduled_action_create_body,
     parse_scheduled_action_task_entry,
 )
+
+
+def _parse_observation(response: Any, contract_key: str, **arguments: Any) -> tuple[RPCParseResult, dict[str, Any]]:
+    contract = get_contract(contract_key)
+    response_text = str(getattr(response, "text", "") or "")
+    envelope = parse_rpc_envelope(response_text, contract.rpc_id)
+    if envelope.reject_code is not None:
+        parsed = RPCParseResult("rejected", reject_code=envelope.reject_code)
+    elif len(envelope.bodies) == 1:
+        parsed = parse_contract_body(contract, envelope.bodies[0], **arguments)
+    else:
+        parsed = RPCParseResult("changed_shape", warnings=("missing_or_ambiguous_body",))
+    diagnostic = {
+        "source_rpc": contract.rpc_id,
+        "contract_key": contract.key,
+        "parser_status": parsed.status,
+        "parser_warnings": list(parsed.warnings),
+        "observed": contract.observed,
+        "status_code": getattr(response, "status_code", None),
+        "response_length": len(response_text),
+        "body_present": bool(envelope.bodies),
+        "raw_body_type": type(envelope.bodies[0]).__name__ if len(envelope.bodies) == 1 else None,
+        "raw_top_level_count": (
+            len(envelope.bodies[0]) if len(envelope.bodies) == 1 and isinstance(envelope.bodies[0], list) else None
+        ),
+        "reject_code": envelope.reject_code,
+        "read_back_valid": (
+            getattr(response, "status_code", None) == 200
+            and envelope.parsed and envelope.reject_code is None
+            and len(envelope.bodies) == 1 and parsed.ok
+        ),
+    }
+    return parsed, diagnostic
+
+
+def _valid_read_back(diagnostic: dict[str, Any]) -> bool:
+    return (
+        diagnostic.get("read_back_valid") is True
+        and diagnostic.get("status_code") == 200
+        and diagnostic.get("body_present") is True
+        and diagnostic.get("reject_code") is None
+        and diagnostic.get("parser_status") in {"success", "empty"}
+        and not diagnostic.get("parser_warnings")
+    )
 
 
 async def fetch_scheduled_registry(
@@ -19,26 +65,16 @@ async def fetch_scheduled_registry(
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     contract = get_contract("scheduled.registry")
     response = await execute_contract(client, contract.key)
-    response_text = getattr(response, "text", "") or ""
-    bodies = extract_rpc_bodies(response_text, contract.rpc_id)
-    body = bodies[0] if bodies else []
-    parsed = parse_contract_body(contract, body, max_chars=max_chars)
-    entries = parsed.value if isinstance(parsed.value, list) else []
-    diagnostic = {
-        "source_rpc": contract.rpc_id,
-        "contract_key": contract.key,
-        "parser_status": parsed.status,
-        "observed": contract.observed,
-        "status_code": getattr(response, "status_code", None),
-        "response_length": len(response_text),
-        "body_present": bool(bodies),
+    parsed, diagnostic = _parse_observation(response, contract.key, max_chars=max_chars)
+    entries = parsed.value if _valid_read_back(diagnostic) and isinstance(parsed.value, list) else []
+    diagnostic.update({
         "raw_entry_count": len(entries),
         "client_language": getattr(client, "language", None),
         "client_build_label": getattr(client, "build_label", None),
         "has_session_id": bool(getattr(client, "session_id", None)),
         "account_status": str(getattr(client, "account_status", "")),
-    }
-    if not entries:
+    })
+    if not entries and _valid_read_back(diagnostic):
         diagnostic["empty_hint"] = (
             "The current Gemini cookie/session returned an empty scheduled-actions registry. "
             "If the Gemini Web UI shows scheduled actions, refresh cookies from the same signed-in "
@@ -54,32 +90,19 @@ async def fetch_scheduled_task_by_id(
 ) -> tuple[dict[str, Any] | None, dict[str, Any]]:
     contract = get_contract("scheduled.get")
     response = await execute_contract(client, contract.key, action_id=action_id)
-    response_text = getattr(response, "text", "") or ""
-    bodies = extract_rpc_bodies(response_text, contract.rpc_id)
-    body = bodies[0] if bodies else []
-    parsed = parse_contract_body(contract, body, max_chars=max_chars, expected_id=action_id)
+    parsed, diagnostic = _parse_observation(response, contract.key, max_chars=max_chars, expected_id=action_id)
     entry = parsed.value if isinstance(parsed.value, dict) else None
-    matched_task = bool(entry and entry.get("id") == action_id)
-    diagnostic = {
-        "source_rpc": contract.rpc_id,
-        "contract_key": contract.key,
-        "parser_status": parsed.status,
-        "parser_warnings": list(parsed.warnings),
-        "observed": contract.observed,
-        "status_code": getattr(response, "status_code", None),
-        "response_length": len(response_text),
-        "body_present": bool(bodies),
-        "raw_body_type": type(body).__name__,
-        "raw_top_level_count": len(body) if isinstance(body, list) else None,
+    matched_task = bool(_valid_read_back(diagnostic) and entry and entry.get("id") == action_id)
+    diagnostic.update({
         "matched_task": matched_task,
         "client_language": getattr(client, "language", None),
         "client_build_label": getattr(client, "build_label", None),
         "has_session_id": bool(getattr(client, "session_id", None)),
         "account_status": str(getattr(client, "account_status", "")),
-    }
+    })
     if entry and not matched_task:
         diagnostic["returned_id"] = entry.get("id", "")
-    if not matched_task:
+    if not matched_task and _valid_read_back(diagnostic):
         diagnostic["empty_hint"] = (
             "The current Gemini cookie/session did not return this scheduled action by id. "
             "Check that the id belongs to the same Gemini account/profile context."
@@ -212,6 +235,12 @@ async def delete_action(
     response = await execute_contract(client, contract.key, action_id=action_id)
     response_text = getattr(response, "text", "") or ""
     bodies = extract_bodies(response_text, contract.rpc_id)
+    envelope = parse_rpc_envelope(response_text, contract.rpc_id)
+    acknowledged = (
+        getattr(response, "status_code", None) == 200
+        and envelope.parsed and envelope.reject_code is None and len(envelope.bodies) == 1 and bool(bodies)
+        and parse_contract_body(contract, envelope.bodies[0]).ok
+    )
     visible_after_delete = None
     readable_by_id_after_delete = None
     deleted_by_id_after_delete = None
@@ -221,9 +250,12 @@ async def delete_action(
     verification_error = ""
     get_task_error = ""
     get_task_diagnostic: dict[str, Any] = {}
-    if bodies:
+    registry_diagnostic: dict[str, Any] = {}
+    if acknowledged:
         try:
-            registry_entries, _ = await fetch_registry(client, max_chars)
+            registry_entries, registry_diagnostic = await fetch_registry(client, max_chars)
+            if not _valid_read_back(registry_diagnostic):
+                raise RuntimeError("Scheduled registry read-back is not valid evidence.")
             visible_after_delete = any(item.get("id") == action_id for item in registry_entries)
             if visible_after_delete:
                 verification_status = "still_visible_in_registry"
@@ -236,6 +268,12 @@ async def delete_action(
             verification_status = "verification_error"
         try:
             task_after_delete, get_task_diagnostic = await fetch_by_id(client, action_id, max_chars)
+            if not _valid_read_back(get_task_diagnostic):
+                raise RuntimeError("Scheduled task read-back is not valid evidence.")
+            if task_after_delete is not None and task_after_delete.get("id") != action_id:
+                raise RuntimeError("Scheduled task read-back returned a different ID.")
+            if task_after_delete is None and get_task_diagnostic.get("parser_status") != "empty":
+                raise RuntimeError("Scheduled task read-back did not observe an empty result.")
             readable_by_id_after_delete = task_after_delete is not None
             if task_after_delete:
                 task_state_after_delete = str(task_after_delete.get("task_state") or "")
@@ -254,14 +292,17 @@ async def delete_action(
                 verification_status = "not_visible_not_readable_by_id"
         except Exception as exc:
             get_task_error = str(exc)
+            if verification_status != "still_visible_in_registry":
+                verification_status = "read_back_unverified"
     status_code = getattr(response, "status_code", None)
     return {
-        "ok": status_code in {None, 200} and bool(bodies),
+        "ok": acknowledged,
         "id": action_id,
         "source_rpc": contract.rpc_id,
         "contract_key": contract.key,
         "body_present": bool(bodies),
         "status_code": status_code,
+        "reject_code": envelope.reject_code,
         "visible_after_delete": visible_after_delete,
         "readable_by_id_after_delete": readable_by_id_after_delete,
         "deleted_by_id_after_delete": deleted_by_id_after_delete,
@@ -271,6 +312,7 @@ async def delete_action(
         "verification_error": verification_error,
         "get_task_error": get_task_error,
         "get_task_diagnostic": get_task_diagnostic,
+        "registry_diagnostic": registry_diagnostic,
     }
 
 
