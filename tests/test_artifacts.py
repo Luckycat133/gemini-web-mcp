@@ -2,12 +2,18 @@
 
 import asyncio
 import logging
+import json
+import sys
 from types import SimpleNamespace
+
+import pytest
 
 from src.adapters.mcp_sdk import MCPServer
 
 import src.skill_server as skill_server
 import src.tools.media as media_tools
+import src.services.artifacts as artifact_service
+from tests.media_fixtures import write_audio, write_image, write_video
 from src.adapters import format_artifact_block
 from src.domain import (
     ArtifactKind,
@@ -37,7 +43,7 @@ def _domain_payload(content):
 def test_artifact_identity_is_stable_across_remote_and_local_observations(tmp_path):
     uri = "https://cdn.example.test/generated/cat.png"
     path = tmp_path / "cat.png"
-    path.write_bytes(b"image-bytes")
+    write_image(path, size=(640, 480))
 
     remote = artifact_from_remote(ArtifactKind.IMAGE, uri, title="cat")
     local = artifact_from_local_path(
@@ -73,9 +79,9 @@ def test_artifact_identity_is_stable_across_remote_and_local_observations(tmp_pa
 
 def test_local_artifact_verifies_file_metadata_dimensions_and_duration(tmp_path):
     image_path = tmp_path / "cover.png"
-    image_path.write_bytes(b"not-a-real-image-but-nonempty")
+    write_image(image_path, size=(320, 180))
     audio_path = tmp_path / "theme.mp3"
-    audio_path.write_bytes(b"audio")
+    write_audio(audio_path, duration=12.5)
 
     image = artifact_from_local_path(
         ArtifactKind.IMAGE,
@@ -90,17 +96,17 @@ def test_local_artifact_verifies_file_metadata_dimensions_and_duration(tmp_path)
 
     assert image.state == ArtifactState.LOCAL
     assert image.mime_type == "image/png"
-    assert image.size_bytes == len(b"not-a-real-image-but-nonempty")
+    assert image.size_bytes == image_path.stat().st_size
     assert (image.width, image.height) == (320, 180)
     assert "image_dimensions" in image.verification.methods
-    assert audio.mime_type == "audio/mpeg"
+    assert audio.mime_type == "audio/wav"
     assert audio.duration_seconds == 12.5
     assert "duration_probe" in audio.verification.methods
 
 
 def test_local_image_mime_uses_signature_when_suffix_is_wrong(tmp_path):
     image_path = tmp_path / "actually-jpeg.png"
-    image_path.write_bytes(b"\xff\xd8\xff\xe0" + b"jpeg-content")
+    write_image(image_path, format="JPEG")
 
     image = artifact_from_local_path(ArtifactKind.IMAGE, str(image_path))
 
@@ -299,3 +305,158 @@ def test_primary_and_compact_media_adapters_return_same_artifact_identity(monkey
     assert primary_data["observed_backend"] == "observed-image-backend"
     assert compact_data["observed_backend"] == "observed-image-backend"
     assert primary_data["effective_backend"] == compact_data["effective_backend"] == "Nano Banana 2"
+
+
+@pytest.mark.parametrize("kind,body", [
+    (ArtifactKind.IMAGE, b"<html>login required</html>"),
+    (ArtifactKind.IMAGE, b"\x89PNG\r\n\x1a\ntruncated"),
+    (ArtifactKind.AUDIO, b"<html>login required</html>"),
+    (ArtifactKind.VIDEO, b"not video"),
+])
+def test_nonempty_damaged_media_never_becomes_verified(monkeypatch, tmp_path, kind, body):
+    monkeypatch.setattr(artifact_service, "_probe_av_metadata", lambda _path: {})
+    path = tmp_path / "download.png"
+    path.write_bytes(body)
+    artifact = artifact_from_local_path(kind, str(path), dimensions_probe=lambda _path: (20, 20),
+                                        duration_probe=lambda _path: 1.0)
+    assert artifact.state == ArtifactState.FAILED
+    assert artifact.verification.status == ArtifactVerificationStatus.FAILED
+
+
+def test_truncated_wav_fails_content_verification(tmp_path):
+    path = write_audio(tmp_path / "truncated.wav")
+    path.write_bytes(path.read_bytes()[:-20])
+    artifact = artifact_from_local_path(ArtifactKind.AUDIO, str(path))
+    assert artifact.state == ArtifactState.FAILED
+    assert "media_decode_failed" in artifact.verification.methods
+
+
+@pytest.mark.parametrize("kind", [ArtifactKind.AUDIO, ArtifactKind.VIDEO])
+def test_valid_image_bytes_cannot_verify_an_audio_or_video_artifact(tmp_path, kind):
+    path = write_image(tmp_path / "wrong-kind.mp4", format="JPEG")
+    artifact = artifact_from_local_path(kind, str(path))
+    assert artifact.state == ArtifactState.FAILED
+    assert artifact.verification.status == ArtifactVerificationStatus.FAILED
+    assert "media_kind_mismatch" in artifact.verification.methods
+
+
+def test_unavailable_image_decoder_preserves_unverified_file(monkeypatch, tmp_path):
+    path = write_image(tmp_path / "image.png")
+    monkeypatch.setitem(sys.modules, "PIL", None)
+    artifact = artifact_from_local_path(ArtifactKind.IMAGE, str(path))
+    result = artifact_result(ArtifactResultData(state=ArtifactState.LOCAL, artifacts=(artifact,)))
+    assert artifact.state == ArtifactState.LOCAL
+    assert artifact.verification.status == ArtifactVerificationStatus.UNVERIFIED
+    assert result.meta.verification_status == "artifact_saved_unverified"
+    assert result.meta.operation_state == OperationState.PARTIAL
+    input_only = artifact_result(ArtifactResultData(state=ArtifactState.LOCAL, input_artifacts=(artifact,)))
+    assert input_only.meta.verification_status == "input_artifact_unverified"
+
+
+def test_unavailable_video_probe_preserves_unverified_file(monkeypatch, tmp_path):
+    path = write_video(tmp_path / "video.avi")
+    monkeypatch.setattr(artifact_service.shutil, "which", lambda _name: None)
+    artifact = artifact_from_local_path(ArtifactKind.VIDEO, str(path))
+    assert artifact.state == ArtifactState.LOCAL
+    assert artifact.mime_type == "video/x-msvideo"
+    assert artifact.verification.status == ArtifactVerificationStatus.UNVERIFIED
+    assert "media_decoder_unavailable" in artifact.verification.methods
+
+
+@pytest.mark.parametrize("format", ["BMP", "TIFF", "GIF", "WEBP"])
+def test_supported_reference_image_formats_still_verify(tmp_path, format):
+    path = write_image(tmp_path / "reference.image", format=format)
+    artifact = artifact_from_local_path(ArtifactKind.IMAGE, str(path))
+    assert artifact.state == ArtifactState.LOCAL
+    assert artifact.verification.status == ArtifactVerificationStatus.VERIFIED
+    assert (artifact.width, artifact.height) == (2, 1)
+
+
+@pytest.mark.parametrize("streams,expected", [
+    ([{"codec_type": "video", "width": 16, "height": 16}], ArtifactState.LOCAL),
+    ([{"codec_type": "audio"}], ArtifactState.FAILED),
+    ([{"codec_type": "video", "width": 0, "height": 16}], ArtifactState.FAILED),
+    (None, ArtifactState.FAILED),
+])
+def test_video_probe_parses_stream_evidence(monkeypatch, tmp_path, streams, expected):
+    path = write_video(tmp_path / "video.avi")
+    payload = {"streams": streams, "format": {"duration": "1.0", "format_name": "avi"}}
+    calls = []
+    monkeypatch.setattr(artifact_service.shutil, "which", lambda _name: "/fixture/ffprobe")
+
+    def probe(args, **kwargs):
+        calls.append((args, kwargs))
+        return SimpleNamespace(returncode=0, stdout=json.dumps(payload))
+
+    monkeypatch.setattr(artifact_service.subprocess, "run", probe)
+    artifact = artifact_from_local_path(ArtifactKind.VIDEO, str(path))
+    assert artifact.state == expected
+    assert calls[0][0][-1] == str(path.resolve())
+    if expected == ArtifactState.LOCAL:
+        assert artifact.verification.status == ArtifactVerificationStatus.VERIFIED
+        assert (artifact.width, artifact.height, artifact.duration_seconds) == (16, 16, 1.0)
+    else:
+        assert artifact.verification.status == ArtifactVerificationStatus.FAILED
+
+
+@pytest.mark.parametrize("requested,observed", [
+    ("image", "video"), ("image_edit", "video"), ("video", "image"),
+    ("music", "image"), ("music", "video"),
+])
+def test_primary_and_compact_do_not_complete_a_different_modality(monkeypatch, requested, observed):
+    response = SimpleNamespace(text="done", images=[], videos=[], media=[], metadata=["c_mismatch", "r_mismatch"])
+    item = SimpleNamespace(url=f"https://cdn.test/other.{observed}", title="other", alt="other")
+    getattr(response, "images" if observed == "image" else "videos").append(item)
+    client = _ParityClient(response)
+    monkeypatch.setattr(media_tools, "get_gemini_client", lambda: client)
+    monkeypatch.setattr(media_tools, "initialize_client", _no_op_async)
+    monkeypatch.setattr(media_tools, "cleanup_due_remote_chats", _no_op_async)
+    monkeypatch.setattr(media_tools, "schedule_remote_chat_cleanup_from_response", lambda *_a, **_k: None)
+
+    async def no_recovered_music(*_args):
+        return []
+
+    monkeypatch.setattr(media_tools, "_fetch_music_media_from_chat", no_recovered_music)
+    mcp = MCPServer("mismatched-media")
+    media_tools.register_media_tools(mcp)
+
+    async def run_primary():
+        return (await mcp.call_tool("gemini_generate_media", {"prompt": "make media", "media_type": "image" if requested == "image_edit" else requested})).content
+
+    primary = _domain_payload(asyncio.run(run_primary()))
+    _, compact_result = skill_server._skill_media_result(response, (), requested_model="flash", request_model="gemini-3-flash",
+                                                         effective_backend="observed", media_type=requested)
+    for result in (primary, compact_result.to_dict()):
+        assert result["ok"] is False
+        assert result["data"]["state"] == "empty"
+        assert result["error"]["code"] == "ARTIFACT_NOT_RETURNED"
+        assert result["meta"]["operation_state"] != "completed"
+
+
+@pytest.mark.parametrize("operation", ["create", "edit"])
+def test_compact_creation_has_a_finite_deadline(monkeypatch, tmp_path, operation):
+    cancelled = []
+
+    class Client:
+        async def generate_content(self, **kwargs):
+            assert kwargs["timeout"] == 0.04
+            try:
+                await asyncio.Event().wait()
+            finally:
+                cancelled.append(True)
+
+    monkeypatch.setattr(skill_server, "get_gemini_client", Client)
+    monkeypatch.setattr(skill_server, "initialize_client", _no_op_async)
+    monkeypatch.setattr(skill_server, "cleanup_due_remote_chats", _no_op_async)
+    monkeypatch.setattr(skill_server, "media_operation_timeout", lambda *_args: 0.04)
+
+    async def run():
+        if operation == "create":
+            return await skill_server.create(prompt="cat")
+        path = write_image(tmp_path / "reference.png")
+        return await skill_server.edit(str(path), prompt="make it brighter")
+
+    result = _domain_payload(asyncio.run(run()))
+    assert result["error"]["code"] == "TIMED_OUT"
+    assert result["meta"]["operation_state"] == "timed_out"
+    assert cancelled == [True]

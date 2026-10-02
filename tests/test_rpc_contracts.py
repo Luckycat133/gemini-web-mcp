@@ -49,6 +49,18 @@ def test_registered_parser_fixture_status(parser_name: str, case_name: str):
     assert result.status == case_name
 
 
+@pytest.mark.parametrize(
+    ("contract_key", "body"),
+    [
+        (fixture["contract_key"], body)
+        for fixture in PARSER_FIXTURES.values()
+        for body in fixture.get("malformed_items", [])
+    ],
+)
+def test_valid_outer_envelope_does_not_hide_malformed_items(contract_key, body):
+    assert parse_contract_body(contract_key, body).status == "changed_shape"
+
+
 def test_registry_owns_probe_payloads_and_evidence():
     assert len(WEB_FEATURE_PROBES) == 21
     assert tuple(contract.key for contract in WEB_FEATURE_PROBE_CONTRACTS) == WEB_FEATURE_PROBE_KEYS

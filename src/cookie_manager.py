@@ -128,6 +128,9 @@ class CookieManager:
 
         self._cookie_data: Optional[CookieData] = None
         self._lock = threading.Lock()
+        # Serialize publication and callbacks without holding the data lock,
+        # which client creation also acquires while owning its own lock.
+        self._update_lock = threading.Lock()
         self._monitor_thread: Optional[threading.Thread] = None
         self._monitor_running = False
         self._monitor_interval = 3600  # 1小时检查一次
@@ -230,7 +233,7 @@ class CookieManager:
                     cookie_functions[browser],
                     cookie_names,
                 )
-                if profile and candidates:
+                if profile:
                     cookies = CookieManager._select_named_cookie_candidate(candidates, profile)
                 elif not candidates:
                     cookies = CookieManager._read_cookie_jar(
@@ -576,6 +579,8 @@ class CookieManager:
         psidts: str = "",
         source: str = "manual",
         extra_cookies: Optional[Dict[str, str]] = None,
+        *,
+        notify: Optional[Callable[[CookieData], None]] = None,
     ) -> bool:
         """
         更新 Cookie
@@ -584,32 +589,37 @@ class CookieManager:
             psid: 新的 PSID
             psidts: 新的 PSIDTS
             source: Cookie 来源
+            notify: 此次更新必须执行的集成回调（默认回调仍会执行一次）
         
         Returns:
             是否更新成功
         """
-        with self._lock:
-            if not psid:
-                logger.error("❌ PSID 不能为空")
-                return False
-            
-            self._cookie_data = CookieData(
-                psid=psid,
-                psidts=psidts,
-                extra_cookies=extra_cookies or self._load_extra_cookies_from_env(psid, psidts),
-                source=source,
-                status=CookieStatus.VALID
-            )
-            
+        if not psid:
+            logger.error("❌ PSID 不能为空")
+            return False
+
+        with self._update_lock:
+            with self._lock:
+                cookie_data = CookieData(
+                    psid=psid,
+                    psidts=psidts,
+                    extra_cookies=dict(extra_cookies) if extra_cookies is not None else self._load_extra_cookies_from_env(psid, psidts),
+                    source=source,
+                    status=CookieStatus.VALID,
+                )
+                self._cookie_data = cookie_data
+                callback = self.on_cookie_update
+
             logger.info(f"✅ Cookie 已更新 (来源: {source})")
-            
-            if self.on_cookie_update:
+            callbacks = [notify] if notify is not None else []
+            if callback is not None and callback is not notify:
+                callbacks.append(callback)
+            for callback in callbacks:
                 try:
-                    self.on_cookie_update(self._cookie_data)
+                    callback(cookie_data)
                 except Exception as e:
                     logger.error(f"❌ Cookie 更新回调失败: {e}")
-            
-            return True
+        return True
 
     def get_cookie(self) -> Optional[CookieData]:
         """

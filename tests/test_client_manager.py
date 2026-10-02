@@ -500,6 +500,7 @@ def test_get_extra_cookies_returns_empty_when_no_cookie_data(monkeypatch):
 def test_get_extra_cookies_returns_extra_cookies(monkeypatch):
     """cookie_data 存在时返回 extra_cookies（line 76 直接覆盖）。"""
     monkeypatch.setattr(client_manager, "COOKIE_MANAGER_AVAILABLE", True)
+    monkeypatch.setenv("GEMINI_PSID", "x")
     cookie_data = _make_cookie_data(source="manual")
     cookie_data.extra_cookies = {"__Secure-1PSID": "x", "__Secure-1PSIDTS": "y"}
     monkeypatch.setattr(

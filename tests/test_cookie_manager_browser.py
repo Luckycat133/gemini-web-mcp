@@ -813,7 +813,7 @@ def test_probe_scheduled_registry_count_returns_count_on_happy_path(monkeypatch)
     monkeypatch.setattr(gw_types, "RPCData", _FakeRPCData)
 
     # 构造 part: [0]="wrb.fr", [1]="XPSWpd", [2]=JSON 字符串（parsed[0] 是 3 元素列表）
-    body_json = json.dumps([["a", "b", "c"], ["d"]])
+    body_json = json.dumps([[["a", [], []], ["b", [], []], ["c", [], []]], ["d"]])
     parts = [["wrb.fr", "XPSWpd", body_json]]
     monkeypatch.setattr(gw_utils, "extract_json_from_response", lambda text: parts)
 

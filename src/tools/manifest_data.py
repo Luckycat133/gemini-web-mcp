@@ -508,10 +508,10 @@ TOOL_MANIFEST: list[dict[str, Any]] = [
     {
         "name": "gemini_reset",
         "group": "cookie",
-        "purpose": "Reset the local Gemini client instance.",
+        "purpose": "Reset the client and all local sessions, deleting non-retained remote chats with read-back verification.",
         "read_only": False,
-        "destructive": False,
-        "privacy": "local_runtime_state",
+        "destructive": True,
+        "privacy": "deletes_non_retained_remote_chats",
         "pagination": False,
     },
     {

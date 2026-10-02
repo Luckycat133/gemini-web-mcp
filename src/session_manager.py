@@ -14,6 +14,7 @@ from typing import Any
 from .constants import DEFAULT_CHAT_RETENTION_SECONDS
 from .domain import (
     CleanupObservation,
+    CleanupState,
     ConversationLifecycleMetadata,
     DomainError,
     DomainErrorCode,
@@ -22,6 +23,7 @@ from .domain import (
     OperationState,
     ResultMeta,
     SessionLifecycleState,
+    new_diagnostic_id,
 )
 
 logger = logging.getLogger(__name__)
@@ -45,6 +47,8 @@ class SessionState:
     retain_chat: bool = False
     delete_after_seconds: int | None = None
     lifecycle_state: SessionLifecycleState = SessionLifecycleState.ACTIVE
+    _authentication_invalidated: bool = field(default=False, repr=False, metadata={"domain_exclude": True})
+    _authentication_generation: int | None = field(default=None, repr=False, metadata={"domain_exclude": True})
     _send_lock: asyncio.Lock = field(
         default_factory=asyncio.Lock,
         repr=False,
@@ -134,6 +138,44 @@ class SessionOperationResult(DomainResult[SessionOperationData]):
             meta=ResultMeta.create(
                 OperationState.FAILED,
                 verification_status="local_state_absent",
+                details={"lifecycle": lifecycle},
+            ),
+        )
+
+    @classmethod
+    def authentication_changed(cls, session: SessionData) -> "SessionOperationResult":
+        """Keep an old resource locator without scheduling it under new credentials."""
+        diagnostic_id = new_diagnostic_id()
+        session.lifecycle_state = SessionLifecycleState.REMOVED
+        cid = getattr(session.session, "cid", None) or session.upstream_chat_id
+        cleanup = CleanupObservation(
+            state=CleanupState.CANCELLED,
+            upstream_chat_id=cid,
+            diagnostic_id=diagnostic_id,
+            cancellation_reason="authentication_context_changed",
+        )
+        lifecycle = ConversationLifecycleMetadata(
+            session_id=session.session_id or None,
+            upstream_chat_id=cid,
+            session_state=SessionLifecycleState.REMOVED,
+            retain_chat=session.retain_chat,
+            delete_after_seconds=session.delete_after_seconds,
+            cleanup=cleanup,
+        )
+        return cls(
+            ok=False,
+            data=SessionOperationData(state=session),
+            error=DomainError(
+                code=DomainErrorCode.CANCELLED,
+                message="Authentication changed while the old session was in use.",
+                suggested_action="Switch back to the original account before explicitly resuming its chat cleanup.",
+                diagnostic_id=diagnostic_id,
+            ),
+            warnings=(),
+            meta=ResultMeta.create(
+                OperationState.CANCELLED,
+                diagnostic_id=diagnostic_id,
+                verification_status="authentication_context_changed",
                 details={"lifecycle": lifecycle},
             ),
         )
@@ -254,8 +296,16 @@ class SessionService:
                 if self._sessions.get(session_id) is not data:
                     return SessionOperationResult.not_found(session_id)
 
-            response = await data.session.send_message(**request_kwargs)
+            try:
+                response = await data.session.send_message(**request_kwargs)
+            except (Exception, asyncio.CancelledError):
+                if data._authentication_invalidated:
+                    return SessionOperationResult.authentication_changed(data)
+                raise
             with self._lock:
+                if data._authentication_invalidated:
+                    data.upstream_chat_id = getattr(response, "cid", None) or data.upstream_chat_id
+                    return SessionOperationResult.authentication_changed(data)
                 if self._sessions.get(session_id) is data:
                     data.updated_at = time.time()
                     data.upstream_chat_id = getattr(data.session, "cid", data.upstream_chat_id)
@@ -283,9 +333,18 @@ class SessionService:
                     return SessionOperationResult.not_found(session_id)
 
             responses = []
-            async for response in data.session.send_message_stream(**request_kwargs):
-                responses.append(response)
+            try:
+                async for response in data.session.send_message_stream(**request_kwargs):
+                    responses.append(response)
+            except (Exception, asyncio.CancelledError):
+                if data._authentication_invalidated:
+                    return SessionOperationResult.authentication_changed(data)
+                raise
             with self._lock:
+                if data._authentication_invalidated:
+                    if responses:
+                        data.upstream_chat_id = getattr(responses[-1], "cid", None) or data.upstream_chat_id
+                    return SessionOperationResult.authentication_changed(data)
                 if self._sessions.get(session_id) is data:
                     data.updated_at = time.time()
                     data.upstream_chat_id = getattr(data.session, "cid", data.upstream_chat_id)
@@ -364,6 +423,17 @@ class SessionService:
         """清空所有会话"""
         self.reset_all()
 
+    def invalidate_authentication_context(self) -> list[SessionData]:
+        """Detach old handles immediately without scheduling remote mutations."""
+        with self._lock:
+            detached = [*self._sessions.values(), *self._expired_sessions]
+            self._sessions.clear()
+            self._expired_sessions.clear()
+            for data in detached:
+                data.lifecycle_state = SessionLifecycleState.REMOVED
+                data._authentication_invalidated = True
+        return detached
+
     def cleanup_expired_sessions(self) -> None:
         """清理过期会话。"""
         with self._lock:
@@ -379,7 +449,11 @@ class SessionService:
     def _clean_expired_sessions(self) -> None:
         """清理过期会话（内部函数，需在锁内调用）"""
         now = time.time()
-        expired = [sid for sid, data in self._sessions.items() if now - data.created_at > self._max_age]
+        expired = [
+            sid
+            for sid, data in self._sessions.items()
+            if now - data.created_at > self._max_age and not data._send_lock.locked()
+        ]
         for sid in expired:
             data = self._sessions.pop(sid)
             data.lifecycle_state = SessionLifecycleState.EXPIRED

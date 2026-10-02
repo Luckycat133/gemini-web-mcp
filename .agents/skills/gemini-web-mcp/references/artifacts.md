@@ -55,9 +55,12 @@ Before treating a local Artifact as complete:
 7. inspect duration when available for audio/video;
 8. preserve the structured verification result.
 
+A non-empty file alone is insufficient. Image verification decodes its container and pixels; WAV verification checks the PCM stream; other audio/video verification requires an observed stream from the decoder. Decoder absence leaves `verification.status=unverified` and the operation partial. Corrupt/HTML bytes fail verification. Only output artifacts matching the requested modality count: an image cannot satisfy a video or music request. Input files and URLs cannot make an empty analysis response complete.
+
 For generated images, inspect actual file bytes rather than trusting a requested
 suffix. The primary media saver now aligns a mismatched image extension with
 the detected format (for example, JPEG bytes requested as `.png` become `.jpg`).
+Music audio and cover-video files use separate destination paths, including when a filename already has `.mp3` or `.mp4`.
 
 ## Resource Links
 

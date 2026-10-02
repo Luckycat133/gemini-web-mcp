@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
@@ -35,6 +36,29 @@ _web_request: ContextVar[WebRequestOptions | None] = ContextVar(
     "gemini_web_request",
     default=None,
 )
+
+_request_timeout: ContextVar[tuple[object, float] | None] = ContextVar("gemini_request_timeout", default=None)
+_timeout_initializing_task: ContextVar[tuple[int, int] | None] = ContextVar("gemini_timeout_initializing_task", default=None)
+
+
+def _is_scoped_timeout_initialization(client: object) -> bool:
+    owner = _timeout_initializing_task.get()
+    if owner is None or owner[0] != id(client):
+        return False
+    try:
+        return owner[1] == id(asyncio.current_task())
+    except RuntimeError:
+        return False
+
+
+@contextmanager
+def client_request_timeout(client: object, timeout_seconds: float) -> Iterator[None]:
+    """Scope upstream watchdog/recovery settings to one request and its tasks."""
+    token = _request_timeout.set((client, timeout_seconds))
+    try:
+        yield
+    finally:
+        _request_timeout.reset(token)
 
 
 def _encode_learning_x9b(field_name: str, value: int) -> list[Any]:
@@ -117,8 +141,56 @@ def inject_web_request_options(
 class ThinkingLevelGeminiClient(GeminiClient):
     """Gemini client that carries the current Web UI thinking-level selector."""
 
+    @property
+    def timeout(self) -> float:
+        default = float(GeminiClient.timeout.__get__(self, type(self)))
+        scope = _request_timeout.get()
+        return max(default, scope[1]) if scope is not None and scope[0] is self else default
+
+    @timeout.setter
+    def timeout(self, value: float) -> None:
+        if not _is_scoped_timeout_initialization(self):
+            GeminiClient.timeout.__set__(self, value)
+
+    @property
+    def watchdog_timeout(self) -> float:
+        default = float(GeminiClient.watchdog_timeout.__get__(self, type(self)))
+        scope = _request_timeout.get()
+        if scope is None or scope[0] is not self:
+            return default
+        return min(max(default, 120.0), max(scope[1], 120.0))
+
+    @watchdog_timeout.setter
+    def watchdog_timeout(self, value: float) -> None:
+        if not _is_scoped_timeout_initialization(self):
+            GeminiClient.watchdog_timeout.__set__(self, value)
+
     async def init(self, *args: Any, **kwargs: Any) -> None:
-        await super().init(*args, **kwargs)
+        scope = _request_timeout.get()
+        if scope is not None and scope[0] is self:
+            # Upstream reconnect forwards its timeout getters into init(). Keep
+            # request overrides out of the singleton defaults and background
+            # refresh tasks created by that initialization.
+            default_timeout = GeminiClient.timeout.__get__(self, type(self))
+            default_watchdog = GeminiClient.watchdog_timeout.__get__(self, type(self))
+            init_args = list(args)
+            if init_args:
+                init_args[0] = default_timeout
+            else:
+                kwargs["timeout"] = default_timeout
+            if len(init_args) > 5:
+                init_args[5] = default_watchdog
+            else:
+                kwargs["watchdog_timeout"] = default_watchdog
+            timeout_token = _request_timeout.set(None)
+            initializing_token = _timeout_initializing_task.set((id(self), id(asyncio.current_task())))
+            try:
+                await super().init(*init_args, **kwargs)
+            finally:
+                _timeout_initializing_task.reset(initializing_token)
+                _request_timeout.reset(timeout_token)
+        else:
+            await super().init(*args, **kwargs)
         self._install_thinking_transport()
 
     async def generate_content(

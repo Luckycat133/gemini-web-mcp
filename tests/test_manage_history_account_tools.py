@@ -324,7 +324,8 @@ def test_search_chats_scan_turns_read_error_becomes_snippet_error(monkeypatch):
     assert payload["match_count"] == 1
     match = payload["matches"][0]
     assert match["matched_fields"] == ["title"]  # turn 未匹配
-    assert match["snippets"][0]["error"] == "ValueError: boom"
+    assert match["snippets"][0]["error"] == "ValueError"
+    assert payload["diagnostic"]["content_scan_complete"] is False
 
 
 def test_search_chats_batch_execute_path_uses_fetch_recent(monkeypatch):

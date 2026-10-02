@@ -455,7 +455,10 @@ def _json_safe(value: Any) -> Any:
         for item in fields(value):
             if item.name.startswith("_") or item.metadata.get("domain_exclude"):
                 continue
-            output[item.name] = _json_safe(getattr(value, item.name))
+            item_value = getattr(value, item.name)
+            if item_value is None and item.metadata.get("domain_exclude_if_none"):
+                continue
+            output[item.name] = _json_safe(item_value)
         return output
     if isinstance(value, Mapping):
         return {str(key): _json_safe(item) for key, item in value.items()}

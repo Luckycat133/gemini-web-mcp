@@ -120,7 +120,7 @@
         "output_schema_sha256": "54badddf73e42cf3e3d8c3f4fb8f4ef58b1262ef9115e8ccfeb0a3c1cceecb1a"
       },
       {
-        "annotations_sha256": "d72d3cb182e3d7fcf0b1c6782251eee772cdf2a99470e1a4bd6a006b5c8f4e25",
+        "annotations_sha256": "bbca3f90a8f37a2e09188309470b131134c395dbc4eccad15de06d2c2f94f06a",
         "input_schema_sha256": "e3ce632b327fcc1deb706c39260265eb59b514683802917c2e9871b96975e074",
         "name": "gemini_reset",
         "output_schema_sha256": "c246fe4bc80d4b12244bbb2bc044b6b9336af669dfc685b245cb0e3c108201af"

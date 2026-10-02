@@ -16,4 +16,6 @@ There is no `operation(...)`, `gemini_get_operation_status`, `gemini_get_operati
 
 Preserve every observed upstream identifier and Artifact identity. `timed_out` describes the local wait, not proof that Gemini stopped. A `queued` response is not a completed Artifact. Do not automatically repeat a generation request after a timeout, because it may create a duplicate.
 
+Media deadlines include generation, recovery reads, verification, and save. Research polling/report retrieval consumes the remaining phase budget. Changed chat text, progress notices, and quota refusals do not establish report completion: inspect completed-state/report evidence and preserve failed, cancelled, or unavailable results. A completion notice without retrievable report content still requires recovery.
+
 The planned SQLite OperationService will add restart-safe `status`, `result`, and `cancel` by explicit operation ID. Those tools and durable handles are not available in the current release.

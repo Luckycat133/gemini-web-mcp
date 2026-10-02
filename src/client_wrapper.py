@@ -6,8 +6,10 @@ Gemini 客户端封装 - 门面模式
 import inspect
 import logging
 import os
+import threading
 from collections.abc import Mapping
 from functools import wraps
+from contextvars import ContextVar
 from typing import Any, Dict, Optional, Self
 
 from .client_manager import (
@@ -35,7 +37,7 @@ from .session_manager import SessionData, SessionOperationResult, SessionService
 logger = logging.getLogger(__name__)
 
 try:
-    from .cookie_manager import CookieData, get_cookie_manager, init_cookie_manager
+    from .cookie_manager import CookieData, CookieManager, get_cookie_manager, init_cookie_manager
     COOKIE_MANAGER_AVAILABLE = True
 except ImportError:
     COOKIE_MANAGER_AVAILABLE = False
@@ -45,13 +47,31 @@ except ImportError:
 _client_manager = ClientManager()
 _session_manager = SessionService()
 _cleanup_manager = RemoteChatCleanupManager(
-    client_provider=lambda: _client_manager.get_client(),
+    client_provider=lambda: _initialize_cleanup_client(),
     retention_provider=get_default_chat_retention_seconds,
 )
 _lifecycle_service = ConversationLifecycleService(
     session_provider=lambda: _session_manager,
     cleanup_provider=lambda: _cleanup_manager,
 )
+_authentication_lock = threading.RLock()
+_request_authentication_generation: ContextVar[tuple[str, int] | None] = ContextVar(
+    "gemini_authentication_generation", default=None,
+)
+
+
+def _cleanup_context() -> tuple[str, int] | None:
+    if isinstance(_cleanup_manager, RemoteChatCleanupManager):
+        return _cleanup_manager.authentication_context()
+    return None
+
+
+def _request_cleanup_generation() -> int | None:
+    request_context = _request_authentication_generation.get()
+    current_context = _cleanup_context()
+    if request_context is not None and current_context is not None and request_context[0] == current_context[0]:
+        return request_context[1]
+    return None
 
 
 class _AttributeMapping(dict[str, Any]):
@@ -155,7 +175,10 @@ def _session_data_to_dict(data: Optional[SessionData]) -> Optional[Dict[str, Any
 
 def get_gemini_client() -> Any:
     """获取 GeminiClient，并规范化混合对象/映射历史返回值。"""
-    return _install_history_compatibility(_client_manager.get_client())
+    with _authentication_lock:
+        client = _install_history_compatibility(_client_manager.get_client())
+        _request_authentication_generation.set(_cleanup_context())
+        return client
 
 
 async def initialize_client() -> Any:
@@ -174,7 +197,7 @@ async def reset_client_async() -> Optional[DomainResult[LifecycleResetAllData]]:
     reset_result: Optional[DomainResult[LifecycleResetAllData]] = None
     if isinstance(_session_manager, SessionService):
         reset_result = await _lifecycle_service.reset_all(
-            delete_callback=lambda cid: delete_remote_chat(cid),
+            delete_callback=lambda cid: delete_remote_chat_result(cid),
         )
     else:
         _lifecycle_service.clear_sessions()
@@ -194,15 +217,25 @@ def create_session(
     delete_after_seconds: Optional[int] = None,
 ) -> SessionOperationResult:
     """创建带不可碰撞本地 ID 的共享会话。"""
-    return _lifecycle_service.create_session(
-        session,
-        model,
-        thinking_level=thinking_level,
-        learning_mode=learning_mode,
-        temporary=temporary,
-        retain_chat=retain_chat,
-        delete_after_seconds=delete_after_seconds,
-    )
+    with _authentication_lock:
+        generation = _request_cleanup_generation()
+        current_context = _cleanup_context()
+        if generation is not None and current_context is not None and generation != current_context[1]:
+            state = SessionData(session=session, model=model, retain_chat=retain_chat)
+            result = SessionOperationResult.authentication_changed(state)
+            return _lifecycle_service.record_cancelled_session_result(result, generation=generation)
+        result = _lifecycle_service.create_session(
+            session,
+            model,
+            thinking_level=thinking_level,
+            learning_mode=learning_mode,
+            temporary=temporary,
+            retain_chat=retain_chat,
+            delete_after_seconds=delete_after_seconds,
+        )
+        if result.session is not None and current_context is not None:
+            result.session._authentication_generation = current_context[1]
+        return result
 
 
 def store_session(
@@ -216,16 +249,23 @@ def store_session(
     delete_after_seconds: Optional[int] = None,
 ) -> None:
     """存储会话"""
-    _lifecycle_service.store_session(
-        session_id,
-        session,
-        model,
-        thinking_level=thinking_level,
-        learning_mode=learning_mode,
-        temporary=temporary,
-        retain_chat=retain_chat,
-        delete_after_seconds=delete_after_seconds,
-    )
+    with _authentication_lock:
+        generation, current_context = _request_cleanup_generation(), _cleanup_context()
+        if generation is not None and current_context is not None and generation != current_context[1]:
+            _cleanup_manager.record_authentication_context_change(getattr(session, "cid", None), generation=generation)
+            raise RuntimeError("Authentication context changed before the session could be stored.")
+        state = _lifecycle_service.store_session(
+            session_id,
+            session,
+            model,
+            thinking_level=thinking_level,
+            learning_mode=learning_mode,
+            temporary=temporary,
+            retain_chat=retain_chat,
+            delete_after_seconds=delete_after_seconds,
+        )
+        if isinstance(state, SessionData) and current_context is not None:
+            state._authentication_generation = current_context[1]
 
 
 def get_session(session_id: str) -> Optional[Dict[str, Any]]:
@@ -252,7 +292,7 @@ async def reset_session(session_id: str) -> SessionOperationResult:
     """只重置指定会话，并按保留策略清理其远端聊天。"""
     return await _lifecycle_service.reset_one(
         session_id,
-        delete_callback=lambda cid: delete_remote_chat(cid),
+        delete_callback=lambda cid: delete_remote_chat_result(cid),
     )
 
 
@@ -300,6 +340,7 @@ def schedule_remote_chat_cleanup_from_response(
         retain_chat=retain_chat,
         delete_after_seconds=delete_after_seconds,
         source=source,
+        authentication_generation=_request_cleanup_generation(),
     )
     if observation.upstream_chat_id is None:
         return None
@@ -321,17 +362,20 @@ def schedule_remote_chat_cleanup(
         retain_chat=retain_chat,
         delete_after_seconds=delete_after_seconds,
         source=source,
+        authentication_generation=_request_cleanup_generation(),
     )
+
+
+async def _initialize_cleanup_client() -> Any:
+    """Resolve a current initialized generation inside the cleanup error boundary."""
+    client = get_gemini_client()
+    initialized = await initialize_client()
+    return initialized if initialized is not None else client
 
 
 async def delete_remote_chat(cid: Optional[str], client: Any = None) -> bool:
     """立即删除远端 Gemini chat。"""
-    if not is_valid_remote_chat_id(cid):
-        return False
-    if client is None:
-        client = get_gemini_client()
-        await initialize_client()
-    observation = await _lifecycle_service.delete_chat_result(cid, client=client)
+    observation = await delete_remote_chat_result(cid, client=client)
     return observation.state in {
         CleanupState.COMPLETED,
         CleanupState.ALREADY_COMPLETED,
@@ -347,18 +391,21 @@ async def delete_remote_chat_result(
         return CleanupObservation(
             state=(CleanupState.INVALID_ID if cid is not None else CleanupState.NOT_APPLICABLE),
         )
-    if client is None:
-        client = get_gemini_client()
-        await initialize_client()
-    return await _lifecycle_service.delete_chat_result(cid, client=client)
+    return await _lifecycle_service.delete_chat_result(
+        cid,
+        client=client,
+        client_initializer=_initialize_cleanup_client if client is None else None,
+        authentication_generation=_request_cleanup_generation(),
+    )
 
 
 async def cleanup_due_remote_chats(client: Any = None) -> int:
     """清理已经到期的远端 Gemini chat。"""
-    if client is None:
-        client = get_gemini_client()
-        await initialize_client()
-    return await _lifecycle_service.cleanup_due_chats(client=client)
+    return await _lifecycle_service.cleanup_due_chats(
+        client=client,
+        client_initializer=_initialize_cleanup_client if client is None else None,
+        authentication_generation=_request_cleanup_generation(),
+    )
 
 
 def list_pending_remote_chat_cleanup() -> Dict[str, Dict[str, Any]]:
@@ -379,13 +426,26 @@ def list_pending_remote_chat_cleanup() -> Dict[str, Dict[str, Any]]:
 
 def _on_cookie_update(cookie_data: CookieData) -> None:
     """Cookie 更新回调"""
-    logger.info("🔄 Cookie 已更新，重置客户端...")
-    os.environ["GEMINI_PSID"] = cookie_data.psid
-    if cookie_data.psidts:
-        os.environ["GEMINI_PSIDTS"] = cookie_data.psidts
-    else:
-        os.environ.pop("GEMINI_PSIDTS", None)
-    reset_client()
+    with _authentication_lock:
+        authentication = dict(getattr(cookie_data, "extra_cookies", {}))
+        authentication["__Secure-1PSID"] = cookie_data.psid
+        if cookie_data.psidts:
+            authentication["__Secure-1PSIDTS"] = cookie_data.psidts
+        else:
+            authentication.pop("__Secure-1PSIDTS", None)
+        changed = not _client_manager.authentication_matches(authentication)
+        if changed:
+            _lifecycle_service.invalidate_authentication_context()
+        os.environ["GEMINI_PSID"] = cookie_data.psid
+        for name, env in (("__Secure-1PSIDTS", "GEMINI_PSIDTS"), ("__Secure-1PSIDCC", "GEMINI_PSIDCC")):
+            value = authentication.get(name, "")
+            if value:
+                os.environ[env] = value
+            else:
+                os.environ.pop(env, None)
+        if changed:
+            logger.info("🔄 认证已更新，已取消旧账号清理并重置客户端")
+            _client_manager.reset()
 
 
 def init_cookie_manager_integration() -> None:
@@ -413,16 +473,18 @@ def get_cookie_from_browser(browser: str = "chrome", profile: str = "") -> bool:
         source = f"browser_{browser}"
         if profile:
             source += f":{profile}"
-        success = cm.update_cookie(
-            psid,
-            psidts,
-            source=source,
-            extra_cookies=cookies,
-        )
+        update_kwargs: dict[str, Any] = {"source": source, "extra_cookies": cookies}
+        if isinstance(cm, CookieManager):
+            update_kwargs["notify"] = _on_cookie_update
+        success = cm.update_cookie(psid, psidts, **update_kwargs)
         if success:
-            os.environ["GEMINI_PSID"] = psid
-            if psidts:
-                os.environ["GEMINI_PSIDTS"] = psidts
+            # Library callers and compact startup may not have installed the
+            # monitor callback. Authentication publication always retires the
+            # old client and clears stale fields, independent of that setup.
+            if not isinstance(cm, CookieManager) and getattr(cm, "on_cookie_update", None) is not _on_cookie_update:
+                _on_cookie_update(
+                    CookieData(psid=psid, psidts=psidts, extra_cookies=cookies, source=source),
+                )
             logger.info("✅ 已从浏览器获取 Cookie 并更新")
         return success
     return False

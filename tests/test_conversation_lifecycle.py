@@ -6,11 +6,22 @@ import asyncio
 import json
 import time
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 from src.domain import CleanupState, DomainResult, OperationState
+from src.infrastructure.rpc_contracts import get_contract
 from src.remote_chat_cleanup_manager import RemoteChatCleanupManager
 from src.services import ConversationLifecycleService
 from src.session_manager import SessionService
+
+
+def _empty_history_readback():
+    return AsyncMock(
+        return_value=SimpleNamespace(
+            status_code=200,
+            text=json.dumps([["wrb.fr", get_contract("history.page").rpc_id, json.dumps([None, None, []])]]),
+        ),
+    )
 
 
 def _service(
@@ -59,6 +70,7 @@ def test_concurrent_and_repeated_delete_calls_upstream_exactly_once():
 
         manager = RemoteChatCleanupManager()
         client = Client()
+        client._batch_execute = _empty_history_readback()
         first_task = asyncio.create_task(
             manager.delete_chat_result("c_once", client=client),
         )
@@ -95,6 +107,7 @@ def test_failed_cleanup_keeps_safe_diagnostic_and_can_retry():
     async def run():
         manager = RemoteChatCleanupManager()
         client = Client()
+        client._batch_execute = _empty_history_readback()
         failed = await manager.delete_chat_result("c_retry", client=client)
         pending_after_failure = manager.list_pending_cleanup()
         completed = await manager.delete_chat_result("c_retry", client=client)
@@ -231,9 +244,11 @@ def test_reset_all_reports_each_retention_decision():
     lifecycle.create_session(SimpleNamespace())
     deleted: list[str] = []
 
-    async def delete(cid: str) -> bool:
+    client = SimpleNamespace(delete_chat=AsyncMock(), _batch_execute=_empty_history_readback())
+
+    async def delete(cid: str):
         deleted.append(cid)
-        return True
+        return await cleanup.delete_chat_result(cid, client=client)
 
     result = asyncio.run(lifecycle.reset_all(delete_callback=delete))
 

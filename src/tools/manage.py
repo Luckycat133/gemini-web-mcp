@@ -76,6 +76,8 @@ from ..services.notebooks import (
 from ..services.scheduled import (
     create_daily_action as create_daily_action_service,
     delete_action as delete_action_service,
+    fetch_scheduled_registry as fetch_scheduled_registry_service,
+    fetch_scheduled_task_by_id as fetch_scheduled_task_by_id_service,
     scheduled_daily_payload as registered_scheduled_daily_payload,
 )
 from .annotations import (
@@ -210,31 +212,7 @@ async def _execute_observed_rpc(client, probe: dict[str, str]):
 
 
 async def _fetch_scheduled_registry(client, max_chars: int) -> tuple[list[dict[str, Any]], dict[str, Any]]:
-    probe = _get_probe("scheduled", "scheduled_actions_registry")
-    response = await _execute_observed_rpc(client, probe)
-    bodies = _extract_rpc_bodies(response.text, probe["rpcid"])
-    body = bodies[0] if bodies else []
-    raw_entries = body[0] if isinstance(body, list) and body and isinstance(body[0], list) else []
-    entries = [_parse_scheduled_action_task_entry(item, max_chars) for item in raw_entries]
-    diagnostic = {
-        "source_rpc": probe["rpcid"],
-        "observed": probe["observed"],
-        "status_code": getattr(response, "status_code", None),
-        "response_length": len(getattr(response, "text", "") or ""),
-        "body_present": bool(bodies),
-        "raw_entry_count": len(raw_entries),
-        "client_language": getattr(client, "language", None),
-        "client_build_label": getattr(client, "build_label", None),
-        "has_session_id": bool(getattr(client, "session_id", None)),
-        "account_status": str(getattr(client, "account_status", "")),
-    }
-    if not entries:
-        diagnostic["empty_hint"] = (
-            "The current Gemini cookie/session returned an empty scheduled-actions registry. "
-            "If the Gemini Web UI shows scheduled actions, refresh cookies from the same signed-in "
-            "Chrome profile or check Google multi-account context."
-        )
-    return entries, diagnostic
+    return await fetch_scheduled_registry_service(client, max_chars)
 
 
 def _get_scheduled_task_entry_from_body(body: Any) -> Any:
@@ -253,40 +231,7 @@ async def _fetch_scheduled_task_by_id(
     action_id: str,
     max_chars: int,
 ) -> tuple[dict[str, Any] | None, dict[str, Any]]:
-    contract = get_contract("scheduled.get")
-    response = await client._batch_execute(
-        [_RawRPCData(contract.rpc_id, contract.build_payload(action_id=action_id))],
-        source_path=contract.source_path,
-        close_on_error=False,
-    )
-    bodies = _extract_rpc_bodies(response.text, contract.rpc_id)
-    body = bodies[0] if bodies else []
-    raw_entry = _get_scheduled_task_entry_from_body(body)
-    entry = _parse_scheduled_action_task_entry(raw_entry, max_chars) if raw_entry is not None else None
-    matched_task = bool(entry and entry.get("id") == action_id)
-    diagnostic = {
-        "source_rpc": contract.rpc_id,
-        "contract_key": contract.key,
-        "observed": contract.observed,
-        "status_code": getattr(response, "status_code", None),
-        "response_length": len(getattr(response, "text", "") or ""),
-        "body_present": bool(bodies),
-        "raw_body_type": type(body).__name__,
-        "raw_top_level_count": len(body) if isinstance(body, list) else None,
-        "matched_task": matched_task,
-        "client_language": getattr(client, "language", None),
-        "client_build_label": getattr(client, "build_label", None),
-        "has_session_id": bool(getattr(client, "session_id", None)),
-        "account_status": str(getattr(client, "account_status", "")),
-    }
-    if entry and not matched_task:
-        diagnostic["returned_id"] = entry.get("id", "")
-    if not matched_task:
-        diagnostic["empty_hint"] = (
-            "The current Gemini cookie/session did not return this scheduled action by id. "
-            "Check that the id belongs to the same Gemini account/profile context."
-        )
-    return (entry if matched_task else None), diagnostic
+    return await fetch_scheduled_task_by_id_service(client, action_id, max_chars)
 
 
 
@@ -819,6 +764,7 @@ async def _fetch_recent_conversation_metadata(
         "contract_key": contract.key,
         "observed": contract.observed,
         "target_count_per_bucket": safe_target,
+        "max_offset": 5000,
         "pinned": pinned_diag,
         "recent": recent_diag,
         "has_remote_more": bool(
@@ -970,11 +916,15 @@ def _register_history_scan_tools(mcp: MCPServer, enabled_tool_names: set[str], t
             assert result.data is not None
             payload = result.data
             page = payload["items"]
-            if not page:
-                return domain_text(result, "暂无历史对话。", use_result_data=True)
-
             if response_format == "json":
                 return attach_domain_result(_json_response(payload), result, use_result_data=True)
+
+            if not page:
+                message = (
+                    "历史扫描达到当前来源上限，覆盖不完整；请使用深度扫描提高上限。"
+                    if result.warnings else "暂无历史对话。"
+                )
+                return domain_text(result, message, use_result_data=True)
 
             chat_list = [
                 "## 📜 历史对话",
@@ -1202,7 +1152,9 @@ def _register_history_read_tools(mcp: MCPServer, enabled_tool_names: set[str], t
                 f"Scanned: {payload['scanned_count']}/{payload['total_count']} · Matches: {payload['match_count']}",
             ]
             if not matches:
-                lines.append("未在当前页找到匹配项。")
+                lines.append("正文读取失败，无法确认是否存在匹配项。" if not result.ok else "未在当前页找到匹配项。")
+            for warning in result.warnings:
+                lines.append(f"⚠️ {warning.message}")
             for idx, match in enumerate(matches, 1):
                 fields_str = ", ".join(match["matched_fields"])
                 time_text = f" · {match['time']}" if match.get("time") else ""

@@ -164,7 +164,7 @@ report 本地产物；history 的 list/search/read/export/delete 也在 primary 
       "observed_backend": null,
       "verification": {
         "status": "verified",
-        "methods": ["file_exists", "size_checked", "size_nonzero", "image_dimensions"]
+        "methods": ["file_exists", "size_checked", "size_nonzero", "image_mime_signature", "image_decoded", "image_dimensions"]
       }
     }
   ],
@@ -179,12 +179,14 @@ report 本地产物；history 的 list/search/read/export/delete 也在 primary 
 ```
 
 - `state=remote`：响应含可用 URI，但尚未验证远端内容；artifact 的 verification 是 `unverified`。
-- `state=local`：本地文件存在且非零；记录大小和可推断的 MIME，尺寸和时长在探针可用时填写。
+- `state=local`：本地文件存在且非零；是否能验收还需检查 `verification.status`。图片需解码成功，WAV 需校验流，其他音视频需探针观察到对应流；缺少解码依赖时为 `unverified`，操作为 `partial`。
 - `state=queued`：上游明确返回 pending/processing/queued 等状态，操作结果仍为 `ok=true`、
   `operation_state=queued`。
 - `state=empty`：请求完成但没有可用产物，返回 `ARTIFACT_NOT_RETURNED`，不把普通文本当作媒体成功。
 - `state=failed`：保存或验证失败；完全失败使用 `ARTIFACT_SAVE_FAILED`/`VERIFICATION_FAILED`，
   远端 URI 仍可用但本地保存失败时使用 `operation_state=partial` 和 `ARTIFACT_SAVE_PARTIAL` 告警。
+
+缺少本地媒体验证依赖时，`meta.verification_status` 为 `artifact_saved_unverified` 或 `input_artifact_unverified`，并附 `ARTIFACT_VERIFICATION_UNAVAILABLE` 告警；不改写为已验证成功。
 
 `artifacts` 是输出，`input_artifacts` 是本地文件、URL 或参考图。相同类型和 URI 的 artifact ID
 在 primary 与 compact 表面一致。`response_format="json"` 的 research report 正文仍保持合法 JSON；
@@ -312,10 +314,12 @@ report 本地产物；history 的 list/search/read/export/delete 也在 primary 
 - `video`: 当前通用聊天路线可能只返回文本；需要结构化视频 Artifact 才算成功，已验证的网页入口是 Gemini Omni 专用视频模式
 - `image + model=pro` 不会直接切换首轮图像后端；Pro redo 是网页生成后的二次操作
 
-**artifact 行为：** 成功响应会公开远端 URI；指定输出目录后，实际写入的文件会再检查存在性、
-非零大小、MIME，以及可用的尺寸/时长。排队、空响应和保存失败有独立结构化状态。
+**artifact 行为：** 成功响应会公开远端 URI；指定输出目录后，实际写入的文件会检查存在性、
+非零大小、真实格式和解码/流证据。排队、空响应和保存失败有独立结构化状态。
 `prompt` 不可为空；`filename` 只能是单个文件名，若目标文件已存在会另取不冲突的名字。
 排队或未返回媒体的聊天会保留以便回看，结构化结果中的 `source_chat_id` 只在上游实际提供时出现。
+只有请求类型匹配的输出才计入完成状态，图片不能满足视频或音乐请求；音乐完成需要音频，封面视频是辅助产物。
+音乐的音频和视频分别选择不冲突的路径。`timeout_seconds` 覆盖生成、恢复读取、验证和保存；超时会保留已观察的 URI/聊天 ID，避免自动重复生成。超时/看门狗参数按请求隔离，不会改写其他并发请求的默认值。
 
 ### gemini_generate_music
 
@@ -444,6 +448,7 @@ Gemini Web 历史对话只读聚合入口。推荐给 `GEMINI_TOOLS=history` 和
 
 结构化结果的 `count` / `offset` / `limit` 描述本次扫描的来源页，`match_count` 描述该页命中数。
 当前分页在过滤前应用，不是对全局匹配结果分页；`scan_turns=true` 也只读取当前来源页。
+来源达到上限或空页无法继续时，返回 `operation_state=partial`、覆盖告警和 `next_offset=null`，不会返回重复的游标。正文读取失败单独列在 `read_failures`；部分读取失败为 `partial`，全部失败为 `VERIFICATION_FAILED`，不能据此认定没有匹配。
 
 ### gemini_scan_chat_history_sources
 
@@ -668,7 +673,7 @@ JSON 输出包含 `visible_in_registry`、`readable_by_id_after_create` 和
 
 JSON 输出包含 `verification_status`、`visible_after_delete`、`readable_by_id_after_delete`
 和 `deleted_by_id_after_delete`。Gemini 的 `GetTask` 在删除后可能仍返回 tombstone 对象；
-只有按 ID 读到 `task_state=deleted` 时，工具才把删除标记为已校验。
+读到相同 ID 的 `task_state=deleted` tombstone，或有效 registry 与有效 GetTask 都确认缺失时，工具才把删除标记为已校验。读回必须包含 HTTP 200、匹配 RPC 的可解析包络、无拒绝和合法条目；错误、错误 ID 和形状漂移不能作为缺失证据。
 如果 mutation 响应没有可解析 body，`verification_status="rpc_unconfirmed"`；调用方不能把它当作
 已删除。
 这个工具是 destructive 远端操作。只删除用户明确指定或当前验证流程刚创建的任务。
@@ -812,7 +817,8 @@ macOS Keychain 读取由 `GEMINI_BROWSER_COOKIE_TIMEOUT_SECONDS` 限制，默认
 
 ### gemini_reset
 
-重置客户端。
+重置客户端和全部本地会话，并尝试立即删除未设置 `retain_chat` 的远端聊天。工具标注为 destructive 远端操作。
+本地连接重置成功而远端清理失败时，保留 `partial`、告警和清理诊断；只有新鲜读回 `verified_absent` 才能称聊天已删除。
 
 **参数：** 无
 
@@ -840,6 +846,10 @@ compact `session` 支持 `create` / `send` / `list` / `reset`（或 `reset_one`�
 
 compact 的 history/account/scheduled/doctor/cleanup 直接导入共享 service 和 RPC parser；加载
 `src.skill_server` 不再初始化 4k 行的 `src.tools.manage` 兼容适配器。
+
+primary 与 compact 的 Prompt 适配器共用 `src/services/prompts.py`：新条目使用 UUID，保留原有 ID；变更在跨进程锁内重新读取并原子替换 JSON。文件损坏、读取或保存失败会返回错误并保留原文件。持久锁文件位于库旁的 `.prompts.json.lock`，不保存提示词内容，也不能在写入期间移除。
+
+两个表面的 Cookie 更新会退役旧客户端。认证材料真正变化时，旧会话和清理任务取消，诊断为 `cancellation_reason=authentication_context_changed`；不会用新账号执行旧账号的删除。相同材料刷新保留会话和任务。显式指定的浏览器 profile 读取失败不会回退到另一个 profile；Doctor 将 cookie 存在和账号验证成功分开报告。
 
 ---
 

@@ -41,6 +41,7 @@ from src.thinking_client import (
     _encode_learning_goa,
     _encode_learning_x9b,
     _web_request,
+    client_request_timeout,
     inject_thinking_level,
     inject_web_request_options,
 )
@@ -81,6 +82,180 @@ def _parse_inner(patched):
 def _new_client():
     """用 object.__new__ 跳过 GeminiClient.__init__ 的网络依赖。"""
     return object.__new__(ThinkingLevelGeminiClient)
+
+
+def _timeout_client():
+    client = _new_client()
+    client.timeout = 60.0
+    client.watchdog_timeout = 60.0
+    return client
+
+
+def test_request_timeout_scope_restores_nested_defaults_and_is_instance_specific():
+    client, other = _timeout_client(), _timeout_client()
+    with client_request_timeout(client, 180):
+        assert (client.timeout, client.watchdog_timeout) == (180, 120)
+        assert (other.timeout, other.watchdog_timeout) == (60, 60)
+        with client_request_timeout(client, 600):
+            assert client.timeout == 600
+        assert client.timeout == 180
+    assert (client.timeout, client.watchdog_timeout) == (60, 60)
+    assert GeminiClient.timeout.__get__(client, type(client)) == 60
+
+
+def test_concurrent_request_timeout_scopes_and_unrelated_task_are_isolated():
+    client = _timeout_client()
+
+    async def run():
+        entered_a, entered_b, release = asyncio.Event(), asyncio.Event(), asyncio.Event()
+
+        async def worker(timeout, entered, other_entered):
+            with client_request_timeout(client, timeout):
+                entered.set()
+                await other_entered.wait()
+                assert client.timeout == timeout
+                assert GeminiClient.timeout.__get__(client, type(client)) == 60
+                await release.wait()
+                assert client.timeout == timeout
+            return client.timeout
+
+        a = asyncio.create_task(worker(180, entered_a, entered_b))
+        b = asyncio.create_task(worker(600, entered_b, entered_a))
+        await entered_a.wait()
+        await entered_b.wait()
+        assert (client.timeout, client.watchdog_timeout) == (60, 60)
+        release.set()
+        assert await asyncio.gather(a, b) == [60, 60]
+
+    asyncio.run(run())
+
+
+def test_child_task_inherits_scope_without_mutating_parent_or_global_default():
+    client = _timeout_client()
+
+    async def run():
+        release = asyncio.Event()
+
+        async def child():
+            await release.wait()
+            assert client.timeout == 180
+            with client_request_timeout(client, 600):
+                assert client.timeout == 600
+            return client.timeout
+
+        with client_request_timeout(client, 180):
+            task = asyncio.create_task(child())
+            assert client.timeout == 180
+        assert client.timeout == 60
+        release.set()
+        assert await task == 180
+        assert client.timeout == 60
+
+    asyncio.run(run())
+
+
+def test_cancellation_exits_request_timeout_scope():
+    client = _timeout_client()
+    after_scope = []
+
+    async def run():
+        entered = asyncio.Event()
+
+        async def worker():
+            try:
+                with client_request_timeout(client, 600):
+                    entered.set()
+                    await asyncio.Event().wait()
+            finally:
+                after_scope.append((client.timeout, client.watchdog_timeout))
+
+        task = asyncio.create_task(worker())
+        await entered.wait()
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        assert (client.timeout, client.watchdog_timeout) == (60, 60)
+
+    asyncio.run(run())
+    assert after_scope == [(60, 60)]
+
+
+def test_global_default_update_during_a_scope_is_not_overwritten_on_exit():
+    client = _timeout_client()
+    with client_request_timeout(client, 600):
+        client.timeout = 90
+        client.watchdog_timeout = 80
+        assert (client.timeout, client.watchdog_timeout) == (600, 120)
+        assert GeminiClient.timeout.__get__(client, type(client)) == 90
+    assert (client.timeout, client.watchdog_timeout) == (90, 80)
+
+
+def test_scoped_reconnect_preserves_concurrent_default_updates_and_background_tasks(monkeypatch):
+    client = _timeout_client()
+    background_tasks = []
+
+    async def run():
+        entered, release = asyncio.Event(), asyncio.Event()
+
+        async def background():
+            await release.wait()
+            return client.timeout, client.watchdog_timeout
+
+        async def init(self, **kwargs):
+            assert (kwargs["timeout"], kwargs["watchdog_timeout"]) == (60, 60)
+            background_tasks.append(asyncio.create_task(background()))
+            entered.set()
+            await release.wait()
+            self.timeout = kwargs["timeout"]
+            self.watchdog_timeout = kwargs["watchdog_timeout"]
+
+        monkeypatch.setattr(GeminiClient, "init", init)
+        monkeypatch.setattr(client, "_install_thinking_transport", lambda: None)
+
+        async def worker():
+            with client_request_timeout(client, 600):
+                await client.init(timeout=client.timeout, watchdog_timeout=client.watchdog_timeout)
+                assert client.timeout == 600
+
+        task = asyncio.create_task(worker())
+        await entered.wait()
+        client.timeout = 90
+        client.watchdog_timeout = 80
+        release.set()
+        await task
+        assert (client.timeout, client.watchdog_timeout) == (90, 80)
+        assert await background_tasks[0] == (90, 80)
+
+    asyncio.run(run())
+
+
+def test_cancelled_scoped_reconnect_clears_initialization_guard(monkeypatch):
+    client = _timeout_client()
+
+    async def run():
+        entered = asyncio.Event()
+
+        async def init(_self, **_kwargs):
+            entered.set()
+            await asyncio.Event().wait()
+
+        monkeypatch.setattr(GeminiClient, "init", init)
+
+        async def worker():
+            try:
+                with client_request_timeout(client, 600):
+                    await client.init(timeout=600)
+            finally:
+                client.timeout = 95
+
+        task = asyncio.create_task(worker())
+        await entered.wait()
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        assert client.timeout == 95
+
+    asyncio.run(run())
 
 
 # ---------------------------------------------------------------------------

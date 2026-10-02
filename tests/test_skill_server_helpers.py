@@ -35,8 +35,11 @@ mock 边界：
 
 import asyncio
 import json
+import pytest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
+
+from tests._account_rpc_fakes import scheduled_ack_response, scheduled_read
 
 import src.skill_server as skill_server
 from src.session_manager import SessionService
@@ -316,19 +319,20 @@ def test_prompt_manager_load_reads_existing_file(tmp_path):
     assert items[0]["name"] == "Prompt 1"
 
 
-def test_prompt_manager_load_handles_invalid_json(tmp_path):
+def test_prompt_manager_load_preserves_invalid_json(tmp_path):
     f = tmp_path / "prompts.json"
     f.write_text("not valid json {{{", encoding="utf-8")
-    mgr = PromptManager(f)
-    # 损坏 JSON 触发 except 分支，_data 重置为 {}
-    assert mgr.list_all() == []
+    with pytest.raises(ValueError, match="原文件已保留"):
+        PromptManager(f)
+    assert f.read_text(encoding="utf-8") == "not valid json {{{"
 
 
 def test_prompt_manager_load_handles_missing_prompts_key(tmp_path):
     f = tmp_path / "prompts.json"
     f.write_text(json.dumps({"version": "1.0"}), encoding="utf-8")
-    mgr = PromptManager(f)
-    assert mgr.list_all() == []
+    with pytest.raises(ValueError, match="原文件已保留"):
+        PromptManager(f)
+    assert json.loads(f.read_text(encoding="utf-8")) == {"version": "1.0"}
 
 
 def test_prompt_manager_save_persists_to_file(tmp_path, monkeypatch):
@@ -336,29 +340,24 @@ def test_prompt_manager_save_persists_to_file(tmp_path, monkeypatch):
     monkeypatch.setattr(skill_server, "CONFIG_DIR", tmp_path)
     f = tmp_path / "prompts.json"
     mgr = PromptManager(f)
-    mgr.create("Test", "content")
+    prompt_id = mgr.create("Test", "content")
     assert f.exists()
     data = json.loads(f.read_text(encoding="utf-8"))
     assert "prompts" in data
-    assert "test" in data["prompts"]
+    assert prompt_id in data["prompts"]
 
 
-def test_prompt_manager_save_handles_io_error(tmp_path, monkeypatch):
+def test_prompt_manager_save_propagates_io_error(tmp_path, monkeypatch):
     monkeypatch.setattr(skill_server, "CONFIG_DIR", tmp_path)
     f = tmp_path / "prompts.json"
     mgr = PromptManager(f)
 
-    # 让 open 抛 IOError 触发 except 分支
-    real_open = open
+    def failed_write():
+        raise OSError("disk full")
 
-    def raising_open(path, *args, **kwargs):
-        if str(path) == str(f) and "w" in (args[0] if args else kwargs.get("mode", "")):
-            raise IOError("disk full")
-        return real_open(path, *args, **kwargs)
-
-    monkeypatch.setattr("builtins.open", raising_open)
-    # 不抛异常，仅记录日志
-    mgr._save()
+    monkeypatch.setattr(mgr._library, "_atomic_write", failed_write)
+    with pytest.raises(OSError, match="disk full"):
+        mgr._save()
 
 
 def test_prompt_manager_list_all_sorts_by_name_case_insensitive(tmp_path):
@@ -389,7 +388,7 @@ def test_prompt_manager_create_generates_id_and_persists(tmp_path, monkeypatch):
     f = tmp_path / "prompts.json"
     mgr = PromptManager(f)
     pid = mgr.create("My Cool Prompt", "content", category="custom")
-    assert pid == "my_cool_prompt"
+    assert len(pid) == 36
     prompt = mgr.get_by_name("My Cool Prompt")
     assert prompt is not None
     assert prompt["content"] == "content"
@@ -1181,7 +1180,7 @@ def test_scheduled_delete_requires_action_id(monkeypatch):
 
 def test_scheduled_delete_rpc_unconfirmed_when_no_bodies(monkeypatch):
     """_extract_rpc_bodies 返回空 → verification_status=rpc_unconfirmed。"""
-    client = SimpleNamespace(_batch_execute=AsyncMock(return_value=_ns(text="t")))
+    client = SimpleNamespace(_batch_execute=AsyncMock(return_value=scheduled_ack_response()))
     monkeypatch.setattr(skill_server, "_extract_rpc_bodies", lambda _t, _r: [])
     result = _run(_scheduled_delete(client, "s1"))
     assert "rpc_unconfirmed" in result[0].text
@@ -1189,72 +1188,72 @@ def test_scheduled_delete_rpc_unconfirmed_when_no_bodies(monkeypatch):
 
 def test_scheduled_delete_still_visible_in_registry(monkeypatch):
     """删除后仍 visible → still_visible_in_registry。"""
-    client = SimpleNamespace(_batch_execute=AsyncMock(return_value=_ns(text="t")))
+    client = SimpleNamespace(_batch_execute=AsyncMock(return_value=scheduled_ack_response()))
     monkeypatch.setattr(skill_server, "_extract_rpc_bodies", lambda _t, _r: [["x"]])
     monkeypatch.setattr(skill_server, "_fetch_scheduled_registry",
-                        AsyncMock(return_value=([{"id": "s1"}], {})))
+                        AsyncMock(return_value=scheduled_read([{"id": "s1"}])))
     monkeypatch.setattr(skill_server, "_fetch_scheduled_task_by_id",
-                        AsyncMock(return_value=(None, {})))
+                        AsyncMock(return_value=scheduled_read(None)))
     result = _run(_scheduled_delete(client, "s1"))
     assert "still_visible_in_registry" in result[0].text
 
 
 def test_scheduled_delete_deleted_state_by_id(monkeypatch):
     """task_after_delete.task_state_id == 6 → deleted_state_by_id。"""
-    client = SimpleNamespace(_batch_execute=AsyncMock(return_value=_ns(text="t")))
+    client = SimpleNamespace(_batch_execute=AsyncMock(return_value=scheduled_ack_response()))
     monkeypatch.setattr(skill_server, "_extract_rpc_bodies", lambda _t, _r: [["x"]])
     monkeypatch.setattr(skill_server, "_fetch_scheduled_registry",
-                        AsyncMock(return_value=([], {})))
+                        AsyncMock(return_value=scheduled_read([])))
     monkeypatch.setattr(skill_server, "_fetch_scheduled_task_by_id",
-                        AsyncMock(return_value=({"task_state_id": 6}, {})))
+                        AsyncMock(return_value=scheduled_read({"id": "s1", "task_state_id": 6})))
     result = _run(_scheduled_delete(client, "s1"))
     assert "deleted_state_by_id" in result[0].text
 
 
 def test_scheduled_delete_registry_empty_active_or_unknown_by_id(monkeypatch):
     """registry 空 + readable 但 task_state_id != 6 → registry_empty_active_or_unknown_by_id。"""
-    client = SimpleNamespace(_batch_execute=AsyncMock(return_value=_ns(text="t")))
+    client = SimpleNamespace(_batch_execute=AsyncMock(return_value=scheduled_ack_response()))
     monkeypatch.setattr(skill_server, "_extract_rpc_bodies", lambda _t, _r: [["x"]])
     monkeypatch.setattr(skill_server, "_fetch_scheduled_registry",
-                        AsyncMock(return_value=([], {})))
+                        AsyncMock(return_value=scheduled_read([])))
     monkeypatch.setattr(skill_server, "_fetch_scheduled_task_by_id",
-                        AsyncMock(return_value=({"task_state_id": 1}, {})))
+                        AsyncMock(return_value=scheduled_read({"id": "s1", "task_state_id": 1})))
     result = _run(_scheduled_delete(client, "s1"))
     assert "registry_empty_active_or_unknown_by_id" in result[0].text
 
 
 def test_scheduled_delete_not_visible_active_or_unknown_by_id(monkeypatch):
     """registry 非空 + 不 visible + readable + state!=6 → not_visible_active_or_unknown_by_id。"""
-    client = SimpleNamespace(_batch_execute=AsyncMock(return_value=_ns(text="t")))
+    client = SimpleNamespace(_batch_execute=AsyncMock(return_value=scheduled_ack_response()))
     monkeypatch.setattr(skill_server, "_extract_rpc_bodies", lambda _t, _r: [["x"]])
     monkeypatch.setattr(skill_server, "_fetch_scheduled_registry",
-                        AsyncMock(return_value=([{"id": "other"}], {})))
+                        AsyncMock(return_value=scheduled_read([{"id": "other"}])))
     monkeypatch.setattr(skill_server, "_fetch_scheduled_task_by_id",
-                        AsyncMock(return_value=({"task_state_id": 1}, {})))
+                        AsyncMock(return_value=scheduled_read({"id": "s1", "task_state_id": 1})))
     result = _run(_scheduled_delete(client, "s1"))
     assert "not_visible_active_or_unknown_by_id" in result[0].text
 
 
 def test_scheduled_delete_registry_empty_not_readable_by_id(monkeypatch):
     """registry 空 + 不可读 → registry_empty_not_readable_by_id。"""
-    client = SimpleNamespace(_batch_execute=AsyncMock(return_value=_ns(text="t")))
+    client = SimpleNamespace(_batch_execute=AsyncMock(return_value=scheduled_ack_response()))
     monkeypatch.setattr(skill_server, "_extract_rpc_bodies", lambda _t, _r: [["x"]])
     monkeypatch.setattr(skill_server, "_fetch_scheduled_registry",
-                        AsyncMock(return_value=([], {})))
+                        AsyncMock(return_value=scheduled_read([])))
     monkeypatch.setattr(skill_server, "_fetch_scheduled_task_by_id",
-                        AsyncMock(return_value=(None, {})))
+                        AsyncMock(return_value=scheduled_read(None)))
     result = _run(_scheduled_delete(client, "s1"))
     assert "registry_empty_not_readable_by_id" in result[0].text
 
 
 def test_scheduled_delete_not_visible_not_readable_by_id(monkeypatch):
     """registry 非空 + 不 visible + 不可读 → not_visible_not_readable_by_id。"""
-    client = SimpleNamespace(_batch_execute=AsyncMock(return_value=_ns(text="t")))
+    client = SimpleNamespace(_batch_execute=AsyncMock(return_value=scheduled_ack_response()))
     monkeypatch.setattr(skill_server, "_extract_rpc_bodies", lambda _t, _r: [["x"]])
     monkeypatch.setattr(skill_server, "_fetch_scheduled_registry",
-                        AsyncMock(return_value=([{"id": "other"}], {})))
+                        AsyncMock(return_value=scheduled_read([{"id": "other"}])))
     monkeypatch.setattr(skill_server, "_fetch_scheduled_task_by_id",
-                        AsyncMock(return_value=(None, {})))
+                        AsyncMock(return_value=scheduled_read(None)))
     result = _run(_scheduled_delete(client, "s1"))
     assert "not_visible_not_readable_by_id" in result[0].text
 

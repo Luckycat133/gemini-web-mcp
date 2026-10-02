@@ -378,15 +378,30 @@ def parse_tool_mode_entry(entry: Any) -> dict[str, Any]:
     }
 
 
-def _result_for_items(body: Any, index: int, item_parser: Callable[[Any], Any]) -> RPCParseResult:
+def _result_for_items(
+    body: Any, index: int, item_parser: Callable[[Any], Any], *, require_id: bool = False,
+    item_validator: Callable[[Any], bool] | None = None,
+) -> RPCParseResult:
     if not isinstance(body, list) or len(body) <= index or not isinstance(body[index], list):
         return RPCParseResult("changed_shape", raw_type=type(body).__name__)
-    values = [item_parser(item) for item in body[index]]
+    values = []
+    for row_index, item in enumerate(body[index]):
+        if not isinstance(item, list) or (item_validator is not None and not item_validator(item)):
+            return RPCParseResult("changed_shape", warnings=(f"invalid_entry:{row_index}",), raw_type=type(item).__name__)
+        try:
+            value = item_parser(item)
+        except (TypeError, ValueError, IndexError, OverflowError):
+            return RPCParseResult("changed_shape", warnings=(f"invalid_entry:{row_index}",), raw_type=type(item).__name__)
+        if require_id and (not isinstance(value, dict) or not isinstance(value.get("id"), str) or not value["id"].strip()):
+            return RPCParseResult("changed_shape", warnings=(f"missing_entry_id:{row_index}",), raw_type=type(item).__name__)
+        values.append(value)
     return RPCParseResult("success" if values else "empty", value=values)
 
 
 def parse_conversation_page(body: Any, **_: Any) -> RPCParseResult:
-    return _result_for_items(body, 2, parse_conversation_metadata)
+    if isinstance(body, list) and len(body) > 1 and body[1] is not None and not isinstance(body[1], str):
+        return RPCParseResult("changed_shape", warnings=("invalid_continuation",), raw_type=type(body[1]).__name__)
+    return _result_for_items(body, 2, parse_conversation_metadata, require_id=True)
 
 
 def parse_remy_goals_page(body: Any, **_: Any) -> RPCParseResult:
@@ -415,7 +430,18 @@ def parse_notebook_move(body: Any, **_: Any) -> RPCParseResult:
 
 
 def parse_scheduled_registry(body: Any, *, max_chars: int = 500, **_: Any) -> RPCParseResult:
-    return _result_for_items(body, 0, lambda item: parse_scheduled_action_task_entry(item, max_chars))
+    return _result_for_items(
+        body, 0, lambda item: parse_scheduled_action_task_entry(item, max_chars),
+        require_id=True, item_validator=_valid_scheduled_entry,
+    )
+
+
+def _valid_scheduled_entry(entry: Any) -> bool:
+    return (
+        isinstance(entry, list) and len(entry) >= 3 and isinstance(entry[0], str) and bool(entry[0].strip())
+        and isinstance(entry[1], list) and isinstance(entry[2], list)
+        and all(marker is None or isinstance(marker, list) for marker in entry[2][:5])
+    )
 
 
 def _scheduled_entry_from_body(body: Any) -> Any:
@@ -423,7 +449,7 @@ def _scheduled_entry_from_body(body: Any) -> Any:
         return None
     first = body[0]
     if isinstance(first, list) and first and isinstance(first[0], str):
-        return first
+        return first if len(body) == 1 else None
     if isinstance(first, str):
         return body
     return None
@@ -433,13 +459,14 @@ def parse_scheduled_get(body: Any, *, max_chars: int = 500, expected_id: str | N
     if body == []:
         return RPCParseResult("empty", value=None)
     entry = _scheduled_entry_from_body(body)
-    if entry is None:
+    if not _valid_scheduled_entry(entry):
         return RPCParseResult("changed_shape", raw_type=type(body).__name__)
     value = parse_scheduled_action_task_entry(entry, max_chars)
-    warnings: tuple[str, ...] = ()
+    if not isinstance(value.get("id"), str) or not value["id"].strip():
+        return RPCParseResult("changed_shape", value=value, warnings=("missing_entry_id",))
     if expected_id and value.get("id") != expected_id:
-        warnings = ("returned_id_mismatch",)
-    return RPCParseResult("success", value=value, warnings=warnings)
+        return RPCParseResult("changed_shape", value=value, warnings=("returned_id_mismatch",))
+    return RPCParseResult("success", value=value)
 
 
 def parse_scheduled_create(body: Any, **_: Any) -> RPCParseResult:

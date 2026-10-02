@@ -20,6 +20,7 @@ which primary tools are registered in the current process. The focused
 | Tool | Group | Purpose |
 |---|---|---|
 | `gemini_reset_session` | core | Clear one MCP/Gemini session and its configured remote-chat lifecycle; never changes agent memory or agent instructions |
+| `gemini_reset` | always | Clear all local sessions and reset the client; deletes non-retained remote chats and reports cleanup verification |
 | `gemini_cleanup_test_artifacts` | history | Find and optionally delete test chats/scheduled actions by marker |
 | `gemini_delete_chat` | history | Request remote chat deletion and report read-back evidence |
 | `gemini_delete_scheduled_action` | account | Delete a scheduled action by id |
@@ -83,7 +84,7 @@ which primary tools are registered in the current process. The focused
 | Tool | Group | Effect |
 |---|---|---|
 | `gemini_get_cookie_from_browser` | cookie | With explicit user approval already given for this task or earlier in the conversation, caches sensitive account-authentication material locally; restrict file access and never log, back up, or share it |
-| `gemini_reset` | always | Resets the local Gemini client connection; it does not delete agent memory or instructions |
+| `gemini_reset` | always | Destructive reset; local success can accompany partial remote cleanup, so preserve warnings and verification |
 
 ## Low-token skill server facade (`src.skill_server`)
 
@@ -111,6 +112,10 @@ markers; metadata-only cleanup is a fallback, and `scan_turns=true` requires exp
 profile tools never return Cookie values. On macOS, the system browser-credential prompt only unlocks the browser Cookie
 store for `browser-cookie3`; the workflow does not inspect arbitrary credential files. Authorization timeouts surface as
 `BROWSER_COOKIE_ACCESS_TIMEOUT`.
+
+An explicitly selected browser profile fails closed if unreadable or signed out. Changing authentication retires the old client and sessions, and cancels their cleanup with `cancellation_reason=authentication_context_changed`; it never runs those deletions under the new account. Same-material refresh preserves the active context. Cancelled work is not verified deletion.
+
+Content search exposes `read_failures` and incomplete coverage even when no title or body matched. A bounded history page with `operation_state=partial` and `next_offset=null` cannot be continued through the same cursor. Use the metadata scan with a larger source bound. Prompt changes use atomic, locked storage; an unreadable/corrupt library or failed save must be repaired before reporting success.
 
 ## Tool group selection (`GEMINI_TOOLS`)
 

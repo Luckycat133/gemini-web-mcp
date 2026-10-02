@@ -9,6 +9,7 @@ import socket
 import tempfile
 import threading
 import logging
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Optional, Any, Dict
 from urllib.parse import urlparse
@@ -47,7 +48,9 @@ def get_configured_proxy() -> Optional[str]:
             with socket.create_connection((host, port), timeout=0.25):
                 pass
         except OSError:
-            logger.warning("GEMINI_PROXY=%s is not reachable; continuing without proxy", proxy)
+            public_host = f"[{host}]" if ":" in host else host
+            endpoint = f"{parsed.scheme}://{public_host}:{port}"
+            logger.warning("GEMINI_PROXY endpoint %s is not reachable; continuing without proxy", endpoint)
             return None
     return proxy
 
@@ -74,6 +77,10 @@ def get_extra_cookies() -> Dict[str, str]:
         return {}
     cookie_data = get_cookie_manager().get_cookie()
     if not cookie_data:
+        return {}
+    # A Cookie update publishes its snapshot before the integration callback
+    # swaps the environment/client generation. Do not mix those two accounts.
+    if cookie_data.psid != os.environ.get("GEMINI_PSID", ""):
         return {}
     return cookie_data.extra_cookies
 
@@ -128,6 +135,23 @@ class ClientManager:
             if self._client is None:
                 self._create_client()
         return self._client
+
+    def authentication_matches(self, cookies: Mapping[str, str]) -> bool:
+        """Compare the active material without storing another credential copy."""
+        with self._lock:
+            current = getattr(self._client, "cookies", None)
+            if isinstance(current, Mapping):
+                return dict(current) == dict(cookies)
+            environment_cookies = {
+                name: os.environ[env]
+                for name, env in (
+                    ("__Secure-1PSID", "GEMINI_PSID"),
+                    ("__Secure-1PSIDTS", "GEMINI_PSIDTS"),
+                    ("__Secure-1PSIDCC", "GEMINI_PSIDCC"),
+                )
+                if os.environ.get(env)
+            }
+            return environment_cookies == dict(cookies)
 
     async def initialize(self) -> Any:
         """Initialize one current client and share the attempt across callers."""

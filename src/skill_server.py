@@ -5,7 +5,6 @@ Low-token, production-ready.
 """
 
 import asyncio
-import json
 import logging
 import os
 import threading
@@ -26,6 +25,7 @@ from .client_wrapper import (
     get_cookie_from_browser,
     get_cookie_status,
     get_gemini_client,
+    init_cookie_manager_integration,
     initialize_client,
     list_browser_cookie_profiles,
     list_sessions,
@@ -59,8 +59,10 @@ from .services import (
     artifact_exception_result,
     artifact_from_local_path,
     artifact_result,
-    classify_artifact_state,
+    classify_media_artifact_state,
     extract_response_artifacts,
+    media_artifacts,
+    media_operation_timeout,
     observed_backend_from_response,
     response_chat_id,
 )
@@ -191,76 +193,53 @@ def _ensure_config_dir() -> None:
 
 def _init_default_prompts() -> None:
     """Initialize with default prompts if none exist."""
+    from .services.prompts import PromptLibrary
+
     _ensure_config_dir()
-    if not PROMPTS_FILE.exists() and DEFAULT_PROMPTS_FILE.is_file():
-        PROMPTS_FILE.write_text(DEFAULT_PROMPTS_FILE.read_text(encoding="utf-8"), encoding="utf-8")
+    if DEFAULT_PROMPTS_FILE.is_file() and PromptLibrary(PROMPTS_FILE).seed_if_absent(DEFAULT_PROMPTS_FILE):
         logger.info("Initialized default prompts")
 
 
 class PromptManager:
-    """Simple prompt storage manager."""
+    """Name-based compatibility adapter over the shared Prompt storage."""
 
     def __init__(self, file_path: Path):
+        from .services.prompts import PromptLibrary
+
         self.file_path = file_path
-        self._data: dict[str, dict] = {}
-        self._load()
+        self._library = PromptLibrary(file_path)
+
+    @property
+    def _data(self) -> dict[str, dict]:
+        return self._library.data
+
+    @_data.setter
+    def _data(self, value: dict[str, dict]) -> None:
+        self._library.data = value
 
     def _load(self) -> None:
         """Load prompts from file."""
-        if self.file_path.exists():
-            try:
-                with open(self.file_path, "r", encoding="utf-8") as f:
-                    data = json.load(f)
-                    self._data = data.get("prompts", {})
-            except (json.JSONDecodeError, IOError) as e:
-                logger.error(f"Failed to load prompts: {e}")
-                self._data = {}
+        self._library.load()
 
     def _save(self) -> None:
         """Save prompts to file."""
-        _ensure_config_dir()
-        try:
-            with open(self.file_path, "w", encoding="utf-8") as f:
-                json.dump(
-                    {"version": "1.0", "prompts": self._data},
-                    f,
-                    ensure_ascii=False,
-                    indent=2,
-                )
-        except IOError as e:
-            logger.error(f"Failed to save prompts: {e}")
+        self._library.save()
 
     def list_all(self) -> list[dict]:
         """List all prompts."""
-        return sorted(self._data.values(), key=lambda x: x.get("name", "").lower())
+        return self._library.list(by_name=True)
 
     def get_by_name(self, name: str) -> Optional[dict]:
         """Get prompt by name."""
-        for p in self._data.values():
-            if p.get("name", "").lower() == name.lower():
-                return p
-        return None
+        return self._library.get_by_name(name)
 
     def create(self, name: str, content: str, category: str = "general") -> str:
         """Create new prompt."""
-        prompt_id = name.lower().replace(" ", "_")
-        self._data[prompt_id] = {
-            "id": prompt_id,
-            "name": name,
-            "content": content,
-            "category": category,
-        }
-        self._save()
-        return prompt_id
+        return self._library.create(name, content, category, unique_name=True, save=self._save)
 
     def delete(self, name: str) -> bool:
         """Delete prompt by name."""
-        prompt = self.get_by_name(name)
-        if prompt:
-            del self._data[prompt["id"]]
-            self._save()
-            return True
-        return False
+        return self._library.delete(name, by_name=True, save=self._save)
 
 
 _prompt_manager: Optional[PromptManager] = None
@@ -512,6 +491,8 @@ async def _history_search_text(
     )
     assert result.data is not None
     lines = []
+    if not result.ok and result.error is not None:
+        lines.append(f"Content search failed: {result.error.message}")
     for match in result.data["matches"]:
         lines.append(f"{match['title']} ({match['id']})")
         for snippet in match.get("snippets", [])[:3]:
@@ -522,6 +503,8 @@ async def _history_search_text(
                     f"  turn {snippet.get('turn_index')} {snippet.get('role')}: "
                     f"{_truncate_text(snippet.get('text', ''), 240)}"
                 )
+    if result.data.get("read_failures"):
+        lines.append(f"Content search incomplete: {len(result.data['read_failures'])} chat reads failed.")
     if result.data["has_more"]:
         lines.append(f"next_offset={result.data['next_offset']}")
     return domain_text(result, "\n".join(lines) if lines else "No matches", use_result_data=True)
@@ -990,16 +973,16 @@ def _skill_media_result(
     media_type: str,
 ) -> tuple[ArtifactResultData, Any]:
     observed_backend = observed_backend_from_response(response)
-    artifacts = extract_response_artifacts(
+    artifacts = media_artifacts(extract_response_artifacts(
         response,
         media_type=media_type,
         requested_backend=requested_model,
         request_model=request_model,
         effective_backend=effective_backend,
         observed_backend=observed_backend,
-    )
+    ), media_type)
     data = ArtifactResultData(
-        state=classify_artifact_state(response, artifacts),
+        state=classify_media_artifact_state(response, artifacts, media_type),
         artifacts=artifacts,
         input_artifacts=input_artifacts,
         requested_model=requested_model,
@@ -1069,12 +1052,18 @@ async def create(
         files = [safe_image_path] if safe_image_path else None
         input_artifacts = _skill_input_artifacts(safe_image_path, requested_model, request_model, effective_backend)
 
-        response = await client.generate_content(
-            prompt=media_prompt,
-            files=files,
-            model=request_model,
-            thinking_level=thinking_level,
-        )
+        timeout = media_operation_timeout(media_type)
+        from .thinking_client import client_request_timeout
+
+        with client_request_timeout(client, timeout):
+            async with asyncio.timeout(timeout):
+                response = await client.generate_content(
+                    prompt=media_prompt,
+                    files=files,
+                    model=request_model,
+                    thinking_level=thinking_level,
+                    timeout=timeout,
+                )
         input_artifacts = _skill_input_artifacts(
             safe_image_path,
             requested_model,
@@ -1175,12 +1164,18 @@ async def edit(
             effective_backend,
         )
 
-        response = await client.generate_content(
-            prompt=f"Edit this image: {prompt}",
-            files=[safe_image_path],
-            model=request_model,
-            thinking_level=thinking_level,
-        )
+        timeout = media_operation_timeout("image_edit")
+        from .thinking_client import client_request_timeout
+
+        with client_request_timeout(client, timeout):
+            async with asyncio.timeout(timeout):
+                response = await client.generate_content(
+                    prompt=f"Edit this image: {prompt}",
+                    files=[safe_image_path],
+                    model=request_model,
+                    thinking_level=thinking_level,
+                    timeout=timeout,
+                )
         input_artifacts = _skill_input_artifacts(
             safe_image_path or image_path,
             requested_model,
@@ -1207,6 +1202,10 @@ async def edit(
             backend_label=effective_backend,
             backend_note=media_request["note"],
         )
+        if data.state == ArtifactState.EMPTY:
+            content[0].text += "\n\nArtifact state: empty (no usable edited image URI was returned)."
+        elif data.state == ArtifactState.QUEUED:
+            content[0].text += "\n\nArtifact state: queued (no completed image is available yet)."
         content = append_artifact_block(content, data.artifacts)
         return attach_domain_result(content, result, use_result_data=True)
 
@@ -1591,6 +1590,7 @@ def _format_response(
 def main() -> None:
     """Run the server."""
     _init_default_prompts()
+    init_cookie_manager_integration()
     mcp.run()
 
 
