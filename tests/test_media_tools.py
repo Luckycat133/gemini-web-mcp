@@ -139,15 +139,26 @@ def _patch_media_env(monkeypatch, client, *, captured_schedule=None,
             captured_cleanup.append(client_arg)
     monkeypatch.setattr(media_tools, "cleanup_due_remote_chats", fake_cleanup)
 
-    def fake_schedule(response, *, retain_chat, delete_after_seconds, source):
+    async def fake_schedule(response, *, owns_chat, retain_chat=False, preserve_for_recovery=False,
+                            delete_after_seconds=None, source="", client=None):
         if captured_schedule is not None:
             captured_schedule.append({
                 "response": response,
                 "retain_chat": retain_chat,
+                "owns_chat": owns_chat,
+                "preserve_for_recovery": preserve_for_recovery,
                 "delete_after_seconds": delete_after_seconds,
                 "source": source,
+                "client": client,
             })
-    monkeypatch.setattr(media_tools, "schedule_remote_chat_cleanup_from_response",
+        from tests.media_fixtures import fake_finalize_generated_cleanup
+
+        return await fake_finalize_generated_cleanup(
+            response, owns_chat=owns_chat, retain_chat=retain_chat,
+            preserve_for_recovery=preserve_for_recovery, delete_after_seconds=delete_after_seconds,
+            source=source, client=client,
+        )
+    monkeypatch.setattr(media_tools, "finalize_generated_chat_cleanup",
                         fake_schedule)
 
     if fetch_music is not None:
@@ -609,6 +620,22 @@ def test_generate_media_generic_exception_returns_error_message_with_backend(mon
     assert "后端: Gemini Web generic chat" in text
     assert "❌ video 生成失败: upstream aborted" in text
     assert "通用 generate_content" in text
+    assert "显式选择 Gemini Web 原生工具模式" not in text
+
+
+@pytest.mark.parametrize("media_type", ["image", "music"])
+def test_native_media_failure_reports_selected_mode_without_claiming_artifact(monkeypatch, media_type):
+    client = _FakeMediaClient(raise_exc=RuntimeError("upstream aborted"))
+    _patch_media_env(monkeypatch, client)
+
+    async def run():
+        return await _call_tool(_make_mcp(), "gemini_generate_media", prompt="fixture", media_type=media_type)
+
+    content = asyncio.run(run())
+    assert "显式选择 Gemini Web 原生工具模式" in content[0].text
+    assert client.captured_generate_kwargs["media_mode"] == media_type
+    assert content[0].meta["domain_result"]["ok"] is False
+    assert content[0].meta["domain_result"]["data"]["artifacts"] == []
 
 
 def test_generate_media_exception_skips_schedule_cleanup(monkeypatch):
@@ -687,10 +714,10 @@ def test_generate_media_queued_response_is_not_reported_as_empty(monkeypatch):
     assert domain["ok"] is True
     assert domain["data"]["state"] == "queued"
     assert domain["meta"]["operation_state"] == "queued"
-    assert scheduled[0]["retain_chat"] is True
+    assert scheduled[0]["preserve_for_recovery"] is True
 
 
-def test_empty_media_response_retains_chat_for_recovery(monkeypatch):
+def test_definitive_empty_media_response_can_finalize_owned_chat(monkeypatch):
     client = _FakeMediaClient(response_text="no media")
     scheduled = []
     _patch_media_env(monkeypatch, client, captured_schedule=scheduled)
@@ -701,7 +728,10 @@ def test_empty_media_response_retains_chat_for_recovery(monkeypatch):
 
     result = asyncio.run(run())
     assert result[0].meta["domain_result"]["data"]["state"] == "empty"
-    assert scheduled[0]["retain_chat"] is True
+    assert scheduled[0]["owns_chat"] is True
+    assert scheduled[0]["retain_chat"] is False
+    assert scheduled[0]["preserve_for_recovery"] is False
+    assert result[0].meta["domain_result"]["meta"]["details"]["cleanup"]["state"] == "completed"
 
 
 def test_generate_media_remote_uri_includes_backend_evidence(monkeypatch):
@@ -1091,16 +1121,14 @@ def test_generate_media_empty_save_result_is_explicit_save_failure(monkeypatch):
     assert domain["meta"]["details"]["save_failure_count"] == 1
 
 
-def test_generate_media_music_recovery_failure_logs_warning_and_continues(monkeypatch):
-    """_fetch_music_media_from_chat 抛异常 → 工具不崩溃，saved_lines=[]。
-
-    异常被 try/except 吞咽（line 298-299），仅 logger.warning。
-    """
+def test_generate_media_music_recovery_failure_returns_error_and_retains_chat(monkeypatch):
+    """Unavailable music recovery is not a definitive empty result."""
     client = _FakeMediaClient(response_text="ok", media=[])
+    cleanup = []
 
     async def fake_fetch(client_arg, cid):
         raise RuntimeError("batch_execute failed")
-    _patch_media_env(monkeypatch, client, fetch_music=fake_fetch)
+    _patch_media_env(monkeypatch, client, fetch_music=fake_fetch, captured_schedule=cleanup)
 
     mcp = _make_mcp()
 
@@ -1109,7 +1137,12 @@ def test_generate_media_music_recovery_failure_logs_warning_and_continues(monkey
                                 prompt="x", media_type="music")
 
     result = asyncio.run(run())
-    # 不崩溃，返回正常 parsed 文本（无 Saved files）
+    domain = result[0].meta["domain_result"]
+    assert domain["ok"] is False
+    assert domain["data"]["state"] == "failed"
+    assert domain["error"]["code"] != "ARTIFACT_NOT_RETURNED"
+    assert domain["meta"]["details"]["cleanup"]["state"] == "retained"
+    assert cleanup[0]["preserve_for_recovery"] is True
     assert "后端: Lyria" in result[0].text
     assert "Saved files:" not in result[0].text
 

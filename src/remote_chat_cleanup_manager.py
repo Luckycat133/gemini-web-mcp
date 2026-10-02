@@ -223,6 +223,7 @@ class RemoteChatCleanupManager:
             )
 
         delete_at = 0.0
+        explicit_delay = delete_after_seconds is not None
         if not retain_chat:
             if delete_after_seconds is None and self._retention_provider is not None:
                 delete_after_seconds = self._retention_provider()
@@ -245,6 +246,7 @@ class RemoteChatCleanupManager:
 
             if retain_chat:
                 self._pending_cleanup.pop(cid, None)
+                self._cancel_delayed_cleanup_locked(cid)
                 observation = CleanupObservation(
                     state=CleanupState.RETAINED,
                     upstream_chat_id=cid,
@@ -254,7 +256,8 @@ class RemoteChatCleanupManager:
                 return observation
 
             pending = self._pending_cleanup.get(cid)
-            if pending is not None:
+            rescheduled = pending is not None and explicit_delay and delete_at < pending.delete_at
+            if pending is not None and not rescheduled:
                 previous = self._cleanup_observations.get(cid)
                 if previous is not None and previous.state is CleanupState.FAILED:
                     observation = replace(previous, idempotent=True)
@@ -271,16 +274,23 @@ class RemoteChatCleanupManager:
                 self._store_observation_locked(cid, observation, generation)
                 return observation
 
-            pending_task = CleanupTask(
-                delete_at=delete_at,
-                source=source,
-                authentication_generation=generation,
-            )
-            self._pending_cleanup[cid] = pending_task
+            if pending is None:
+                pending = CleanupTask(
+                    delete_at=delete_at,
+                    source=source,
+                    authentication_generation=generation,
+                )
+                self._pending_cleanup[cid] = pending
+            else:
+                pending.delete_at = delete_at
+                self._cancel_delayed_cleanup_locked(cid)
             observation = CleanupObservation(
                 state=CleanupState.PENDING,
                 upstream_chat_id=cid,
-                source=source,
+                attempts=pending.attempts,
+                diagnostic_id=pending.last_diagnostic_id,
+                idempotent=rescheduled,
+                source=pending.source,
                 delete_at=delete_at,
             )
             self._store_observation_locked(cid, observation, generation)
@@ -291,12 +301,26 @@ class RemoteChatCleanupManager:
             return observation
         task = loop.create_task(self._delete_after_delay(cid, delete_at, generation))
         with self._lock:
-            if generation == self._authentication_generation and cid in self._pending_cleanup:
+            pending = self._pending_cleanup.get(cid)
+            if generation == self._authentication_generation and pending is not None and pending.delete_at == delete_at:
                 self._delayed_cleanup[cid] = task
             else:
                 task.cancel()
         task.add_done_callback(lambda completed: self._finish_delay(cid, completed))
         return observation
+
+    def _cancel_delayed_cleanup_locked(self, cid: str) -> None:
+        task = self._delayed_cleanup.pop(cid, None)
+        if task is None or task.done() or task.get_loop().is_closed():
+            return
+        try:
+            current_loop = asyncio.get_running_loop()
+        except RuntimeError:
+            current_loop = None
+        if task.get_loop() is current_loop:
+            task.cancel()
+        else:
+            task.get_loop().call_soon_threadsafe(task.cancel)
 
     def _finish_delay(self, cid: str, task: asyncio.Task[None]) -> None:
         with self._lock:
@@ -318,7 +342,13 @@ class RemoteChatCleanupManager:
             ):
                 return
 
-        await self.delete_chat_result(cid, authentication_generation=generation)
+            expected_due = (pending, delete_at, pending.attempts)
+
+        await self._delete_chat_result(
+            cid,
+            authentication_generation=pending.authentication_generation,
+            expected_due=expected_due,
+        )
 
     async def delete_chat(
         self,
@@ -344,17 +374,52 @@ class RemoteChatCleanupManager:
         client_initializer: Callable[[], Any] | None = None,
         *,
         authentication_generation: int | None = None,
+        source: str = "",
     ) -> CleanupObservation:
         """Delete once per upstream ID and return public-safe cleanup evidence."""
+        observation = await self._delete_chat_result(
+            cid,
+            client=client,
+            client_initializer=client_initializer,
+            authentication_generation=authentication_generation,
+            source=source,
+        )
+        assert observation is not None
+        return observation
+
+    async def _delete_chat_result(
+        self,
+        cid: str | None,
+        client: Any = None,
+        client_initializer: Callable[[], Any] | None = None,
+        *,
+        authentication_generation: int | None = None,
+        expected_due: tuple[CleanupTask, float, int] | None = None,
+        source: str = "",
+    ) -> CleanupObservation | None:
+        """Claim automatic work only while its original due decision is current."""
         if cid is None:
-            return CleanupObservation()
+            return CleanupObservation(source=source)
         if not is_valid_remote_chat_id(cid):
-            return CleanupObservation(state=CleanupState.INVALID_ID)
+            return CleanupObservation(state=CleanupState.INVALID_ID, source=source)
 
         with self._lock:
             generation = self._authentication_generation if authentication_generation is None else authentication_generation
             if generation != self._authentication_generation:
                 return self._cancelled_for_generation_locked(cid, generation)
+            if expected_due is not None:
+                expected_task, delete_at, attempts = expected_due
+                pending = self._pending_cleanup.get(cid)
+                # Validate and claim under the same lock. A retained, replaced,
+                # rescheduled, or already attempted job invalidates this snapshot.
+                if (
+                    pending is not expected_task
+                    or pending.delete_at != delete_at
+                    or pending.delete_at > time.time()
+                    or pending.attempts != attempts
+                    or cid in self._inflight_cleanup
+                ):
+                    return None
             completed = self._completed_cleanup.get(cid)
             if completed is not None:
                 observation = replace(
@@ -368,12 +433,15 @@ class RemoteChatCleanupManager:
             task = self._inflight_cleanup.get(cid)
             joined_existing = task is not None
             if task is None:
+                pending = self._pending_cleanup.get(cid)
+                delete_source = pending.source if pending is not None else source
                 task = asyncio.create_task(
                     self._execute_delete(
                         cid,
                         client=client,
                         client_initializer=client_initializer,
                         authentication_generation=generation,
+                        source=delete_source,
                     )
                 )
                 self._inflight_cleanup[cid] = task
@@ -409,12 +477,12 @@ class RemoteChatCleanupManager:
         client: Any,
         client_initializer: Callable[[], Any] | None,
         authentication_generation: int,
+        source: str,
     ) -> CleanupObservation:
         with self._lock:
             if authentication_generation != self._authentication_generation:
                 return self._cancelled_for_generation_locked(cid, authentication_generation)
             pending = self._pending_cleanup.get(cid)
-            source = pending.source if pending is not None else ""
             attempts = (pending.attempts if pending is not None else 0) + 1
             if pending is not None:
                 pending.attempts = attempts
@@ -484,6 +552,7 @@ class RemoteChatCleanupManager:
             if authentication_generation != self._authentication_generation:
                 return self._cancelled_for_generation_locked(cid, authentication_generation)
             self._pending_cleanup.pop(cid, None)
+            self._cancel_delayed_cleanup_locked(cid)
             self._completed_cleanup[cid] = observation
             self._store_observation_locked(cid, observation, authentication_generation)
 
@@ -552,6 +621,47 @@ class RemoteChatCleanupManager:
             error=error,
         )
 
+    def record_cleanup_wait_timeout(
+        self,
+        cid: str,
+        *,
+        source: str = "",
+        authentication_generation: int | None = None,
+    ) -> CleanupObservation:
+        """Record an expired caller wait without cancelling or retrying its worker."""
+        if not is_valid_remote_chat_id(cid):
+            return CleanupObservation(state=CleanupState.INVALID_ID, source=source)
+        with self._lock:
+            generation = self._authentication_generation if authentication_generation is None else authentication_generation
+            if generation != self._authentication_generation:
+                return self._cancelled_for_generation_locked(cid, generation)
+            observed = self._cleanup_observations.get(cid)
+            if observed is not None and observed.state is not CleanupState.PENDING:
+                return observed
+            attempts = observed.attempts if observed is not None else 0
+            diagnostic_id = (observed.diagnostic_id if observed is not None else None) or new_diagnostic_id()
+            pending = self._pending_cleanup.get(cid)
+            if pending is None:
+                pending = CleanupTask(
+                    delete_at=time.time(),
+                    source=observed.source if observed is not None else source,
+                    attempts=attempts,
+                    authentication_generation=generation,
+                )
+                self._pending_cleanup[cid] = pending
+            pending.last_diagnostic_id = diagnostic_id
+            observation = CleanupObservation(
+                state=CleanupState.PENDING,
+                upstream_chat_id=cid,
+                attempts=attempts,
+                diagnostic_id=diagnostic_id,
+                source=pending.source,
+                delete_at=pending.delete_at,
+            )
+            self._store_observation_locked(cid, observation, generation)
+        logger.warning("Remote cleanup wait timed out cid=%s diagnostic_id=%s", cid, diagnostic_id)
+        return observation
+
     async def cleanup_due_chats(
         self,
         client: Any = None,
@@ -579,18 +689,23 @@ class RemoteChatCleanupManager:
         with self._lock:
             if authentication_generation is not None and authentication_generation != self._authentication_generation:
                 return ()
-            due_cids = [(cid, data.authentication_generation) for cid, data in self._pending_cleanup.items() if data.delete_at <= now]
+            due_cids = [
+                (cid, data, data.delete_at, data.attempts)
+                for cid, data in self._pending_cleanup.items()
+                if data.delete_at <= now and cid not in self._inflight_cleanup
+            ]
 
         results = []
-        for cid, generation in due_cids:
-            results.append(
-                await self.delete_chat_result(
-                    cid,
-                    client=client,
-                    client_initializer=client_initializer,
-                    authentication_generation=generation,
-                )
+        for cid, pending, delete_at, attempts in due_cids:
+            observation = await self._delete_chat_result(
+                cid,
+                client=client,
+                client_initializer=client_initializer,
+                authentication_generation=pending.authentication_generation,
+                expected_due=(pending, delete_at, attempts),
             )
+            if observation is not None:
+                results.append(observation)
         return tuple(results)
 
     def list_pending_cleanup(self) -> dict[str, CleanupTask]:

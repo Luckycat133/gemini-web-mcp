@@ -40,6 +40,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 from tests._account_rpc_fakes import scheduled_ack_response, scheduled_read
+from tests.media_fixtures import fake_finalize_generated_cleanup
 
 import src.skill_server as skill_server
 from src.session_manager import SessionService
@@ -495,6 +496,7 @@ def _patch_client_seams(monkeypatch, client=None):
     monkeypatch.setattr(skill_server, "get_gemini_client", lambda: client)
     monkeypatch.setattr(skill_server, "initialize_client", AsyncMock(return_value=None))
     monkeypatch.setattr(skill_server, "cleanup_due_remote_chats", AsyncMock(return_value=None))
+    monkeypatch.setattr(skill_server, "finalize_generated_chat_cleanup", fake_finalize_generated_cleanup)
 
 
 def test_chat_returns_error_when_image_path_invalid(monkeypatch):
@@ -1318,16 +1320,20 @@ def test_compact_creation_retains_unfinished_chat(monkeypatch):
     _patch_client_seams(monkeypatch, client)
     scheduled = []
     monkeypatch.setattr(skill_server, "validate_optional_image_path", lambda _path: (True, None, None))
+    async def finalize(response, **kwargs):
+        scheduled.append(kwargs)
+        return await fake_finalize_generated_cleanup(response, **kwargs)
+
     monkeypatch.setattr(
         skill_server,
-        "schedule_remote_chat_cleanup_from_response",
-        lambda _response, **kwargs: scheduled.append(kwargs),
+        "finalize_generated_chat_cleanup",
+        finalize,
     )
 
     result = _run(skill_server.create(prompt="a short video", type="video"))
 
     assert result[0].meta["domain_result"]["data"]["state"] == "queued"
-    assert scheduled == [{"retain_chat": True, "source": "skill_create:video"}]
+    assert scheduled == [{"owns_chat": True, "preserve_for_recovery": True, "source": "skill_create:video", "client": client}]
 
 
 def test_create_top_level_exception(monkeypatch):
@@ -1581,12 +1587,12 @@ def test_create_image_happy_path(monkeypatch):
     assert "image generated" in text
     assert "[Image 1]: http://img" in text
     kwargs = client.generate_content.call_args.kwargs
-    assert kwargs["prompt"] == "Generate image: a cat"
+    assert kwargs["prompt"] == "Generate an image. Prompt: a cat"
     assert kwargs["model"] == "gemini-3-flash"
 
 
 def test_create_music_happy_path(monkeypatch):
-    """create 生成 music：prompt 前缀为 'Create music: '。"""
+    """create 与 primary 共用音乐生成请求。"""
     response = _ns(text="music done", audio_url="http://audio")
     client = SimpleNamespace(generate_content=AsyncMock(return_value=response))
     _patch_client_seams(monkeypatch, client)
@@ -1602,7 +1608,7 @@ def test_create_music_happy_path(monkeypatch):
     result = _run(skill_server.create(prompt="jazz", type="music", model="pro",
                                        thinking_level="extended"))
     kwargs = client.generate_content.call_args.kwargs
-    assert kwargs["prompt"] == "Create music: jazz"
+    assert kwargs["prompt"] == "Create music/audio using Gemini's music generation capability. Prompt: jazz"
     assert "[Audio]: http://audio" in result[0].text
 
 

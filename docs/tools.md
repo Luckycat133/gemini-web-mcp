@@ -299,7 +299,7 @@ report 本地产物；history 的 list/search/read/export/delete 也在 primary 
 
 ### gemini_generate_media
 
-通用媒体生成。
+生成并保存媒体。图片和音乐请求显式选择 Gemini Web 原生生成模式；视频参数保留现有兼容路线。
 
 **参数：**
 - `prompt`: str - 生成描述
@@ -307,6 +307,11 @@ report 本地产物；history 的 list/search/read/export/delete 也在 primary 
 - `model`: str - MCP 别名或运行时模型名 (默认: `flash`)
 - `thinking_level`: str - `standard` / `extended` (默认: `standard`)
 - `image_path`: str - 可选参考图片
+- `timeout_seconds`: int - 生成、恢复读取、验证和保存的总时限
+- `output_dir`: str - 输出目录，默认 `generated_media/`
+- `filename`: str - 可选单个文件名，已有文件不会被覆盖
+- `retain_chat`: bool - 保留本次生成的源会话，默认 `false`
+- `delete_after_seconds`: int | None - 显式延迟清理；正值覆盖立即清理，任务仅保存在当前进程
 
 **真实网页行为：**
 - `image`: Flash-Lite 使用 `Nano Banana 2 Lite`；Flash / Pro 使用 `Nano Banana 2`
@@ -314,12 +319,17 @@ report 本地产物；history 的 list/search/read/export/delete 也在 primary 
 - `video`: 当前通用聊天路线可能只返回文本；需要结构化视频 Artifact 才算成功，已验证的网页入口是 Gemini Omni 专用视频模式
 - `image + model=pro` 不会直接切换首轮图像后端；Pro redo 是网页生成后的二次操作
 
-**artifact 行为：** 成功响应会公开远端 URI；指定输出目录后，实际写入的文件会检查存在性、
+**artifact 行为：** primary 与 compact 均默认保存到本地；响应保留远端 URI，实际写入的文件会检查存在性、
 非零大小、真实格式和解码/流证据。排队、空响应和保存失败有独立结构化状态。
 `prompt` 不可为空；`filename` 只能是单个文件名，若目标文件已存在会另取不冲突的名字。
-排队或未返回媒体的聊天会保留以便回看，结构化结果中的 `source_chat_id` 只在上游实际提供时出现。
+排队、仅远端、保存失败或尚未验证的产物会保留聊天以便恢复，结构化结果中的 `source_chat_id` 只在上游实际提供时出现。
+上游已结束且所有输出都已本地保存并验证，或响应/可信读回明确没有生成产物时，默认立即清理本次新建的源聊天。
+即使部分文件已可用，上游仍明确排队时也会保留源聊天；音乐恢复读取失败不会被当成空结果。
+清理最多等待 10 秒，结果在 `_meta.domain_result.meta.details.cleanup`；只有 `completed` / `already_completed` 表示删除已读回验证。
+`pending` / `failed` / `cancelled` 不表示已删除，也不会改写已验证本地文件的成功状态。显式保留优先。
 只有请求类型匹配的输出才计入完成状态，图片不能满足视频或音乐请求；音乐完成需要音频，封面视频是辅助产物。
-音乐的音频和视频分别选择不冲突的路径。`timeout_seconds` 覆盖生成、恢复读取、验证和保存；超时会保留已观察的 URI/聊天 ID，避免自动重复生成。超时/看门狗参数按请求隔离，不会改写其他并发请求的默认值。
+搜索返回的 `WebImage` 和聊天文字不能计作生成图片。
+音乐的音频和视频分别选择不冲突的路径，并禁用未请求的缩略图下载，避免覆盖已有文件。`timeout_seconds` 覆盖生成、恢复读取、验证和保存；超时会保留已观察的 URI/聊天 ID，避免自动重复生成。超时/看门狗参数按请求隔离，不会改写其他并发请求的默认值。
 
 ### gemini_generate_music
 
@@ -330,8 +340,10 @@ report 本地产物；history 的 list/search/read/export/delete 也在 primary 
 - `model`: str - MCP 别名或运行时模型名 (默认: `flash`)
 - `thinking_level`: str - `standard` / `extended` (默认: `extended`)
 
-媒体工具通过 Gemini Web 通用生成接口触发图像、视频和音乐能力。
+音乐便捷工具还支持上述 `timeout_seconds`、`output_dir`、`filename`、`retain_chat` 和 `delete_after_seconds`。
+图片和音乐在现有传输中携带网页原生模式选择，服务端仍决定实际后端、账号可用性与输出。
 账号可用性、上游排队和响应形状仍由 Gemini Web 决定。
+公开字段证据和实测边界见 [原生媒体模式](native-media-mode.md)。
 
 ---
 
@@ -831,8 +843,8 @@ macOS Keychain 读取由 `GEMINI_BROWSER_COOKIE_TIMEOUT_SECONDS` 限制，默认
 | Tool | Purpose |
 |------|---------|
 | `chat` | 对话，支持图片和 session |
-| `create` | 生成图片、视频或音乐 |
-| `edit` | 基于参考图片编辑 |
+| `create` | 原生图片/音乐生成并保存验证；视频保留兼容参数 |
+| `edit` | 原生图片模式编辑参考图并保存验证 |
 | `session` | 创建、发送、列出、重置本地多轮会话 |
 | `history` | 远端 Gemini Web 历史对话 list/search/read/export/delete 和测试产物清理 |
 | `cleanup` | dry-run 或删除匹配显式 marker 的测试聊天/定时任务 |
@@ -843,6 +855,9 @@ macOS Keychain 读取由 `GEMINI_BROWSER_COOKIE_TIMEOUT_SECONDS` 限制，默认
 | `doctor` | 只读预检工具组、Cookie 状态、浏览器 profile 对齐和媒体校验依赖，不输出 Cookie 值 |
 
 compact `session` 支持 `create` / `send` / `list` / `reset`（或 `reset_one`）/ `reset_all`。`reset` 与 `reset_one` 都必须提供 `session_id`，且只删除该会话；只有显式 `reset_all` 才会清空全部会话并重置客户端。旧的 `action="reset"` 保留为单会话别名，不再把缺少 ID 解释为全量重置。
+
+compact `create` / `edit` 复用 `src/services/media_generation.py`，默认在服务进程工作目录的 `generated_media/` 保存并验证。
+源聊天清理与 primary 采用相同规则及结构化状态。需要自定义目录、显式保留或延迟时使用 primary 媒体工具。
 
 compact 的 history/account/scheduled/doctor/cleanup 直接导入共享 service 和 RPC parser；加载
 `src.skill_server` 不再初始化 4k 行的 `src.tools.manage` 兼容适配器。

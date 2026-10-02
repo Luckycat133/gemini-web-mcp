@@ -373,6 +373,30 @@ async def _initialize_cleanup_client() -> Any:
     return initialized if initialized is not None else client
 
 
+async def finalize_generated_chat_cleanup(
+    response: Any,
+    *,
+    owns_chat: bool,
+    retain_chat: bool = False,
+    preserve_for_recovery: bool = False,
+    delete_after_seconds: Optional[int] = None,
+    source: str = "",
+    client: Any = None,
+) -> CleanupObservation:
+    """Finalize a newly generated chat after artifact verification or recovery policy."""
+    return await _lifecycle_service.finalize_generated_chat(
+        response,
+        owns_chat=owns_chat,
+        retain_chat=retain_chat,
+        preserve_for_recovery=preserve_for_recovery,
+        delete_after_seconds=delete_after_seconds,
+        source=source,
+        client=client,
+        client_initializer=_initialize_cleanup_client if client is None else None,
+        authentication_generation=_request_cleanup_generation(),
+    )
+
+
 async def delete_remote_chat(cid: Optional[str], client: Any = None) -> bool:
     """立即删除远端 Gemini chat。"""
     observation = await delete_remote_chat_result(cid, client=client)

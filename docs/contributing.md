@@ -77,7 +77,7 @@ mcp dev src/server.py
 
 - 测试文件放 `tests/test_*.py`，名字描述被测行为
 - 工具面变更要同时断言**工具注册**和 **MCP annotations**（`readOnlyHint` / `destructiveHint` / `openWorldHint` 等）
-- 用户可见能力或安全元数据变更时，同步更新 [evaluations/gemini_web_mcp_contract.xml](../evaluations/gemini_web_mcp_contract.xml)（当前 17 个只读 QA）
+- 用户可见能力或安全元数据变更时，同步更新 [evaluations/gemini_web_mcp_contract.xml](../evaluations/gemini_web_mcp_contract.xml) 的工具选择和安全语义 QA；离线契约与模型实际执行结果分开报告
 - `scripts/run_contract_checklist.py` 是快速、可诊断的架构契约门禁；它不替代 Python 3.11/3.12 上的全量测试
 - 交付前必跑：
 

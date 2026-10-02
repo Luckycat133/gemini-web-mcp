@@ -96,7 +96,7 @@ def test_deadline_bounds_real_upstream_206_polling_and_preserves_remote_uris(mon
     assert domain["meta"]["operation_state"] == "timed_out"
     assert domain["data"]["source_chat_id"] == "c_media1"
     assert {artifact["uri"] for artifact in domain["data"]["artifacts"]} == {"https://cdn.test/song.mp3", "https://cdn.test/song.mp4"}
-    assert scheduled[0]["retain_chat"] is True
+    assert scheduled[0]["preserve_for_recovery"] is True
     assert all(session.closed and session.requests == 1 for session in sessions)
     if pending_type == "video":
         audio = next(artifact for artifact in domain["data"]["artifacts"] if artifact["kind"] == "audio")
@@ -134,7 +134,7 @@ def test_generation_and_save_share_one_deadline(monkeypatch):
     domain = asyncio.run(run())[0].meta["domain_result"]
     assert domain["error"]["code"] == "TIMED_OUT"
     assert domain["data"]["artifacts"][0]["uri"] == SlowImage.url
-    assert scheduled[0]["retain_chat"] is True
+    assert scheduled[0]["preserve_for_recovery"] is True
     assert cancelled == [True]
 
 
@@ -158,7 +158,7 @@ def test_music_chat_recovery_uses_the_same_deadline(monkeypatch):
     domain = asyncio.run(run())[0].meta["domain_result"]
     assert domain["error"]["code"] == "TIMED_OUT"
     assert domain["data"]["source_chat_id"] == "c_media1"
-    assert scheduled[0]["retain_chat"] is True
+    assert scheduled[0]["preserve_for_recovery"] is True
     assert cancelled == [True]
 
 

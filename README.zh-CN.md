@@ -293,11 +293,13 @@ gemini-mcp-skill-server
 `learning_mode=interactive_quiz|flashcards|practice_test|study_guide` 来对齐
 Gemini Web `学习辅导` 输入模式。
 
-默认情况下，工具调用产生的 Gemini 网页端对话会在一段时间后自动删除。需要保留时传入 `retain_chat=true`；需要调整本次调用保留时间时传入 `delete_after_seconds`。
+普通对话工具默认按保留时间自动清理网页端对话。需要保留时传入 `retain_chat=true`；需要调整本次调用保留时间时传入 `delete_after_seconds`。
 
 ### 媒体工具
 - `gemini_generate_media`: 图像/音乐生成；`media_type="video"` 仅保留兼容入口，必须检查实际产物
 - `gemini_generate_music`: 音乐生成便捷工具；不要从模型别名推断精确 Lyria 版本
+
+图片/编辑和音乐显式选择网页原生模式，primary 与 compact 默认保存到本地。上游已结束且文件全部验证通过，或响应明确为空时，会立即尝试清理本次新建的源会话，并返回独立删除读回状态。排队、未保存和恢复读取失败会保留会话；primary 可显式保留或延迟。新模式路线仍待账号实测，详见[原生媒体与清理](docs/native-media-mode.md)。
 
 ### 文件和 URL
 - `gemini_upload_file`: 上传并分析本地文件

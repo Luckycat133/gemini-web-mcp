@@ -14,7 +14,7 @@ def _qa_pairs():
 def test_gemini_web_mcp_contract_evaluation_shape():
     pairs = _qa_pairs()
 
-    assert len(pairs) == 30
+    assert len(pairs) == 34
     for pair in pairs:
         question = pair.findtext("question")
         answer = pair.findtext("answer")
@@ -103,3 +103,5 @@ def test_gemini_web_mcp_contract_answers_match_static_manifest():
 
     assert "scheduled_action_create_and_cleanup" in workflow_names
     assert pairs["scheduled_action_create_and_cleanup"]
+    assert "media_creation_and_cleanup" in workflow_names
+    assert pairs["media_creation_and_cleanup"]

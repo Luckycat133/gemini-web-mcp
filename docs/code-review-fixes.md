@@ -61,3 +61,35 @@ Local run on 2026-10-02, Python 3.13:
 | Independent wheel installation | `pip check`, installed entrypoints/resources/profiles, core modern/legacy protocols, and isolated `uvx` onboarding passed |
 
 The installed wheel was exercised outside the checkout with no Gemini account calls. Hosted CI, model-backed evaluation, live account acceptance, and release publication are separate evidence.
+
+## Native media follow-up — 2026-10-02
+
+The follow-up addresses native image/music selection and disposable generation chats. Primary and compact surfaces retain their public names, arguments and annotations; shared request, recovery and saving behavior lives in services.
+
+| Area | Repair and regression evidence |
+| --- | --- |
+| Native request | Public frontend selectors are injected into the real upstream request builder; shape/conflict drift fails before generation HTTP, internal arguments do not leak, and native creation does not silently repeat after an SDK API error. `test_native_media_transport.py` covers SDK 2.0 and 2.1.1. |
+| Created artifacts | Search `WebImage` does not satisfy creation. Original URI identity survives full-size URL mutation; filenames are reserved atomically and failed/cancelled reservations are released. `test_media_generation_workflows.py` and `test_artifacts.py`. |
+| Music recovery | Failed transport, rejected/missing envelopes and malformed observed music-card URLs remain typed recovery failures. A valid empty read remains empty. Both surfaces retain failed recovery chats. `test_media_generation_workflows.py` and `test_rpc_contracts.py`. |
+| SDK side effects | Request-local media copies suppress unrequested audio/video thumbnails, preserving existing files and the original response. Real SDK saves run against a sealed HTTP fixture in `test_media_generation_workflows.py`. |
+| Partial/queued work | A ready verified local file does not complete an explicitly queued request or permit source deletion. Partial-save timeout is triggered during the second save after first-file verification. `test_media_generation_workflows.py`. |
+| Source cleanup | Owned new chats with finished verified outputs or definitive empty responses use bounded positive deletion read-back. Recovery, explicit retention and delayed cleanup remain separate. Automatic due work rejects changed retention, deadline, job identity or attempts after its snapshot; source attribution survives immediate and late terminal results. `test_ephemeral_chat_cleanup.py`. |
+| Browser access | OS refusal produces `BROWSER_COOKIE_ACCESS_DENIED`; modern `Network/Cookies` retains the Chrome profile name and selects one database per profile. `test_cookie_browser_access_regressions.py`. |
+
+Independent reviewers reproduced recovery, thumbnail and queued-output defects before their repairs. After the stable source handoff, the four media/native findings passed independent checks on SDK 2.0.0 and 2.1.1. These are offline checks, not current account acceptance.
+
+### Verified follow-up gates
+
+| Gate | Result |
+| --- | --- |
+| Ruff / Mypy | Passed; 71 source files checked by Mypy |
+| Complete offline suite | 1,962 passed on Python 3.13 / gemini-webapi 2.0.0 |
+| Architecture/distribution checklist | 269 passed |
+| SDK compatibility | 2.1.1: 173 native/media/parser cases and 66 runtime cases passed; independent media review resolved all four findings |
+| Agent Skills | All three project Skills passed reference validation |
+| Distribution | Wheel, sdist and two Runtime Skill bundles built; `0.2.2` version/tag consistency passed |
+| Independent installation | Clean wheel with gemini-webapi 2.1.1 / MCP 2.2.0; `pip check`, resources, four entrypoints and seven primary profile catalogs passed |
+| Installed MCP protocol | Primary/compact/assist, model/core, modern `2026-07-28` and legacy `2025-11-25` discovery/list/call passed |
+| Isolated onboarding | `uvx` wheel preflight passed with `credentials_accessed=false` |
+
+Signed-in generation/deletion acceptance for the new native path remains **NOT_RUN**: Chrome data access was denied by macOS, and browser control later encountered the locked Mac. No old test-chat deletion was positively verified in this pass. The [dated live results](live-ui-coverage.md) and [native source evidence](native-media-mode.md) remain distinct.

@@ -67,7 +67,7 @@ gemini-mcp-server/
 │   ├── infrastructure/    # Gemini Web RPC registry、payload builder 与纯 parser
 │   ├── services/          # 各表面共用的应用服务与读回验证（chat/artifact/history/research/search/understanding 等）
 │   ├── surfaces/          # 聚焦型独立 MCP 表面（assist.py：五工具 gemini_assist_mcp，入口 gemini-mcp-assist）
-│   ├── thinking_client.py # Thinking/Learning 模式传输层
+│   ├── thinking_client.py # Thinking/Learning/原生媒体模式传输层
 │   ├── error_handler.py   # 错误处理装饰器
 │   ├── constants.py       # 模型常量与配置
 │   ├── remote_chat_cleanup_manager.py  # 远程聊天清理
@@ -190,9 +190,10 @@ MODEL_CONFIG = {
 - 报告格式化
 
 #### Media Tools (media.py)
-- 图像生成
-- 视频生成
-- 音乐生成
+- primary 的兼容参数与展示适配；compact create/edit 复用共享媒体服务
+- `services/media_generation.py` 统一原生请求选择、生成产物过滤、音乐恢复、保存与验证
+- `infrastructure/web_request_contracts.py` 保存当前公开前端支持的模式字段，`thinking_client.py` 按请求注入；模型 header 与模式选择分开
+- `services/lifecycle.py` 只清理当前请求新建且不再需要恢复的源聊天；10 秒等待预算与正向删除读回状态独立于本地产物成功
 
 #### File Tools (file.py)
 - 文件上传
@@ -287,6 +288,8 @@ primary / compact MCP adapters
 `src/services/artifacts.py` 是唯一的身份、响应提取、合并、文件验证和结果分类实现；两个 MCP
 入口不再各自猜测媒体 URI。相同类型和远端 URI 会生成相同 `artifact_<sha256-prefix>` ID，因此
 primary `gemini_generate_media` 与 compact `create` 可稳定引用同一产物。
+
+creation 专用响应视图排除搜索 `WebImage`；chat/理解仍可展示它。保存前快照原始 URI，避免上游图片下载器修改为 full-size URI 后拆成两个产物。primary 与 compact 均默认保存验证，源聊天只有在上游已结束且全部输出保存验证或明确空结果时才立即清理；queued/remote/partial 和失败读回仍保留恢复。原子文件名预留和禁用未请求的 SDK 缩略图防止下载覆盖已有文件。模式字段的公开证据和实测状态见 [原生媒体模式](native-media-mode.md)。
 
 远端 URI 的验证状态是 `unverified`，只表示在上游响应中观测到 URI，不声称已经下载或解码。
 本地文件只有在路径存在且大小非零时才是 `local/verified`；同时记录 MIME、字节数，并在可用时

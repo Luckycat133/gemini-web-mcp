@@ -71,6 +71,11 @@ export GEMINI_BROWSER_COOKIE_TIMEOUT_SECONDS=15
 如果确实要允许更长时间完成系统授权，可临时提高该值并重试。不要通过脚本绕过系统安全机制，也不要把
 Chrome profile 数据库复制进仓库。
 
+系统拒绝读取 Chrome 数据目录时，profile 诊断返回 `BROWSER_COOKIE_ACCESS_DENIED`。
+这与 Keychain 等待超时、未登录或 Cookie 过期不同。由用户在「系统设置 → 隐私与安全性 →
+文件与文件夹／完全磁盘访问权限」允许当前 MCP 宿主读取所需浏览器数据，再重试同一 profile。
+现代 Chrome 的 `Network/Cookies` 与旧 `Cookies` 布局均保留实际 profile 名；同一 profile 只选择一个数据库。
+
 ## 验证
 
 1. `gemini_get_cookie_status`：确认当前运行时是否已有 Cookie，不访问 Gemini。

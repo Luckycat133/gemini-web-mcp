@@ -224,6 +224,25 @@ For image/video/audio/report:
 
 Match output kinds to the requested modality; an unrelated image is insufficient for video/music. Check decodable image/WAV content or audio/video stream evidence before `verified`. A missing decoder yields `unverified`, and malformed bytes yield failure. Exercise total recovery/save deadlines, independent audio/video filenames, and timeout scope isolation, including reconnects.
 
+For native media selection, test the installed upstream SDK's real offline
+request builder, strict shape/conflict failures before generation HTTP, exception wrapping
+and retry behavior, thinking coexistence, and concurrent/cancelled scope reset.
+Keep public frontend source evidence separate from signed-in generation
+acceptance. Creation must distinguish generated images from search `WebImage`.
+Exercise URI mutation during full-size saving and atomic concurrent filename
+reservation, including failure/cancellation cleanup and SDK thumbnail side effects.
+Music recovery must distinguish valid empty reads from transport/envelope/parser
+failures, including malformed cards whose URL cannot be used.
+
+For generated-chat cleanup, test request ownership, invalid/missing IDs,
+verified local versus queued/remote/unverified/partial-save results, explicit
+retention/delay, bounded deletion/read-back waiting, late completion and account
+change. Report pending or failed cleanup independently from artifact success;
+only positive absence qualifies for live deletion acceptance. Record exact
+disposable test IDs and finish their authorized cleanup before ending a live run.
+Cover queued operations with already verified local output and retention or
+replacement after an automatic cleanup batch snapshot.
+
 ## Mutation Tests
 
 For every create/update/move/delete:

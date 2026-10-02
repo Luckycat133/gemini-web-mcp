@@ -7,6 +7,32 @@ from pathlib import Path
 
 from PIL import Image
 
+from src.domain import CleanupObservation, CleanupState
+from src.services.artifacts import response_chat_id
+
+
+async def fake_finalize_generated_cleanup(
+    response,
+    *,
+    owns_chat,
+    retain_chat=False,
+    preserve_for_recovery=False,
+    delete_after_seconds=None,
+    source="",
+    client=None,
+):
+    """Observe the adapter's decision without any account or timer access."""
+    cid = response_chat_id(response)
+    if cid is None:
+        state = CleanupState.NOT_APPLICABLE
+    elif not owns_chat or retain_chat or preserve_for_recovery:
+        state = CleanupState.RETAINED
+    elif delete_after_seconds is not None and delete_after_seconds > 0:
+        state = CleanupState.PENDING
+    else:
+        state = CleanupState.COMPLETED
+    return CleanupObservation(state=state, upstream_chat_id=cid, source=source)
+
 
 def write_image(path: Path, *, format: str = "PNG", size: tuple[int, int] = (2, 1)) -> Path:
     Image.new("RGB", size, (32, 64, 96)).save(path, format=format)

@@ -230,6 +230,15 @@ MANIFEST_WORKFLOWS = [
         "notes": "Read-only local/profile diagnostics before live account workflows; use validate_browser=true only when account validation is needed.",
     },
     {
+        "name": "media_creation_and_cleanup",
+        "steps": [
+            "gemini_generate_media or gemini_generate_music",
+            "inspect requested-kind local artifacts and verification",
+            "inspect domain_result.meta.details.cleanup",
+        ],
+        "notes": "Primary and compact creation select native image/music modes. Text or search WebImage alone cannot satisfy generation. New source chats with a finished operation's outputs saved and verified, or definitive empty output, are cleaned immediately with bounded deletion read-back; completed/already_completed proves absence. Queued requests retain their source even with ready local output. Remote-only, unverified, partial-save, failed recovery reads and interrupted results also retain recovery. Primary retain_chat=true or a positive delete_after_seconds overrides immediate cleanup; delays are in-memory. Pending/failed cleanup is not verified deletion.",
+    },
+    {
         "name": "test_artifact_cleanup",
         "steps": [
             "gemini_cleanup_test_artifacts with dry_run=true",

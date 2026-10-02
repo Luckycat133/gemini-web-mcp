@@ -8,6 +8,7 @@ import asyncio
 import logging
 import os
 import threading
+from dataclasses import replace
 from pathlib import Path
 from typing import Any, Awaitable, Callable, Literal, Optional
 
@@ -21,6 +22,7 @@ from . import __version__
 from .adapters import append_artifact_block, attach_domain_result, domain_text, exception_text
 from .client_wrapper import (
     cleanup_due_remote_chats,
+    finalize_generated_chat_cleanup,
     create_session,
     get_cookie_from_browser,
     get_cookie_status,
@@ -58,9 +60,9 @@ from .services import (
     StartSessionRequest,
     artifact_exception_result,
     artifact_from_local_path,
-    artifact_result,
     classify_media_artifact_state,
     extract_response_artifacts,
+    merge_artifacts,
     media_artifacts,
     media_operation_timeout,
     observed_backend_from_response,
@@ -109,6 +111,15 @@ from .services.manifest import (
     web_capabilities_payload as _web_capabilities_payload,
 )
 from .services.notebooks import fetch_native_notebooks as _fetch_native_notebooks
+from .services.media_generation import (
+    MediaSaveOutcome,
+    materialize_generated_media,
+    media_artifact_result,
+    media_creation_response,
+    media_generation_kwargs,
+    media_requires_recovery,
+    with_media_cleanup,
+)
 from .services.scheduled import (
     create_daily_action as _create_daily_action_service,
     delete_action as _delete_scheduled_action_service,
@@ -971,18 +982,24 @@ def _skill_media_result(
     request_model: Optional[str],
     effective_backend: Optional[str],
     media_type: str,
+    observed_artifacts: tuple[Artifact, ...] | None = None,
+    save_failures: tuple[str, ...] = (),
 ) -> tuple[ArtifactResultData, Any]:
     observed_backend = observed_backend_from_response(response)
-    artifacts = media_artifacts(extract_response_artifacts(
-        response,
+    remote_artifacts = extract_response_artifacts(
+        media_creation_response(response),
         media_type=media_type,
         requested_backend=requested_model,
         request_model=request_model,
         effective_backend=effective_backend,
         observed_backend=observed_backend,
-    ), media_type)
+    ) if observed_artifacts is None else ()
+    artifacts = media_artifacts(merge_artifacts(remote_artifacts, observed_artifacts or ()), media_type)
+    state = classify_media_artifact_state(response, artifacts, media_type)
+    if state == ArtifactState.EMPTY and save_failures:
+        state = ArtifactState.FAILED
     data = ArtifactResultData(
-        state=classify_media_artifact_state(response, artifacts, media_type),
+        state=state,
         artifacts=artifacts,
         input_artifacts=input_artifacts,
         requested_model=requested_model,
@@ -993,18 +1010,15 @@ def _skill_media_result(
         media_type=media_type,
     )
     video_empty_action = (
-        (
-            "Inspect the retained upstream chat. "
-            if data.source_chat_id
-            else "No upstream chat ID was observed. "
-        )
-        + "Generic chat has not been verified to enter Gemini Omni video mode. "
+        "Generic chat has not been verified to enter Gemini Omni video mode. "
         "Use https://gemini.google.com/videos in an authorized browser."
         if media_type == "video" and data.state == ArtifactState.EMPTY
-        else None
+        else "Check Gemini's media capability and quota before another attempt."
     )
-    return data, artifact_result(
+    return data, media_artifact_result(
         data,
+        response=response,
+        save_failures=save_failures,
         empty_suggested_action=video_empty_action,
         empty_retryable=media_type != "video",
     )
@@ -1018,7 +1032,13 @@ async def create(
     thinking_level: str = "standard",
     image_path: Optional[str] = None,
 ) -> list[TextContent]:
-    """Generate image/video/music."""
+    """Generate media; image/music explicitly select their native Gemini Web modes.
+
+    Save to generated_media and verify local outputs. The native video entry
+    remains unverified. Clean only this request's new chat after all outputs
+    are verified locally or the response is definitively empty. Keep queued
+    or unsaved output chats; meta.details.cleanup records the observed state.
+    """
     if not prompt.strip():
         return domain_text(_invalid_argument_result("prompt must not be blank."), "Error: prompt must not be blank.")
     requested_model = model
@@ -1026,6 +1046,10 @@ async def create(
     request_model: str | None = None
     effective_backend: str | None = None
     input_artifacts: tuple[Artifact, ...] = ()
+    response = None
+    client = None
+    observed_artifacts: list[Artifact] = []
+    saved = MediaSaveOutcome()
     try:
         valid_image, safe_image_path, image_error = validate_optional_image_path(image_path)
         if not valid_image:
@@ -1034,44 +1058,52 @@ async def create(
                 f"Error: {image_error}",
             )
 
-        client = get_gemini_client()
-        await initialize_client()
-        await cleanup_due_remote_chats(client)
-
         model = _normalize_model(model)
         media_request = resolve_media_request(model, media_type, thinking_level)
         request_model = media_request["request_model"]
         effective_backend = media_request["backend_label"]
 
-        prefixes = {
-            "image": "Generate image: ",
-            "video": "Generate video: ",
-            "music": "Create music: ",
-        }
-        media_prompt = prefixes.get(media_type, "") + prompt
         files = [safe_image_path] if safe_image_path else None
-        input_artifacts = _skill_input_artifacts(safe_image_path, requested_model, request_model, effective_backend)
 
         timeout = media_operation_timeout(media_type)
         from .thinking_client import client_request_timeout
 
-        with client_request_timeout(client, timeout):
-            async with asyncio.timeout(timeout):
-                response = await client.generate_content(
-                    prompt=media_prompt,
+        async with asyncio.timeout(timeout):
+            client = get_gemini_client()
+            await initialize_client()
+            await cleanup_due_remote_chats(client)
+            input_artifacts = await asyncio.to_thread(
+                _skill_input_artifacts, safe_image_path, requested_model, request_model, effective_backend,
+            )
+            with client_request_timeout(client, timeout):
+                response = await client.generate_content(**media_generation_kwargs(
+                    prompt,
+                    media_type,
                     files=files,
                     model=request_model,
                     thinking_level=thinking_level,
-                    timeout=timeout,
+                    timeout_seconds=timeout,
+                ))
+                materialized = await materialize_generated_media(
+                    client,
+                    response,
+                    media_type=media_type,
+                    prompt=prompt,
+                    requested_model=requested_model,
+                    request_model=request_model,
+                    effective_backend=effective_backend,
+                    artifact_sink=observed_artifacts,
                 )
-        input_artifacts = _skill_input_artifacts(
-            safe_image_path,
-            requested_model,
-            request_model,
-            effective_backend,
-            observed_backend=observed_backend_from_response(response),
-            source_chat_id=response_chat_id(response),
-        )
+                saved = materialized.saved
+            input_artifacts = await asyncio.to_thread(
+                _skill_input_artifacts,
+                safe_image_path,
+                requested_model,
+                request_model,
+                effective_backend,
+                observed_backend=observed_backend_from_response(response),
+                source_chat_id=response_chat_id(response),
+            )
         data, result = _skill_media_result(
             response,
             input_artifacts,
@@ -1079,17 +1111,11 @@ async def create(
             request_model=request_model,
             effective_backend=effective_backend,
             media_type=media_type,
+            observed_artifacts=tuple(observed_artifacts),
+            save_failures=saved.failures,
         )
-        if data.state in {ArtifactState.QUEUED, ArtifactState.EMPTY}:
-            schedule_remote_chat_cleanup_from_response(
-                response,
-                retain_chat=True,
-                source=f"skill_create:{media_type}",
-            )
-        else:
-            _schedule_skill_response_cleanup(response, f"skill_create:{media_type}")
         content = _format_response(
-            response,
+            media_creation_response(response),
             media_type,
             backend_label=effective_backend,
             backend_note=media_request["note"],
@@ -1097,10 +1123,26 @@ async def create(
         if data.state == ArtifactState.EMPTY:
             content[0].text += "\n\nArtifact state: empty (no usable media URI was returned)."
             if media_type == "video":
-                content[0].text += " Use the dedicated Gemini Videos page after inspecting this chat."
+                content[0].text += " Use the dedicated Gemini Videos page."
         elif data.state == ArtifactState.QUEUED:
             content[0].text += "\n\nArtifact state: queued (no completed media is available yet)."
+        elif data.state == ArtifactState.FAILED:
+            content[0].text += "\n\nArtifact state: failed (local save or verification failed)."
+        if saved.lines:
+            content[0].text += "\n\nSaved files:\n" + "\n".join(saved.lines)
+        if saved.failures and data.state != ArtifactState.FAILED:
+            content[0].text += "\n\nLocal artifact save was incomplete; the upstream chat is retained."
+        if result.meta.details.get("upstream_queued") and data.state != ArtifactState.QUEUED:
+            content[0].text += "\n\nReturned artifacts are available, but the upstream request is still queued or processing; the chat is retained."
         content = append_artifact_block(content, data.artifacts)
+        cleanup = await finalize_generated_chat_cleanup(
+            response,
+            owns_chat=True,
+            preserve_for_recovery=media_requires_recovery(data, response=response, save_failed=bool(saved.failures)),
+            source=f"skill_create:{media_type}",
+            client=client,
+        )
+        result = with_media_cleanup(result, cleanup)
         return attach_domain_result(content, result, use_result_data=True)
 
     except Exception as e:
@@ -1110,14 +1152,30 @@ async def create(
             request_model=request_model,
             effective_backend=effective_backend,
             input_artifacts=input_artifacts,
+            observed_backend=observed_backend_from_response(response),
+            source_chat_id=response_chat_id(response),
             media_type=media_type,
         )
+        if response is not None:
+            data, _ = _skill_media_result(
+                response, input_artifacts, requested_model=requested_model,
+                request_model=request_model, effective_backend=effective_backend, media_type=media_type,
+                observed_artifacts=tuple(observed_artifacts),
+            )
+            if data.state == ArtifactState.EMPTY:
+                data = replace(data, state=ArtifactState.FAILED)
         result = artifact_exception_result(
             e,
             data,
             logger=logger,
             operation=f"skill_create:{media_type}",
         )
+        if response is not None:
+            cleanup = await finalize_generated_chat_cleanup(
+                response, owns_chat=True, preserve_for_recovery=True,
+                source=f"skill_create:{media_type}", client=client,
+            )
+            result = with_media_cleanup(result, cleanup)
         return attach_domain_result(
             _error_text(e, "Create"),
             result,
@@ -1132,7 +1190,12 @@ async def edit(
     model: str = "flash",
     thinking_level: str = "standard",
 ) -> list[TextContent]:
-    """Edit existing image."""
+    """Edit an image with native image mode; save and verify in generated_media.
+
+    Clean only this request's new chat after all outputs are verified locally
+    or the response is definitively empty. Keep queued or unsaved output chats;
+    meta.details.cleanup records cleanup separately from image availability.
+    """
     if not prompt.strip():
         return domain_text(_invalid_argument_result("prompt must not be blank."), "Error: prompt must not be blank.")
     if not image_path.strip():
@@ -1141,6 +1204,10 @@ async def edit(
     request_model: str | None = None
     effective_backend: str | None = None
     input_artifacts: tuple[Artifact, ...] = ()
+    response = None
+    client = None
+    observed_artifacts: list[Artifact] = []
+    saved = MediaSaveOutcome()
     try:
         valid_image, safe_image_path, image_error = validate_optional_image_path(image_path)
         if not valid_image:
@@ -1149,41 +1216,54 @@ async def edit(
                 f"Error: {image_error}",
             )
 
-        client = get_gemini_client()
-        await initialize_client()
-        await cleanup_due_remote_chats(client)
-
         model = _normalize_model(model)
         media_request = resolve_media_request(model, "image", thinking_level)
         request_model = media_request["request_model"]
         effective_backend = media_request["backend_label"]
-        input_artifacts = _skill_input_artifacts(
-            safe_image_path or image_path,
-            requested_model,
-            request_model,
-            effective_backend,
-        )
 
         timeout = media_operation_timeout("image_edit")
         from .thinking_client import client_request_timeout
 
-        with client_request_timeout(client, timeout):
-            async with asyncio.timeout(timeout):
-                response = await client.generate_content(
-                    prompt=f"Edit this image: {prompt}",
-                    files=[safe_image_path],
+        async with asyncio.timeout(timeout):
+            client = get_gemini_client()
+            await initialize_client()
+            await cleanup_due_remote_chats(client)
+            input_artifacts = await asyncio.to_thread(
+                _skill_input_artifacts,
+                safe_image_path or image_path,
+                requested_model,
+                request_model,
+                effective_backend,
+            )
+            with client_request_timeout(client, timeout):
+                response = await client.generate_content(**media_generation_kwargs(
+                    prompt,
+                    "image_edit",
+                    files=[safe_image_path or image_path],
                     model=request_model,
                     thinking_level=thinking_level,
-                    timeout=timeout,
+                    timeout_seconds=timeout,
+                ))
+                materialized = await materialize_generated_media(
+                    client,
+                    response,
+                    media_type="image_edit",
+                    prompt=prompt,
+                    requested_model=requested_model,
+                    request_model=request_model,
+                    effective_backend=effective_backend,
+                    artifact_sink=observed_artifacts,
                 )
-        input_artifacts = _skill_input_artifacts(
-            safe_image_path or image_path,
-            requested_model,
-            request_model,
-            effective_backend,
-            observed_backend=observed_backend_from_response(response),
-            source_chat_id=response_chat_id(response),
-        )
+                saved = materialized.saved
+            input_artifacts = await asyncio.to_thread(
+                _skill_input_artifacts,
+                safe_image_path or image_path,
+                requested_model,
+                request_model,
+                effective_backend,
+                observed_backend=observed_backend_from_response(response),
+                source_chat_id=response_chat_id(response),
+            )
         data, result = _skill_media_result(
             response,
             input_artifacts,
@@ -1191,13 +1271,11 @@ async def edit(
             request_model=request_model,
             effective_backend=effective_backend,
             media_type="image_edit",
+            observed_artifacts=tuple(observed_artifacts),
+            save_failures=saved.failures,
         )
-        if data.state in {ArtifactState.QUEUED, ArtifactState.EMPTY}:
-            schedule_remote_chat_cleanup_from_response(response, retain_chat=True, source="skill_edit")
-        else:
-            _schedule_skill_response_cleanup(response, "skill_edit")
         content = _format_response(
-            response,
+            media_creation_response(response),
             "image",
             backend_label=effective_backend,
             backend_note=media_request["note"],
@@ -1206,7 +1284,23 @@ async def edit(
             content[0].text += "\n\nArtifact state: empty (no usable edited image URI was returned)."
         elif data.state == ArtifactState.QUEUED:
             content[0].text += "\n\nArtifact state: queued (no completed image is available yet)."
+        elif data.state == ArtifactState.FAILED:
+            content[0].text += "\n\nArtifact state: failed (local save or verification failed)."
+        if saved.lines:
+            content[0].text += "\n\nSaved files:\n" + "\n".join(saved.lines)
+        if saved.failures and data.state != ArtifactState.FAILED:
+            content[0].text += "\n\nLocal artifact save was incomplete; the upstream chat is retained."
+        if result.meta.details.get("upstream_queued") and data.state != ArtifactState.QUEUED:
+            content[0].text += "\n\nReturned artifacts are available, but the upstream request is still queued or processing; the chat is retained."
         content = append_artifact_block(content, data.artifacts)
+        cleanup = await finalize_generated_chat_cleanup(
+            response,
+            owns_chat=True,
+            preserve_for_recovery=media_requires_recovery(data, response=response, save_failed=bool(saved.failures)),
+            source="skill_edit",
+            client=client,
+        )
+        result = with_media_cleanup(result, cleanup)
         return attach_domain_result(content, result, use_result_data=True)
 
     except Exception as e:
@@ -1216,14 +1310,30 @@ async def edit(
             request_model=request_model,
             effective_backend=effective_backend,
             input_artifacts=input_artifacts,
+            observed_backend=observed_backend_from_response(response),
+            source_chat_id=response_chat_id(response),
             media_type="image_edit",
         )
+        if response is not None:
+            data, _ = _skill_media_result(
+                response, input_artifacts, requested_model=requested_model,
+                request_model=request_model, effective_backend=effective_backend, media_type="image_edit",
+                observed_artifacts=tuple(observed_artifacts),
+            )
+            if data.state == ArtifactState.EMPTY:
+                data = replace(data, state=ArtifactState.FAILED)
         result = artifact_exception_result(
             e,
             data,
             logger=logger,
             operation="skill_edit",
         )
+        if response is not None:
+            cleanup = await finalize_generated_chat_cleanup(
+                response, owns_chat=True, preserve_for_recovery=True,
+                source="skill_edit", client=client,
+            )
+            result = with_media_cleanup(result, cleanup)
         return attach_domain_result(
             _error_text(e, "Edit"),
             result,

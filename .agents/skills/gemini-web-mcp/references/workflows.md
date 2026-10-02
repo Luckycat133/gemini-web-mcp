@@ -145,10 +145,12 @@ action. Check the current UI and returned `observed_backend` before claiming an
 exact backend for a new run.
 
 The compact `edit` call returned a remote image URI in the 2026-09-26 live
-check. When the task needs a local file, call primary
-`gemini_generate_media(media_type="image", image_path=..., output_dir=...)` and
-verify the saved file. The live primary edit changed only the requested mug
-color and preserved the cat and composition.
+check. The current implementation saves and verifies compact creation/edit
+outputs in `generated_media/`; primary
+`gemini_generate_media(media_type="image", image_path=..., output_dir=...)`
+lets the caller choose the destination. Both select the native Web image mode.
+The dated live primary edit changed only the requested mug color and preserved
+the cat and composition; a new implementation still needs its own live check.
 
 Process:
 
@@ -156,7 +158,16 @@ Process:
 2. Generate or edit.
 3. Verify the returned Artifact.
 4. Use the Artifact in the next step.
-5. Only expose technical metadata when it helps the user or another tool.
+5. Inspect the source-chat cleanup observation; recover or remove a disposable
+   test by its recorded ID if cleanup is pending or failed.
+6. Only expose technical metadata when it helps the user or another tool.
+
+Search-reference images are not generated output. If Gemini returns only text
+or a Web search image, preserve `ARTIFACT_NOT_RETURNED`; do not announce a
+successful drawing. A finished operation with verified local outputs allows default source-chat cleanup.
+An unsaved or queued output keeps its chat for recovery. Explicit primary
+retention/delay options override the default, and delayed cleanup does not
+survive a process restart.
 
 ## 7. Generate Music or Video
 

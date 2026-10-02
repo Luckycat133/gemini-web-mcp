@@ -43,7 +43,23 @@ they are not backend identifiers observed in the MCP response. See the
 [music](https://blog.google/innovation-and-ai/products/gemini-app/better-tracks-lyria-gemini/)
 sources.
 
-## Observed Native UI
+## 2026-10-02 Native Media Recheck
+
+Signed-in Chrome showed `3.5 Flash-Lite`, `3.8 Flash` and `3.1 Pro`. Selecting
+Create image changed the composer to the image feature with styles and aspect
+ratio controls; Create video was also visible in the tools menu. Other account
+menus were not revalidated in this pass.
+
+Public frontend source establishes image mode 14 and music mode 21 at the
+StreamGenerate inner array's index 49. MCP now selects these modes explicitly
+and shares local saving, verification and source-chat cleanup across primary
+and compact creation. See [the source chain and policy](native-media-mode.md).
+This is static request evidence plus offline coverage. New signed-in MCP
+generation/deletion is **NOT_RUN** because macOS denied Chrome data access
+and subsequent browser control encountered the locked Mac;
+the 2026-09-26 generated-file observations above remain separate.
+
+## Observed Native UI (2026-06-18)
 
 The chat surface exposed:
 
@@ -79,7 +95,7 @@ NotebookLM, help/feedback, and location entries.
 | Gems | Covered in part | CRUD and chat use via `gemini_manage_gems` and `gem_id` |
 | Upload file | Covered | Local files use `gemini_upload_file` |
 | Import code | Covered in part | Local code files can be uploaded; UI import workflows are not replicated |
-| Create image/music | Covered in part | Generic web generation plus response parsing; account/UI gates still apply |
+| Create image/music | Covered in part | Native feature selection, shared local verification/cleanup; new route needs signed-in acceptance and account/UI gates still apply |
 | Create video | Web UI only | Dedicated Gemini Omni mode works in Chrome; generic MCP chat route did not return a video Artifact |
 | Deep Research | Covered | Full workflow when the installed client exposes research helpers |
 | Dynamic model discovery | Covered | `gemini_list_models` reports the account model registry after init |

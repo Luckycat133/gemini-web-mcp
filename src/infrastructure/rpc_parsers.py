@@ -544,7 +544,7 @@ def parse_music_chat(body: Any, **_: Any) -> RPCParseResult:
                 title = _nested(card, [1, 2])
                 url = _nested(card, [1, 7, 1])
                 if not isinstance(url, str) or not url.strip():
-                    continue
+                    return RPCParseResult("changed_shape", raw_type=type(url).__name__)
                 media.append(
                     {
                         "title": title if isinstance(title, str) else "[Media]",

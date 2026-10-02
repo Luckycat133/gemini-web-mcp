@@ -235,6 +235,16 @@ git diff --check
 
 Do not claim a live capability from fixtures, package smoke, a skipped canary, or generated prose alone.
 
+For authorized generation tests on an everyday account, record each source
+chat ID when returned. Save and verify the artifact before cleanup; inspect
+the deletion read-back and finish cleanup of disposable test chats by those
+exact IDs. Empty text/search-reference responses are failed creation and can
+be discarded. Queued, unsaved, partially saved, or timed-out work stays
+recoverable until the tester explicitly discards it. Keep test identifiers,
+account content, and generated files outside commits. Check native Web feature
+selectors from current public frontend evidence; never invent a mode ID or
+treat a chatting model alias as proof of the media backend.
+
 ## Focus Rules
 
 - Do not reopen the three-product split, `gemini_ask`, asynchronous research, SQLite, or task-first Skill decisions.

@@ -96,8 +96,8 @@ Fewer, broader tools with `action` parameters. Same safety tiers apply.
 | `account` | `READS_PRIVATE_REMOTE` | `action="manifest\|capabilities"` are auth-free; other actions read private inventory |
 | `history` | `DESTRUCTIVE_REMOTE` | `action="list\|search\|read\|export"` read-only; `action="delete"` destructive |
 | `scheduled` | `DESTRUCTIVE_REMOTE` | `action="list\|get"` read-only; `action="create\|delete"` mutate/destroy |
-| `create` | `MUTATES_REMOTE` | image/music generation; video argument is compatibility-only, not a verified Gemini Omni route |
-| `edit` | `MUTATES_REMOTE` | image editing |
+| `create` | `MUTATES_REMOTE` | native image/music selection, local verification and new source-chat cleanup; video compatibility route remains unverified |
+| `edit` | `MUTATES_REMOTE` | native image editing, local verification and new source-chat cleanup |
 | `session` | `DESTRUCTIVE_REMOTE` | create/send/list/reset actions; reset affects Gemini conversation state |
 | `prompts` | `DESTRUCTIVE_LOCAL` | local prompt list/get/create/delete |
 | `cookie` | `MUTATES_LOCAL` | `action="profiles"` read-only; `action="get"` requires explicit user approval because it caches sensitive account-authentication material locally; restrict file access and remove the cache when no longer needed |
