@@ -3,13 +3,15 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 from contextlib import contextmanager
 from contextvars import ContextVar
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from typing import Any, AsyncGenerator, Iterator
 
 import orjson
 from gemini_webapi import GeminiClient
+from gemini_webapi.client import ChatSession
 from gemini_webapi.constants import Endpoint
 from gemini_webapi.types import ModelOutput
 
@@ -19,6 +21,7 @@ from .constants import (
     resolve_thinking_mode_id,
     supported_learning_modes,
 )
+from .domain.conversations import is_valid_remote_chat_id
 from .infrastructure.web_request_contracts import (
     MEDIA_FEATURE_MODE_INDEX,
     NativeMediaRequestShapeError,
@@ -45,6 +48,100 @@ _web_request: ContextVar[WebRequestOptions | None] = ContextVar(
 
 _request_timeout: ContextVar[tuple[object, float] | None] = ContextVar("gemini_request_timeout", default=None)
 _timeout_initializing_task: ContextVar[tuple[int, int] | None] = ContextVar("gemini_timeout_initializing_task", default=None)
+
+
+@dataclass
+class MediaRequestObservation:
+    """Remember only the chat allocated by one fresh media request.
+
+    The SDK rolls ChatSession metadata back after a failed stream. Recording
+    the CID as metadata arrives preserves recovery evidence through that
+    rollback, cancellation, or an outer asyncio.timeout.
+    """
+
+    chat_id: str | None = field(default=None, init=False)
+    _started: bool = field(default=False, init=False)
+
+    def start(self) -> None:
+        if self._started:
+            raise ValueError("A media observation belongs to a single generation request.")
+        self._started = True
+
+    def observe(self, metadata: list[Any]) -> None:
+        if metadata and is_valid_remote_chat_id(metadata[0]):
+            self.chat_id = metadata[0]
+
+
+class _OwnedMediaChatSession(ChatSession):
+    """A blank request-owned SDK session with isolated, observable metadata."""
+
+    __slots__ = ("_request_metadata", "_request_observation")
+
+    def __init__(self, client: GeminiClient, observation: MediaRequestObservation) -> None:
+        # SDK2.0's DEFAULT_METADATA is shared mutable state (2.1 copies it).
+        # Use properties backed by our own blank list in both versions, so a
+        # previous chat can neither enter this request nor be mutated by it.
+        self._request_metadata: list[Any] = ["", "", "", None, None, None, None, None, None, ""]
+        self._request_observation = observation
+        super().__init__(client)
+
+    @property
+    def metadata(self) -> list[Any]:
+        # The SDK retains this value as its rollback backup. It must not alias
+        # the mutable request state that later stream frames update.
+        return list(self._request_metadata)
+
+    @metadata.setter
+    def metadata(self, value: list[Any]) -> None:
+        if not isinstance(value, list):
+            return
+        for index, item in enumerate(value[:10]):
+            if item is not None:
+                self._request_metadata[index] = item
+        self._request_observation.observe(self._request_metadata)
+
+    @property
+    def cid(self) -> Any:
+        return self._request_metadata[0]
+
+    @cid.setter
+    def cid(self, value: str) -> None:
+        self._request_metadata[0] = value
+        self._request_observation.observe(self._request_metadata)
+
+    @property
+    def rid(self) -> Any:
+        return self._request_metadata[1]
+
+    @rid.setter
+    def rid(self, value: str) -> None:
+        self._request_metadata[1] = value
+
+    @property
+    def rcid(self) -> Any:
+        return self._request_metadata[2]
+
+    @rcid.setter
+    def rcid(self, value: str) -> None:
+        self._request_metadata[2] = value
+
+
+def _with_owned_media_session(
+    client: GeminiClient,
+    args: tuple[Any, ...],
+    kwargs: dict[str, Any],
+    observation: MediaRequestObservation,
+) -> tuple[tuple[Any, ...], dict[str, Any]]:
+    if kwargs.get("chat") is not None or (len(args) > 4 and args[4] is not None):
+        raise ValueError("Owned media generation cannot use an existing chat.")
+    observation.start()
+    chat = _OwnedMediaChatSession(client, observation)
+    kwargs = {**kwargs, "current_retry": 0}
+    if len(args) > 4:
+        args = (*args[:4], chat, *args[5:])
+    else:
+        kwargs["chat"] = chat
+    return args, kwargs
 
 
 def _is_scoped_timeout_initialization(client: object) -> bool:
@@ -238,15 +335,19 @@ class ThinkingLevelGeminiClient(GeminiClient):
         thinking_level: str | None = None,
         learning_mode: str | None = None,
         media_mode: str | None = None,
+        media_observation: MediaRequestObservation | None = None,
         **kwargs: Any,
     ) -> ModelOutput:
         token = self._set_web_request(model, thinking_level, learning_mode, media_mode)
         try:
+            if media_observation is not None:
+                args, kwargs = _with_owned_media_session(self, args, kwargs, media_observation)
             request = _web_request.get()
             if request and request.media_mode_id is not None:
                 # gemini-webapi's running decorator consumes this before its
                 # HTTP kwargs. A parse/API failure must not duplicate creation.
                 kwargs["current_retry"] = 0
+            args, kwargs = self._with_upstream_thinking(args, kwargs, GeminiClient.generate_content)
             args, kwargs = self._with_learning_prompt(args, kwargs, learning_mode)
             if model is None:
                 return await super().generate_content(*args, **kwargs)
@@ -261,13 +362,17 @@ class ThinkingLevelGeminiClient(GeminiClient):
         thinking_level: str | None = None,
         learning_mode: str | None = None,
         media_mode: str | None = None,
+        media_observation: MediaRequestObservation | None = None,
         **kwargs: Any,
     ) -> AsyncGenerator[ModelOutput, None]:
         token = self._set_web_request(model, thinking_level, learning_mode, media_mode)
         try:
+            if media_observation is not None:
+                args, kwargs = _with_owned_media_session(self, args, kwargs, media_observation)
             request = _web_request.get()
             if request and request.media_mode_id is not None:
                 kwargs["current_retry"] = 0
+            args, kwargs = self._with_upstream_thinking(args, kwargs, GeminiClient.generate_content_stream)
             args, kwargs = self._with_learning_prompt(args, kwargs, learning_mode)
             if model is None:
                 stream = super().generate_content_stream(*args, **kwargs)
@@ -277,6 +382,38 @@ class ThinkingLevelGeminiClient(GeminiClient):
                 yield output
         finally:
             _web_request.reset(token)
+
+    @staticmethod
+    def _with_upstream_thinking(
+        args: tuple[Any, ...], kwargs: dict[str, Any], method: Any,
+    ) -> tuple[tuple[Any, ...], dict[str, Any]]:
+        request = _web_request.get()
+        parameters = inspect.signature(method).parameters
+        if (
+            request is not None
+            and request.thinking_level_id is not None
+            and "extended_thinking" in parameters
+        ):
+            # SDK2.1.1 also appends its thinking level to the model header.
+            # Let its supported parameter construct both header and body;
+            # SDK2.0 has no such parameter and would forward it to curl.
+            extended = request.thinking_level_id == 2
+            positional = [
+                item.name for item in parameters.values()
+                if item.kind in (inspect.Parameter.POSITIONAL_ONLY, inspect.Parameter.POSITIONAL_OR_KEYWORD)
+                and item.name != "self"
+            ]
+            if "extended_thinking" in positional:
+                index = positional.index("extended_thinking")
+                if len(args) > index:
+                    # Preserve the SDK's legal positional calling convention;
+                    # adding a keyword would bind its eighth argument twice.
+                    return (
+                        (*args[:index], extended, *args[index + 1:]),
+                        {key: value for key, value in kwargs.items() if key != "extended_thinking"},
+                    )
+            return args, {**kwargs, "extended_thinking": extended}
+        return args, kwargs
 
     def _set_web_request(
         self,

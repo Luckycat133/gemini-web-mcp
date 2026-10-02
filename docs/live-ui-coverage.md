@@ -54,10 +54,53 @@ Public frontend source establishes image mode 14 and music mode 21 at the
 StreamGenerate inner array's index 49. MCP now selects these modes explicitly
 and shares local saving, verification and source-chat cleanup across primary
 and compact creation. See [the source chain and policy](native-media-mode.md).
-This is static request evidence plus offline coverage. New signed-in MCP
-generation/deletion is **NOT_RUN** because macOS denied Chrome data access
-and subsequent browser control encountered the locked Mac;
-the 2026-09-26 generated-file observations above remain separate.
+After the user enabled macOS browser-data access, a fresh current-code stdio
+session negotiated MCP `2026-07-28` with SDK `2.2.0` and `gemini-webapi 2.0.0`.
+Primary image generation and local-image editing each saved a 2816×1536 JPEG.
+Both files passed independent full decoding, size/MIME/dimension checks and
+visual inspection. Image source cleanup initially returned `pending`.
+Subsequent targeted MCP deletion positively verified both owned source chats
+as `verified_absent`. Both saved files still decoded with unchanged SHA256
+hashes after deletion.
+
+The native music request raised the upstream SDK's `APIError` with a message
+reporting a possible upstream interruption. No music artifact or source-chat ID was returned; the original
+MCP response classified it as `INTERNAL_ERROR`. This is a failed live music
+attempt, not a successful creation or proof of a quota/entitlement cause.
+
+After adding safe API-error classification, isolated request-owned metadata
+and supported thinking-argument synchronization, a separate fresh MCP session
+used SDK `2.1.1`. One native music request returned a verified MP3
+(`audio/mpeg`, 2,947,046 bytes, 122.540333 seconds) and companion MP4
+(`video/mp4`, 9,532,928 bytes, 1024×1024, 122.54 seconds). Independent FFmpeg
+full-stream decoding passed for both files. Initial cleanup was `pending`;
+targeted follow-up returned `ok=true`, `deleted=true` and
+`verification.status=verified_absent`. Both files still fully decoded with
+unchanged SHA256 hashes after deletion. The MP4 is music's companion output,
+not evidence that the generic video-generation route works.
+
+The updated compact MCP (`create` then `edit`) was also exercised with SDK
+`2.1.1`, using its default `generated_media/` destination. Both outputs were
+decoded 2816×1536 JPEGs; visual inspection confirmed the blue fox and the added
+gold star while preserving the subject and background. Exact-ID follow-up
+returned positive deletion proof for each source chat, and the saved files
+remained usable. The installable package now requires `gemini-webapi>=2.1.1,<3`
+to include the current model, stream-recovery and music-parser paths.
+
+The original failed request still has no observed ID or artifact; the later
+successful request does not establish its cause or final account state. No
+generation retry was used to recover that unknown request. The 2026-09-26
+observations remain separate. These bounded user-authorized acceptance runs
+are not the dedicated-account full canary or a guarantee of repeatability.
+
+Targeted account cleanup additionally verified absence for seven historical
+test chats whose ownership was established by exact recorded IDs and test
+markers. Together with four new image sources and one new music source,
+twelve deletions had
+positive read-back evidence. Three historical candidates were retained because
+their test ownership could not be established. The failed music request had no
+observed ID and was excluded from deletion; no unrelated account scan was used
+to guess its chat.
 
 ## Observed Native UI (2026-06-18)
 
@@ -95,7 +138,7 @@ NotebookLM, help/feedback, and location entries.
 | Gems | Covered in part | CRUD and chat use via `gemini_manage_gems` and `gem_id` |
 | Upload file | Covered | Local files use `gemini_upload_file` |
 | Import code | Covered in part | Local code files can be uploaded; UI import workflows are not replicated |
-| Create image/music | Covered in part | Native feature selection, shared local verification/cleanup; new route needs signed-in acceptance and account/UI gates still apply |
+| Create image/music | Covered in part | Native image generation/editing and one SDK 2.1.1 music request verified on 2026-10-02; an earlier music request failed. Cleanup has separate read-back evidence, and account/UI gates still apply |
 | Create video | Web UI only | Dedicated Gemini Omni mode works in Chrome; generic MCP chat route did not return a video Artifact |
 | Deep Research | Covered | Full workflow when the installed client exposes research helpers |
 | Dynamic model discovery | Covered | `gemini_list_models` reports the account model registry after init |

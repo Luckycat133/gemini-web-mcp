@@ -58,7 +58,6 @@ from .services import (
     CleanupStrategy,
     SessionMessageRequest,
     StartSessionRequest,
-    artifact_exception_result,
     artifact_from_local_path,
     classify_media_artifact_state,
     extract_response_artifacts,
@@ -112,12 +111,15 @@ from .services.manifest import (
 )
 from .services.notebooks import fetch_native_notebooks as _fetch_native_notebooks
 from .services.media_generation import (
+    MediaGenerationAttempt,
     MediaSaveOutcome,
     materialize_generated_media,
     media_artifact_result,
     media_creation_response,
+    media_exception_result,
     media_generation_kwargs,
     media_requires_recovery,
+    normalize_media_exception,
     with_media_cleanup,
 )
 from .services.scheduled import (
@@ -1050,6 +1052,7 @@ async def create(
     client = None
     observed_artifacts: list[Artifact] = []
     saved = MediaSaveOutcome()
+    attempt = MediaGenerationAttempt()
     try:
         valid_image, safe_image_path, image_error = validate_optional_image_path(image_path)
         if not valid_image:
@@ -1076,7 +1079,7 @@ async def create(
                 _skill_input_artifacts, safe_image_path, requested_model, request_model, effective_backend,
             )
             with client_request_timeout(client, timeout):
-                response = await client.generate_content(**media_generation_kwargs(
+                response = await attempt.generate(client, **media_generation_kwargs(
                     prompt,
                     media_type,
                     files=files,
@@ -1146,6 +1149,9 @@ async def create(
         return attach_domain_result(content, result, use_result_data=True)
 
     except Exception as e:
+        if response is None:
+            response = attempt.recovery_response
+        e = normalize_media_exception(e)
         data = ArtifactResultData(
             state=ArtifactState.FAILED,
             requested_model=requested_model,
@@ -1164,7 +1170,7 @@ async def create(
             )
             if data.state == ArtifactState.EMPTY:
                 data = replace(data, state=ArtifactState.FAILED)
-        result = artifact_exception_result(
+        result = media_exception_result(
             e,
             data,
             logger=logger,
@@ -1208,6 +1214,7 @@ async def edit(
     client = None
     observed_artifacts: list[Artifact] = []
     saved = MediaSaveOutcome()
+    attempt = MediaGenerationAttempt()
     try:
         valid_image, safe_image_path, image_error = validate_optional_image_path(image_path)
         if not valid_image:
@@ -1236,7 +1243,7 @@ async def edit(
                 effective_backend,
             )
             with client_request_timeout(client, timeout):
-                response = await client.generate_content(**media_generation_kwargs(
+                response = await attempt.generate(client, **media_generation_kwargs(
                     prompt,
                     "image_edit",
                     files=[safe_image_path or image_path],
@@ -1304,6 +1311,9 @@ async def edit(
         return attach_domain_result(content, result, use_result_data=True)
 
     except Exception as e:
+        if response is None:
+            response = attempt.recovery_response
+        e = normalize_media_exception(e)
         data = ArtifactResultData(
             state=ArtifactState.FAILED,
             requested_model=requested_model,
@@ -1322,7 +1332,7 @@ async def edit(
             )
             if data.state == ArtifactState.EMPTY:
                 data = replace(data, state=ArtifactState.FAILED)
-        result = artifact_exception_result(
+        result = media_exception_result(
             e,
             data,
             logger=logger,

@@ -47,7 +47,9 @@ These repairs are checked with offline regressions, real auth-free MCP protocol 
 
 Primary and compact creation now share media request construction, recovery, saving and verification. Image/edit and music requests select the native Web feature observed in current public frontend source, with strict payload-shape rejection and request-local transport options. Compact creation/editing saves local artifacts by default; search images cannot satisfy generation. New source chats are cleaned after a finished operation's outputs are saved and verified, or definitive empty output, with bounded positive read-back. Unsaved/queued/partial results and failed recovery reads retain recovery; explicit retention/delay is preserved. See [native media mode and evidence](native-media-mode.md).
 
-Chrome UI recheck showed 3.5 Flash-Lite, 3.8 Flash and 3.1 Pro, plus the selected Create image feature and Create video entry. The new MCP generation and cleanup live acceptance is **NOT_RUN**: macOS denied Chrome data access, and later browser control encountered the locked Mac. This is distinct from an expired Cookie or upstream generation failure. The browser helper returns `BROWSER_COOKIE_ACCESS_DENIED` with a system-privacy remedy. No fresh generation or account cleanup is claimed from the static source or offline tests.
+Chrome UI recheck showed 3.5 Flash-Lite, 3.8 Flash and 3.1 Pro, plus the selected Create image feature and Create video entry. After browser-data access was enabled, fresh MCP calls verified primary and compact image generation/editing as independently decoded, visually checked 2816×1536 JPEG files. An initial SDK 2.0.0 music call failed without an artifact or returned source-chat ID. After recovery repairs, a separate single SDK 2.1.1 music request returned verified MP3 audio and a companion MP4, both fully decoded at about 122.54 seconds. Targeted follow-up verified all five successful requests' owned source chats absent, with saved files intact. Seven historical test chats were also verified absent; three candidates lacking ownership evidence were retained. These are bounded observations, separate from static source, offline tests and the dedicated-account full canary; the original music failure's cause and account state remain unknown. The browser helper reports operating-system denial as `BROWSER_COOKIE_ACCESS_DENIED` when permission is absent.
+
+The failure-recovery patch passed 1,995 offline tests, the 269-test contract checklist, Ruff and Mypy. Real media request-builder/stream regressions passed on SDK 2.0.0 and 2.1.1; independent review found and verified the repair of a positional-argument compatibility issue. All three MCP surfaces passed modern/legacy stdio checks. Wheel, sdist and both Runtime Skill archives built successfully; a clean base-wheel install and isolated `uvx` onboarding preflight passed without accessing credentials.
 
 ## Targeted Live Evidence (2026-09-26)
 
@@ -59,7 +61,7 @@ An authorized signed-in Chrome session showed 3.5 Flash-Lite, 3.8 Flash, and 3.1
 - SQLite OperationService and durable Cleanup queue;
 - complete typed account/admin results;
 - full mutation verification audit;
-- a verified MCP Omni video route and reliable music recovery;
+- a verified MCP Omni video route and music recovery across process restarts;
 - complete current live Gemini evidence through the dedicated-account canary;
 - real trigger evaluation with paraphrases and mixed languages;
 - task-level real-agent evaluations and official client/OS matrix.
