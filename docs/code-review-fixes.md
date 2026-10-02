@@ -130,3 +130,9 @@ identified, owned test-chat deletions were positively verified across the
 dated runs. Dedicated-account canaries, unfinished provider recovery after a
 hard crash and current live Research/account mutation coverage remain separate
 in [development status](development-status.md).
+
+The first hosted clean Python 3.11/3.12 run exposed an undeclared PyYAML
+dependency in the new focused Skill tests. The `dev` extra now declares it
+directly; no runtime dependency was added. Clean development installation and
+the final hosted CI run verify this distribution repair separately from the
+existing local-environment gates.
