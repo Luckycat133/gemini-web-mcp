@@ -532,7 +532,7 @@ workflow 不引用这些 secrets，也不调用 live canary。
 | Python | >= 3.11 | 开发语言（受 `pyproject.toml` 约束） |
 | MCPServer | mcp >= 2, < 3 | MCP SDK v2 服务器框架（`@mcp.tool(annotations=...)` 注册工具） |
 | mcp-types | >= 2, < 3 | 独立协议模型、snake_case Python 字段与 wire alias |
-| gemini-webapi | >= 2.0.0, < 3 | Gemini Web API 封装（依赖 `types.RPCData`、`constants.GRPC` 等 2.x API） |
+| gemini-webapi | >= 2.1.1, < 3 | Gemini Web API 封装；支持当前模型注册、无 final marker 的已知会话恢复及 sparse 音乐卡解析 |
 | orjson | >= 3.11.7, < 4 | 媒体和 Thinking 请求的直接 JSON 编解码依赖 |
 
 ---

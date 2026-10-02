@@ -7,13 +7,14 @@ import logging
 import os
 import re
 from collections.abc import Awaitable, Callable, Mapping, Sequence
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Optional, TypeVar
 
 from gemini_webapi.types.video import GeneratedMedia, GeneratedVideo
 from gemini_webapi.types.image import GeneratedImage, Image
+from gemini_webapi.exceptions import APIError
 
 from ..domain import (
     Artifact,
@@ -28,7 +29,9 @@ from ..domain import (
 )
 from ..infrastructure.rpc_contracts import execute_contract, get_contract
 from ..infrastructure.rpc_parsers import parse_contract_body, parse_rpc_envelope
+from ..thinking_client import MediaRequestObservation, ThinkingLevelGeminiClient
 from .artifacts import (
+    artifact_exception_result,
     artifact_from_local_path,
     artifact_result,
     detect_image_mime_type,
@@ -51,6 +54,100 @@ _MEDIA_PROMPTS = {
     "video": "Generate a video using Gemini's video generation capability. Prompt: {prompt}",
     "music": "Create music/audio using Gemini's music generation capability. Prompt: {prompt}",
 }
+
+
+class MediaGenerationError(RuntimeError):
+    """A public-safe SDK API failure, without an unsupported quota claim."""
+
+    def __init__(self, code: DomainErrorCode, message: str, failure_kind: str) -> None:
+        self.code = code
+        self.failure_kind = failure_kind
+        super().__init__(message)
+
+
+def _safe_generation_error(error: APIError) -> MediaGenerationError:
+    # These phrases are SDK-produced messages in both supported 2.0/2.1
+    # versions. Never copy an arbitrary HTTP body/exception into the result.
+    text = str(error).lower()
+    if "failed to parse response body from google" in text:
+        return MediaGenerationError(
+            DomainErrorCode.UPSTREAM_CHANGED,
+            "Gemini Web returned a media response the supported SDK could not parse.",
+            "response_parse_failed",
+        )
+    if "silently aborted by google" in text:
+        return MediaGenerationError(
+            DomainErrorCode.UPSTREAM_REJECTED,
+            "The media request ended without a complete result; the SDK reported a possible upstream interruption.",
+            "request_interrupted",
+        )
+    return MediaGenerationError(
+        DomainErrorCode.UPSTREAM_REJECTED,
+        "Gemini Web failed to complete the media request.",
+        "upstream_api_failed",
+    )
+
+
+def normalize_media_exception(error: Exception) -> Exception:
+    """Keep SDK API failures safe across initialization and recovery phases."""
+    return _safe_generation_error(error) if isinstance(error, APIError) else error
+
+
+@dataclass
+class MediaGenerationAttempt:
+    """One shared media attempt, retaining only its observed new-chat CID."""
+
+    observation: MediaRequestObservation = field(default_factory=MediaRequestObservation)
+
+    async def generate(self, client: Any, **request: Any) -> Any:
+        if request.get("chat") is not None:
+            raise ValueError("Owned media generation cannot use an existing chat.")
+        if isinstance(client, ThinkingLevelGeminiClient):
+            request = {**request, "media_observation": self.observation}
+        try:
+            return await client.generate_content(**request)
+        except APIError as error:
+            raise _safe_generation_error(error) from None
+
+    @property
+    def recovery_response(self) -> Any | None:
+        if self.observation.chat_id is None:
+            return None
+        # This is evidence of an allocated chat, not of a completed/empty
+        # generation. Callers attach it only to failures and always retain it.
+        return SimpleNamespace(
+            metadata=[self.observation.chat_id], text="", images=[], videos=[], media=[],
+        )
+
+
+def media_exception_result(
+    error: BaseException,
+    data: ArtifactResultData,
+    *,
+    logger: logging.Logger,
+    operation: str,
+) -> DomainResult[ArtifactResultData]:
+    """Use the stable domain vocabulary with specific safe API-failure evidence."""
+    if isinstance(error, APIError):
+        error = normalize_media_exception(error)
+    result = artifact_exception_result(error, data, logger=logger, operation=operation)
+    if not isinstance(error, MediaGenerationError) or result.error is None:
+        return result
+    return replace(
+        result,
+        error=replace(
+            result.error, code=error.code, message=str(error), retryable=False,
+            suggested_action=(
+                "Inspect the retained chat and observed artifacts before deciding whether to make another request."
+                if data.source_chat_id
+                else "No chat ID was observed. Check Gemini Web request status before deciding whether to make another request."
+            ),
+        ),
+        meta=replace(result.meta, details={
+            **result.meta.details, "upstream_failure_kind": error.failure_kind,
+            "request_chat_observed": data.source_chat_id is not None,
+        }),
+    )
 
 
 def _is_created_image(item: Any) -> bool:

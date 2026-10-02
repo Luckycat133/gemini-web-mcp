@@ -14,7 +14,7 @@ def _qa_pairs():
 def test_gemini_web_mcp_contract_evaluation_shape():
     pairs = _qa_pairs()
 
-    assert len(pairs) == 34
+    assert len(pairs) == 36
     for pair in pairs:
         question = pair.findtext("question")
         answer = pair.findtext("answer")
@@ -105,3 +105,10 @@ def test_gemini_web_mcp_contract_answers_match_static_manifest():
     assert pairs["scheduled_action_create_and_cleanup"]
     assert "media_creation_and_cleanup" in workflow_names
     assert pairs["media_creation_and_cleanup"]
+    media_workflow = next(
+        workflow for workflow in manifest["workflows"]
+        if workflow["name"] == "media_creation_and_cleanup"
+    )
+    assert "source_chat_id" in media_workflow["notes"]
+    assert "a missing ID does not prove no chat was created" in media_workflow["notes"]
+    assert "never scan unrelated history or automatically restart" in media_workflow["notes"]

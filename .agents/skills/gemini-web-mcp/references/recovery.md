@@ -93,6 +93,14 @@ If quick search returns an answer but no observed sources:
 
 For local `unverified` media, inspect the decoder diagnostic and install/repair the relevant local decoder before acceptance. An existing non-empty file or a mismatched media kind cannot substitute for verification. File/URL input artifacts only identify what was submitted; an empty response remains empty.
 
+A failed or timed-out media request may already have allocated a source chat.
+Preserve any returned `source_chat_id` and inspect it before deciding whether
+to request another generation. A missing ID means ownership was not observed;
+it does not prove that no chat was created. Do not search unrelated account
+history or restart generation automatically to recover a missing ID. Keep
+failure recovery separate from automatic deletion of completed disposable
+results, and require positive absence read-back for any authorized cleanup.
+
 For `media_type="video"`, a text-only response can mean the generic MCP call
 stayed in chat mode. Inspect cleanup metadata first: definitive empty responses
 are cleaned by default, while interrupted/queued/unsaved results retain recovery.

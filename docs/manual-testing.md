@@ -120,6 +120,9 @@
 | 4.19 | 音乐生成返回已知会话，但恢复读取网络失败、RPC 拒绝或形状改变（离线 fixture） | 保留会话并返回恢复失败诊断；不把查询失败当作可信 empty，只有成功解析的空结果可自动清理 |
 | 4.20 | 上游仍 queued/processing，但已经有一个本地验证通过的文件（离线 fixture） | 文件可用，操作状态仍 queued；保留源会话，primary/compact 一致 |
 | 4.21 | 真实 SDK 音乐保存带缩略图，目标目录已有同名缩略图（离线 HTTP fixture） | 原文件字节不变；音频/视频可验证，响应原对象不被修改 |
+| 4.22 | 真实 SDK 收到本次新建会话 metadata 后抛错或超时（离线流 fixture） | `source_chat_id` 保留，结果失败或超时并保留恢复；SDK metadata rollback 不丢 ID，不删除其他会话 |
+| 4.23 | SDK 报 silently aborted / 无法解析响应（离线 fixture） | 分别返回 `UPSTREAM_REJECTED` / `UPSTREAM_CHANGED`；未知原始响应不进入公开文本，不猜测配额，不自动重新生成 |
+| 4.24 | 支持的 SDK 版本分别构造 standard/extended 原生媒体请求（离线 fixture） | 请求 body 与模型 header 的 thinking 字段一致；只发一次 generation HTTP；旧 SDK 不泄漏新版控制参数 |
 
 **关键校验**：
 - 图片首轮按 Flash-Lite 与 Flash/Pro 分流；`observed_backend=null` 时，后端标签只是当前网页帮助支持的路由判断
@@ -129,7 +132,7 @@
 - 远端 URI 只标记 `unverified`；本地文件需解码或音视频流证据才标记 `verified`
 - 清理只以 `completed` / `already_completed` 验收；失败或等待超时需用记录的完整测试 ID 跟进。测试者决定丢弃未保存产物后，显式删除该测试聊天并验证，不扫描或删除其他用户聊天
 - `requested_model`、`request_model`、`effective_backend`、`observed_backend` 分开记录；没有观测证据时 `observed_backend=null`
-- 失败时返回**清晰的上游错误文本**，不能是空字符串（单元测试 `test_media_tool_returns_clear_upstream_failure` 验了形状，实机要验内容真实可读）
+- 失败时返回清晰的稳定错误、已观测恢复 ID 和下一步；不透出未经处理的响应正文或凭据。缺少 ID 不能证明没有新建聊天
 
 ### 5. Deep Research（`gemini_deep_research`）
 

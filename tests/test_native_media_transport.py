@@ -1,6 +1,8 @@
 """Native media selectors through the installed SDK's real request builder."""
 
 import asyncio
+import inspect
+import json
 from types import SimpleNamespace
 
 import pytest
@@ -11,7 +13,13 @@ from gemini_webapi.exceptions import APIError, GeminiError
 
 import src.thinking_client as transport
 from src.infrastructure.web_request_contracts import NativeMediaRequestShapeError
-from src.thinking_client import ThinkingLevelGeminiClient, WebRequestOptions, _web_request, inject_web_request_options
+from src.thinking_client import (
+    MediaRequestObservation,
+    ThinkingLevelGeminiClient,
+    WebRequestOptions,
+    _web_request,
+    inject_web_request_options,
+)
 from tests.test_thinking_client import _make_request_data, _new_client, _parse_inner
 
 
@@ -115,6 +123,10 @@ def sdk_client_at_http_boundary(monkeypatch, captured):
     # installed method, without inventing an attribute or bypassing its builder.
     activity_name = "_sync_activity" if hasattr(client, "_sync_activity") else "_send_bard_activity"
     monkeypatch.setattr(client, activity_name, activity)
+    if hasattr(client, "_fetch_usage_info"):
+        #2.1.1 refreshes account usage after a successful stream. Seal that
+        # unrelated I/O while preserving its actual generation/parser path.
+        monkeypatch.setattr(client, "_fetch_usage_info", activity)
     monkeypatch.setattr(client, "init", forbidden_io)
     monkeypatch.setattr(client, "_batch_execute", forbidden_io)
     monkeypatch.setattr(upstream_client, "save_cookies", lambda *_args: None)
@@ -182,6 +194,73 @@ def test_native_api_error_does_not_retry_a_generation(monkeypatch):
     assert len(captured) == 1
     assert "media_mode" not in captured[0]
     assert "current_retry" not in captured[0]
+    assert _web_request.get() is None
+
+
+@pytest.mark.parametrize("mode", ["image", "music"])
+@pytest.mark.parametrize("thinking_level,level_id", [("standard", 1), ("extended", 2)])
+@pytest.mark.parametrize("streaming", [False, True])
+def test_real_sdk_native_thinking_header_and_body_agree(monkeypatch, mode, thinking_level, level_id, streaming):
+    captured = []
+    client = sdk_client_at_http_boundary(monkeypatch, captured)
+
+    async def run():
+        with pytest.raises(StopAtHTTPBoundary):
+            if streaming:
+                async for _ in client.generate_content_stream(
+                    "fixture", model="gemini-3-flash", media_mode=mode, thinking_level=thinking_level,
+                ):
+                    pass
+            else:
+                await client.generate_content(
+                    "fixture", model="gemini-3-flash", media_mode=mode, thinking_level=thinking_level,
+                )
+
+    asyncio.run(run())
+    assert len(captured) == 1
+    request = captured[0]
+    assert _parse_inner(request["data"])[80] == level_id
+    assert "extended_thinking" not in request
+    method = GeminiClient.generate_content_stream if streaming else GeminiClient.generate_content
+    if "extended_thinking" in inspect.signature(method).parameters:
+        # The real2.1 builder appends [thinking_level, sessionid] to the model
+        # header.2.0 has no appended field; its native body remains verified.
+        assert json.loads(request["headers"][MODEL_HEADER_KEY])[-2] == level_id
+    assert _web_request.get() is None
+
+
+@pytest.mark.parametrize("streaming", [False, True])
+@pytest.mark.parametrize("thinking_level,level_id", [("standard", 1), ("extended", 2)])
+def test_real_sdk_positional_thinking_argument_remains_compatible(monkeypatch, streaming, thinking_level, level_id):
+    captured = []
+    client = sdk_client_at_http_boundary(monkeypatch, captured)
+    method = GeminiClient.generate_content_stream if streaming else GeminiClient.generate_content
+    args = ("fixture", None, "gemini-3-flash", None, None, False, False)
+    # Exercise every legal positional SDK field; 2.1.1 appended this eighth
+    # argument. An opposing positional value must be replaced, not rebound.
+    if "extended_thinking" in inspect.signature(method).parameters:
+        args = (*args, thinking_level != "extended")
+
+    async def run():
+        observation = MediaRequestObservation()
+        with pytest.raises(StopAtHTTPBoundary):
+            if streaming:
+                async for _ in client.generate_content_stream(
+                    *args, media_mode="image", thinking_level=thinking_level, media_observation=observation,
+                ):
+                    pass
+            else:
+                await client.generate_content(
+                    *args, media_mode="image", thinking_level=thinking_level, media_observation=observation,
+                )
+
+    asyncio.run(run())
+    assert len(captured) == 1
+    request = captured[0]
+    assert "extended_thinking" not in request
+    if "extended_thinking" in inspect.signature(method).parameters:
+        assert _parse_inner(request["data"])[80] == level_id
+        assert json.loads(request["headers"][MODEL_HEADER_KEY])[-2] == level_id
     assert _web_request.get() is None
 
 

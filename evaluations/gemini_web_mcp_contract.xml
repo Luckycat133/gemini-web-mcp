@@ -135,4 +135,12 @@
     <question>Inspect the media creation workflow. Should an unsaved remote-only result or a queued request, including one with ready local output, retain its source chat for recovery? Answer yes or no.</question>
     <answer>yes</answer>
   </qa_pair>
+  <qa_pair>
+    <question>Inspect the media creation workflow. Does a failed generation with no observed source_chat_id prove that no chat was created or justify an automatic restart? Answer yes or no.</question>
+    <answer>no</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>When an interrupted media request returns a source_chat_id, should the agent preserve and inspect that chat before deciding on another generation? Answer yes or no.</question>
+    <answer>yes</answer>
+  </qa_pair>
 </evaluation>

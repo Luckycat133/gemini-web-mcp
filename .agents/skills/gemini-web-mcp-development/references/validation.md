@@ -233,6 +233,11 @@ Exercise URI mutation during full-size saving and atomic concurrent filename
 reservation, including failure/cancellation cleanup and SDK thumbnail side effects.
 Music recovery must distinguish valid empty reads from transport/envelope/parser
 failures, including malformed cards whose URL cannot be used.
+Exercise a fresh, request-owned SDK session with isolated initial metadata,
+preserve an observed source chat ID through SDK rollback and timeouts, and
+reject pre-existing chat handles. API failures must expose stable safe errors
+without inferred quota causes or automatic generation retries. For supported
+SDK versions, test thinking mode consistency in the model header and body.
 
 For generated-chat cleanup, test request ownership, invalid/missing IDs,
 verified local versus queued/remote/unverified/partial-save results, explicit

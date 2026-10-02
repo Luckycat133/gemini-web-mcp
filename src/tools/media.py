@@ -20,7 +20,6 @@ from ..client_wrapper import (
 from ..constants import resolve_media_request
 from ..domain import Artifact, ArtifactKind, ArtifactResultData, ArtifactState, CleanupObservation, DomainErrorCode, DomainResult
 from ..services import (
-    artifact_exception_result,
     artifact_from_local_path,
     classify_media_artifact_state,
     extract_response_artifacts,
@@ -32,14 +31,17 @@ from ..services import (
 )
 from ..thinking_client import client_request_timeout
 from ..services.media_generation import (
+    MediaGenerationAttempt,
     MediaSaveOutcome as _MediaSaveOutcome,
     _media_from_music_card as _media_from_music_card,
     fetch_music_media_from_chat as _fetch_music_media_from_chat,
     materialize_generated_media,
     media_artifact_result,
     media_creation_response,
+    media_exception_result,
     media_generation_kwargs,
     media_requires_recovery,
+    normalize_media_exception,
     normalize_saved_image_extension as _normalize_saved_image_extension,  # noqa: F401 - private compatibility helper
     safe_media_filename as _safe_media_filename,  # noqa: F401 - private compatibility helper
     save_generated_media as _save_generated_media,  # noqa: F401 - private compatibility helper
@@ -121,7 +123,7 @@ def _media_failure_response(
         source_chat_id=response_chat_id(response),
         media_type=job.media_type,
     )
-    result = artifact_exception_result(
+    result = media_exception_result(
         error,
         failure_data,
         logger=logger,
@@ -363,6 +365,7 @@ def register_media_tools(mcp: MCPServer):
         )
         response = None
         client = None
+        attempt = MediaGenerationAttempt()
         observed_artifacts: list[Artifact] = []
         try:
             # One budget covers generation, chat recovery, downloads (including
@@ -372,7 +375,7 @@ def register_media_tools(mcp: MCPServer):
                 await initialize_client()
                 await cleanup_due_remote_chats(client)
                 with client_request_timeout(client, effective_timeout):
-                    response = await client.generate_content(**media_generation_kwargs(
+                    response = await attempt.generate(client, **media_generation_kwargs(
                         job.prompt,
                         job.media_type,
                         files=job.files,
@@ -382,6 +385,8 @@ def register_media_tools(mcp: MCPServer):
                     ))
                     outcome = await _build_media_outcome(client, response, job, output_dir, filename, observed_artifacts)
         except asyncio.TimeoutError as error:
+            if response is None:
+                response = attempt.recovery_response
             cleanup = None
             if response is not None:
                 cleanup = await finalize_generated_chat_cleanup(
@@ -406,6 +411,9 @@ def register_media_tools(mcp: MCPServer):
                 cleanup=cleanup,
             )
         except Exception as e:
+            e = normalize_media_exception(e)
+            if response is None:
+                response = attempt.recovery_response
             cleanup = None
             if response is not None:
                 cleanup = await finalize_generated_chat_cleanup(
