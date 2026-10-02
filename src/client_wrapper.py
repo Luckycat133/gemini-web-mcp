@@ -28,6 +28,7 @@ from .domain import (
     is_valid_remote_chat_id,
 )
 from .remote_chat_cleanup_manager import RemoteChatCleanupManager
+from .infrastructure.state_store import authentication_scope, get_default_state_store
 from .services.lifecycle import (
     ConversationLifecycleService,
     LifecycleResetAllData,
@@ -177,8 +178,43 @@ def get_gemini_client() -> Any:
     """获取 GeminiClient，并规范化混合对象/映射历史返回值。"""
     with _authentication_lock:
         client = _install_history_compatibility(_client_manager.get_client())
+        _bind_cleanup_authentication(client)
         _request_authentication_generation.set(_cleanup_context())
         return client
+
+
+def _bind_cleanup_authentication(client: Any) -> None:
+    if not isinstance(_cleanup_manager, RemoteChatCleanupManager):
+        return
+    cookies = getattr(client, "cookies", None)
+    getter = getattr(cookies, "get", None)
+    psid = getter("__Secure-1PSID") if callable(getter) else None
+    if not isinstance(psid, str):
+        psid = os.environ.get("GEMINI_PSID", "")
+    store = get_default_state_store()
+    _cleanup_manager.bind_authentication_scope(authentication_scope(psid, store=store), state_store=store)
+
+
+def get_remote_chat_cleanup_manager(client: Any = None) -> RemoteChatCleanupManager:
+    """Return the shared owner bound to the explicitly selected credentials."""
+    with _authentication_lock:
+        if client is None:
+            client = get_gemini_client()
+        else:
+            _bind_cleanup_authentication(client)
+        return _cleanup_manager
+
+
+def get_authentication_scope() -> str | None:
+    """Read the selected client's private scope without initializing or sending RPCs."""
+    try:
+        get_gemini_client()
+    except ValueError:
+        return None
+    if isinstance(_cleanup_manager, RemoteChatCleanupManager):
+        return _cleanup_manager.authentication_scope_id()
+    # A legacy test/lifecycle replacement must not invent persistent authority.
+    return None
 
 
 async def initialize_client() -> Any:
@@ -458,7 +494,9 @@ def _on_cookie_update(cookie_data: CookieData) -> None:
         else:
             authentication.pop("__Secure-1PSIDTS", None)
         changed = not _client_manager.authentication_matches(authentication)
-        if changed:
+        same_scope = _cleanup_manager.credentials_match_scope(cookie_data.psid) if isinstance(_cleanup_manager, RemoteChatCleanupManager) else None
+        identity_changed = not same_scope if same_scope is not None else cookie_data.psid != os.environ.get("GEMINI_PSID", "")
+        if identity_changed:
             _lifecycle_service.invalidate_authentication_context()
         os.environ["GEMINI_PSID"] = cookie_data.psid
         for name, env in (("__Secure-1PSIDTS", "GEMINI_PSIDTS"), ("__Secure-1PSIDCC", "GEMINI_PSIDCC")):
@@ -468,7 +506,7 @@ def _on_cookie_update(cookie_data: CookieData) -> None:
             else:
                 os.environ.pop(env, None)
         if changed:
-            logger.info("🔄 认证已更新，已取消旧账号清理并重置客户端")
+            logger.info("🔄 认证已更新，已重置客户端 identity_changed=%s", identity_changed)
             _client_manager.reset()
 
 

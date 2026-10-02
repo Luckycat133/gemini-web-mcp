@@ -399,6 +399,7 @@ class ConversationLifecycleService:
                     client_initializer=client_initializer,
                     authentication_generation=generation,
                     source=source,
+                    allow_durable=True,
                 )
         except asyncio.TimeoutError:
             if isinstance(cleanup, RemoteChatCleanupManager):
@@ -417,6 +418,7 @@ class ConversationLifecycleService:
         client_initializer: Callable[[], Any] | None = None,
         authentication_generation: int | None = None,
         source: str = "",
+        allow_durable: bool = False,
     ) -> CleanupObservation:
         if cid is None:
             return CleanupObservation(source=source)
@@ -430,6 +432,7 @@ class ConversationLifecycleService:
                 client_initializer=client_initializer,
                 authentication_generation=authentication_generation,
                 source=source,
+                allow_durable=allow_durable,
             )
         if client is None and client_initializer is not None:
             client = client_initializer()

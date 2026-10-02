@@ -18,9 +18,10 @@
 
 ### 使用指南
 - [工具使用手册](./tools.md) - 所有 MCP 工具详细说明（含媒体生成、Deep Research、会话管理）
+- [任务恢复与持久化清理](./operations-and-cleanup.md) - 重启恢复、凭据隔离和删除读回
 - [模型选择指南](./models.md) - 选择合适的模型
 - [现网 UI 覆盖表](./live-ui-coverage.md) - 已登录 Gemini Web UI 与 MCP 覆盖关系
-- [原生媒体模式与清理](./native-media-mode.md) - 图片/音乐专用选择、产物验证和源聊天清理证据
+- [原生媒体模式与清理](./native-media-mode.md) - 图片/视频/音乐专用选择、产物验证和源聊天清理证据
 
 ### 部署与配置
 - [Launch Kit](./launch-kit.md) - 分发链接、安装文案和社交媒体发布素材
@@ -35,6 +36,8 @@
 - [MCP Contract Evaluation](../evaluations/gemini_web_mcp_contract.xml) - 只读工具选择与安全元数据评估
 - [运行时 Skill](../.agents/skills/gemini-web-mcp/SKILL.md) - 操作已安装 MCP 工具的 agent 使用流程
 - [Assistance Skill](../.agents/skills/gemini-assist/SKILL.md) - 专注 assistance 服务器（`gemini-mcp-assist`）的 agent 使用流程
+- [Creation Skill](../.agents/skills/gemini-create/SKILL.md) - 专注生成与产物交付
+- [Account Skill](../.agents/skills/gemini-account/SKILL.md) - 明确账号操作与清理
 - [开发 Skill](../.agents/skills/gemini-web-mcp-development/SKILL.md) - 仓库架构、测试、打包和发布流程
 
 ### 参考资料

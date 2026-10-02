@@ -543,7 +543,7 @@ def test_generate_media_video_routes_to_default_backend(monkeypatch):
                                 prompt="x", media_type="video")
 
     result = asyncio.run(run())
-    assert "后端: Gemini Web generic chat" in result[0].text
+    assert "后端: Gemini Web video feature" in result[0].text
     assert "https://gemini.google.com/videos" in result[0].text
     domain = result[0].meta["domain_result"]
     assert domain["error"]["code"] == "ARTIFACT_NOT_RETURNED"
@@ -617,13 +617,13 @@ def test_generate_media_generic_exception_returns_error_message_with_backend(mon
 
     result = asyncio.run(run())
     text = result[0].text
-    assert "后端: Gemini Web generic chat" in text
-    assert "❌ video 生成失败: upstream aborted" in text
-    assert "通用 generate_content" in text
-    assert "显式选择 Gemini Web 原生工具模式" not in text
+    assert "后端: Gemini Web video feature" in text
+    assert "❌ video 生成失败:" in text
+    assert "upstream aborted" not in text
+    assert "显式选择 Gemini Web 原生工具模式" in text
 
 
-@pytest.mark.parametrize("media_type", ["image", "music"])
+@pytest.mark.parametrize("media_type", ["image", "video", "music"])
 def test_native_media_failure_reports_selected_mode_without_claiming_artifact(monkeypatch, media_type):
     client = _FakeMediaClient(raise_exc=RuntimeError("upstream aborted"))
     _patch_media_env(monkeypatch, client)

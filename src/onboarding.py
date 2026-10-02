@@ -1,7 +1,7 @@
 """Public onboarding client for verified Gemini Web MCP installation paths.
 
 The default preflight launches the installed stdio server and calls a static
-text tool without reading Gemini credentials.  Live chat and image examples
+text tool without reading Gemini credentials.  Live text and media examples
 are separately opt-in and keep requested/effective/observed backend evidence
 distinct.
 """
@@ -10,17 +10,21 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import hashlib
 import json
 import os
 import shutil
 import sys
 import tempfile
+import uuid
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
-from mcp import Client, StdioServerParameters, stdio_client
+from mcp import Client, MCPError, StdioServerParameters, stdio_client
 from mcp_types import CallToolResult
+
+from .domain import DomainErrorCode, OperationState
 
 
 COOKIE_ENVIRONMENT_NAMES = ("GEMINI_PSID", "GEMINI_PSIDTS", "GEMINI_PSIDCC")
@@ -37,6 +41,9 @@ def _resolve_server_command(command: str | None = None) -> str:
             if not candidate.is_file():
                 raise OnboardingError(f"MCP server command does not exist: {candidate}")
             return str(candidate.resolve())
+        beside_python = Path(sys.executable).parent / command
+        if beside_python.is_file():
+            return str(beside_python)
         resolved = shutil.which(command)
         if resolved:
             return resolved
@@ -78,6 +85,8 @@ async def _call_installed_tool(
             env=environment,
             cwd=Path(directory),
         )
+        if not allow_live_account:
+            environment["GEMINI_STATE_DB_PATH"] = str(Path(directory) / "state.sqlite3")
         async with asyncio.timeout(45 if not allow_live_account else 720):
             async with Client(stdio_client(parameters), mode="auto", cache=None) as client:
                 result = await client.call_tool(name, dict(arguments))
@@ -104,6 +113,8 @@ def domain_result_from_call(result: CallToolResult) -> dict[str, Any]:
 
     structured = result.structured_content
     if isinstance(structured, Mapping):
+        if isinstance(structured.get("ok"), bool) and isinstance(structured.get("meta"), Mapping):
+            return dict(structured)
         items = structured.get("result")
         if isinstance(items, Sequence) and not isinstance(items, (str, bytes)):
             for item in items:
@@ -270,6 +281,7 @@ async def run_image(
         "model": model,
         "output_dir": str(output_root),
     }
+
     if filename:
         arguments["filename"] = filename
     result, protocol_version, server_version = await _call_installed_tool(
@@ -301,6 +313,173 @@ async def run_image(
     }
 
 
+def verify_local_media_artifacts(payload: Mapping[str, Any], *, media_type: str) -> list[dict[str, Any]]:
+    """Read and verify bytes independently of the MCP artifact's claimed status."""
+    from .domain import ArtifactKind
+    from .services.artifacts import artifact_from_local_path
+
+    data = payload.get("data")
+    candidates = data.get("artifacts", []) if isinstance(data, Mapping) else []
+    allowed = {"audio", "video"} if media_type == "music" else {"video"}
+    verified = []
+    for candidate in candidates:
+        if not isinstance(candidate, Mapping) or candidate.get("kind") not in allowed or not candidate.get("local_path"):
+            continue
+        path = Path(candidate["local_path"]).expanduser().resolve()
+        observed = artifact_from_local_path(ArtifactKind(candidate["kind"]), str(path))
+        if observed.verification.status.value != "verified":
+            raise OnboardingError("A returned local media artifact could not be verified")
+        claimed = candidate.get("verification", {})
+        if not isinstance(claimed, Mapping) or claimed.get("status") != "verified":
+            raise OnboardingError("The server has not verified a returned media artifact")
+        verified.append({
+            "kind": observed.kind.value, "local_path": str(path), "mime_type": observed.mime_type,
+            "size_bytes": observed.size_bytes, "duration_seconds": observed.duration_seconds,
+            "width": observed.width, "height": observed.height,
+            "sha256": hashlib.sha256(path.read_bytes()).hexdigest(), "verification": "verified",
+        })
+    return verified
+
+
+async def run_media_operation(
+    prompt: str | None = None, *, media_type: str = "music", output_dir: Path | None = None,
+    model: str = "flash", thinking_level: str = "standard", timeout_seconds: int = 720,
+    idempotency_key: str | None = None, operation_id: str | None = None,
+    server_command: str | None = None,
+) -> dict[str, Any]:
+    """Start once and retain a safe recovery receipt even if responses are lost."""
+    if operation_id is None and (media_type not in {"music", "video"} or not prompt or not prompt.strip()):
+        raise OnboardingError("Music/video starts require a nonblank prompt")
+    executable = _resolve_server_command(server_command or "gemini-mcp-create")
+    environment = _server_environment(profile="core", allow_live_account=True)
+    parameters = StdioServerParameters(command=executable, env=environment)
+    handle = operation_id
+    key = idempotency_key if handle is not None else idempotency_key or uuid.uuid4().hex
+    state = "unknown"
+    last_observed_state = None
+    artifacts: list[dict[str, Any]] = []
+    error_code = None
+    failure_stage = None
+    phase = "initialize"
+    start_attempted = completion_verified = False
+    version = protocol = None
+    try:
+        async with asyncio.timeout(timeout_seconds):
+            async with Client(stdio_client(parameters), mode="auto", cache=None) as client:
+                version = client.server_info.version if client.server_info else None
+                protocol = client.protocol_version
+                if handle is None:
+                    arguments = {"prompt": prompt, "model": model, "thinking_level": thinking_level,
+                                 "idempotency_key": key, "output_dir": str((output_dir or Path("generated_media")).expanduser().resolve())}
+                    phase = "start"
+                    start_attempted = True
+                    start_response = await client.call_tool(f"gemini_generate_{media_type}", arguments)
+                    phase = "start_response"
+                    started = domain_result_from_call(start_response)
+                    data = started.get("data")
+                    handle = data.get("operation_id") if isinstance(data, Mapping) else None
+                    error_code = _media_result_error_code(started)
+                    if not isinstance(handle, str) or not handle.strip():
+                        handle = None
+                        state = "failed" if started.get("ok") is False else "unknown"
+                        raise OnboardingError("Media start returned no recovery handle")
+                    state = _media_result_state(started)
+                    last_observed_state = state
+                while True:
+                    phase = "result"
+                    result_response = await client.call_tool("gemini_get_operation_result", {"operation_id": handle})
+                    phase = "result_response"
+                    payload = domain_result_from_call(result_response)
+                    data = payload.get("data")
+                    state = _media_result_state(payload)
+                    last_observed_state = state
+                    error_code = _media_result_error_code(payload)
+                    if isinstance(data, Mapping):
+                        operation = data.get("operation", media_type)
+                        if not isinstance(operation, str) or operation not in {"music", "video"}:
+                            raise OnboardingError("This handle does not identify a music/video operation")
+                        media_type = str(operation)
+                    phase = "verification"
+                    artifacts = await asyncio.to_thread(verify_local_media_artifacts, payload, media_type=media_type)
+                    if state == "completed":
+                        if not payload.get("ok") or not artifacts:
+                            raise OnboardingError("A completed media operation returned no verified local artifacts")
+                        completion_verified = True
+                        break
+                    if state in {"cancelled", "expired", "unavailable"} or error_code in {"AUTH_REQUIRED", "AUTH_EXPIRED", "OPERATION_NOT_FOUND", "OPERATION_EXPIRED"}:
+                        break
+                    # Failed/timed-out operations with a source can still recover.
+                    if state in {"failed", "timed_out"} and not (isinstance(data, Mapping) and data.get("continuation_possible")):
+                        break
+                    phase = "poll_wait"
+                    await asyncio.sleep(2)
+                phase = "shutdown"
+    except TimeoutError:
+        failure_stage = phase
+        if not completion_verified:
+            state = "timed_out"
+            error_code = "TIMED_OUT"
+    except Exception as error:
+        # The start may already have reached the server. Never lose its key or
+        # observed handle, and never leak the exception's response/message/data.
+        failure_stage = phase
+        if phase == "verification":
+            error_code = "VERIFICATION_FAILED"
+            state = "failed"
+            artifacts = []
+        else:
+            if not (phase == "start_response" and state == "failed" and error_code):
+                error_code = _media_receipt_error_code(error)
+            if not completion_verified and state not in {"failed", "cancelled", "expired", "unavailable"}:
+                state = "partial" if handle is not None else "unknown"
+    if state == "completed":
+        next_step = None
+    elif handle is None:
+        next_step = "Repeat the same start in the same authentication context with the returned idempotency_key to retrieve its handle; do not use a new key."
+    else:
+        next_step = "gemini-mcp-onboarding operation --allow-live-account --operation-id <operation_id>"
+    status = "ok" if state == "completed" else "failed" if state in {"failed", "cancelled", "expired", "unavailable"} else "pending"
+    return {"status": status, "mode": "live", "media_type": media_type,
+            "operation_id": handle, "idempotency_key": key,
+            "state": state, "error_code": error_code, "artifacts": artifacts,
+            "last_observed_state": last_observed_state, "failure_stage": failure_stage,
+            "start_attempted": start_attempted, "completion_verified": completion_verified,
+            "next_step": next_step,
+            "protocol_version": protocol, "server_version": version, "generation_resubmitted": False}
+
+
+def _media_result_error_code(payload: Mapping[str, Any]) -> str | None:
+    error = payload.get("error")
+    if not isinstance(error, Mapping):
+        return None
+    code = error.get("code")
+    return code if isinstance(code, str) and code in {item.value for item in DomainErrorCode} else "UPSTREAM_CHANGED"
+
+
+def _media_result_state(payload: Mapping[str, Any]) -> str:
+    data = payload.get("data")
+    meta = payload.get("meta")
+    state = data.get("state") if isinstance(data, Mapping) else meta.get("operation_state") if isinstance(meta, Mapping) else None
+    if not isinstance(state, str) or state not in {item.value for item in OperationState}:
+        raise OnboardingError("The operation response did not contain a known state")
+    return state
+
+
+def _media_receipt_error_code(error: Exception) -> str:
+    if isinstance(error, ExceptionGroup):
+        codes = {_media_receipt_error_code(item) for item in error.exceptions}
+        if codes and codes <= {"NETWORK_ERROR", "MCP_ERROR"}:
+            return "MCP_ERROR" if "MCP_ERROR" in codes else "NETWORK_ERROR"
+        return "INTERNAL_ERROR"
+    if isinstance(error, MCPError):
+        return "MCP_ERROR"
+    if isinstance(error, (ConnectionError, OSError, EOFError)):
+        return "NETWORK_ERROR"
+    if isinstance(error, (OnboardingError, ValueError, TypeError)):
+        return "UPSTREAM_CHANGED"
+    return "INTERNAL_ERROR"
+
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -322,6 +501,18 @@ def _build_parser() -> argparse.ArgumentParser:
     image.add_argument("--output-dir", type=Path, required=True)
     image.add_argument("--model", default="flash")
     image.add_argument("--filename")
+    for action in ("music", "video", "operation"):
+        media = subparsers.add_parser(action, help="Start once or recover media by opaque operation handle")
+        media.add_argument("--allow-live-account", action="store_true", required=True)
+        media.add_argument("--timeout-seconds", type=int, choices=range(1, 1801), metavar="1..1800", default=720)
+        if action == "operation":
+            media.add_argument("--operation-id", required=True)
+        else:
+            media.add_argument("--prompt", required=True)
+            media.add_argument("--output-dir", type=Path, required=True)
+            media.add_argument("--model", default="flash")
+            media.add_argument("--thinking-level", choices=("standard", "extended"), default="standard")
+            media.add_argument("--idempotency-key", help="Reuse an opaque token after response loss; never use prompt text")
     return parser
 
 
@@ -351,6 +542,15 @@ def main() -> None:
                     server_command=args.server_command,
                 )
             )
+        elif action in {"music", "video"}:
+            payload = asyncio.run(run_media_operation(
+                args.prompt, media_type=action, output_dir=args.output_dir, model=args.model,
+                thinking_level=args.thinking_level, timeout_seconds=args.timeout_seconds,
+                idempotency_key=args.idempotency_key, server_command=args.server_command,
+            ))
+        elif action == "operation":
+            payload = asyncio.run(run_media_operation(operation_id=args.operation_id,
+                timeout_seconds=args.timeout_seconds, server_command=args.server_command))
         else:  # pragma: no cover - argparse constrains this branch.
             parser.error(f"Unsupported action: {action}")
     except (OnboardingError, TimeoutError) as exc:

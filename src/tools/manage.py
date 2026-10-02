@@ -46,6 +46,7 @@ from ..services.gems import (
     create_gem as create_gem_service,
     delete_gem as delete_gem_service,
     iter_gem_values as registered_iter_gems,
+    list_gems as list_gems_service,
     update_gem as update_gem_service,
 )
 from ..services.history import (
@@ -68,6 +69,8 @@ from ..services.manifest import (
     web_capabilities_payload as registered_web_capabilities_payload,
 )
 from ..services.notebooks import (
+    fetch_native_notebooks as fetch_native_notebooks_service,
+    fetch_notebook_chats as fetch_notebook_chats_service,
     move_chat_to_notebook as move_chat_to_notebook_service,
     move_chat_to_notebook_payload as registered_move_chat_payload,
     native_notebooks_payload as registered_notebooks_payload,
@@ -238,33 +241,7 @@ async def _fetch_scheduled_task_by_id(
 
 
 async def _fetch_native_notebooks(client, locale: str = "zh-CN") -> tuple[list[dict[str, Any]], dict[str, Any]]:
-    contract = get_contract("notebooks.list")
-    response = await client._batch_execute(
-        [_RawRPCData(contract.rpc_id, _native_notebooks_payload(locale))],
-        source_path=contract.source_path,
-        close_on_error=False,
-    )
-    bodies = _extract_rpc_bodies(response.text, contract.rpc_id)
-    body = bodies[0] if bodies else []
-    raw_entries = body[2] if isinstance(body, list) and len(body) > 2 and isinstance(body[2], list) else []
-    raw_categories = body[3] if isinstance(body, list) and len(body) > 3 and isinstance(body[3], list) else []
-    notebooks = [_parse_native_notebook(item) for item in raw_entries]
-    diagnostic = {
-        "source_rpc": contract.rpc_id,
-        "contract_key": contract.key,
-        "observed": contract.observed,
-        "status_code": getattr(response, "status_code", None),
-        "response_length": len(getattr(response, "text", "") or ""),
-        "body_present": bool(bodies),
-        "raw_entry_count": len(raw_entries),
-        "categories": [_parse_notebook_category(item) for item in raw_categories],
-        "client_language": getattr(client, "language", None),
-        "client_build_label": getattr(client, "build_label", None),
-    }
-    return notebooks, diagnostic
-
-
-
+    return await fetch_native_notebooks_service(client, locale)
 
 
 async def _fetch_conversation_metadata_source(
@@ -636,52 +613,7 @@ async def _fetch_notebook_chats(
     limit: int,
     offset: int,
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
-    contract = get_contract("notebooks.chats")
-    safe_limit = clamp_int(limit, default=20, minimum=1, maximum=100)
-    safe_offset = clamp_int(offset, default=0, minimum=0, maximum=10000)
-    target_count = safe_offset + safe_limit
-    page_size = min(max(target_count, 10), 100)
-    items: list[dict[str, Any]] = []
-    next_page_token: str | None = None
-    response_length = 0
-    page_count = 0
-
-    while len(items) < target_count:
-        response = await client._batch_execute(
-            [_RawRPCData(contract.rpc_id, _notebook_chats_payload(notebook_id, page_size, next_page_token))],
-            source_path=contract.source_path.format(notebook_slug=notebook_id.rsplit("/", 1)[-1]),
-            close_on_error=False,
-        )
-        response_length += len(getattr(response, "text", "") or "")
-        page_count += 1
-        bodies = _extract_rpc_bodies(response.text, contract.rpc_id)
-        body = bodies[0] if bodies else []
-        raw_entries = body[2] if isinstance(body, list) and len(body) > 2 and isinstance(body[2], list) else []
-        items.extend(_parse_conversation_metadata(item) for item in raw_entries)
-        next_page_token = body[1] if isinstance(body, list) and len(body) > 1 and isinstance(body[1], str) else None
-        if not next_page_token or not raw_entries:
-            break
-
-    page = items[safe_offset : safe_offset + safe_limit]
-    diagnostic = {
-        "source_rpc": contract.rpc_id,
-        "contract_key": contract.key,
-        "observed": contract.observed,
-        "response_length": response_length,
-        "page_count": page_count,
-        "fetched_count": len(items),
-        "has_remote_more": bool(next_page_token),
-        "next_page_token_present": bool(next_page_token),
-    }
-    page_info = {
-        "total_count": len(items),
-        "count": len(page),
-        "offset": safe_offset,
-        "limit": safe_limit,
-        "has_more": bool(next_page_token) or safe_offset + len(page) < len(items),
-        "next_offset": safe_offset + len(page) if bool(next_page_token) or safe_offset + len(page) < len(items) else None,
-    }
-    return page, {**page_info, "diagnostic": diagnostic}
+    return await fetch_notebook_chats_service(client, notebook_id, limit, offset)
 
 
 def _find_notebook(
@@ -2348,18 +2280,22 @@ def _register_gem_tools(mcp: MCPServer, enabled_tool_names: set[str]) -> None:
 
         try:
             if action == "list":
-                gems = await client.fetch_gems()
-                if not gems:
-                    return [TextContent(type="text", text="暂无保存的 Gems。")]
-
+                result = await list_gems_service(client)
+                items = (result.data or {}).get("items", [])
+                if not result.ok:
+                    return domain_text(result, "无法核实 Gems 列表。", use_result_data=True)
+                if not items and not result.warnings:
+                    return domain_text(result, "暂无保存的 Gems。", use_result_data=True)
                 gem_list = ["## 💎 Gems 列表"]
-                for i, gem in enumerate(_iter_gem_values(gems), 1):
-                    gem_name = getattr(gem, "name", "Untitled")
-                    gem_id_val = getattr(gem, "id", "")
-                    gem_desc = getattr(gem, "description", "")[:30]
+                if not items:
+                    gem_list.append("已观察的集合中暂无 Gems。")
+                for i, gem in enumerate(items, 1):
+                    gem_name = gem.get("name") or "Untitled"
+                    gem_id_val = gem.get("id", "")
+                    gem_desc = gem.get("description", "")[:30]
                     gem_list.append(f"{i}. {gem_name} (ID: {gem_id_val})\n   {gem_desc}")
-                
-                return [TextContent(type="text", text="\n".join(gem_list))]
+                gem_list.extend(f"⚠️ {warning.message}" for warning in result.warnings)
+                return domain_text(result, "\n".join(gem_list), use_result_data=True)
 
             elif action == "create":
                 if not name:

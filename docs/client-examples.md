@@ -14,6 +14,11 @@ The command removes Gemini Cookie variables from the child process and reports `
 
 ## Authentication
 
+The authenticated local runtime currently requires macOS/Linux POSIX file
+protections. Windows local authentication is unsupported until a secure
+private-file/ACL implementation is accepted. Desktop configuration examples
+describe client formats; they do not establish server support on that OS.
+
 Live model calls use Gemini Web Cookies and therefore carry account and Terms-of-Service risk. Export secrets in the client host or use that client's secret-input facility; never pass Cookies as command-line arguments or commit them.
 
 ```bash
@@ -35,10 +40,21 @@ not evidence that no matching browser profile exists.
 
 Authoritative configuration references: [Codex MCP](https://developers.openai.com/codex/mcp/), [Claude Code MCP](https://code.claude.com/docs/en/mcp), and [VS Code MCP configuration](https://code.visualstudio.com/docs/agents/reference/mcp-configuration).
 
+Focused configurations for all three capability lanes are also available:
+[Codex](../examples/clients/codex.focused.config.toml),
+[Claude Desktop](../examples/clients/claude-desktop.focused.json),
+[Claude Code](../examples/clients/claude-code.focused.mcp.json), and
+[VS Code](../examples/clients/vscode.focused.mcp.json).
+Connect only the lanes needed for the task. Share `GEMINI_STATE_DB_PATH` when
+multiple local processes should recover the same operations and cleanup jobs.
+
 ## Pick one surface
 
 | Surface | Select it when | Trade-off |
 | --- | --- | --- |
+| `gemini-mcp-assist` | Second opinion, sourced search, image/mixed-input understanding, Research | Five focused tools; explicit Research actions recover a saved handle |
+| `gemini-mcp-create` | Image generation/editing, video/music operations | Seven focused tools; verified files and restart recovery |
+| `gemini-mcp-account` | Explicit Gemini history/admin/cleanup | Seven typed action facades; account reads/mutations require user intent |
 | Primary + `GEMINI_TOOLS=model` | Text/model calls are the goal | Recommended starting point; smallest primary model surface |
 | Primary + `GEMINI_TOOLS=core` | Images, music, files, URLs, or Deep Research are needed | Broader content surface and longer tool timeouts; use Gemini Web's dedicated Videos page for video until its MCP route returns a verified artifact |
 | `gemini-mcp-skill-server` | The client benefits from a fixed, low-token facade | Eleven workflow tools; compact presentation, shared service semantics |
@@ -103,3 +119,21 @@ npx --yes skills@1.5.21 add \
 ```
 
 The runtime skill teaches safe tool use. The development skill owns architecture, tests, packaging, compatibility, and release gates; neither installs the MCP server itself.
+
+## Client and OS evidence
+
+The initial supported runtime is Python 3.11+ with MCP SDK v2 over local stdio,
+installed from a built wheel or pinned source with uvx. Media images require
+`[image]` (or `[all]`) for independent decoding; audio/video verification needs
+working ffprobe/ffmpeg binaries in the server's PATH.
+
+| Combination | Evidence | Boundary |
+| --- | --- | --- |
+| macOS arm64, Python SDK v2 stdio client | Modern/legacy protocol, wheel/uvx, bounded Chrome media tests | Primary, compact and focused surfaces; signed-in coverage is modality-specific |
+| Linux, supported CI Python matrix | Offline tests, package and real stdio gates | CI does not access a Gemini account |
+| Codex, Claude Desktop/Code, VS Code configs | Parsed copyable configurations | Desktop-host end-to-end behavior requires a separate run |
+| Windows | Authenticated local runtime unsupported; no runtime/ACL acceptance | Missing POSIX protections fail with a safe storage error before writing state; configuration templates are format examples only |
+
+An agent-use handoff can exercise a Skill with an existing verified file without
+making another generation request. This proves task routing/use of that file;
+it does not replace fresh upstream acceptance for another modality.

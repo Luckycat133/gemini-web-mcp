@@ -831,6 +831,7 @@ def test_fetch_notebook_chats_single_page(monkeypatch):
     entries = [["c_1", "Chat 1", False, None, None, None, None, None, None, None, None, None, None, None]]
     # body=[next_page_token, raw_entries, raw_entries_dup?] —— 实际 body[1]=token, body[2]=entries
     body = [None, None, entries]
+    client._responses = [json.dumps([["wrb.fr", "MaZiqc", json.dumps(body)]])]
     monkeypatch.setattr(manage_tools, "_extract_rpc_bodies", lambda _t, _r: [body])
     items, page_payload = _run(manage_tools._fetch_notebook_chats(client, "n_1", 20, 0))
     assert client.call_count == 1
@@ -853,6 +854,7 @@ def test_fetch_notebook_chats_multi_page_until_no_token(monkeypatch):
     body1 = [None, "tok_next", entries1]  # body[1]=token（str）→ 继续
     body2 = [None, None, entries2]  # body[1]=None → 停止
     pages = [body1, body2]
+    client._responses = [json.dumps([["wrb.fr", "MaZiqc", json.dumps(body)]]) for body in pages]
     monkeypatch.setattr(manage_tools, "_extract_rpc_bodies",
                         lambda _t, _r: [pages.pop(0)])
     items, page_payload = _run(manage_tools._fetch_notebook_chats(client, "n_1", 20, 0))

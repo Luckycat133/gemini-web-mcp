@@ -40,7 +40,8 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 from tests._account_rpc_fakes import scheduled_ack_response, scheduled_read
-from tests.media_fixtures import fake_finalize_generated_cleanup
+from tests.media_fixtures import fake_finalize_generated_cleanup, write_image
+from src.infrastructure.rpc_contracts import get_contract
 
 import src.skill_server as skill_server
 from src.session_manager import SessionService
@@ -1079,17 +1080,23 @@ def test_scheduled_create_rejects_invalid_hour(monkeypatch):
     assert result[0].text == "hour must be 0..23"
 
 
+def _scheduled_create_response():
+    return SimpleNamespace(status_code=200, text=json.dumps([
+        ["wrb.fr", get_contract("scheduled.create_daily").rpc_id, json.dumps(["new_1", []])],
+    ]))
+
+
 def test_scheduled_create_visible_in_registry(monkeypatch):
     """created_id 命中 registry_entries → verification_status=visible_in_registry，无 suffix。"""
-    fake_response = SimpleNamespace(text="t")
+    fake_response = _scheduled_create_response()
     client = SimpleNamespace(_batch_execute=AsyncMock(return_value=fake_response))
     monkeypatch.setattr(skill_server, "_extract_rpc_bodies", lambda _t, _r: [[["created_id"]]])
     monkeypatch.setattr(skill_server, "_parse_scheduled_action_create_body",
                         lambda b: {"id": "new_1"})
     monkeypatch.setattr(skill_server, "_fetch_scheduled_registry",
-                        AsyncMock(return_value=([{"id": "new_1"}], {})))
+                        AsyncMock(return_value=scheduled_read([{"id": "new_1"}])))
     monkeypatch.setattr(skill_server, "_fetch_scheduled_task_by_id",
-                        AsyncMock(return_value=(None, {})))
+                        AsyncMock(return_value=scheduled_read(None)))
     monkeypatch.setattr(skill_server, "_scheduled_daily_payload",
                         lambda *args: "payload")
     result = _run(_scheduled_create(client, "Title", "Instr", 9, "Asia/Shanghai"))
@@ -1099,15 +1106,15 @@ def test_scheduled_create_visible_in_registry(monkeypatch):
 
 def test_scheduled_create_not_visible_in_nonempty_registry(monkeypatch):
     """created_id 不在 registry 但 registry 非空 → not_visible_in_nonempty_registry。"""
-    fake_response = SimpleNamespace(text="t")
+    fake_response = _scheduled_create_response()
     client = SimpleNamespace(_batch_execute=AsyncMock(return_value=fake_response))
     monkeypatch.setattr(skill_server, "_extract_rpc_bodies", lambda _t, _r: [[["x"]]])
     monkeypatch.setattr(skill_server, "_parse_scheduled_action_create_body",
                         lambda b: {"id": "new_1"})
     monkeypatch.setattr(skill_server, "_fetch_scheduled_registry",
-                        AsyncMock(return_value=([{"id": "other"}], {})))
+                        AsyncMock(return_value=scheduled_read([{"id": "other"}])))
     monkeypatch.setattr(skill_server, "_fetch_scheduled_task_by_id",
-                        AsyncMock(return_value=(None, {})))
+                        AsyncMock(return_value=scheduled_read(None)))
     monkeypatch.setattr(skill_server, "_scheduled_daily_payload", lambda *a: "p")
     result = _run(_scheduled_create(client, "T", "I", 9, "Asia/Shanghai"))
     assert "not_visible_in_nonempty_registry" in result[0].text
@@ -1115,15 +1122,15 @@ def test_scheduled_create_not_visible_in_nonempty_registry(monkeypatch):
 
 def test_scheduled_create_registry_empty_unverified(monkeypatch):
     """created_id 存在但 registry 为空 → registry_empty_unverified。"""
-    fake_response = SimpleNamespace(text="t")
+    fake_response = _scheduled_create_response()
     client = SimpleNamespace(_batch_execute=AsyncMock(return_value=fake_response))
     monkeypatch.setattr(skill_server, "_extract_rpc_bodies", lambda _t, _r: [[["x"]]])
     monkeypatch.setattr(skill_server, "_parse_scheduled_action_create_body",
                         lambda b: {"id": "new_1"})
     monkeypatch.setattr(skill_server, "_fetch_scheduled_registry",
-                        AsyncMock(return_value=([], {})))
+                        AsyncMock(return_value=scheduled_read([])))
     monkeypatch.setattr(skill_server, "_fetch_scheduled_task_by_id",
-                        AsyncMock(return_value=(None, {})))
+                        AsyncMock(return_value=scheduled_read(None)))
     monkeypatch.setattr(skill_server, "_scheduled_daily_payload", lambda *a: "p")
     result = _run(_scheduled_create(client, "T", "I", 9, "Asia/Shanghai"))
     assert "registry_empty_unverified" in result[0].text
@@ -1131,15 +1138,15 @@ def test_scheduled_create_registry_empty_unverified(monkeypatch):
 
 def test_scheduled_create_readable_by_id_registry_empty(monkeypatch):
     """registry 空但 task_by_id 可读 → readable_by_id_registry_empty。"""
-    fake_response = SimpleNamespace(text="t")
+    fake_response = _scheduled_create_response()
     client = SimpleNamespace(_batch_execute=AsyncMock(return_value=fake_response))
     monkeypatch.setattr(skill_server, "_extract_rpc_bodies", lambda _t, _r: [[["x"]]])
     monkeypatch.setattr(skill_server, "_parse_scheduled_action_create_body",
                         lambda b: {"id": "new_1"})
     monkeypatch.setattr(skill_server, "_fetch_scheduled_registry",
-                        AsyncMock(return_value=([], {})))
+                        AsyncMock(return_value=scheduled_read([])))
     monkeypatch.setattr(skill_server, "_fetch_scheduled_task_by_id",
-                        AsyncMock(return_value=({"id": "new_1"}, {})))
+                        AsyncMock(return_value=scheduled_read({"id": "new_1"})))
     monkeypatch.setattr(skill_server, "_scheduled_daily_payload", lambda *a: "p")
     result = _run(_scheduled_create(client, "T", "I", 9, "Asia/Shanghai"))
     assert "readable_by_id_registry_empty" in result[0].text
@@ -1147,15 +1154,15 @@ def test_scheduled_create_readable_by_id_registry_empty(monkeypatch):
 
 def test_scheduled_create_readable_by_id_not_visible(monkeypatch):
     """registry 非空且不 visible 但 task_by_id 可读 → readable_by_id_not_visible_in_registry。"""
-    fake_response = SimpleNamespace(text="t")
+    fake_response = _scheduled_create_response()
     client = SimpleNamespace(_batch_execute=AsyncMock(return_value=fake_response))
     monkeypatch.setattr(skill_server, "_extract_rpc_bodies", lambda _t, _r: [[["x"]]])
     monkeypatch.setattr(skill_server, "_parse_scheduled_action_create_body",
                         lambda b: {"id": "new_1"})
     monkeypatch.setattr(skill_server, "_fetch_scheduled_registry",
-                        AsyncMock(return_value=([{"id": "other"}], {})))
+                        AsyncMock(return_value=scheduled_read([{"id": "other"}])))
     monkeypatch.setattr(skill_server, "_fetch_scheduled_task_by_id",
-                        AsyncMock(return_value=({"id": "new_1"}, {})))
+                        AsyncMock(return_value=scheduled_read({"id": "new_1"})))
     monkeypatch.setattr(skill_server, "_scheduled_daily_payload", lambda *a: "p")
     result = _run(_scheduled_create(client, "T", "I", 9, "Asia/Shanghai"))
     assert "readable_by_id_not_visible_in_registry" in result[0].text
@@ -1170,7 +1177,7 @@ def test_scheduled_create_no_created_id(monkeypatch):
                         lambda b: {"id": ""})
     monkeypatch.setattr(skill_server, "_scheduled_daily_payload", lambda *a: "p")
     result = _run(_scheduled_create(client, "My Title", "I", 9, "Asia/Shanghai"))
-    assert "Created: My Title" in result[0].text
+    assert "Creation not confirmed: My Title" in result[0].text
     assert "not_attempted" in result[0].text
 
 
@@ -1333,7 +1340,8 @@ def test_compact_creation_retains_unfinished_chat(monkeypatch):
     result = _run(skill_server.create(prompt="a short video", type="video"))
 
     assert result[0].meta["domain_result"]["data"]["state"] == "queued"
-    assert scheduled == [{"owns_chat": True, "preserve_for_recovery": True, "source": "skill_create:video", "client": client}]
+    assert scheduled == [{"owns_chat": True, "preserve_for_recovery": True, "source": "skill_create:video", "client": client,
+                          "retain_chat": False, "delete_after_seconds": None}]
 
 
 def test_create_top_level_exception(monkeypatch):
@@ -1344,7 +1352,7 @@ def test_create_top_level_exception(monkeypatch):
                         lambda *a: (_ for _ in ()).throw(ValueError("bad media")))
     _patch_client_seams(monkeypatch, SimpleNamespace())
     result = _run(skill_server.create(prompt="x"))
-    assert result[0].text == "Error: bad media"
+    assert result[0].meta["domain_result"]["error"]["code"] == "INVALID_ARGUMENT"
 
 
 def test_edit_returns_error_when_image_invalid(monkeypatch):
@@ -1362,7 +1370,7 @@ def test_edit_top_level_exception(monkeypatch):
                         lambda *a: (_ for _ in ()).throw(ValueError("bad model")))
     _patch_client_seams(monkeypatch, SimpleNamespace())
     result = _run(skill_server.edit(image_path="x", prompt="y"))
-    assert result[0].text == "Error: bad model"
+    assert result[0].meta["domain_result"]["error"]["code"] == "INVALID_ARGUMENT"
 
 
 # ---------------------------------------------------------------------------
@@ -1612,13 +1620,14 @@ def test_create_music_happy_path(monkeypatch):
     assert "[Audio]: http://audio" in result[0].text
 
 
-def test_edit_happy_path(monkeypatch):
+def test_edit_happy_path(monkeypatch, tmp_path):
     """edit 调 generate_content 带 files=[safe_image_path]。"""
     response = _ns(text="edited", images=[_ns(url="http://edited")])
     client = SimpleNamespace(generate_content=AsyncMock(return_value=response))
     _patch_client_seams(monkeypatch, client)
+    image_path = write_image(tmp_path / "reference.png")
     monkeypatch.setattr(skill_server, "validate_optional_image_path",
-                        lambda _p: (True, "/safe/path.png", None))
+                        lambda _p: (True, str(image_path), None))
     monkeypatch.setattr(skill_server, "resolve_media_request",
                         lambda model, media_type, thinking_level: {
                             "request_model": "gemini-3-flash",
@@ -1627,10 +1636,10 @@ def test_edit_happy_path(monkeypatch):
                         })
     monkeypatch.setattr(skill_server, "schedule_remote_chat_cleanup_from_response",
                         lambda _r, source: None)
-    result = _run(skill_server.edit(image_path="/tmp/x.png", prompt="make it blue"))
+    result = _run(skill_server.edit(image_path=str(image_path), prompt="make it blue"))
     assert "edited" in result[0].text
     kwargs = client.generate_content.call_args.kwargs
-    assert kwargs["files"] == ["/safe/path.png"]
+    assert kwargs["files"] == [str(image_path)]
     assert "Edit this image: make it blue" in kwargs["prompt"]
     assert "Nano Banana 2" in result[0].text
 
@@ -1864,7 +1873,7 @@ def test_scheduled_main_dispatches_create(monkeypatch):
     monkeypatch.setattr(skill_server, "_parse_scheduled_action_create_body", lambda b: {"id": ""})
     monkeypatch.setattr(skill_server, "_scheduled_daily_payload", lambda *a: "p")
     result = _run(skill_server.scheduled(action="create", title="T", instructions="I", hour=9))
-    assert "Created: T" in result[0].text
+    assert "Creation not confirmed: T" in result[0].text
 
 
 def test_scheduled_main_dispatches_delete(monkeypatch):

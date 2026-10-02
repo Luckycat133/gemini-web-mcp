@@ -25,12 +25,14 @@ from ..domain import (
     CleanupObservation,
     DomainErrorCode,
     DomainResult,
+    DomainWarning,
     OperationState,
 )
 from ..infrastructure.rpc_contracts import execute_contract, get_contract
 from ..infrastructure.rpc_parsers import parse_contract_body, parse_rpc_envelope
 from ..thinking_client import MediaRequestObservation, ThinkingLevelGeminiClient
 from .artifacts import (
+    artifact_id,
     artifact_exception_result,
     artifact_from_local_path,
     artifact_result,
@@ -196,8 +198,8 @@ def media_generation_kwargs(
     }
     if media_type in {"image", "image_edit"}:
         request["media_mode"] = "image"
-    elif media_type == "music":
-        request["media_mode"] = "music"
+    elif media_type in {"video", "music"}:
+        request["media_mode"] = media_type
     return request
 
 
@@ -244,6 +246,12 @@ def media_artifact_result(
             result.meta, operation_state=OperationState.QUEUED,
             details={**result.meta.details, "upstream_queued": True},
         ))
+    if result.ok and any(artifact.state == ArtifactState.REMOTE for artifact in data.artifacts):
+        return replace(result, warnings=(*result.warnings, DomainWarning(
+            code="ARTIFACT_DOWNLOAD_PENDING",
+            message="At least one creation output is still remote and has not been verified locally.",
+            suggested_action="Recover the existing operation before starting another generation request.",
+        )), meta=replace(result.meta, operation_state=OperationState.PARTIAL))
     return result
 
 
@@ -394,6 +402,7 @@ async def save_generated_media(
     observed_backend: str | None,
     source_chat_id: str | None,
     artifact_sink: list[Artifact] | None = None,
+    existing_artifacts: Sequence[Artifact] = (),
 ) -> "MediaSaveOutcome":
     media_items = media_items if media_items is not None else response_media_items(response, media_type)
     if not media_items:
@@ -427,6 +436,22 @@ async def save_generated_media(
         elif media_type == "video" and hasattr(media, "mp3_url"):
             downloads = ["video"]
         for download_type in downloads:
+            artifact_kind = _saved_artifact_kind(media_type, download_type or media_type)
+            uri = source_uris[artifact_kind]
+            existing = next((artifact for artifact in existing_artifacts if (
+                uri and artifact.kind == artifact_kind
+                and (artifact.uri == uri or artifact.id == artifact_id(artifact_kind, uri=uri))
+                and artifact.state == ArtifactState.LOCAL and artifact.local_path
+                and artifact.verification.status != ArtifactVerificationStatus.FAILED
+                and Path(artifact.local_path).is_file()
+            )), None)
+            if existing is not None:
+                # Recovery re-probes saved bytes before passing these locators.
+                # Reuse them without promoting an unverified/queued operation.
+                saved_artifacts.append(existing)
+                if artifact_sink is not None:
+                    artifact_sink.append(existing)
+                continue
             # Upstream keeps an explicit suffix for both downloads. Separate
             # names prevent audio/video from racing on the same output path.
             output_name = (
@@ -554,6 +579,7 @@ async def materialize_generated_media(
     filename: str | None = None,
     artifact_sink: list[Artifact] | None = None,
     music_fetcher: Callable[..., Awaitable[list]] | None = None,
+    existing_artifacts: Sequence[Artifact] = (),
 ) -> MediaMaterialization:
     """Recover returned music cards, then save and verify the requested outputs.
 
@@ -609,6 +635,7 @@ async def materialize_generated_media(
         filename=filename,
         media_items=recovered_media or None,
         artifact_sink=artifact_sink,
+        existing_artifacts=existing_artifacts,
     )
     return MediaMaterialization(
         media_artifacts(merge_artifacts(remote, recovered, saved.artifacts), media_type), saved,

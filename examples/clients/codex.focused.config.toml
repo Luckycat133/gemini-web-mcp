@@ -1,0 +1,32 @@
+# Connect only the capability lanes needed for your task.
+# Configure authentication privately in the client host environment.
+
+[mcp_servers.gemini-assist]
+command = "uvx"
+args = ["--from", "git+https://github.com/Luckycat133/gemini-web-mcp@main", "gemini-mcp-assist"]
+env_vars = ["GEMINI_PSID", "GEMINI_PSIDTS", "GEMINI_PSIDCC"]
+startup_timeout_sec = 60
+tool_timeout_sec = 720
+
+[mcp_servers.gemini-assist.env]
+GEMINI_AUTO_REFRESH = "false"
+
+[mcp_servers.gemini-create]
+command = "uvx"
+args = ["--from", "git+https://github.com/Luckycat133/gemini-web-mcp@main", "gemini-mcp-create"]
+env_vars = ["GEMINI_PSID", "GEMINI_PSIDTS", "GEMINI_PSIDCC"]
+startup_timeout_sec = 60
+tool_timeout_sec = 720
+
+[mcp_servers.gemini-create.env]
+GEMINI_AUTO_REFRESH = "false"
+
+[mcp_servers.gemini-account]
+command = "uvx"
+args = ["--from", "git+https://github.com/Luckycat133/gemini-web-mcp@main", "gemini-mcp-account"]
+env_vars = ["GEMINI_PSID", "GEMINI_PSIDTS", "GEMINI_PSIDCC"]
+startup_timeout_sec = 60
+tool_timeout_sec = 720
+
+[mcp_servers.gemini-account.env]
+GEMINI_AUTO_REFRESH = "false"

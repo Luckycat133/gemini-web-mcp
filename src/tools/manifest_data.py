@@ -168,7 +168,7 @@ TOOL_MANIFEST: list[dict[str, Any]] = [
     {
         "name": "gemini_generate_media",
         "group": "media",
-        "purpose": "Select native image/music generation, save and verify local artifacts, and clean the new source chat when recoverable outputs no longer depend on it. The generic video argument is compatibility-only, not a verified Gemini Omni route.",
+        "purpose": "Select observed native image/video/music modes, save and verify matching local artifacts, and clean the new source chat when recoverable outputs no longer depend on it. A selector alone does not prove generation or an exact backend version.",
         "read_only": False,
         "destructive": False,
         "privacy": "sends_user_prompt_and_optional_reference_files",

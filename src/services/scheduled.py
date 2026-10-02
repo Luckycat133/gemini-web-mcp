@@ -158,11 +158,13 @@ async def create_daily_action(
     )
     response_text = getattr(response, "text", "") or ""
     bodies = extract_bodies(response_text, contract.rpc_id)
-    body = bodies[0] if bodies else []
+    mutation_parse, mutation_diagnostic = _parse_observation(response, contract.key)
+    body = bodies[0] if _valid_read_back(mutation_diagnostic) and bodies else []
     if isinstance(body, list) and body and isinstance(body[0], list):
         body = body[0]
     created = parse_create(body)
     created_id = str(created.get("id") or "")
+    acknowledged = bool(_valid_read_back(mutation_diagnostic) and mutation_parse.status == "success" and created_id)
     visible_in_registry = False
     readable_by_id_after_create = None
     task_state_after_create = ""
@@ -170,11 +172,15 @@ async def create_daily_action(
     verification_error = ""
     get_task_error = ""
     get_task_diagnostic: dict[str, Any] = {}
+    registry_diagnostic: dict[str, Any] = {}
     verification_status = "not_attempted"
-    if created_id:
+    if acknowledged:
         try:
-            registry_entries, _ = await fetch_registry(client, max_chars)
-            visible_in_registry = any(item.get("id") == created_id for item in registry_entries)
+            registry_entries, registry_diagnostic = await fetch_registry(client, max_chars)
+            if not _valid_read_back(registry_diagnostic):
+                raise RuntimeError("Scheduled registry read-back is not valid evidence.")
+            visible_in_registry = any(item.get("id") == created_id and item.get("task_state_id") != 6
+                                      for item in registry_entries)
             if visible_in_registry:
                 verification_status = "visible_in_registry"
             elif registry_entries:
@@ -186,7 +192,11 @@ async def create_daily_action(
             verification_status = "verification_error"
         try:
             task_by_id, get_task_diagnostic = await fetch_by_id(client, created_id, max_chars)
-            readable_by_id_after_create = task_by_id is not None
+            if not _valid_read_back(get_task_diagnostic):
+                raise RuntimeError("Scheduled task read-back is not valid evidence.")
+            if task_by_id is not None and task_by_id.get("id") != created_id:
+                raise RuntimeError("Scheduled task read-back returned a different ID.")
+            readable_by_id_after_create = task_by_id is not None and task_by_id.get("task_state_id") != 6
             if task_by_id:
                 task_state_after_create = str(task_by_id.get("task_state") or "")
                 task_state_id_after_create = task_by_id.get("task_state_id")
@@ -197,7 +207,9 @@ async def create_daily_action(
         except Exception as exc:
             get_task_error = str(exc)
     return {
-        "ok": getattr(response, "status_code", None) == 200 and bool(created_id),
+        "ok": acknowledged,
+        "accepted": acknowledged,
+        "verified": visible_in_registry or readable_by_id_after_create is True,
         "id": created_id,
         "title": created.get("title") or title,
         "instructions": created.get("instructions") or instructions,
@@ -217,6 +229,8 @@ async def create_daily_action(
         "verification_error": verification_error,
         "get_task_error": get_task_error,
         "get_task_diagnostic": get_task_diagnostic,
+        "registry_diagnostic": registry_diagnostic,
+        "mutation_diagnostic": mutation_diagnostic,
     }
 
 

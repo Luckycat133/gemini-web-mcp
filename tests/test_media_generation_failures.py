@@ -106,6 +106,20 @@ def test_request_owned_session_is_blank_and_does_not_mutate_sdk_shared_defaults(
     assert observation.chat_id == "c_new"
 
 
+def test_chat_observer_persists_each_new_identity_before_sdk_rollback(monkeypatch):
+    calls = []
+    client = sdk_client_at_http_boundary(monkeypatch, [])
+    observation = MediaRequestObservation(on_chat_observed=calls.append)
+    chat = _OwnedMediaChatSession(client, observation)
+    backup = chat.metadata
+    chat.metadata = ["c_observed", "r_observed", "rc_observed"]
+    assert calls == ["c_observed"]
+    chat.metadata = ["c_observed", "r_observed", "rc_observed"]
+    chat.metadata = backup
+    assert calls == ["c_observed"]
+    assert observation.chat_id == "c_observed"
+
+
 @pytest.mark.parametrize("known_cid", [None, "c_offline_allocated"])
 def test_real_sdk_api_abort_preserves_allocated_cid_across_metadata_rollback(monkeypatch, known_cid):
     monkeypatch.setattr(upstream_client, "DEFAULT_METADATA", [
@@ -235,8 +249,8 @@ def test_real_total_timeout_retains_metadata_observed_before_cancellation(monkey
     patch_compact(monkeypatch, client, cleanup)
     # Both surface adapters use the same total budget. Schedule its real
     # expiration only after the SDK has parsed the allocated CID frame.
-    module = primary if surface == "primary" else compact
-    monkeypatch.setattr(module.asyncio, "timeout", lambda _seconds: timeout_scope)
+    import src.services.creation as creation
+    monkeypatch.setattr(creation.asyncio, "timeout", lambda _seconds: timeout_scope)
     image_path = write_image(tmp_path / "source.png") if surface == "edit" else None
     if image_path:
         async def uploaded_fixture(*_args, **_kwargs):

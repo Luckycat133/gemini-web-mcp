@@ -10,7 +10,7 @@ import tomllib
 from pathlib import Path
 
 from scripts.run_contract_checklist import CONTRACT_TESTS
-from scripts.smoke_profiles import ASSIST_TOOLS, COMPACT_TOOLS, PRIMARY_PROFILE_TOOLS
+from scripts.smoke_profiles import ACCOUNT_TOOLS, ASSIST_TOOLS, COMPACT_TOOLS, CREATE_TOOLS, PRIMARY_PROFILE_TOOLS
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 CI_WORKFLOW = PROJECT_ROOT / ".github" / "workflows" / "ci.yml"
@@ -50,12 +50,15 @@ def test_targeted_contract_checklist_covers_stable_architecture_boundaries() -> 
         "tests/test_live_canary.py",
         "tests/test_package_integrity.py",
         "tests/test_onboarding.py",
+        "tests/test_onboarding_media.py",
         "tests/test_onboarding_distribution.py",
         "tests/test_version_consistency.py",
         "tests/test_evaluations.py",
         "tests/test_development_skill.py",
         "tests/test_skill_packaging.py",
         "tests/test_assist_skill.py",
+        "tests/test_focused_surfaces.py",
+        "tests/test_focused_skills.py",
         "tests/test_ci_contracts.py",
     } == set(CONTRACT_TESTS)
 
@@ -92,6 +95,8 @@ def test_representative_profile_snapshots_are_explicit_and_exhaustive() -> None:
         "gemini_understand",
         "gemini_understand_image",
     }
+    assert len(CREATE_TOOLS) == 7
+    assert len(ACCOUNT_TOOLS) == 7
 
 
 def test_profile_snapshot_smoke_passes_from_the_installed_environment() -> None:
@@ -141,7 +146,7 @@ def test_ci_pins_reference_skill_validator_and_checks_single_public_sources() ->
     workflow = CI_WORKFLOW.read_text(encoding="utf-8")
 
     assert SKILLS_REF_SHA in workflow
-    assert workflow.count("skills-ref validate") == 3
+    assert workflow.count("skills-ref validate") == 5
     assert ".codex/skills" not in workflow
     assert f"skills@{SKILLS_CLI_VERSION} add \"$GITHUB_WORKSPACE\" --skill gemini-web-mcp-development" in workflow
     assert (

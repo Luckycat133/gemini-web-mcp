@@ -66,7 +66,7 @@ gemini-mcp-server/
 │   ├── adapters/          # MCP 文本兼容、artifact 展示和结构化结果适配
 │   ├── infrastructure/    # Gemini Web RPC registry、payload builder 与纯 parser
 │   ├── services/          # 各表面共用的应用服务与读回验证（chat/artifact/history/research/search/understanding 等）
-│   ├── surfaces/          # 聚焦型独立 MCP 表面（assist.py：五工具 gemini_assist_mcp，入口 gemini-mcp-assist）
+│   ├── surfaces/          # 聚焦型独立 MCP 表面（assist/create/account：5/7/7 工具，三个独立 stdio 入口）
 │   ├── thinking_client.py # Thinking/Learning/原生媒体模式传输层
 │   ├── error_handler.py   # 错误处理装饰器
 │   ├── constants.py       # 模型常量与配置
@@ -354,7 +354,13 @@ Deep Research 使用 `LongOperationData` 保存上游 research/chat ID、最新�
 服务之上的薄适配层——搜索与理解逻辑在 `src/services/search.py` 与 `src/services/understanding.py`，
 Deep Research 启动阶段由 `src/services/research.py` 与兼容面 `gemini_deep_research` 复用；
 表面自身只做参数校验和文本渲染。`scripts/smoke_profiles.py` 与 `scripts/smoke_mcp_protocol.py`
-把 assist 面纳入与 primary/facade 相同的工具面快照和 stdio 握手验证。
+把 assist/create/account 面纳入与 primary/facade 相同的工具面快照和 stdio 握手验证。
+
+`src/services/creation.py` 统一所有创建表面的生成、保存、恢复和完成清理；
+`src/services/operations.py` 提供显式任务句柄和租约。`src/infrastructure/state_store.py`
+是 metadata-only SQLite 唯一所有者。恢复先保存产物 locator，再删除源会话，
+多个客户端通过 CAS 与租约避免重复保存/清理。账号动作由 `account_facade.py` 分派到共享服务。
+凭据隔离、保留期限和恢复状态详见 [任务与清理](operations-and-cleanup.md)。
 
 ---
 

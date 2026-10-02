@@ -16,10 +16,11 @@
 | GEMINI_BROWSER_COOKIE_TIMEOUT_SECONDS | ❌ | macOS 浏览器 Cookie 读取等待 Keychain 的单次超时（秒，范围 0.01–120） | 15 |
 | GEMINI_TOOLS | ❌ | 加载的工具组 | core |
 | GEMINI_CHAT_RETENTION_SECONDS | ❌ | 普通对话工具的默认远端保留时间，0 表示尽快删除 | 1800 |
+| GEMINI_STATE_DB_PATH | ❌ | 本地 Operation / Cleanup SQLite 数据库；重启恢复须使用同一路径和身份密钥 | macOS: `~/Library/Application Support/gemini-web-mcp/state.sqlite3`；其他平台见[恢复说明](operations-and-cleanup.md) |
 | GEMINI_CONFIG_DIR | ❌ | skill_server 读取的本地 prompt 库目录（`prompts.json` 所在） | `.gemini` |
 | GEMINI_COOKIE_PATH | ❌ | gemini_webapi cookie cache 目录；浏览器刷新 Cookie 时由 `client_manager` 写入临时目录隔离 | 系统临时目录下的 `gemini_web_mcp_webapi_cookie_cache` |
 
-媒体生成使用独立的完成清理策略：完成的产物全部本地验证通过或明确空响应后立即尝试删除本次源聊天，排队/未保存/恢复失败时保留。primary 的 `retain_chat` / `delete_after_seconds` 可覆盖默认行为；正值延迟仍仅保存在当前进程。详见[原生媒体与清理](native-media-mode.md)。
+媒体生成使用独立的完成清理策略：完成的产物全部本地验证通过或明确空响应后立即尝试删除本次源聊天，排队/未保存/恢复失败时保留。primary 的 `retain_chat` / `delete_after_seconds` 可覆盖默认行为；正值延迟持久化到本地 SQLite，使用相同凭据和数据库可在服务重启后恢复。详见[原生媒体与清理](native-media-mode.md)。
 
 ---
 

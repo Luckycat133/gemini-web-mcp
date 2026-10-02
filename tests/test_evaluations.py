@@ -14,7 +14,7 @@ def _qa_pairs():
 def test_gemini_web_mcp_contract_evaluation_shape():
     pairs = _qa_pairs()
 
-    assert len(pairs) == 36
+    assert len(pairs) == 42
     for pair in pairs:
         question = pair.findtext("question")
         answer = pair.findtext("answer")
@@ -112,3 +112,31 @@ def test_gemini_web_mcp_contract_answers_match_static_manifest():
     assert "source_chat_id" in media_workflow["notes"]
     assert "a missing ID does not prove no chat was created" in media_workflow["notes"]
     assert "never scan unrelated history or automatically restart" in media_workflow["notes"]
+
+
+def test_focused_evaluation_answers_match_installed_catalog_and_operation_contract():
+    import asyncio
+    import tomllib
+
+    from src.infrastructure.state_store import RETENTION_SECONDS
+    from src.surfaces import account, create
+
+    pairs = {pair.findtext("answer"): pair.findtext("question") for pair in _qa_pairs()}
+    project = tomllib.loads((EVALUATION_PATH.parents[1] / "pyproject.toml").read_text())
+    assert project["project"]["scripts"]["gemini-mcp-create"] == "src.surfaces.create:main"
+    assert pairs["gemini-mcp-create"]
+
+    async def catalogs():
+        return ({item.name: item for item in await create.mcp.list_tools()},
+                {item.name: item for item in await account.mcp.list_tools()})
+    creation_tools, account_tools = asyncio.run(catalogs())
+    assert len(creation_tools) == len(account_tools) == 7
+    assert creation_tools["gemini_get_operation_result"].input_schema["required"] == ["operation_id"]
+    assert pairs["gemini_get_operation_result"]
+    for name in ("gemini_generate_music", "gemini_generate_video"):
+        assert "idempotency_key" in creation_tools[name].input_schema["properties"]
+    assert pairs["idempotency_key"]
+    assert RETENTION_SECONDS == 7 * 24 * 60 * 60 and pairs["seven days"]
+    assert pairs["accepted"]
+    assert account_tools["gemini_cleanup"].annotations.destructive_hint is True
+    assert pairs["gemini_cleanup"]

@@ -102,6 +102,64 @@ their test ownership could not be established. The failed music request had no
 observed ID and was excluded from deletion; no unrelated account scan was used
 to guess its chat.
 
+## 2026-10-03 Focused Creation and Native Video Recheck
+
+Signed-in Chrome showed the dedicated Videos page with video mode and a
+16:9 landscape control. Re-fetched public frontend modules confirmed native
+video mode 11 in the same index-49 StreamGenerate feature chain used for
+image mode 14 and music mode 21. This establishes the request selection, not
+the generator Google actually dispatched or successful creation.
+
+One native primary MCP video request observed its new source chat, then
+returned `UPSTREAM_REJECTED` after a possible upstream interruption. It
+produced no video file. Exact-ID disposal subsequently returned positive
+`verified_absent` evidence. The cause remains unconfirmed; no exclusive
+generator endpoint or verified model-bypass route was established.
+
+The focused seven-tool creation server was exercised over real MCP
+`2026-07-28` stdio with SDK `2.2.0` and `gemini-webapi 2.1.1`. One image
+request and one local-image edit each returned a saved 2816×1536 JPEG.
+Independent decoding confirmed their MIME, dimensions and hashes; visual
+inspection confirmed the blue wooden cat became gold with its shape,
+tabletop and camera composition preserved. Both automatic cleanup jobs
+completed, then exact-ID follow-up independently verified their sources
+absent. At this stage fifteen owned-source deletions had positive read-back
+proof, including the earlier twelve and the failed primary video source above.
+
+Two focused asynchronous music starts failed in TLS initialization before
+the media request was submitted. The second run reported `NETWORK_ERROR`
+with `generation_not_started`; no observed source or artifact was returned.
+Reading their failed handles after process restart worked, but that is not
+proof of completed asynchronous music/video artifact recovery. A separate
+authenticated model-registry read succeeded. These bounded personal-account
+tests do not satisfy the dedicated-account full-canary gate.
+
+Subsequent testing distinguished interrupted generation from completed-file
+recovery. Two deliberately interrupted asynchronous music attempts observed
+their sources but returned no local files: one recovery failed in transport,
+the other with an upstream SDK failure. Their exact sources were discarded and
+verified absent. A focused video start also failed before submission in TLS
+initialization. No request was automatically repeated. Client initialization
+now bounds typed transient transport retries to three; authentication and
+argument failures are not retried.
+
+One uninterrupted focused music start then completed with an MP3
+(`audio/mpeg`, 1,764,013 bytes, 73.247292 seconds) and its companion MP4
+(`video/mp4`, 5,688,253 bytes, 1024×1024, 73.247007 seconds). A separate native
+video start completed with a 1280×720 H.264/AAC MP4 (`video/mp4`, 1,731,336
+bytes, 10.005 seconds). Full FFmpeg stream decoding passed for all three files;
+a sampled native-video frame showed the requested green paper cat. Each start
+was submitted once. After the server exited, a new focused stdio process
+retrieved the same completed operation's saved locators with no new generation.
+
+Exact-ID follow-up returned positive absence proof for both successful
+operations. The failed automatic music cleanup job was also resumed through
+its existing durable job and became `completed/verified_absent`. Saved music
+files still decoded with unchanged hashes after deletion. Nineteen recorded
+owned test-chat deletions now have positive read-back evidence. This proves
+current focused image/edit/music/video artifacts and completed-file recovery;
+unfinished-provider recovery after a hard crash remains a separate live gate.
+
 ## Observed Native UI (2026-06-18)
 
 The chat surface exposed:
@@ -138,8 +196,8 @@ NotebookLM, help/feedback, and location entries.
 | Gems | Covered in part | CRUD and chat use via `gemini_manage_gems` and `gem_id` |
 | Upload file | Covered | Local files use `gemini_upload_file` |
 | Import code | Covered in part | Local code files can be uploaded; UI import workflows are not replicated |
-| Create image/music | Covered in part | Native image generation/editing and one SDK 2.1.1 music request verified on 2026-10-02; an earlier music request failed. Cleanup has separate read-back evidence, and account/UI gates still apply |
-| Create video | Web UI only | Dedicated Gemini Omni mode works in Chrome; generic MCP chat route did not return a video Artifact |
+| Create image/music | Verified in bounded runs | Native primary/compact image/edit/music files and focused image/edit plus completed asynchronous music files were decoded; focused completed-file restart retrieval passed on 2026-10-03 |
+| Create video | Verified in a bounded native MCP run | Mode 11 produced a decoded 1280×720, 10.005-second MP4 and completed-file restart retrieval on 2026-10-03; earlier failed requests and dedicated Chrome video remain separate evidence |
 | Deep Research | Covered | Full workflow when the installed client exposes research helpers |
 | Dynamic model discovery | Covered | `gemini_list_models` reports the account model registry after init |
 | Observed Web Pro capability manifest | Covered | `gemini_get_web_capabilities` returns observed models, thinking levels, menu entries, and MCP coverage |

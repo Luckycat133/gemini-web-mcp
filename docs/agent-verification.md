@@ -7,6 +7,7 @@ Read for protocol, tool, artifact, account, packaging or release changes. Docume
 - `python -m venv .venv && . .venv/bin/activate`: create and enter a local virtual environment.
 - `pip install -e ".[all,dev]"`: install the package with optional browser/image support and maintained development gates.
 - `GEMINI_TOOLS=core python -m src.server`: run the default MCP server surface locally.
+- `python -m src.surfaces.create` / `python -m src.surfaces.account`: run the focused seven-tool creation/account servers; assistance remains `python -m src.surfaces.assist`.
 - `GEMINI_TOOLS=all python -m src.server`: run account/history/Gems-capable tools for manual verification.
 - `gemini-mcp-onboarding`: start the installed stdio server and call an auth-free text tool; live chat/image subcommands require `--allow-live-account`.
 - `python -m ruff check src tests scripts && python -m mypy src scripts`: run the maintained static correctness gates.

@@ -20,6 +20,28 @@
 
 下面这份清单对应当前仓库真实注册结果，而不是历史文档残留。
 
+### 专用工具面
+
+| 入口 | 固定目录 | 用途 |
+| --- | --- | --- |
+| `gemini-mcp-assist` | `gemini_ask`、`gemini_search`、`gemini_understand_image`、`gemini_understand`、`gemini_research` | 协助、搜索、混合输入理解、研究 |
+| `gemini-mcp-create` | `gemini_generate_image`、`gemini_edit_image`、`gemini_generate_video`、`gemini_generate_music`、`gemini_get_operation_status`、`gemini_get_operation_result`、`gemini_cancel_operation` | 生成及获取本地产物 |
+| `gemini-mcp-account` | `gemini_history`、`gemini_notebooks`、`gemini_scheduled`、`gemini_gems`、`gemini_prompts`、`gemini_account`、`gemini_cleanup` | 显式账户操作和本地提示词 |
+
+图片和改图同步返回 Artifact；视频、音乐和研究默认异步，返回不透明的
+`operation_id`。恢复时使用原句柄，不能重新提交提示词。`gemini_research`
+通过 `action=start/status/result/cancel` 保持五工具目录。
+账户工具使用 `request.action`，按动作校验参数。例如：
+
+```json
+{"request": {"action": "models"}}
+```
+
+上述参数对应 `gemini_account`；`gemini_cleanup` 的 `status/cancel` 查询本地
+清理记录，`run` 执行已授权的到期任务。广泛测试记录清理另用
+`test_artifacts`，默认 `dry_run=true`。账户删除成功要求明确的读回证据。
+详见[任务恢复和清理策略](operations-and-cleanup.md)。
+
 ### 默认启用 (`GEMINI_TOOLS=core`)
 
 - `gemini_chat`
@@ -878,9 +900,9 @@ primary 与 compact 的 Prompt 适配器共用 `src/services/prompts.py`：新�
 | `gemini_search` | 带观测来源的当前网页搜索；`grounding_state` 如实报告 grounded / answer_only / unavailable / failed |
 | `gemini_understand_image` | 理解单张本地图片或 http(s) 图片 URI |
 | `gemini_understand` | 文本、图片、文件、URL 的类型化混合输入理解（最多 16 个输入，逐输入记录结果） |
-| `gemini_research` | 异步启动一次 Deep Research 并返回保留的 operation handle 与上游 ID |
+| `gemini_research` | 通过显式 action=start/status/result/cancel 启动及恢复 Deep Research，返回 operation handle 与上游 ID |
 
-`gemini_search` 与 `gemini_understand` 返回信息而不是 Artifact；完成的 Deep Research 报告保留在远端聊天中，通过返回的上游标识找回。对应 Runtime Skill 为 `gemini-assist`。
+`gemini_search` 与 `gemini_understand` 返回信息而不是 Artifact；完成的 Deep Research 报告保存为本地 Artifact；通过显式 operation_id 恢复，同一任务不重复启动。对应 Runtime Skill 为 `gemini-assist`。
 
 ---
 

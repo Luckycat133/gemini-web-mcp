@@ -27,7 +27,7 @@ Install the runtime skill for agents that operate the server:
 clawhub install gemini-web-mcp
 ```
 
-The current repository line unifies the Python package and all three repository Skills at `0.2.2`. ClawHub is a separate distribution channel; confirm its public listing before claiming that `0.2.2` is published there. To install directly from the repository instead:
+The current repository line unifies the Python package and all five repository Skills at `0.2.2`: four runtime Skills and one development Skill. ClawHub is a separate distribution channel; confirm its public listing before claiming that `0.2.2` is published there. To install directly from the repository instead:
 
 ```bash
 npx --yes skills@1.5.21 add \
@@ -58,9 +58,9 @@ GEMINI_TOOLS=model python -m src.server
 
 ## Product summary
 
-Gemini Web MCP is an agent-first MCP Python SDK v2 gateway and paired skill set for Gemini Web text, media, files, URLs, Deep Research, history, notebooks, scheduled actions, and account inventory. `model` is the narrow text starting point, `core` adds content and multimodal workflows, the compact server offers a fixed low-token facade, and `all` is reserved for maintenance verification.
+Gemini Web MCP is an agent-first MCP Python SDK v2 gateway and task-first Skill set for Gemini Web text, media, files, URLs, Deep Research, history, notebooks, scheduled actions, and account inventory. Focused assistance, creation, and account servers expose five, seven, and seven tools respectively. The compatibility surfaces retain `model`, `core`, compact, and `all` workflows; see [client examples](client-examples.md) for configuration.
 
-The runtime skill and development skill are deliberately separate. Shared history services keep primary and compact typed results aligned, destructive results distinguish accepted requests from positive read-back evidence, and media results preserve requested, effective, and observed backend fields while treating a deliverable as local only after file/MIME/size metadata verification.
+The focused runtime Skills and compatibility router share services with the primary and compact surfaces. The development Skill guides repository changes. Account mutations require positive read-back evidence, media completion requires independent file verification, and durable operation and cleanup records survive a server restart within the supported POSIX runtime.
 
 The three-file ClawHub runtime bundle is MIT-0. The MCP server source and repository-development skill remain AGPL-3.0-only.
 

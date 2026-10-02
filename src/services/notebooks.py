@@ -6,13 +6,37 @@ from typing import Any, Awaitable, Callable
 
 from ..infrastructure.rpc_contracts import execute_contract, get_contract
 from ..infrastructure.rpc_parsers import (
+    RPCParseResult,
     extract_rpc_bodies,
     parse_contract_body,
     parse_conversation_metadata,
     parse_native_notebook,
     parse_notebook_category,
+    parse_rpc_envelope,
 )
 from .history import clamp_int
+
+
+def _parse_observation(response: Any, contract_key: str, **arguments: Any) -> tuple[RPCParseResult, dict[str, Any]]:
+    contract = get_contract(contract_key)
+    text = str(getattr(response, "text", "") or "")
+    envelope = parse_rpc_envelope(text, contract.rpc_id)
+    if envelope.reject_code is not None:
+        parsed = RPCParseResult("rejected", reject_code=envelope.reject_code)
+    elif len(envelope.bodies) == 1:
+        parsed = parse_contract_body(contract, envelope.bodies[0], **arguments)
+    else:
+        parsed = RPCParseResult("changed_shape", warnings=("missing_or_ambiguous_body",))
+    valid = bool(getattr(response, "status_code", None) == 200 and envelope.parsed
+                 and envelope.reject_code is None and len(envelope.bodies) == 1 and parsed.ok and not parsed.warnings)
+    return parsed, {"source_rpc": contract.rpc_id, "contract_key": contract.key, "observed": contract.observed,
+                    "parser_status": parsed.status, "parser_warnings": list(parsed.warnings),
+                    "status_code": getattr(response, "status_code", None), "body_present": bool(envelope.bodies),
+                    "reject_code": envelope.reject_code, "response_length": len(text), "read_back_valid": valid}
+
+
+def _valid_read_back(diagnostic: dict[str, Any]) -> bool:
+    return diagnostic.get("read_back_valid") is True and diagnostic.get("parser_status") in {"success", "empty"}
 
 
 def native_notebooks_payload(locale: str = "zh-CN") -> str:
@@ -41,25 +65,16 @@ async def fetch_native_notebooks(
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     contract = get_contract("notebooks.list")
     response = await execute_contract(client, contract.key, locale=locale)
-    bodies = extract_rpc_bodies(response.text, contract.rpc_id)
-    body = bodies[0] if bodies else []
-    parsed = parse_contract_body(contract, body)
-    value = parsed.value if isinstance(parsed.value, dict) else {}
+    parsed, diagnostic = _parse_observation(response, contract.key)
+    value = parsed.value if _valid_read_back(diagnostic) and isinstance(parsed.value, dict) else {}
     notebooks = value.get("items", []) if isinstance(value.get("items", []), list) else []
     categories = value.get("categories", []) if isinstance(value.get("categories", []), list) else []
-    diagnostic = {
-        "source_rpc": contract.rpc_id,
-        "contract_key": contract.key,
-        "parser_status": parsed.status,
-        "observed": contract.observed,
-        "status_code": getattr(response, "status_code", None),
-        "response_length": len(getattr(response, "text", "") or ""),
-        "body_present": bool(bodies),
+    diagnostic.update({
         "raw_entry_count": len(notebooks),
         "categories": categories,
         "client_language": getattr(client, "language", None),
         "client_build_label": getattr(client, "build_label", None),
-    }
+    })
     return notebooks, diagnostic
 
 
@@ -79,6 +94,11 @@ async def fetch_notebook_chats(
     response_length = 0
     page_count = 0
     parser_status = "empty"
+    seen_tokens: set[str] = set()
+    seen_ids: set[str] = set()
+    valid = True
+    incomplete_reason: str | None = None
+    last_diagnostic: dict[str, Any] = {}
     source_path = contract.source_path.format(notebook_slug=notebook_id.rsplit("/", 1)[-1])
     while len(items) < target_count:
         response = await execute_contract(
@@ -94,12 +114,24 @@ async def fetch_notebook_chats(
         page_count += 1
         bodies = extract_rpc_bodies(response_text, contract.rpc_id)
         body = bodies[0] if bodies else []
-        parsed = parse_contract_body(contract, body)
+        parsed, last_diagnostic = _parse_observation(response, contract.key)
         parser_status = parsed.status
+        if not _valid_read_back(last_diagnostic):
+            valid = False
+            incomplete_reason = "invalid_read_back"
+            next_page_token = None
+            break
         parsed_items = parsed.value if isinstance(parsed.value, list) else []
-        items.extend(parsed_items)
+        new_items = [item for item in parsed_items if item.get("id") not in seen_ids]
+        seen_ids.update(str(item.get("id")) for item in new_items)
+        items.extend(new_items)
         next_page_token = body[1] if isinstance(body, list) and len(body) > 1 and isinstance(body[1], str) else None
-        if not next_page_token or not parsed_items:
+        if next_page_token and (next_page_token in seen_tokens or not new_items):
+            incomplete_reason = "pagination_not_progressing"
+            break
+        if next_page_token:
+            seen_tokens.add(next_page_token)
+        if not next_page_token:
             break
     page = items[safe_offset : safe_offset + safe_limit]
     has_more = bool(next_page_token) or safe_offset + len(page) < len(items)
@@ -113,6 +145,13 @@ async def fetch_notebook_chats(
         "fetched_count": len(items),
         "has_remote_more": bool(next_page_token),
         "next_page_token_present": bool(next_page_token),
+        "read_back_valid": valid,
+        "status_code": last_diagnostic.get("status_code"),
+        "body_present": last_diagnostic.get("body_present", False),
+        "reject_code": last_diagnostic.get("reject_code"),
+        "parser_warnings": last_diagnostic.get("parser_warnings", []),
+        "complete": valid and incomplete_reason is None,
+        "incomplete_reason": incomplete_reason,
     }
     return page, {
         "total_count": len(items),
@@ -120,7 +159,7 @@ async def fetch_notebook_chats(
         "offset": safe_offset,
         "limit": safe_limit,
         "has_more": has_more,
-        "next_offset": safe_offset + len(page) if has_more else None,
+        "next_offset": safe_offset + len(page) if has_more and page else None,
         "diagnostic": diagnostic,
     }
 
@@ -165,6 +204,9 @@ async def move_chat_to_notebook(
 
     contract = get_contract("notebooks.move_chat")
     notebooks, list_diagnostic = await fetch_notebooks(client, locale)
+    if not _valid_read_back(list_diagnostic):
+        return {"ok": False, "accepted": False, "chat_id": chat_id,
+                "verification_status": "target_read_back_unverified", "diagnostic": list_diagnostic}
     notebook = find_notebook(notebooks, notebook_id, notebook_title)
     if notebook is None:
         return {
@@ -187,26 +229,26 @@ async def move_chat_to_notebook(
         project_type=project_type,
     )
     bodies = extract_bodies(getattr(response, "text", "") or "", contract.rpc_id)
-    body = bodies[0] if bodies else []
-    parsed = parse_contract_body(contract, body)
+    parsed, mutation_diagnostic = _parse_observation(response, contract.key, expected_id=chat_id)
     updated_entry = parsed.value if parsed.status == "success" else None
     verified = False
     verification_status = "rpc_unconfirmed"
     verification: dict[str, Any] = {}
     verification_error = ""
-    if bodies:
+    accepted = _valid_read_back(mutation_diagnostic)
+    if accepted:
         verification_status = "read_back_not_observed"
         try:
             verify_items, verification = await fetch_chats(client, str(notebook["id"]), 100, 0)
-            verified = any(item.get("id") == chat_id for item in verify_items)
-            verification_status = "verified" if verified else "read_back_not_observed"
+            read_diagnostic = verification.get("diagnostic", {})
+            verified = _valid_read_back(read_diagnostic) and any(item.get("id") == chat_id for item in verify_items)
+            verification_status = ("verified" if verified else "read_back_not_observed") if _valid_read_back(read_diagnostic) else "read_back_unverified"
         except Exception as exc:
             verification_status = "read_back_error"
             verification_error = f"{type(exc).__name__}: {exc}"
-    status_ok = getattr(response, "status_code", None) == 200
     return {
-        "ok": status_ok and verified,
-        "accepted": status_ok and parsed.status == "success",
+        "ok": accepted and verified,
+        "accepted": accepted,
         "chat_id": chat_id,
         "notebook": notebook,
         "source_rpc": contract.rpc_id,
@@ -214,6 +256,7 @@ async def move_chat_to_notebook(
         "status_code": getattr(response, "status_code", None),
         "body_present": bool(bodies),
         "parser_status": parsed.status,
+        "mutation_diagnostic": mutation_diagnostic,
         "updated_entry": updated_entry,
         "verified_in_target_notebook": verified,
         "verification_status": verification_status,

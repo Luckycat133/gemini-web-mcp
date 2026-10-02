@@ -2,7 +2,6 @@
 媒体生成 MCP 工具
 """
 
-import asyncio
 import logging
 from dataclasses import dataclass
 from pathlib import Path
@@ -18,34 +17,18 @@ from ..client_wrapper import (
     initialize_client,
 )
 from ..constants import resolve_media_request
-from ..domain import Artifact, ArtifactKind, ArtifactResultData, ArtifactState, CleanupObservation, DomainErrorCode, DomainResult
+from ..domain import Artifact, ArtifactKind, ArtifactResultData, ArtifactState, DomainErrorCode, DomainResult
 from ..services import (
     artifact_from_local_path,
-    classify_media_artifact_state,
-    extract_response_artifacts,
-    merge_artifacts,
-    media_artifacts,
     media_operation_timeout,
-    observed_backend_from_response,
-    response_chat_id,
 )
-from ..thinking_client import client_request_timeout
 from ..services.media_generation import (
-    MediaGenerationAttempt,
     MediaSaveOutcome as _MediaSaveOutcome,
     _media_from_music_card as _media_from_music_card,
     fetch_music_media_from_chat as _fetch_music_media_from_chat,
-    materialize_generated_media,
-    media_artifact_result,
-    media_creation_response,
-    media_exception_result,
-    media_generation_kwargs,
-    media_requires_recovery,
-    normalize_media_exception,
     normalize_saved_image_extension as _normalize_saved_image_extension,  # noqa: F401 - private compatibility helper
     safe_media_filename as _safe_media_filename,  # noqa: F401 - private compatibility helper
     save_generated_media as _save_generated_media,  # noqa: F401 - private compatibility helper
-    with_media_cleanup,
 )
 from .annotations import MUTATES_REMOTE
 from .utils import parse_response, validate_optional_image_path
@@ -97,126 +80,6 @@ class _MediaJob:
     timeout_seconds: int
 
 
-def _media_failure_response(
-    error: Exception, job: _MediaJob, message: str, *,
-    response: object | None = None, observed_artifacts: tuple[Artifact, ...] = (),
-    cleanup: CleanupObservation | None = None,
-) -> list[TextContent]:
-    remote_artifacts = () if observed_artifacts else extract_response_artifacts(
-            media_creation_response(response),
-            requested_backend=job.requested_model,
-            request_model=job.request_model,
-            effective_backend=job.backend_label,
-        )
-    artifacts = media_artifacts(merge_artifacts(
-        remote_artifacts,
-        observed_artifacts,
-    ), job.media_type)
-    failure_data = ArtifactResultData(
-        state=classify_media_artifact_state(response, artifacts, job.media_type) if artifacts else ArtifactState.FAILED,
-        artifacts=artifacts,
-        requested_model=job.requested_model,
-        request_model=job.request_model,
-        effective_backend=job.backend_label,
-        input_artifacts=job.input_artifacts,
-        observed_backend=observed_backend_from_response(response),
-        source_chat_id=response_chat_id(response),
-        media_type=job.media_type,
-    )
-    result = media_exception_result(
-        error,
-        failure_data,
-        logger=logger,
-        operation=f"gemini_generate_media:{job.media_type}",
-    )
-    if cleanup is not None:
-        result = with_media_cleanup(result, cleanup)
-    content = append_artifact_block([TextContent(type="text", text=message)], artifacts)
-    return attach_domain_result(content, result, use_result_data=True)
-
-
-@dataclass(frozen=True)
-class _MediaOutcome:
-    parsed: list[TextContent]
-    artifacts_data: ArtifactResultData
-    result: DomainResult
-    save_outcome: "_MediaSaveOutcome"
-
-
-async def _build_media_outcome(
-    client: object,
-    response: object,
-    job: _MediaJob,
-    output_dir: Optional[str],
-    filename: Optional[str],
-    artifact_sink: list[Artifact] | None = None,
-) -> _MediaOutcome:
-    parsed = parse_response(media_creation_response(response), job.effective_alias)
-    remote_chat_id = response_chat_id(response)
-    observed_backend = observed_backend_from_response(response)
-    materialized = await materialize_generated_media(
-        client,
-        response,
-        media_type=job.media_type,
-        output_dir=output_dir,
-        filename=filename,
-        prompt=job.prompt,
-        requested_model=job.requested_model,
-        request_model=job.request_model,
-        effective_backend=job.backend_label,
-        artifact_sink=artifact_sink,
-        music_fetcher=_fetch_music_media_from_chat,
-    )
-    save_outcome = materialized.saved
-    if save_outcome.lines:
-        parsed[0].text = f"{parsed[0].text}\n\nSaved files:\n" + "\n".join(save_outcome.lines)
-    artifacts = materialized.artifacts
-    input_artifacts = job.input_artifacts
-    if job.safe_image_path:
-        input_artifacts = (
-            await asyncio.to_thread(artifact_from_local_path,
-                ArtifactKind.IMAGE,
-                job.safe_image_path,
-                title=Path(job.safe_image_path).name,
-                requested_backend=job.requested_model,
-                request_model=job.request_model,
-                effective_backend=job.backend_label,
-                observed_backend=observed_backend,
-                source_chat_id=remote_chat_id,
-            ),
-        )
-    artifact_state = classify_media_artifact_state(response, artifacts, job.media_type)
-    if artifact_state == ArtifactState.EMPTY and save_outcome.failures:
-        artifact_state = ArtifactState.FAILED
-    data = ArtifactResultData(
-        state=artifact_state,
-        artifacts=artifacts,
-        input_artifacts=input_artifacts,
-        requested_model=job.requested_model,
-        request_model=job.request_model,
-        effective_backend=job.backend_label,
-        observed_backend=observed_backend,
-        source_chat_id=remote_chat_id,
-        media_type=job.media_type,
-    )
-    video_empty_action = (
-        "Gemini returned no usable video artifact. "
-        "Gemini Omni video mode is available at https://gemini.google.com/videos; "
-        "a generic chat prompt does not prove that mode was selected. "
-        "Use that dedicated entry in an authorized browser."
-        if job.media_type == "video" and artifact_state == ArtifactState.EMPTY
-        else "Check Gemini's media capability and quota before another attempt."
-    )
-    result = media_artifact_result(
-        data,
-        response=response,
-        save_failures=save_outcome.failures,
-        empty_suggested_action=video_empty_action,
-        empty_retryable=job.media_type != "video",
-    )
-    return _MediaOutcome(parsed=parsed, artifacts_data=data, result=result, save_outcome=save_outcome)
-
-
 def _finalize_media_content(
     parsed: list[TextContent],
     job: _MediaJob,
@@ -245,8 +108,8 @@ def _finalize_media_content(
     if data.state == ArtifactState.EMPTY:
         empty_message = f"⚠️ {job.media_type} 请求已返回，但没有返回可用的 {job.media_type} 产物。"
         next_step = (
-            "当前通用聊天请求未证实进入 Gemini Omni 视频模式。"
-            + "如需生成视频，可使用网页专用视频入口 https://gemini.google.com/videos。"
+            "请求已选择网页视频模式，但这次没有观察到视频产物。"
+            + "可检查网页视频入口 https://gemini.google.com/videos 的状态。"
             if job.media_type == "video"
             else "请检查 Gemini 当前媒体能力和配额，再决定是否重试。"
         )
@@ -322,9 +185,9 @@ def register_media_tools(mcp: MCPServer):
         output_dir: Optional[str] = None,
         filename: Optional[str] = None,
     ) -> list[TextContent]:
-        """通过 Gemini Web 原生图片/音乐模式请求媒体，默认保存到 generated_media 并验证。
+        """通过 Gemini Web 原生图片/视频/音乐模式请求媒体，默认本地保存并验证。
 
-        视频原生入口尚未证实。仅清理本次新建且所有输出已验证保存、或明确无产物
+        仅清理本次新建且所有输出已验证保存、或明确无产物
         的会话；远端资源、排队和保存不完整时保留。retain_chat / delete_after_seconds
         控制保留策略，meta.details.cleanup 返回独立的清理观测。
         """
@@ -363,100 +226,49 @@ def register_media_tools(mcp: MCPServer):
             media_request["effective_alias"],
             media_request["backend_label"],
         )
-        response = None
-        client = None
-        attempt = MediaGenerationAttempt()
-        observed_artifacts: list[Artifact] = []
-        try:
-            # One budget covers generation, chat recovery, downloads (including
-            # upstream HTTP 206 polling), and local verification.
-            async with asyncio.timeout(effective_timeout):
-                client = get_gemini_client()
-                await initialize_client()
-                await cleanup_due_remote_chats(client)
-                with client_request_timeout(client, effective_timeout):
-                    response = await attempt.generate(client, **media_generation_kwargs(
-                        job.prompt,
-                        job.media_type,
-                        files=job.files,
-                        model=job.request_model,
-                        thinking_level=thinking_level,
-                        timeout_seconds=effective_timeout,
-                    ))
-                    outcome = await _build_media_outcome(client, response, job, output_dir, filename, observed_artifacts)
-        except asyncio.TimeoutError as error:
-            if response is None:
-                response = attempt.recovery_response
-            cleanup = None
-            if response is not None:
-                cleanup = await finalize_generated_chat_cleanup(
-                    response,
-                    owns_chat=True,
-                    retain_chat=retain_chat,
-                    preserve_for_recovery=True,
-                    source=f"gemini_generate_media:{job.media_type}",
-                    client=client,
-                )
-            return _media_failure_response(
-                error,
-                job,
-                (
-                    f"后端: {job.backend_label}\n"
-                    f"❌ {job.media_type} 生成超时: {job.timeout_seconds}s 内没有收到完整结果。"
-                    "视频/音乐通常需要更长时间或会被 Gemini Web 上游排队；"
-                    "可增大 timeout_seconds；先检查保留的 chat 和已观察到的资源，确认状态后再重试。"
-                ),
-                response=response,
-                observed_artifacts=tuple(observed_artifacts),
-                cleanup=cleanup,
-            )
-        except Exception as e:
-            e = normalize_media_exception(e)
-            if response is None:
-                response = attempt.recovery_response
-            cleanup = None
-            if response is not None:
-                cleanup = await finalize_generated_chat_cleanup(
-                    response,
-                    owns_chat=True,
-                    retain_chat=retain_chat,
-                    preserve_for_recovery=True,
-                    source=f"gemini_generate_media:{job.media_type}",
-                    client=client,
-                )
-            return _media_failure_response(
-                e,
-                job,
-                (
-                    f"后端: {job.backend_label}\n"
-                    f"❌ {job.media_type} 生成失败: {str(e)}\n"
-                    + (
-                        "图片/音乐请求已显式选择 Gemini Web 原生工具模式；上游仍可能拒绝或排队。"
-                        if job.media_type in {"image", "music"}
-                        else "当前通用 generate_content 尚未证实进入原生视频模式。"
-                    )
-                ),
-                response=response,
-                observed_artifacts=tuple(observed_artifacts),
-                cleanup=cleanup,
-            )
-        cleanup = await finalize_generated_chat_cleanup(
-            response,
-            owns_chat=True,
-            retain_chat=retain_chat,
-            preserve_for_recovery=media_requires_recovery(
-                outcome.artifacts_data, response=response,
-                save_failed=bool(outcome.save_outcome.failures),
-            ),
-            delete_after_seconds=delete_after_seconds,
-            source=f"gemini_generate_media:{job.media_type}",
-            client=client,
+        from ..services.creation import CreationRequest, CreationService
+
+        responses: list[object] = []
+        service = CreationService(
+            client_provider=get_gemini_client, initializer=initialize_client,
+            cleanup_due=cleanup_due_remote_chats, finalizer=finalize_generated_chat_cleanup,
+            music_fetcher=_fetch_music_media_from_chat, timeout_provider=_media_timeout,
+            source="gemini_generate_media",
         )
+        result = await service.generate(CreationRequest(
+            prompt=prompt, media_type=media_type, model=model, thinking_level=thinking_level,
+            image_path=safe_image_path, timeout_seconds=timeout_seconds,
+            retain_chat=retain_chat, delete_after_seconds=delete_after_seconds,
+            output_dir=output_dir, filename=filename,
+        ), response_sink=responses)
+        if result.data is None:
+            return domain_text(result, result.error.message if result.error else "Media result unavailable.")
+        data = result.data
+        if result.error is not None and result.error.code == DomainErrorCode.TIMED_OUT:
+            parsed = [TextContent(type="text", text=(
+                f"❌ {media_type} 生成超时: {effective_timeout}s 内没有收到完整结果。"
+                "可增大 timeout_seconds；先检查保留的 chat 和已观察到的资源，确认状态后再重试。"
+            ))]
+        elif result.error is not None and data.state == ArtifactState.FAILED:
+            parsed = [TextContent(type="text", text=(
+                f"❌ {media_type} 生成失败: {result.error.message}\n"
+                "请求已显式选择 Gemini Web 原生工具模式；请根据错误和保留资源确认状态。"
+            ))]
+        elif responses:
+            parsed = parse_response(responses[-1], job.effective_alias)
+        else:
+            parsed = [TextContent(type="text", text="Media result observed.")]
+        saved = _MediaSaveOutcome(
+            lines=tuple(f"{artifact.kind.value}: {artifact.local_path}" for artifact in data.artifacts if artifact.local_path),
+            artifacts=data.artifacts,
+            failures=("Local save incomplete.",) if result.meta.details.get("save_failure_count") else (),
+        )
+        if saved.lines:
+            parsed[0].text += "\n\nSaved files:\n" + "\n".join(saved.lines)
         content = _finalize_media_content(
-            outcome.parsed, job, outcome.artifacts_data, outcome.save_outcome,
-            upstream_queued=bool(outcome.result.meta.details.get("upstream_queued")),
+            parsed, job, data, saved, upstream_queued=bool(result.meta.details.get("upstream_queued")),
         )
-        return attach_domain_result(content, with_media_cleanup(outcome.result, cleanup), use_result_data=True)
+        return attach_domain_result(content, result, use_result_data=True)
 
     @mcp.tool(annotations=MUTATES_REMOTE)
     async def gemini_generate_music(

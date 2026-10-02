@@ -30,7 +30,7 @@ def reset_request_scope():
     _web_request.reset(token)
 
 
-@pytest.mark.parametrize("mode_id", [14, 21])
+@pytest.mark.parametrize("mode_id", [14, 11, 21])
 def test_standalone_native_selector_changes_only_observed_feature_slot(mode_id):
     data = _make_request_data()
     original = _parse_inner(data)
@@ -376,8 +376,8 @@ def test_native_scope_inherits_thinking_and_restores_after_nested_scope_and_canc
 
 def test_unobserved_native_mode_and_learning_combination_are_rejected():
     client = _new_client()
-    with pytest.raises(ValueError, match="only image or music"):
-        with client.media_scope("video"):
+    with pytest.raises(ValueError, match="only image, video or music"):
+        with client.media_scope("audio"):
             pass
     with pytest.raises(ValueError, match="cannot be combined"):
         client._set_web_request("flash", "standard", "quiz", "image")

@@ -5,7 +5,7 @@ to pick tools by safety tier or group. The connected server's source of truth is
 `gemini_get_tool_manifest` (primary server) and `account(action="manifest")`
 (low-token server) — re-check those at runtime because `GEMINI_TOOLS` controls
 which primary tools are registered in the current process. The focused
-`gemini-mcp-assist` server exposes only its fixed five-tool catalog.
+`gemini-mcp-assist` server exposes five tools; `gemini-mcp-create` and `gemini-mcp-account` each expose seven tools independent of GEMINI_TOOLS. Their actual input/output schemas and actionSemantics metadata are the focused contracts.
 
 ## Annotation legend
 
@@ -96,7 +96,7 @@ Fewer, broader tools with `action` parameters. Same safety tiers apply.
 | `account` | `READS_PRIVATE_REMOTE` | `action="manifest\|capabilities"` are auth-free; other actions read private inventory |
 | `history` | `DESTRUCTIVE_REMOTE` | `action="list\|search\|read\|export"` read-only; `action="delete"` destructive |
 | `scheduled` | `DESTRUCTIVE_REMOTE` | `action="list\|get"` read-only; `action="create\|delete"` mutate/destroy |
-| `create` | `MUTATES_REMOTE` | native image/music selection, local verification and new source-chat cleanup; video compatibility route remains unverified |
+| `create` | `MUTATES_REMOTE` | native image/video/music selection, local verification and owned source-chat cleanup; actual output of the requested kind is required |
 | `edit` | `MUTATES_REMOTE` | native image editing, local verification and new source-chat cleanup |
 | `session` | `DESTRUCTIVE_REMOTE` | create/send/list/reset actions; reset affects Gemini conversation state |
 | `prompts` | `DESTRUCTIVE_LOCAL` | local prompt list/get/create/delete |
@@ -131,3 +131,9 @@ Content search exposes `read_failures` and incomplete coverage even when no titl
 | `prompts` | prompts | local saved prompts |
 | `core` (default) | chat + media + file + research | broad content workflow |
 | `all` | everything + manage:all | maintenance/verification only |
+
+## Focused creation and account catalogs
+
+Creation: `gemini_generate_image`, `gemini_edit_image`, `gemini_generate_video`, `gemini_generate_music`, `gemini_get_operation_status`, `gemini_get_operation_result`, `gemini_cancel_operation`.
+
+Account: `gemini_history`, `gemini_notebooks`, `gemini_scheduled`, `gemini_gems`, `gemini_prompts`, `gemini_account`, `gemini_cleanup`. Every account facade accepts an action-specific request object; mixed read/mutation facades have conservative annotations and actionSemantics metadata. Account capabilities is static and auth-free.

@@ -92,6 +92,14 @@ def _native_notebooks_payload(*, locale: str = "zh-CN") -> str:
     return _compact([2, [locale or "zh-CN"], False, None, [2]])
 
 
+def _custom_gems_payload(*, locale: str = "en") -> str:
+    return _compact([2, [locale or "en"], 0])
+
+
+def _system_gems_payload(*, locale: str = "en") -> str:
+    return _compact([3, [locale or "en"], 0])
+
+
 def _notebook_chats_payload(
     *,
     notebook_id: str,
@@ -256,6 +264,30 @@ _CONTRACT_LIST = [
         _fixed(["zh-CN"]),
         "library_capabilities",
         "2026-06-18 Pro UI / Library",
+    ),
+    _contract(
+        "gems.system_registry",
+        "gems",
+        "system_gems_registry",
+        "CNgdBe",
+        "/app",
+        _system_gems_payload,
+        "custom_gems",
+        "gemini-webapi 2.0.0 and 2.1.1 GeminiClient.fetch_gems source / system identifier",
+        stability="preview",
+        verification_strategy="complete_system_registry",
+    ),
+    _contract(
+        "gems.custom_registry",
+        "gems",
+        "custom_gems_registry",
+        "CNgdBe",
+        "/app",
+        _custom_gems_payload,
+        "custom_gems",
+        "gemini-webapi 2.0.0 and 2.1.1 GeminiClient.fetch_gems source / custom identifier",
+        stability="preview",
+        verification_strategy="complete_custom_registry",
     ),
     _contract(
         "notebooks.list",

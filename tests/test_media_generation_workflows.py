@@ -514,7 +514,7 @@ def test_compact_initialization_is_in_total_operation_deadline(monkeypatch, tmp_
 
 
 @pytest.mark.parametrize("surface", ["compact", "edit"])
-def test_compact_failure_after_generation_retains_observed_files_and_chat(monkeypatch, tmp_path, surface):
+def test_compact_presentation_failure_preserves_verified_generation_and_cleanup(monkeypatch, tmp_path, surface):
     monkeypatch.chdir(tmp_path)
     image_path = write_image(tmp_path / "reference.png")
     client = _FakeMediaClient(images=[Image()])
@@ -527,19 +527,20 @@ def test_compact_failure_after_generation_retains_observed_files_and_chat(monkey
     monkeypatch.setattr(compact, "_format_response", fail_to_format)
     result = run_surface(surface, "bicycle", image_path=str(image_path))[0].meta["domain_result"]
 
-    assert result["ok"] is False
+    assert result["ok"] is True
     assert result["data"]["state"] == "local"
     assert result["data"]["artifacts"][0]["verification"]["status"] == "verified"
     assert result["data"]["source_chat_id"] == "c_media1"
-    assert observations[0]["preserve_for_recovery"] is True
-    assert result["meta"]["details"]["cleanup"]["state"] == "retained"
+    assert any(item["code"] == "PRESENTATION_FAILED" for item in result["warnings"])
+    assert observations[0]["preserve_for_recovery"] is False
+    assert result["meta"]["details"]["cleanup"]["state"] == "completed"
 
 
 @pytest.mark.parametrize("surface,media_type,mode", [
     ("primary", "image", "image"), ("compact", "image", "image"),
     ("edit", "image_edit", "image"),
     ("primary", "music", "music"), ("compact", "music", "music"),
-    ("primary", "video", None), ("compact", "video", None),
+    ("primary", "video", "video"), ("compact", "video", "video"),
 ])
 def test_surfaces_select_only_observed_native_modes(monkeypatch, tmp_path, surface, media_type, mode):
     client = _FakeMediaClient()
@@ -550,8 +551,6 @@ def test_surfaces_select_only_observed_native_modes(monkeypatch, tmp_path, surfa
     run_surface(surface, "fixture media", image_path=image_path, media_type=media_type)
 
     assert client.captured_generate_kwargs.get("media_mode") == mode
-    if media_type == "video":
-        assert "media_mode" not in client.captured_generate_kwargs
 
 
 class SDKOutputClient(_FakeMediaClient):

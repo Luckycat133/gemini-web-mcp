@@ -2,6 +2,7 @@ import asyncio
 import json
 import os
 import sys
+from pathlib import Path
 from types import SimpleNamespace
 
 from src.adapters.mcp_sdk import MCPServer
@@ -11,6 +12,16 @@ from tests.media_fixtures import fake_finalize_generated_cleanup
 
 def _tool_text(result):
     return result.content[0].text
+
+
+def _isolate_research_operation_owner(monkeypatch):
+    """Research fakes authenticate only the private test metadata repository."""
+    import src.client_wrapper as client_wrapper
+    from src.services.research import ResearchService
+    monkeypatch.setattr(client_wrapper, "get_authentication_scope", lambda: "scope_research_offline")
+    monkeypatch.setattr(client_wrapper, "finalize_generated_chat_cleanup", fake_finalize_generated_cleanup)
+    monkeypatch.setattr(ResearchService, "_destination",
+                        staticmethod(lambda _request: str(Path(os.environ["GEMINI_STATE_DB_PATH"]).parent / "reports")))
 
 
 def test_parse_response_exposes_remote_chat_id_for_cleanup():
@@ -175,6 +186,7 @@ def test_intent_profiles_expose_focused_tool_surfaces():
 
 
 def test_deep_research_uses_default_transport_for_model_aliases(monkeypatch):
+    _isolate_research_operation_owner(monkeypatch)
     import src.tools.research as research_tools
     from src.services.research import null_scope
 
@@ -1103,7 +1115,7 @@ def test_skill_server_uses_v2_file_attachment_contract(monkeypatch, tmp_path):
             "gemini-3-flash",
         )
     ]
-    assert scheduled == ["skill_edit"]
+    assert scheduled == ["skill_create:image_edit"]
 
 
 def test_skill_server_chat_schedules_remote_cleanup(monkeypatch):
@@ -2495,6 +2507,7 @@ def test_url_analysis_preserves_url_and_timeout(monkeypatch):
 
 
 def test_deep_research_uses_library_flag_and_timeout(monkeypatch):
+    _isolate_research_operation_owner(monkeypatch)
     import src.tools.research as research_tools
 
     calls = []
@@ -2535,6 +2548,7 @@ def test_deep_research_uses_library_flag_and_timeout(monkeypatch):
 
 
 def test_deep_research_runs_full_library_workflow(monkeypatch):
+    _isolate_research_operation_owner(monkeypatch)
     import src.tools.research as research_tools
 
     calls = []
@@ -2610,6 +2624,7 @@ def test_deep_research_runs_full_library_workflow(monkeypatch):
 
 
 def test_deep_research_falls_back_to_chat_polling_without_research_id(monkeypatch):
+    _isolate_research_operation_owner(monkeypatch)
     import src.tools.research as research_tools
 
     class FakePlan:
@@ -2672,6 +2687,7 @@ def test_deep_research_falls_back_to_chat_polling_without_research_id(monkeypatc
 
 
 def test_deep_research_timeout_does_not_present_start_message_as_report(monkeypatch):
+    _isolate_research_operation_owner(monkeypatch)
     import src.tools.research as research_tools
 
     start_message = "Great. While I'm researching, feel free to leave this chat."
@@ -2751,7 +2767,8 @@ def test_media_tool_returns_clear_upstream_failure(monkeypatch):
         )
         text = _tool_text(result)
         assert "video 生成失败" in text
-        assert "通用 generate_content" in text
+        assert "请求已显式选择 Gemini Web 原生工具模式" in text
+        assert "silently aborted by Google" not in text
 
     asyncio.run(run())
 
@@ -3143,6 +3160,8 @@ def test_remote_chat_cleanup_deletes_expired_chat(monkeypatch):
     deleted = []
 
     class FakeClient:
+        cookies = {"__Secure-1PSID": "fake-cleanup-workflow"}
+
         async def delete_chat(self, cid):
             deleted.append(cid)
 
@@ -3154,13 +3173,23 @@ def test_remote_chat_cleanup_deletes_expired_chat(monkeypatch):
             )
 
     async def run():
-        client_wrapper._cleanup_manager._pending_cleanup.clear()
+        from src.remote_chat_cleanup_manager import RemoteChatCleanupManager
+
+        monkeypatch.setattr(client_wrapper, "_cleanup_manager", RemoteChatCleanupManager(
+            client_provider=client_wrapper._initialize_cleanup_client,
+            retention_provider=client_wrapper.get_default_chat_retention_seconds,
+        ))
         monkeypatch.setattr(client_wrapper._client_manager, "_client", FakeClient())
         monkeypatch.setattr(client_wrapper._client_manager, "_initialized", True)
         monkeypatch.setenv("GEMINI_CHAT_RETENTION_SECONDS", "0")
-
+        client_wrapper.get_gemini_client()
         client_wrapper.schedule_remote_chat_cleanup("c_test_cleanup")
-        await asyncio.sleep(0.01)
+        async with asyncio.timeout(2):
+            while True:
+                observed = client_wrapper._cleanup_manager.get_cleanup_observation("c_test_cleanup")
+                if observed is not None and observed.state.value == "completed":
+                    break
+                await asyncio.sleep(0)
 
         assert deleted == ["c_test_cleanup"]
         assert "c_test_cleanup" not in client_wrapper.list_pending_remote_chat_cleanup()

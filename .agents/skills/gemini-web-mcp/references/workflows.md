@@ -2,7 +2,7 @@
 
 Load this reference only after the `gemini-web-mcp` Skill has selected the user's capability lane.
 
-The current 0.2.x runtime has a low-token compatibility server plus narrow primary profiles. The dedicated `gemini-assist` MCP server (`gemini-mcp-assist`) now implements the assistance workflows below; `gemini-create` and `gemini-account` remain pending. All of them share the same services instead of duplicating business logic.
+The current 0.2.x runtime has a low-token compatibility server plus narrow primary profiles. The dedicated `gemini-assist` MCP server (`gemini-mcp-assist`) now implements the assistance workflows below; `gemini-create` and `gemini-account` provide dedicated seven-tool catalogs. All of them share the same services instead of duplicating business logic.
 
 ## 1. Ask Gemini for a Second Opinion
 
@@ -120,20 +120,22 @@ Default behavior:
 
 1. Start asynchronously.
 2. Preserve every returned local and upstream identifier, especially `upstream_chat_id`.
-3. The dedicated `operation_id` cannot currently be queried.
-4. Inspect the retained chat by ID later using compact `history(action="read", chat_id=...)` or primary `gemini_history(action="read", chat_id=...)` in the history profile. These reads may truncate long turns and may show only a completion notice.
+3. Use gemini_research(action="status" or "result", operation_id=...) to read the same operation after restart.
+4. For compatibility retrieval, inspect the retained chat by ID later using compact `history(action="read", chat_id=...)` or primary `gemini_history(action="read", chat_id=...)` in the history profile. These reads may truncate long turns and may show only a completion notice.
 5. If the report text is absent, use the primary core profile's `gemini_create_from_research_report(chat_id=..., artifact_type="webpage")` to attempt a local report webpage; treat an empty or failed result as inconclusive.
 6. Read the verified report content and use it in the user's requested output. Do not claim a Markdown report was saved unless one actually exists.
 
 Do not restart the same research merely because the initial MCP wait ended.
 
-The focused tool starts the operation by default and returns an opaque `operation_id` for correlation plus observed upstream IDs. No current status/result/cancel tool accepts that local ID.
+The focused tool returns an accepted opaque operation_id before background plan/start. Its status/result/cancel actions use the shared seven-day metadata store without persisting prompts or report content; cancellation is best effort.
 
 ## 6. Generate or Edit an Image
 
 Current routes:
 
 ```text
+focused: gemini_generate_image(prompt=..., output_dir=...)
+focused: gemini_edit_image(image_path=..., prompt=...)
 compact: create(prompt=..., type="image", image_path=<optional reference>)
 compact: edit(image_path=..., prompt=...)
 primary: gemini_generate_media(... media_type="image")
@@ -166,8 +168,7 @@ Search-reference images are not generated output. If Gemini returns only text
 or a Web search image, preserve `ARTIFACT_NOT_RETURNED`; do not announce a
 successful drawing. A finished operation with verified local outputs allows default source-chat cleanup.
 An unsaved or queued output keeps its chat for recovery. Explicit primary
-retention/delay options override the default, and delayed cleanup does not
-survive a process restart.
+retention/delay options override the default; registered cleanup jobs now survive restart in the shared metadata store.
 
 ## 7. Generate Music or Video
 
@@ -177,7 +178,9 @@ Current routes:
 compact: create(prompt=..., type="music")
 primary: gemini_generate_media(media_type="music")
 primary: gemini_generate_music
-video fallback: https://gemini.google.com/videos in an authorized browser
+focused video: gemini_generate_video(prompt=..., idempotency_key=<opaque token>)
+focused music: gemini_generate_music(prompt=..., idempotency_key=<opaque token>)
+recover: gemini_get_operation_status/result(operation_id=<returned handle>)
 ```
 
 The 2026-09-26 live MCP music call produced verified local MP3 and MP4 files.
@@ -186,17 +189,18 @@ Gemini announcements describe Lyria 3.5. Treat queued/running results as
 incomplete. Current compatibility media calls do not provide a durable
 operation handle.
 
-The same account's generic `gemini_generate_media(media_type="video")` call
-returned chat text and `ARTIFACT_NOT_RETURNED`. Gemini Web's dedicated Omni
-video mode produced a verified downloadable video. Do not retry the generic
-MCP call with a longer prompt and call that video generation. Use the dedicated
-Videos page until a verified MCP mode route exists.
+The 2026-09-26 generic video call returned chat text and
+`ARTIFACT_NOT_RETURNED`; the dedicated Videos page produced a downloadable
+video. Current creation requests select the observed native video mode. Mode
+selection proves routing, while a usable video still requires verified local
+video bytes. Account availability and the returned artifact remain separate
+checks. Do not resubmit a timed-out start to recover it.
 
 Process:
 
-1. Start music with a bounded MCP call, or start video in the dedicated browser mode.
-2. Preserve any observed upstream IDs.
-3. If the call times out, inspect available chat/artifact evidence before considering another generation.
+1. Start music or video once through the focused surface with an opaque idempotency_key.
+2. Preserve the returned operation_id; after response loss retrieve it with the same start key.
+3. Use status/result on that handle after a timeout or server restart.
 4. Verify the final media Artifact.
 5. Use or attach the file in the user's task.
 

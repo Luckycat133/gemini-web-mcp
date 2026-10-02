@@ -10,7 +10,7 @@ The Skill is instructions, not an MCP server installation. First run the credent
 uvx --from git+https://github.com/Luckycat133/gemini-web-mcp@main gemini-mcp-onboarding
 ```
 
-For Codex, connect the compact server as a small default surface:
+For Codex, connect the focused lane needed for the task, or the compact compatibility server:
 
 ```bash
 codex mcp add gemini-compact -- uvx --from git+https://github.com/Luckycat133/gemini-web-mcp@main gemini-mcp-skill-server
@@ -22,6 +22,8 @@ The compact server covers chat, image/music generation, and account facades. Con
 For focused assistance or the primary content surface in Codex:
 
 ```bash
+codex mcp add gemini-create -- uvx --from git+https://github.com/Luckycat133/gemini-web-mcp@main gemini-mcp-create
+codex mcp add gemini-account -- uvx --from git+https://github.com/Luckycat133/gemini-web-mcp@main gemini-mcp-account
 codex mcp add gemini-assist -- uvx --from git+https://github.com/Luckycat133/gemini-web-mcp@main gemini-mcp-assist
 codex mcp add gemini-core --env GEMINI_TOOLS=core -- uvx --from git+https://github.com/Luckycat133/gemini-web-mcp@main gemini-mcp-server
 ```
@@ -30,7 +32,7 @@ This setup does not authenticate a Gemini account. Keep Cookie values in the cli
 
 ## Tool Missing or Wrong Schema
 
-1. Call `gemini_get_tool_manifest` or low-token `account(action="manifest")`.
+1. Inspect the focused server catalog/schema; compatibility servers provide `gemini_get_tool_manifest` or `account(action="manifest")`.
 2. Check the current enabled surface/profile.
 3. Switch to the narrow primary profile required by the workflow.
 4. Do not enable `all` unless the task is repository maintenance or comprehensive verification.
@@ -78,10 +80,10 @@ If quick search returns an answer but no observed sources:
 ## Long Operation Timeout
 
 1. preserve every operation/upstream ID;
-2. use the retained upstream chat ID to inspect the chat; history reads can be truncated or show only a completion notice;
+2. use focused status/result with the returned operation_id; compatibility history reads may be truncated or show only a completion notice;
 3. do not restart automatically;
 4. if the report is absent, try primary `gemini_create_from_research_report(chat_id=..., artifact_type="webpage")` and verify the returned file;
-5. if no chat ID was observed or the extraction fails, report the current recovery limit; the local operation ID has no status/result tool.
+5. if no source was observed, report the recovery limit and keep the handle; never scan unrelated history or repeat generation. A repeated start may safely reuse its opaque idempotency_key within the metadata window.
 
 ## Artifact Missing or Partial
 
@@ -101,12 +103,11 @@ history or restart generation automatically to recover a missing ID. Keep
 failure recovery separate from automatic deletion of completed disposable
 results, and require positive absence read-back for any authorized cleanup.
 
-For `media_type="video"`, a text-only response can mean the generic MCP call
-stayed in chat mode. Inspect cleanup metadata first: definitive empty responses
+For video, a text-only response is not a video artifact even when native selection was requested. Inspect cleanup metadata first: definitive empty responses
 are cleaned by default, while interrupted/queued/unsaved results retain recovery.
 If retained, inspect that source chat, then use the native
 `https://gemini.google.com/videos` mode if the user authorized browser work.
-Do not repeat the generic prompt as if it had entered Omni generation.
+Use focused operation status/result for the known request; never repeat generation to recover it.
 
 ## Accepted but Unverified Mutation
 

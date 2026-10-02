@@ -35,6 +35,8 @@ from types import SimpleNamespace
 
 import src.services.research as research_service
 import src.surfaces.assist as assist
+import src.client_wrapper as client_wrapper
+from src.adapters import attach_domain_result, domain_failure_text, domain_text
 
 from src import __version__
 from src.domain import DomainErrorCode, DomainResult
@@ -185,6 +187,7 @@ class _FakeResearchClient:
 def _patch_research_client_env(monkeypatch, client, *, captured_schedule=None):
     """Patch the client/cleanup seams the assist surface binds to ResearchService."""
     monkeypatch.setattr(assist, "get_gemini_client", lambda: client)
+    monkeypatch.setattr(client_wrapper, "get_authentication_scope", lambda: "scope_research_offline")
 
     async def fake_initialize():
         return None
@@ -208,6 +211,25 @@ def _patch_research_client_env(monkeypatch, client, *, captured_schedule=None):
             )
 
     monkeypatch.setattr(assist, "schedule_remote_chat_cleanup", fake_schedule_chat_cleanup)
+
+
+async def _call_research_start(name: str, **kwargs):
+    """Observe eventual startup independently of the immediate MCP response."""
+    content = await _call_tool(name, **kwargs)
+    initial = content[0].meta["domain_result"]
+    if not initial["ok"] or not initial["data"]:
+        return content
+    operation_id = initial["data"]["operation_id"]
+    assert initial["data"]["state"] == "accepted"
+    operations = assist._research_service._operations
+    task = operations._tasks.get(operation_id)
+    if task is not None:
+        await task
+    record = operations.store.operations.get("scope_research_offline", operation_id)
+    result = operations._render(record)
+    if not result.ok:
+        return domain_text(result, domain_failure_text(result), use_result_data=True)
+    return attach_domain_result(assist._render_research_start(result.data), result, use_result_data=True)
 
 
 # ---------------------------------------------------------------------------
@@ -355,7 +377,7 @@ def test_gemini_research_input_schema_is_deterministic():
     schema = tools["gemini_research"].input_schema
 
     assert schema["type"] == "object"
-    assert schema["required"] == ["query"]
+    assert schema.get("required", []) == []
     assert set(schema["properties"]) == {
         "query",
         "model",
@@ -363,6 +385,9 @@ def test_gemini_research_input_schema_is_deterministic():
         "timeout_seconds",
         "retain_chat",
         "delete_after_seconds",
+        "action",
+        "operation_id",
+        "idempotency_key",
     }
     assert schema["properties"]["model"]["default"] == "flash"
     assert schema["properties"]["thinking_level"]["default"] == "extended"
@@ -1086,7 +1111,7 @@ def test_gemini_research_starts_async_and_returns_one_operation_handle(monkeypat
     client = _FakeResearchClient()
     _patch_research_client_env(monkeypatch, client)
 
-    content = asyncio.run(_call_tool("gemini_research", query="Compare Rust and Go for CLI tooling."))
+    content = asyncio.run(_call_research_start("gemini_research", query="Compare Rust and Go for CLI tooling."))
 
     # The start ran upstream (fresh research chat, plan, start) but the call
     # never waited for the final report.
@@ -1098,21 +1123,14 @@ def test_gemini_research_starts_async_and_returns_one_operation_handle(monkeypat
     domain_result = content[0].meta["domain_result"]
     assert domain_result["ok"] is True
     data = domain_result["data"]
-    assert data["operation"] == "gemini_research"
+    assert data["operation"] == "research"
     # Typed state, not prose-only: the run is started, not completed.
     assert data["state"] == "running"
     assert data["report_available"] is False
     assert data["poll_count"] == 0
     # One opaque high-entropy handle issued by this call.
     assert re.fullmatch(r"op_[0-9a-f]{32}", data["operation_id"])
-    assert domain_result["meta"]["details"] == {
-        "service": "research",
-        "operation_handle_issued": True,
-        "upstream_operation_id_observed": True,
-        "upstream_chat_id_observed": True,
-        "continuation_possible": True,
-        "poll_count": 0,
-    }
+    assert domain_result["meta"]["details"] == {"provider_cancel_verified": False}
     assert domain_result["meta"]["verification_status"] == "upstream_running"
     # Compatibility text repeats the handle without contradicting the state.
     assert data["operation_id"] in content[0].text
@@ -1124,8 +1142,8 @@ def test_gemini_research_operation_handles_are_unique_per_call(monkeypatch):
     client = _FakeResearchClient()
     _patch_research_client_env(monkeypatch, client)
 
-    first = asyncio.run(_call_tool("gemini_research", query="first question"))
-    second = asyncio.run(_call_tool("gemini_research", query="second question"))
+    first = asyncio.run(_call_research_start("gemini_research", query="first question"))
+    second = asyncio.run(_call_research_start("gemini_research", query="second question"))
 
     first_handle = first[0].meta["domain_result"]["data"]["operation_id"]
     second_handle = second[0].meta["domain_result"]["data"]["operation_id"]
@@ -1136,7 +1154,7 @@ def test_gemini_research_preserves_upstream_ids_in_structured_metadata(monkeypat
     client = _FakeResearchClient(research_id="r_unique", plan_cid="c_plan_unique")
     _patch_research_client_env(monkeypatch, client)
 
-    content = asyncio.run(_call_tool("gemini_research", query="Study the migration risks."))
+    content = asyncio.run(_call_research_start("gemini_research", query="Study the migration risks."))
 
     domain_result = content[0].meta["domain_result"]
     assert domain_result["ok"] is True
@@ -1146,7 +1164,8 @@ def test_gemini_research_preserves_upstream_ids_in_structured_metadata(monkeypat
     assert data["upstream_operation_id"] == "r_unique"
     assert data["upstream_chat_id"] == "c_plan_unique"
     assert data["continuation_possible"] is True
-    assert data["title"] == "Research Plan"
+    # Titles are private content; the durable metadata record carries locators.
+    assert data["title"] is None
     # Compatibility text repeats both upstream identifiers.
     assert "Upstream research ID: r_unique" in content[0].text
     assert "Upstream chat ID: c_plan_unique" in content[0].text
@@ -1161,7 +1180,7 @@ def test_gemini_research_recovers_chat_id_from_start_response(monkeypatch):
     captured_schedule = []
     _patch_research_client_env(monkeypatch, client, captured_schedule=captured_schedule)
 
-    content = asyncio.run(_call_tool("gemini_research", query="Study this."))
+    content = asyncio.run(_call_research_start("gemini_research", query="Study this."))
 
     domain_result = content[0].meta["domain_result"]
     assert domain_result["ok"] is True
@@ -1178,13 +1197,13 @@ def test_gemini_research_maps_upstream_state_to_typed_states(monkeypatch):
     failed = _FakeResearchClient(start_state="failed")
 
     _patch_research_client_env(monkeypatch, queued)
-    queued_result = asyncio.run(_call_tool("gemini_research", query="q"))[0].meta["domain_result"]
+    queued_result = asyncio.run(_call_research_start("gemini_research", query="q"))[0].meta["domain_result"]
 
     _patch_research_client_env(monkeypatch, running)
-    running_result = asyncio.run(_call_tool("gemini_research", query="q"))[0].meta["domain_result"]
+    running_result = asyncio.run(_call_research_start("gemini_research", query="q"))[0].meta["domain_result"]
 
     _patch_research_client_env(monkeypatch, failed)
-    failed_result = asyncio.run(_call_tool("gemini_research", query="q"))[0].meta["domain_result"]
+    failed_result = asyncio.run(_call_research_start("gemini_research", query="q"))[0].meta["domain_result"]
 
     assert queued_result["data"]["state"] == "queued"
     assert queued_result["meta"]["verification_status"] == "upstream_queued"
@@ -1200,14 +1219,14 @@ def test_gemini_research_does_not_claim_report_observed_from_start_state_alone(m
     client = _FakeResearchClient(start_state="completed")
     _patch_research_client_env(monkeypatch, client)
 
-    content = asyncio.run(_call_tool("gemini_research", query="Study this."))
+    content = asyncio.run(_call_research_start("gemini_research", query="Study this."))
 
     domain_result = content[0].meta["domain_result"]
     assert domain_result["ok"] is True
-    assert domain_result["data"]["state"] == "completed"
+    assert domain_result["data"]["state"] == "running"
     assert domain_result["data"]["report_available"] is False
-    assert domain_result["meta"]["verification_status"] == "upstream_completed_report_not_observed"
-    assert "did not return a report" in content[0].text
+    assert domain_result["meta"]["verification_status"] == "upstream_running"
+    assert "did not wait for the final report" in content[0].text
 
 
 def test_gemini_research_schedules_cleanup_with_retain_chat_default_true(monkeypatch):
@@ -1215,7 +1234,7 @@ def test_gemini_research_schedules_cleanup_with_retain_chat_default_true(monkeyp
     captured_schedule = []
     _patch_research_client_env(monkeypatch, client, captured_schedule=captured_schedule)
 
-    asyncio.run(_call_tool("gemini_research", query="How did the standard evolve?"))
+    asyncio.run(_call_research_start("gemini_research", query="How did the standard evolve?"))
 
     # The research chat is retained by default so the report stays recoverable
     # through the preserved upstream chat ID.
@@ -1230,7 +1249,7 @@ def test_gemini_research_forwards_explicit_cleanup_overrides(monkeypatch):
     _patch_research_client_env(monkeypatch, client, captured_schedule=captured_schedule)
 
     asyncio.run(
-        _call_tool(
+        _call_research_start(
             "gemini_research",
             query="How did the standard evolve?",
             retain_chat=False,
@@ -1239,7 +1258,7 @@ def test_gemini_research_forwards_explicit_cleanup_overrides(monkeypatch):
     )
 
     assert captured_schedule == [
-        {"cid": "c_plan1", "retain_chat": False, "delete_after_seconds": 3600, "source": "gemini_research"}
+        {"cid": "c_plan1", "retain_chat": True, "delete_after_seconds": 3600, "source": "gemini_research"}
     ]
 
 
@@ -1248,7 +1267,7 @@ def test_gemini_research_delegates_query_model_and_thinking_level(monkeypatch):
     _patch_research_client_env(monkeypatch, client)
 
     asyncio.run(
-        _call_tool(
+        _call_research_start(
             "gemini_research",
             query="Compare vector databases.",
             model="pro",
@@ -1268,7 +1287,7 @@ def test_gemini_research_blank_query_is_rejected_before_client_use(monkeypatch):
 
     monkeypatch.setattr(assist, "get_gemini_client", explode)
 
-    content = asyncio.run(_call_tool("gemini_research", query="   "))
+    content = asyncio.run(_call_research_start("gemini_research", query="   "))
 
     domain_result = content[0].meta["domain_result"]
     assert domain_result["ok"] is False
@@ -1282,7 +1301,7 @@ def test_gemini_research_reports_capability_unavailable_without_native_api(monke
     # A client without the native plan/start/wait API cannot start Deep Research.
     _patch_research_client_env(monkeypatch, _FakeAskClient())
 
-    content = asyncio.run(_call_tool("gemini_research", query="Research this."))
+    content = asyncio.run(_call_research_start("gemini_research", query="Research this."))
 
     domain_result = content[0].meta["domain_result"]
     assert domain_result["ok"] is False
@@ -1300,7 +1319,7 @@ def test_gemini_research_failure_is_typed_with_the_issued_handle(monkeypatch):
     captured_schedule = []
     _patch_research_client_env(monkeypatch, client, captured_schedule=captured_schedule)
 
-    content = asyncio.run(_call_tool("gemini_research", query="Research this."))
+    content = asyncio.run(_call_research_start("gemini_research", query="Research this."))
 
     domain_result = content[0].meta["domain_result"]
     assert domain_result["ok"] is False
@@ -1330,7 +1349,7 @@ def test_gemini_research_plan_phase_hang_returns_timed_out_with_issued_handle(mo
     # immediately; the real 30-second floor is pinned in the test below.
     monkeypatch.setattr(research_service, "phase_timeout", lambda timeout_seconds: 0.05)
 
-    content = asyncio.run(_call_tool("gemini_research", query="Slow plan.", timeout_seconds=1))
+    content = asyncio.run(_call_research_start("gemini_research", query="Slow plan.", timeout_seconds=1))
 
     domain_result = content[0].meta["domain_result"]
     assert domain_result["ok"] is False
@@ -1364,7 +1383,7 @@ def test_gemini_research_start_timeout_without_readback_is_not_reported_running(
     _patch_research_client_env(monkeypatch, client, captured_schedule=captured_schedule)
     monkeypatch.setattr(research_service, "phase_timeout", lambda timeout_seconds: 0.05)
 
-    content = asyncio.run(_call_tool("gemini_research", query="Slow start.", timeout_seconds=1))
+    content = asyncio.run(_call_research_start("gemini_research", query="Slow start.", timeout_seconds=1))
 
     domain_result = content[0].meta["domain_result"]
     assert domain_result["ok"] is False
@@ -1389,7 +1408,7 @@ def test_gemini_research_fresh_chat_failure_keeps_issued_handle(monkeypatch):
     client = _FailingFreshChatClient()
     _patch_research_client_env(monkeypatch, client)
 
-    content = asyncio.run(_call_tool("gemini_research", query="Study this."))
+    content = asyncio.run(_call_research_start("gemini_research", query="Study this."))
 
     domain_result = content[0].meta["domain_result"]
     assert domain_result["ok"] is False

@@ -15,7 +15,7 @@ from mcp.client.sse import sse_client
 from mcp.client.streamable_http import streamable_http_client
 from mcp.server import MCPServer as SDKMCPServer
 from mcp.shared._httpx_utils import create_mcp_http_client
-from mcp_types import Icon, TextContent, ToolAnnotations
+from mcp_types import CallToolResult, Icon, TextContent, ToolAnnotations
 
 
 _CallableT = TypeVar("_CallableT", bound=Callable[..., Any])
@@ -53,6 +53,7 @@ class MCPServer(SDKMCPServer):
 
 __all__ = [
     "Client",
+    "CallToolResult",
     "MCPServer",
     "StdioServerParameters",
     "TextContent",

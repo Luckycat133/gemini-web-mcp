@@ -1,0 +1,32 @@
+{
+  "observed_at": "2026-10-03",
+  "build": "BardChatUi.zh_CN.sOs2tZuLK_8.2018.O",
+  "files": [
+    {
+      "file": "main-module.js",
+      "url": "https://gemini.gstatic.com/_/mss/boq-gemini-web-uiserver/_/js/k=boq-gemini-web-uiserver.BardChatUi.zh_CN.sOs2tZuLK_8.2018.O/ck=boq-gemini-web-uiserver.BardChatUi.ax9QaYAyXKE.L.B1.O/am=YSAADd8BbN8eKPBFOBhIgAk6QQA7AAAAAEI/d=1/exm=_b/excm=_b/ed=1/br=1/wt=2/ujg=1/rs=AKrAJMrozr8-8yTPLWnzVaSxydi8kT77yg/ee=DGWCxb:CgYiQ;EmZ2Bf:zr1jrb;NJ1rfe:yGfSdd;Pjplud:PoEs9b;QGR0gd:Mlhmy;ScI3Yc:e7Hzgb;UYRIEb:HzTAQc;YIZmRd:A1yn5d;cEt90b:ws9Tlc;dIoSBb:SpsfSb;dowIGb:ebZ3mb;eBAeSb:zbML3c;iFQyKf:vfuNJf;oGtAuc:sOXFj;qQEoOc:KUM7Z;qddgKe:xQtZb;wNp4Gc:k56rsf;wR5FRb:siKnQd;yxTchf:KUM7Z/dti=1/m=LQaXg?wli=BardChatUi.7F0_6Tt3YB8.libheifWasm.O%3A%3B",
+      "bytes": 3034627,
+      "sha256": "5d4f50b3a40b96f14efd7891866d1009d6f6f6553347de881fc46d1ced4e5c5b",
+      "same_as_20261002": true
+    },
+    {
+      "file": "toolbox-with-dependencies.js",
+      "url": "https://gemini.gstatic.com/_/mss/boq-gemini-web-uiserver/_/js/k=boq-gemini-web-uiserver.BardChatUi.zh_CN.sOs2tZuLK_8.2018.O/ck=boq-gemini-web-uiserver.BardChatUi.ax9QaYAyXKE.L.B1.O/am=YSAADd8BbN8eKPBFOBhIgAk6QQA7AAAAAEI/d=1/exm=_b/excm=_b/ed=1/br=1/wt=2/ujg=1/rs=AKrAJMrozr8-8yTPLWnzVaSxydi8kT77yg/ee=DGWCxb:CgYiQ;EmZ2Bf:zr1jrb;NJ1rfe:yGfSdd;Pjplud:PoEs9b;QGR0gd:Mlhmy;ScI3Yc:e7Hzgb;UYRIEb:HzTAQc;YIZmRd:A1yn5d;cEt90b:ws9Tlc;dIoSBb:SpsfSb;dowIGb:ebZ3mb;eBAeSb:zbML3c;iFQyKf:vfuNJf;oGtAuc:sOXFj;qQEoOc:KUM7Z;qddgKe:xQtZb;wNp4Gc:k56rsf;wR5FRb:siKnQd;yxTchf:KUM7Z/dti=1/m=xrScke?wli=BardChatUi.7F0_6Tt3YB8.libheifWasm.O%3A%3B",
+      "bytes": 3688842,
+      "sha256": "7d0447a85801b729091fad6fd1e889b0533f11152b6709b2496b677bb3868ffa",
+      "same_as_20261002": true
+    }
+  ],
+  "evidence_kind": "public_frontend_static",
+  "live_generation_verified": false,
+  "video_feature_mode": 11,
+  "stream_generate_index": 49,
+  "selector_chain": [
+    "toolbox-with-dependencies.js:7028-7030 featureMode:11",
+    "toolbox-module.js:61,92 featureModeDataChange",
+    "input-v2-module.js:49,225 Ry -> ConversationService.Lm",
+    "main-module.js:4498,1645,4443,1584,4488 UpdateSelectedFeatureMode -> Yg",
+    "main-module.js:4476-4482 jf",
+    "main-module.js:3878 EOd -> JSPB field 50 -> zero-based index 49"
+  ]
+}
