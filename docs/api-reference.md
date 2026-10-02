@@ -81,7 +81,7 @@ chunk semantics and counts.
 
 | Tool | Purpose |
 |------|---------|
-| `gemini_generate_media` | Generate image, video, or music |
+| `gemini_generate_media` | Native image/music creation; video argument remains an unverified compatibility route |
 | `gemini_generate_music` | Convenience wrapper for music generation |
 
 Current Gemini Web media routing:
@@ -98,6 +98,8 @@ Flash. The Pro image redo control is a post-generation Gemini Web UI action.
 The signed-in 2026-09-26 live check produced images and music through MCP, while
 generic MCP video returned `ARTIFACT_NOT_RETURNED`; Gemini Web's dedicated
 Videos page produced a downloadable Omni video.
+
+Primary and compact creation save and verify local output by default. Native image/music selection is explicit; its current frontend contract has offline coverage, with signed-in acceptance still pending. Finished verified outputs or definitive empty responses trigger bounded cleanup of the request's new source chat. Queued, unsaved and failed recovery results retain the source. Primary `retain_chat` / `delete_after_seconds` overrides the default; structured cleanup observations do not replace Artifact verification. See [native media and cleanup](native-media-mode.md).
 
 ### File And URL
 

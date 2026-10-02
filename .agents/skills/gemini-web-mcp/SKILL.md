@@ -56,7 +56,7 @@ Choose the next capability for the user's task; switch lanes when the task needs
 | Understand one image or screenshot | focused `gemini_understand_image`; fallback compact or primary image chat | analysis returned to the agent and used in the surrounding task |
 | Understand files, URLs, or mixed evidence | focused `gemini_understand`; fallback primary file/URL/image tools | each source identity and outcome preserved before synthesis |
 | Deep, multi-source research | dedicated `gemini_research`; primary `gemini_deep_research(wait_for_completion=false, retain_chat=true)` | preserve the upstream chat ID for later report retrieval; the dedicated tool also returns a local correlation ID |
-| Generate or edit images | low-token `create(type="image")` / `edit`; primary `gemini_generate_media(..., output_dir=...)` when a local file is needed | a usable image Artifact, preferably a verified local file |
+| Generate or edit images | low-token `create(type="image")` / `edit`; primary `gemini_generate_media(..., output_dir=...)` for a chosen destination | a decoded local image Artifact; an empty reply or a search image is insufficient |
 | Generate music | low-token `create(type="music")` or primary media tools | use a verified audio/video Artifact; do not infer the exact Lyria version from a model alias |
 | Generate video | Gemini Web's dedicated [Videos page](https://gemini.google.com/videos) in an authorized browser | use the finished video file; the current generic MCP video path returned no Artifact in the 2026-09-26 live check |
 | History, Notebook, Scheduled, Gem, Prompt, usage, or cleanup | compact account facades where supported; otherwise a narrow primary profile | only the explicitly requested account operation is performed |
@@ -111,6 +111,21 @@ Generation normally returns an Artifact. The agent should pass that file or URI 
 - read and cite the research report.
 
 A path, URI, or success sentence alone is not completion. Load [artifacts.md](references/artifacts.md) for acceptance and handoff rules.
+
+Creation tools select Gemini Web's native image/music feature mode. Primary and
+compact generation save and verify outputs; compact uses `generated_media/` in
+the server's working directory. The Web backend still chooses the effective
+media model. This route needs live verification after upstream changes.
+
+For a newly created source chat, finished operations with verified local outputs
+and definitive empty responses use immediate, bounded cleanup by default. Inspect
+`domain_result.meta.details.cleanup`: only `completed`/`already_completed` with
+positive absence read-back confirms removal. `pending`, `failed`, or `cancelled`
+requires follow-up. Failed recovery reads, remote-only, queued, timed-out, and partially saved results
+keep their source chat for recovery. Primary callers can explicitly choose
+`retain_chat=true` or `delete_after_seconds`; delayed jobs remain in memory.
+Preserve the local file before deleting a disposable test's source chat. Use
+its recorded ID, with the user's authorization, instead of broad account scans.
 
 ## Long Operations
 

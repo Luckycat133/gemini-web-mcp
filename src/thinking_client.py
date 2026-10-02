@@ -1,11 +1,11 @@
-"""Gemini Web thinking-level transport compatibility."""
+"""Gemini Web request-scoped selectors and timeout compatibility."""
 
 from __future__ import annotations
 
 import asyncio
 from contextlib import contextmanager
 from contextvars import ContextVar
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any, AsyncGenerator, Iterator
 
 import orjson
@@ -19,6 +19,11 @@ from .constants import (
     resolve_thinking_mode_id,
     supported_learning_modes,
 )
+from .infrastructure.web_request_contracts import (
+    MEDIA_FEATURE_MODE_INDEX,
+    NativeMediaRequestShapeError,
+    native_media_mode_id,
+)
 
 
 @dataclass(frozen=True)
@@ -30,6 +35,7 @@ class WebRequestOptions:
     learning_mode_id: int | None = None
     learning_x9b_field: str | None = None
     learning_x9b_value: int | None = None
+    media_mode_id: int | None = None
 
 
 _web_request: ContextVar[WebRequestOptions | None] = ContextVar(
@@ -99,21 +105,53 @@ def inject_web_request_options(
     """Add Web UI-only fields to a StreamGenerate request."""
     f_req = request_data.get("f.req")
     if not isinstance(f_req, str):
+        if options.media_mode_id is not None:
+            raise NativeMediaRequestShapeError("Native media request is missing its serialized f.req payload.")
         return request_data
 
-    outer_request = orjson.loads(f_req)
+    try:
+        outer_request = orjson.loads(f_req)
+    except orjson.JSONDecodeError as error:
+        if options.media_mode_id is not None:
+            raise NativeMediaRequestShapeError("Native media request envelope is not valid JSON.") from error
+        raise
     if not isinstance(outer_request, list) or len(outer_request) < 2:
+        if options.media_mode_id is not None:
+            raise NativeMediaRequestShapeError("Native media request envelope shape changed.")
         return request_data
 
     inner_payload = outer_request[1]
     if not isinstance(inner_payload, str):
+        if options.media_mode_id is not None:
+            raise NativeMediaRequestShapeError("Native media request payload shape changed.")
         return request_data
 
-    inner_request = orjson.loads(inner_payload)
+    try:
+        inner_request = orjson.loads(inner_payload)
+    except orjson.JSONDecodeError as error:
+        if options.media_mode_id is not None:
+            raise NativeMediaRequestShapeError("Native media request payload is not valid JSON.") from error
+        raise
     if not isinstance(inner_request, list):
+        if options.media_mode_id is not None:
+            raise NativeMediaRequestShapeError("Native media request payload shape changed.")
         return request_data
 
-    required_length = 81
+    if options.media_mode_id is not None:
+        if (
+            len(inner_request) <= MEDIA_FEATURE_MODE_INDEX
+            or not isinstance(inner_request[0], list)
+            or not inner_request[0]
+            or not isinstance(inner_request[0][0], str)
+        ):
+            raise NativeMediaRequestShapeError("Native media StreamGenerate request shape changed.")
+        if inner_request[MEDIA_FEATURE_MODE_INDEX] not in (None, options.media_mode_id):
+            raise NativeMediaRequestShapeError("Native media request conflicts with an existing feature selector.")
+        inner_request[MEDIA_FEATURE_MODE_INDEX] = options.media_mode_id
+
+    required_length = 81 if options.media_mode_id is None else len(inner_request)
+    if options.thinking_mode_id and options.thinking_level_id:
+        required_length = max(required_length, 81)
     if options.learning_mode_id:
         required_length = max(required_length, 56)
     if len(inner_request) < required_length:
@@ -139,7 +177,7 @@ def inject_web_request_options(
 
 
 class ThinkingLevelGeminiClient(GeminiClient):
-    """Gemini client that carries the current Web UI thinking-level selector."""
+    """Gemini client with scoped thinking, learning, and native media selectors."""
 
     @property
     def timeout(self) -> float:
@@ -199,10 +237,16 @@ class ThinkingLevelGeminiClient(GeminiClient):
         model: Any = None,
         thinking_level: str | None = None,
         learning_mode: str | None = None,
+        media_mode: str | None = None,
         **kwargs: Any,
     ) -> ModelOutput:
-        token = self._set_web_request(model, thinking_level, learning_mode)
+        token = self._set_web_request(model, thinking_level, learning_mode, media_mode)
         try:
+            request = _web_request.get()
+            if request and request.media_mode_id is not None:
+                # gemini-webapi's running decorator consumes this before its
+                # HTTP kwargs. A parse/API failure must not duplicate creation.
+                kwargs["current_retry"] = 0
             args, kwargs = self._with_learning_prompt(args, kwargs, learning_mode)
             if model is None:
                 return await super().generate_content(*args, **kwargs)
@@ -216,10 +260,14 @@ class ThinkingLevelGeminiClient(GeminiClient):
         model: Any = None,
         thinking_level: str | None = None,
         learning_mode: str | None = None,
+        media_mode: str | None = None,
         **kwargs: Any,
     ) -> AsyncGenerator[ModelOutput, None]:
-        token = self._set_web_request(model, thinking_level, learning_mode)
+        token = self._set_web_request(model, thinking_level, learning_mode, media_mode)
         try:
+            request = _web_request.get()
+            if request and request.media_mode_id is not None:
+                kwargs["current_retry"] = 0
             args, kwargs = self._with_learning_prompt(args, kwargs, learning_mode)
             if model is None:
                 stream = super().generate_content_stream(*args, **kwargs)
@@ -235,9 +283,11 @@ class ThinkingLevelGeminiClient(GeminiClient):
         model: Any,
         thinking_level: str | None,
         learning_mode: str | None,
+        media_mode: str | None = None,
     ):
-        if thinking_level is None and learning_mode is None and _web_request.get():
-            return _web_request.set(_web_request.get())
+        existing = _web_request.get()
+        if thinking_level is None and learning_mode is None and media_mode is None and existing:
+            return _web_request.set(existing)
 
         level_id = resolve_thinking_level_id(thinking_level)
         if thinking_level is not None and level_id is None:
@@ -261,10 +311,19 @@ class ThinkingLevelGeminiClient(GeminiClient):
                 int(learning_config["x9b_value"]) if learning_config is not None else None  # type: ignore[call-overload]
             ),
         )
+        if thinking_level is None and learning_mode is None and media_mode is not None and existing:
+            options = existing
+        options = replace(options, media_mode_id=(
+            native_media_mode_id(media_mode) if media_mode is not None
+            else (existing.media_mode_id if existing else None)
+        ))
+        if options.media_mode_id is not None and options.learning_mode_id is not None:
+            raise ValueError("media_mode cannot be combined with learning_mode.")
         if not any(
             (
                 options.thinking_mode_id and options.thinking_level_id,
                 options.learning_mode_id,
+                options.media_mode_id,
             )
         ):
             return _web_request.set(None)
@@ -274,6 +333,15 @@ class ThinkingLevelGeminiClient(GeminiClient):
     def thinking_scope(self, model: Any, thinking_level: str) -> Iterator[None]:
         """Keep a thinking level active through upstream helper workflows."""
         token = self._set_web_request(model, thinking_level, None)
+        try:
+            yield
+        finally:
+            _web_request.reset(token)
+
+    @contextmanager
+    def media_scope(self, mode: str) -> Iterator[None]:
+        """Keep an observed native media selector local to one workflow."""
+        token = self._set_web_request(None, None, None, mode)
         try:
             yield
         finally:
@@ -318,11 +386,18 @@ class ThinkingLevelGeminiClient(GeminiClient):
         def stream_with_thinking(method: str, url: str, *args: Any, **kwargs: Any):
             request = _web_request.get()
             data = kwargs.get("data")
-            if request and url == Endpoint.GENERATE and isinstance(data, dict):
+            if request and url == Endpoint.GENERATE:
+                if request.media_mode_id is not None and "current_retry" in kwargs:
+                    raise NativeMediaRequestShapeError("Upstream native media retry control was not consumed.")
+                if not isinstance(data, dict):
+                    if request.media_mode_id is not None:
+                        raise NativeMediaRequestShapeError("Native media StreamGenerate form data shape changed.")
+                    return stream(method, url, *args, **kwargs)
                 kwargs["data"] = inject_web_request_options(data, request)
-                headers = dict(kwargs.get("headers") or {})
-                headers["x-goog-ext-73010990-jspb"] = "[0,0,0]"
-                kwargs["headers"] = headers
+                if request.thinking_mode_id and request.thinking_level_id or request.learning_mode_id:
+                    headers = dict(kwargs.get("headers") or {})
+                    headers["x-goog-ext-73010990-jspb"] = "[0,0,0]"
+                    kwargs["headers"] = headers
             return stream(method, url, *args, **kwargs)
 
         session.stream = stream_with_thinking

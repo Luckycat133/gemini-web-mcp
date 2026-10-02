@@ -158,6 +158,8 @@ Use `model` as the primary starting profile for text-only work, `core` for multi
 | Safety Metadata | MCP annotations, tool manifest, privacy/destructive-operation guidance |
 | Distribution | Standalone Codex skill zip, wheel, source distribution, launch kit |
 
+Image/edit and music calls select the native Web feature and save locally by default. A finished operation with verified outputs, or a definitive empty response, triggers bounded cleanup of its newly created source chat. Queued or failed recovery stays recoverable; primary callers can retain the chat or request a delay. The new selector path still requires signed-in acceptance. See [native media and cleanup](docs/native-media-mode.md).
+
 ## Development Status
 
 The maintained baseline is usable, but the development skill is not a completed feature checklist. Primary and compact

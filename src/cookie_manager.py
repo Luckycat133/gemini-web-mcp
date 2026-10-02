@@ -309,6 +309,13 @@ class CookieManager:
                     "error_code": "BROWSER_COOKIE_ACCESS_TIMEOUT",
                 }
             ]
+        except PermissionError:
+            return [{
+                "browser": browser,
+                "error": "Browser data access was denied by the operating system. "
+                         "Allow the MCP host to read browser data in system privacy settings.",
+                "error_code": "BROWSER_COOKIE_ACCESS_DENIED",
+            }]
         except Exception as e:
             return [{"browser": browser, "error": str(e)}]
 
@@ -368,7 +375,25 @@ class CookieManager:
         base = CookieManager._chrome_base_path()
         if base is None:
             return []
-        paths = [base / "Default/Cookies", *sorted(base.glob("Profile */Cookies"))]
+        # Path.glob/exists suppress some OS permission failures. Enumerate the
+        # root explicitly so denied access is not reported as an empty account.
+        try:
+            directories = sorted(
+                (entry for entry in base.iterdir()
+                 if (entry.name == "Default" or entry.name.startswith("Profile ")) and entry.is_dir()),
+                key=lambda entry: (entry.name != "Default", entry.name),
+            )
+        except FileNotFoundError:
+            directories = []
+        paths: list[tuple[str, Path]] = []
+        for directory in directories:
+            for path in (directory / "Network/Cookies", directory / "Cookies"):
+                try:
+                    path.stat()
+                except FileNotFoundError:
+                    continue
+                paths.append((directory.name, path))
+                break
         candidates: list[tuple[str, Dict[str, str]]] = []
         try:
             cookies = CookieManager._read_cookie_jar(cookie_function(domain_name="google.com"), cookie_names)
@@ -377,19 +402,17 @@ class CookieManager:
         except Exception as e:
             logger.debug("跳过 Chrome auto cookie: %s", e)
 
-        for path in paths:
-            if not path.exists():
-                continue
+        for profile_name, path in paths:
             try:
                 cookies = CookieManager._read_cookie_jar(
                     browser_cookie3.chrome(cookie_file=str(path), domain_name="google.com"),
                     cookie_names,
                 )
             except Exception as e:
-                logger.debug("跳过 Chrome profile cookie %s: %s", path.parent.name, e)
+                logger.debug("跳过 Chrome profile cookie %s: %s", profile_name, e)
                 continue
             if cookies.get("__Secure-1PSID") or not require_psid:
-                candidates.append((path.parent.name, cookies))
+                candidates.append((profile_name, cookies))
 
         if not candidates:
             return []

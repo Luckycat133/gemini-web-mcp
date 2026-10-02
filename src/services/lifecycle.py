@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import inspect
 from collections.abc import Awaitable, Callable
@@ -31,6 +32,8 @@ from ..session_manager import (
 )
 
 logger = logging.getLogger(__name__)
+
+_GENERATED_CHAT_CLEANUP_WAIT_SECONDS = 10.0
 
 DeleteCallback = Callable[[str], Awaitable[bool | CleanupObservation]]
 
@@ -342,6 +345,70 @@ class ConversationLifecycleService:
             source=source,
         )
 
+    async def finalize_generated_chat(
+        self,
+        response: Any,
+        *,
+        owns_chat: bool,
+        retain_chat: bool = False,
+        preserve_for_recovery: bool = False,
+        delete_after_seconds: int | None = None,
+        source: str = "",
+        client: Any = None,
+        client_initializer: Callable[[], Any] | None = None,
+        authentication_generation: int | None = None,
+    ) -> CleanupObservation:
+        """Finalize only a chat created by this request without an existing chat.
+
+        Callers establish ownership from the generation request and retain any
+        chat containing queued or unsaved artifacts. Ready local artifacts and
+        definitive empty/failed responses can be cleaned before returning.
+        The caller's wait is bounded; a timeout remains pending with a safe
+        diagnostic while the manager owns the shared deletion/read-back work.
+        """
+        cid = extract_remote_chat_id(response)
+        if cid is None:
+            return CleanupObservation(source=source)
+        if not is_valid_remote_chat_id(cid):
+            return CleanupObservation(state=CleanupState.INVALID_ID, source=source)
+        if not owns_chat:
+            return CleanupObservation(state=CleanupState.RETAINED, upstream_chat_id=cid, source=source)
+        if retain_chat or preserve_for_recovery:
+            return self.schedule_cleanup(
+                cid,
+                retain_chat=True,
+                source=source,
+                authentication_generation=authentication_generation,
+            )
+        if delete_after_seconds is not None and delete_after_seconds > 0:
+            return self.schedule_cleanup(
+                cid,
+                delete_after_seconds=delete_after_seconds,
+                source=source,
+                authentication_generation=authentication_generation,
+            )
+        cleanup = self._cleanup()
+        generation = authentication_generation
+        if isinstance(cleanup, RemoteChatCleanupManager) and generation is None:
+            generation = cleanup.authentication_generation()
+        try:
+            async with asyncio.timeout(_GENERATED_CHAT_CLEANUP_WAIT_SECONDS):
+                return await self.delete_chat_result(
+                    cid,
+                    client=client,
+                    client_initializer=client_initializer,
+                    authentication_generation=generation,
+                    source=source,
+                )
+        except asyncio.TimeoutError:
+            if isinstance(cleanup, RemoteChatCleanupManager):
+                return cleanup.record_cleanup_wait_timeout(cid, source=source, authentication_generation=generation)
+            diagnostic_id = new_diagnostic_id()
+            logger.warning("Generated chat cleanup wait timed out cid=%s diagnostic_id=%s", cid, diagnostic_id)
+            return CleanupObservation(
+                state=CleanupState.FAILED, upstream_chat_id=cid, diagnostic_id=diagnostic_id, source=source,
+            )
+
     async def delete_chat_result(
         self,
         cid: str | None,
@@ -349,11 +416,12 @@ class ConversationLifecycleService:
         client: Any = None,
         client_initializer: Callable[[], Any] | None = None,
         authentication_generation: int | None = None,
+        source: str = "",
     ) -> CleanupObservation:
         if cid is None:
-            return CleanupObservation()
+            return CleanupObservation(source=source)
         if not is_valid_remote_chat_id(cid):
-            return CleanupObservation(state=CleanupState.INVALID_ID)
+            return CleanupObservation(state=CleanupState.INVALID_ID, source=source)
         cleanup = self._cleanup()
         if isinstance(cleanup, RemoteChatCleanupManager):
             return await cleanup.delete_chat_result(
@@ -361,6 +429,7 @@ class ConversationLifecycleService:
                 client=client,
                 client_initializer=client_initializer,
                 authentication_generation=authentication_generation,
+                source=source,
             )
         if client is None and client_initializer is not None:
             client = client_initializer()
@@ -371,6 +440,7 @@ class ConversationLifecycleService:
             state=CleanupState.COMPLETED if deleted else CleanupState.FAILED,
             upstream_chat_id=cid,
             attempts=1,
+            source=source,
         )
 
     async def cleanup_due_chats(

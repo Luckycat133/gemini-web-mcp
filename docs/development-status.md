@@ -43,6 +43,12 @@ The full review produced 26 product findings and two issues in the vendored eval
 
 These repairs are checked with offline regressions, real auth-free MCP protocol calls, and installed-package checks. The dated live observations below remain separate; this repair pass does not establish a new signed-in Gemini baseline. Release publication still requires the release PR's review gate.
 
+## Native Media and Cleanup Repair (2026-10-02)
+
+Primary and compact creation now share media request construction, recovery, saving and verification. Image/edit and music requests select the native Web feature observed in current public frontend source, with strict payload-shape rejection and request-local transport options. Compact creation/editing saves local artifacts by default; search images cannot satisfy generation. New source chats are cleaned after a finished operation's outputs are saved and verified, or definitive empty output, with bounded positive read-back. Unsaved/queued/partial results and failed recovery reads retain recovery; explicit retention/delay is preserved. See [native media mode and evidence](native-media-mode.md).
+
+Chrome UI recheck showed 3.5 Flash-Lite, 3.8 Flash and 3.1 Pro, plus the selected Create image feature and Create video entry. The new MCP generation and cleanup live acceptance is **NOT_RUN**: macOS denied Chrome data access, and later browser control encountered the locked Mac. This is distinct from an expired Cookie or upstream generation failure. The browser helper returns `BROWSER_COOKIE_ACCESS_DENIED` with a system-privacy remedy. No fresh generation or account cleanup is claimed from the static source or offline tests.
+
 ## Targeted Live Evidence (2026-09-26)
 
 An authorized signed-in Chrome session showed 3.5 Flash-Lite, 3.8 Flash, and 3.1 Pro. MCP calls saved verified images and an edited image, then MP3 and MP4 music files. A later music request showed a Gemini technical error and no artifact, so music is not proven consistently available. The generic MCP video request returned text without a video artifact; Gemini Web's dedicated Omni Videos page produced a downloadable MP4. These observations are not the dedicated-account full canary. Exact image/music backend versions were not exposed by the MCP responses. See [live UI coverage](live-ui-coverage.md) and [model routing](models.md).

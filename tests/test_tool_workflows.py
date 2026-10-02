@@ -6,6 +6,7 @@ from types import SimpleNamespace
 
 from src.adapters.mcp_sdk import MCPServer
 from src.services import history as history_service
+from tests.media_fixtures import fake_finalize_generated_cleanup
 
 
 def _tool_text(result):
@@ -1038,7 +1039,7 @@ def test_skill_server_uses_v2_file_attachment_contract(monkeypatch, tmp_path):
         metadata = []
 
     class FakeClient:
-        async def generate_content(self, prompt, files=None, model=None, thinking_level=None, timeout=None):
+        async def generate_content(self, prompt, files=None, model=None, thinking_level=None, timeout=None, media_mode=None):
             assert timeout == 180
             calls.append((prompt, files, model))
             return FakeResponse()
@@ -1049,14 +1050,14 @@ def test_skill_server_uses_v2_file_attachment_contract(monkeypatch, tmp_path):
     async def noop_cleanup(client=None):
         return 0
 
-    def fake_schedule(response, **kwargs):
+    async def fake_schedule(response, **kwargs):
         scheduled.append(kwargs.get("source"))
-        return "c_skill_edit"
+        return await fake_finalize_generated_cleanup(response, **kwargs)
 
     monkeypatch.setattr(skill_server, "get_gemini_client", lambda: FakeClient())
     monkeypatch.setattr(skill_server, "initialize_client", noop_initialize)
     monkeypatch.setattr(skill_server, "cleanup_due_remote_chats", noop_cleanup)
-    monkeypatch.setattr(skill_server, "schedule_remote_chat_cleanup_from_response", fake_schedule)
+    monkeypatch.setattr(skill_server, "finalize_generated_chat_cleanup", fake_schedule)
     monkeypatch.setattr(
         skill_server,
         "_doctor_payload",
@@ -1147,6 +1148,7 @@ def test_skill_server_chat_schedules_remote_cleanup(monkeypatch):
 
 def test_skill_server_create_routes_current_media_backends(monkeypatch):
     import src.skill_server as skill_server
+    from src.infrastructure.rpc_contracts import get_contract
 
     calls = []
 
@@ -1154,18 +1156,26 @@ def test_skill_server_create_routes_current_media_backends(monkeypatch):
         text = "ok"
         images = []
         videos = []
+        metadata = ["c_offline_fixture"]
 
     class FakeClient:
-        async def generate_content(self, prompt, files=None, model=None, thinking_level=None, timeout=None):
-            assert timeout == (180 if prompt.startswith("Generate image") else 600)
+        async def generate_content(self, prompt, files=None, model=None, thinking_level=None, timeout=None, media_mode=None):
+            assert timeout == (180 if prompt.startswith("Generate an image") else 600)
             calls.append((prompt, files, model, thinking_level))
             return FakeResponse()
+
+        async def _batch_execute(self, requests, **kwargs):
+            assert requests[0].rpcid == get_contract("media.music_chat").rpc_id
+            return SimpleNamespace(status_code=200, text=json.dumps([
+                ["wrb.fr", requests[0].rpcid, json.dumps([[]])],
+            ]))
 
     async def noop_initialize():
         return None
 
     monkeypatch.setattr(skill_server, "get_gemini_client", lambda: FakeClient())
     monkeypatch.setattr(skill_server, "initialize_client", noop_initialize)
+    monkeypatch.setattr(skill_server, "finalize_generated_chat_cleanup", fake_finalize_generated_cleanup)
 
     async def run():
         image_result = await skill_server.create(
@@ -1185,8 +1195,8 @@ def test_skill_server_create_routes_current_media_backends(monkeypatch):
     asyncio.run(run())
 
     assert calls == [
-        ("Generate image: studio portrait", None, "gemini-3-flash", "standard"),
-        ("Create music: cinematic trailer", None, "gemini-3-pro", "extended"),
+        ("Generate an image. Prompt: studio portrait", None, "gemini-3-flash", "standard"),
+        ("Create music/audio using Gemini's music generation capability. Prompt: cinematic trailer", None, "gemini-3-pro", "extended"),
     ]
 
 
@@ -2718,7 +2728,7 @@ def test_media_tool_returns_clear_upstream_failure(monkeypatch):
     import src.tools.media as media_tools
 
     class FakeClient:
-        async def generate_content(self, prompt, files=None, model=None, thinking_level=None, timeout=None):
+        async def generate_content(self, prompt, files=None, model=None, thinking_level=None, timeout=None, media_mode=None):
             raise RuntimeError("The original request may have been silently aborted by Google.")
 
     async def noop_initialize():
@@ -2748,16 +2758,24 @@ def test_media_tool_returns_clear_upstream_failure(monkeypatch):
 
 def test_media_tool_reports_empty_media_response(monkeypatch):
     import src.tools.media as media_tools
+    from src.infrastructure.rpc_contracts import get_contract
 
     class FakeClient:
-        async def generate_content(self, prompt, files=None, model=None, thinking_level=None, timeout=None):
-            return SimpleNamespace(text="", images=[], videos=[], media=[])
+        async def generate_content(self, prompt, files=None, model=None, thinking_level=None, timeout=None, media_mode=None):
+            return SimpleNamespace(text="", images=[], videos=[], media=[], metadata=["c_offline_empty"])
+
+        async def _batch_execute(self, requests, **kwargs):
+            assert requests[0].rpcid == get_contract("media.music_chat").rpc_id
+            return SimpleNamespace(status_code=200, text=json.dumps([
+                ["wrb.fr", requests[0].rpcid, json.dumps([[]])],
+            ]))
 
     async def noop_initialize():
         return None
 
     monkeypatch.setattr(media_tools, "get_gemini_client", lambda: FakeClient())
     monkeypatch.setattr(media_tools, "initialize_client", noop_initialize)
+    monkeypatch.setattr(media_tools, "finalize_generated_chat_cleanup", fake_finalize_generated_cleanup)
 
     async def run():
         mcp = MCPServer("test")
@@ -2795,7 +2813,7 @@ def test_media_tool_saves_generated_music_files(monkeypatch, tmp_path):
             return {"audio": str(output)}
 
     class FakeClient:
-        async def generate_content(self, prompt, files=None, model=None, thinking_level=None, timeout=None):
+        async def generate_content(self, prompt, files=None, model=None, thinking_level=None, timeout=None, media_mode=None):
             return SimpleNamespace(text="done", images=[], videos=[], media=[FakeMedia()])
 
     async def noop_initialize():
@@ -2807,7 +2825,7 @@ def test_media_tool_saves_generated_music_files(monkeypatch, tmp_path):
     monkeypatch.setattr(media_tools, "get_gemini_client", lambda: FakeClient())
     monkeypatch.setattr(media_tools, "initialize_client", noop_initialize)
     monkeypatch.setattr(media_tools, "cleanup_due_remote_chats", noop_cleanup)
-    monkeypatch.setattr(media_tools, "schedule_remote_chat_cleanup_from_response", lambda *args, **kwargs: None)
+    monkeypatch.setattr(media_tools, "finalize_generated_chat_cleanup", fake_finalize_generated_cleanup)
 
     async def run():
         mcp = MCPServer("test")
@@ -2858,6 +2876,7 @@ def test_media_tool_recovers_music_urls_from_raw_chat_card():
     raw = [["wrb.fr", rpc_id, orjson.dumps(body).decode("utf-8")]]
 
     class FakeResponse:
+        status_code = 200
         text = orjson.dumps(raw).decode("utf-8")
 
     class FakeClient:
@@ -2885,7 +2904,7 @@ def test_media_tool_routes_music_and_image_to_current_web_backends(monkeypatch):
     calls = []
 
     class FakeClient:
-        async def generate_content(self, prompt, files=None, model=None, thinking_level=None, timeout=None):
+        async def generate_content(self, prompt, files=None, model=None, thinking_level=None, timeout=None, media_mode=None):
             calls.append((prompt, model, thinking_level))
             return SimpleNamespace(text="ok", images=[], videos=[], media=[])
 
@@ -2898,7 +2917,7 @@ def test_media_tool_routes_music_and_image_to_current_web_backends(monkeypatch):
     monkeypatch.setattr(media_tools, "get_gemini_client", lambda: FakeClient())
     monkeypatch.setattr(media_tools, "initialize_client", noop_initialize)
     monkeypatch.setattr(media_tools, "cleanup_due_remote_chats", noop_cleanup)
-    monkeypatch.setattr(media_tools, "schedule_remote_chat_cleanup_from_response", lambda *args, **kwargs: None)
+    monkeypatch.setattr(media_tools, "finalize_generated_chat_cleanup", fake_finalize_generated_cleanup)
 
     async def run():
         mcp = MCPServer("test")

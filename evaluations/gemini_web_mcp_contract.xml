@@ -119,4 +119,20 @@
     <question>Can a content search with failed chat reads be treated as complete evidence that no matches exist? Answer yes or no.</question>
     <answer>no</answer>
   </qa_pair>
+  <qa_pair>
+    <question>Inspect the media creation workflow. Can chat text or a search WebImage alone satisfy an image-generation request? Answer yes or no.</question>
+    <answer>no</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>Which manifest workflow explains native media selection, local verification, source-chat recovery retention, and cleanup? Answer with the workflow name only.</question>
+    <answer>media_creation_and_cleanup</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>Inspect the media creation workflow. Which cleanup observation states establish verified absence of the newly created source chat? Answer with the two states.</question>
+    <answer>completed and already_completed</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>Inspect the media creation workflow. Should an unsaved remote-only result or a queued request, including one with ready local output, retain its source chat for recovery? Answer yes or no.</question>
+    <answer>yes</answer>
+  </qa_pair>
 </evaluation>

@@ -49,6 +49,18 @@ def test_registered_parser_fixture_status(parser_name: str, case_name: str):
     assert result.status == case_name
 
 
+@pytest.mark.parametrize("url", [None, "", "  ", 123, False, [], {}])
+def test_observed_music_card_with_invalid_url_is_changed_shape(url):
+    body = json.loads(json.dumps(PARSER_FIXTURES["music_chat"]["cases"]["success"]["body"]))
+    body[0][0][3][0][0][12][0]["87"][0][1][7][1] = url
+    assert parse_contract_body("media.music_chat", body).status == "changed_shape"
+
+
+def test_music_empty_chat_and_non_media_turn_remain_verified_empty():
+    assert parse_contract_body("media.music_chat", [[]]).status == "empty"
+    assert parse_contract_body("media.music_chat", [[[None, None, None, [[["rc_1"]]]]]]).status == "empty"
+
+
 @pytest.mark.parametrize(
     ("contract_key", "body"),
     [

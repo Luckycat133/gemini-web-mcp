@@ -35,7 +35,7 @@ The tools attach `domain_result` to the first content block's `_meta`; MCP clien
 
 - `local` — a local file is available.
 - `remote` — an upstream URI was observed; access has not necessarily been independently verified, and it is not a local file.
-- `queued` — generation has started; no completed Artifact exists yet.
+- `queued` — generation has started; this Artifact is not ready. A queued operation may also expose a separate verified local Artifact.
 - `partial` is an operation state when some locations failed verification; it is not an Artifact state. Check the result's warnings and individual Artifact states.
 - `empty` — no usable Artifact was observed.
 - `failed` — the operation failed.
@@ -61,6 +61,14 @@ For generated images, inspect actual file bytes rather than trusting a requested
 suffix. The primary media saver now aligns a mismatched image extension with
 the detected format (for example, JPEG bytes requested as `.png` become `.jpg`).
 Music audio and cover-video files use separate destination paths, including when a filename already has `.mp3` or `.mp4`.
+
+Primary and compact creation share save/verification. Compact uses
+`generated_media/`; primary supports an explicit destination. A real upstream
+search-reference `WebImage` is not a generated image and cannot satisfy a
+creation request. Keep failed saves, failed recovery reads, queued work, and remote-only locators for
+recovery. Once the operation has finished and all relevant outputs are verified locally, the newly created
+source chat is eligible for default cleanup; inspect its structured cleanup
+observation separately from artifact success.
 
 ## Resource Links
 

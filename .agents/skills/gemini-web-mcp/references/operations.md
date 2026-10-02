@@ -18,4 +18,11 @@ Preserve every observed upstream identifier and Artifact identity. `timed_out` d
 
 Media deadlines include generation, recovery reads, verification, and save. Research polling/report retrieval consumes the remaining phase budget. Changed chat text, progress notices, and quota refusals do not establish report completion: inspect completed-state/report evidence and preserve failed, cancelled, or unavailable results. A completion notice without retrievable report content still requires recovery.
 
+Music selects the native Web feature and primary/compact creation saves locally.
+Finished operations with verified local outputs and definitive empty generation responses trigger bounded
+source-chat cleanup; queued, unsaved, partially saved or interrupted results keep
+their source locator. Inspect `domain_result.meta.details.cleanup` independently
+from media completion. Pending cleanup is not verified deletion; explicit
+retention/delay is available in primary tools and delays remain in-memory.
+
 The planned SQLite OperationService will add restart-safe `status`, `result`, and `cancel` by explicit operation ID. Those tools and durable handles are not available in the current release.

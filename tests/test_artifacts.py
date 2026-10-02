@@ -13,7 +13,7 @@ from src.adapters.mcp_sdk import MCPServer
 import src.skill_server as skill_server
 import src.tools.media as media_tools
 import src.services.artifacts as artifact_service
-from tests.media_fixtures import write_audio, write_image, write_video
+from tests.media_fixtures import fake_finalize_generated_cleanup, write_audio, write_image, write_video
 from src.adapters import format_artifact_block
 from src.domain import (
     ArtifactKind,
@@ -270,8 +270,8 @@ def test_primary_and_compact_media_adapters_return_same_artifact_identity(monkey
     monkeypatch.setattr(media_tools, "cleanup_due_remote_chats", _no_op_async)
     monkeypatch.setattr(
         media_tools,
-        "schedule_remote_chat_cleanup_from_response",
-        lambda *_args, **_kwargs: None,
+        "finalize_generated_chat_cleanup",
+        fake_finalize_generated_cleanup,
     )
     primary_mcp = MCPServer("artifact-parity-primary")
     media_tools.register_media_tools(primary_mcp)
@@ -294,7 +294,7 @@ def test_primary_and_compact_media_adapters_return_same_artifact_identity(monkey
         "validate_optional_image_path",
         lambda _path: (True, None, None),
     )
-    monkeypatch.setattr(skill_server, "_schedule_skill_response_cleanup", lambda *_args: None)
+    monkeypatch.setattr(skill_server, "finalize_generated_chat_cleanup", fake_finalize_generated_cleanup)
     compact_content = asyncio.run(skill_server.create(prompt="shared", type="image", model="flash"))
 
     primary_data = _domain_payload(primary_content)["data"]
@@ -411,7 +411,7 @@ def test_primary_and_compact_do_not_complete_a_different_modality(monkeypatch, r
     monkeypatch.setattr(media_tools, "get_gemini_client", lambda: client)
     monkeypatch.setattr(media_tools, "initialize_client", _no_op_async)
     monkeypatch.setattr(media_tools, "cleanup_due_remote_chats", _no_op_async)
-    monkeypatch.setattr(media_tools, "schedule_remote_chat_cleanup_from_response", lambda *_a, **_k: None)
+    monkeypatch.setattr(media_tools, "finalize_generated_chat_cleanup", fake_finalize_generated_cleanup)
 
     async def no_recovered_music(*_args):
         return []
