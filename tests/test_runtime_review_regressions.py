@@ -41,37 +41,71 @@ def _cleanup_client(*, delete_side_effect=None):
     )
 
 
-def test_http_200_delete_rejection_is_not_completed_and_can_retry():
-    class Client:
-        # Exercise the installed upstream deletion method, which drops RPC bodies.
-        delete_chat = GeminiClient.delete_chat
+def test_http_200_delete_rejection_is_not_completed_and_can_retry(monkeypatch):
+    from src.services import history
+
+    shared_delete = history.delete_chat_result
+    results = []
+
+    async def observe_delete(client, chat_id):
+        result = await shared_delete(client, chat_id)
+        results.append(result)
+        return result
+
+    monkeypatch.setattr(history, "delete_chat_result", observe_delete)
+    delete_requests = [
+        ("GzXR5e", ["c_rejected"]),
+        ("qWymEb", ["c_rejected", [1, None, 0, 1]]),
+    ]
+
+    class Client(GeminiClient):
+        # Keep upstream state, account checks and deletion; replace only RPC I/O.
 
         def __init__(self):
-            self.delete_calls = 0
+            super().__init__()
+            self.delete_calls = []
+            self.history_filters = []
             self.rejected = True
 
         async def _batch_execute(self, calls, **_kwargs):
+            assert len(calls) == 1
             rpc_id = str(calls[0].rpcid)
+            payload = json.loads(calls[0].payload)
             if rpc_id == get_contract("history.page").rpc_id:
+                self.history_filters.append(payload[2])
                 rows = [["c_rejected", "Dummy", False]] if self.rejected else []
                 return _history_response(rows)
-            self.delete_calls += 1
+            self.delete_calls.append((rpc_id, payload))
+            response = (
+                ["wrb.fr", rpc_id, None, None, None, [7]]
+                if self.rejected
+                else ["wrb.fr", rpc_id, json.dumps([])]
+            )
             return SimpleNamespace(
                 status_code=200,
-                text=json.dumps([["wrb.fr", rpc_id, None, None, None, [7]]]),
+                text=json.dumps([response]),
             )
 
     async def run():
         manager, client = RemoteChatCleanupManager(), Client()
         failed = await manager.delete_chat_result("c_rejected", client=client)
         assert failed.state is CleanupState.FAILED
+        assert failed.attempts == 1
         assert failed.diagnostic_id
+        assert client.delete_calls == delete_requests
+        assert client.history_filters == [[False, None, True]]
+        assert results[0].meta.verification_status == "still_present"
+        assert results[0].data["deleted"] is False
         assert "c_rejected" in manager.list_pending_cleanup()
+        assert "c_rejected" not in manager._completed_cleanup
         client.rejected = False
         completed = await manager.delete_chat_result("c_rejected", client=client)
         assert completed.state is CleanupState.COMPLETED
         assert completed.attempts == 2
-        assert client.delete_calls == 4
+        assert client.delete_calls == delete_requests * 2
+        assert client.history_filters == [[False, None, True], [False, None, True], [True, None, True]]
+        assert results[1].meta.verification_status == "verified_absent"
+        assert results[1].data["deleted"] is True
         assert manager.list_pending_cleanup() == {}
 
     asyncio.run(run())
