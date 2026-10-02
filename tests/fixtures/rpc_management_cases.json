@@ -521,5 +521,50 @@
         }
       }
     }
+  },
+  "custom_gems": {
+    "contract_key": "gems.custom_registry",
+    "cases": {
+      "success": {
+        "body": [
+          null,
+          null,
+          [
+            [
+              "g_fixture",
+              [
+                "Writer",
+                "Drafts"
+              ],
+              [
+                "Write clearly"
+              ]
+            ]
+          ]
+        ]
+      },
+      "empty": {
+        "body": [
+          null,
+          null,
+          []
+        ]
+      },
+      "rejected": {
+        "body": [],
+        "reject_code": 7
+      },
+      "changed_shape": {
+        "body": [
+          null,
+          null,
+          [
+            {
+              "new_shape": true
+            }
+          ]
+        ]
+      }
+    }
   }
 }

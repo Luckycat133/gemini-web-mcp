@@ -1,0 +1,290 @@
+{
+  "format": 1,
+  "evidence": "offline expected routing and schema fixtures; no measured trigger accuracy or live calls",
+  "cases": [
+    {
+      "id": "create_image_zh",
+      "intent": "做一张温室主题海报并放入我的网页。",
+      "skill": "gemini-create",
+      "calls": [
+        {
+          "tool": "gemini_generate_image",
+          "arguments": {
+            "prompt": "A clean greenhouse poster"
+          }
+        }
+      ],
+      "handoff": "verified_local_file"
+    },
+    {
+      "id": "create_image_en",
+      "intent": "Generate a hero image for the landing page.",
+      "skill": "gemini-create",
+      "calls": [
+        {
+          "tool": "gemini_generate_image",
+          "arguments": {
+            "prompt": "Greenhouse hero image",
+            "output_dir": "/absolute/project/media"
+          }
+        }
+      ],
+      "handoff": "verified_local_file"
+    },
+    {
+      "id": "edit_local",
+      "intent": "Make the roof blue in this local picture.",
+      "skill": "gemini-create",
+      "calls": [
+        {
+          "tool": "gemini_edit_image",
+          "arguments": {
+            "prompt": "Make the roof blue",
+            "image_path": "/absolute/input.png"
+          }
+        }
+      ],
+      "handoff": "verified_local_file"
+    },
+    {
+      "id": "video",
+      "intent": "Create a five second camera flythrough video.",
+      "skill": "gemini-create",
+      "calls": [
+        {
+          "tool": "gemini_generate_video",
+          "arguments": {
+            "prompt": "Five second greenhouse flythrough",
+            "idempotency_key": "request_fixture_video"
+          }
+        }
+      ],
+      "handoff": "operation_then_verified_file"
+    },
+    {
+      "id": "music_zh",
+      "intent": "用Gemini生成一段爵士背景音乐。",
+      "skill": "gemini-create",
+      "calls": [
+        {
+          "tool": "gemini_generate_music",
+          "arguments": {
+            "prompt": "Instrumental jazz for a greenhouse tour",
+            "idempotency_key": "request_fixture_music"
+          }
+        }
+      ],
+      "handoff": "operation_then_verified_file"
+    },
+    {
+      "id": "music_timeout",
+      "intent": "这个音乐请求超时了，用返回的operation_id恢复，不要再生成。",
+      "skill": "gemini-create",
+      "calls": [
+        {
+          "tool": "gemini_get_operation_result",
+          "arguments": {
+            "operation_id": "op_returned_fixture"
+          }
+        }
+      ],
+      "handoff": "same_operation_only"
+    },
+    {
+      "id": "cancel_video",
+      "intent": "Cancel this started video request.",
+      "skill": "gemini-create",
+      "calls": [
+        {
+          "tool": "gemini_cancel_operation",
+          "arguments": {
+            "operation_id": "op_returned_fixture"
+          }
+        }
+      ],
+      "handoff": "best_effort_confirmation"
+    },
+    {
+      "id": "history_list_zh",
+      "intent": "列出我的Gemini会话标题。",
+      "skill": "gemini-account",
+      "calls": [
+        {
+          "tool": "gemini_history",
+          "arguments": {
+            "request": {
+              "action": "list",
+              "limit": 20
+            }
+          }
+        }
+      ],
+      "handoff": "observed_metadata"
+    },
+    {
+      "id": "history_delete",
+      "intent": "Delete the exact Gemini chat c_observed that I selected.",
+      "skill": "gemini-account",
+      "calls": [
+        {
+          "tool": "gemini_history",
+          "arguments": {
+            "request": {
+              "action": "delete",
+              "chat_id": "c_observed"
+            }
+          }
+        }
+      ],
+      "handoff": "verified_absent"
+    },
+    {
+      "id": "notebook_move",
+      "intent": "Move the selected chat into my observed Notebook.",
+      "skill": "gemini-account",
+      "calls": [
+        {
+          "tool": "gemini_notebooks",
+          "arguments": {
+            "request": {
+              "action": "move",
+              "chat_id": "c_observed",
+              "notebook_id": "notebook_observed"
+            }
+          }
+        }
+      ],
+      "handoff": "read_back_verified"
+    },
+    {
+      "id": "scheduled",
+      "intent": "Create a daily Gemini briefing at nine in Shanghai.",
+      "skill": "gemini-account",
+      "calls": [
+        {
+          "tool": "gemini_scheduled",
+          "arguments": {
+            "request": {
+              "action": "create_daily",
+              "title": "Briefing",
+              "instructions": "Engineering news briefing",
+              "hour": 9,
+              "timezone_name": "Asia/Shanghai"
+            }
+          }
+        }
+      ],
+      "handoff": "read_back_verified"
+    },
+    {
+      "id": "gem_update",
+      "intent": "Update the selected Gem description only.",
+      "skill": "gemini-account",
+      "calls": [
+        {
+          "tool": "gemini_gems",
+          "arguments": {
+            "request": {
+              "action": "update",
+              "gem_id": "gem_observed",
+              "description": "Engineering critique"
+            }
+          }
+        }
+      ],
+      "handoff": "preserve_omitted_fields"
+    },
+    {
+      "id": "prompt_template",
+      "intent": "Save this local review prompt template.",
+      "skill": "gemini-account",
+      "calls": [
+        {
+          "tool": "gemini_prompts",
+          "arguments": {
+            "request": {
+              "action": "create",
+              "name": "Review",
+              "content": "Review {code}"
+            }
+          }
+        }
+      ],
+      "handoff": "local_no_gemini_call"
+    },
+    {
+      "id": "cleanup_job",
+      "intent": "Retry this registered pending cleanup job.",
+      "skill": "gemini-account",
+      "calls": [
+        {
+          "tool": "gemini_cleanup",
+          "arguments": {
+            "request": {
+              "action": "run",
+              "job_id": "cleanup_observed"
+            }
+          }
+        }
+      ],
+      "handoff": "verified_absent_or_pending"
+    },
+    {
+      "id": "negative_understand",
+      "intent": "What is wrong in this screenshot?",
+      "skill": "gemini-assist",
+      "calls": [
+        {
+          "tool": "gemini_understand_image",
+          "arguments": {
+            "image": "/absolute/input.png",
+            "task": "Explain the error"
+          }
+        }
+      ],
+      "handoff": "analysis_not_generation"
+    },
+    {
+      "id": "negative_text_prompt",
+      "intent": "Write a prompt for a music generator; do not generate audio.",
+      "skill": "gemini-assist",
+      "calls": [
+        {
+          "tool": "gemini_ask",
+          "arguments": {
+            "prompt": "Write a concise instrumental music prompt"
+          }
+        }
+      ],
+      "handoff": "text_only"
+    },
+    {
+      "id": "negative_search",
+      "intent": "Find current web sources about greenhouses.",
+      "skill": "gemini-assist",
+      "calls": [
+        {
+          "tool": "gemini_search",
+          "arguments": {
+            "query": "Current greenhouse research"
+          }
+        }
+      ],
+      "handoff": "grounded_sources"
+    },
+    {
+      "id": "negative_local_cleanup",
+      "intent": "Delete the generated local files in this project, not Gemini account chats.",
+      "skill": null,
+      "calls": [],
+      "handoff": "local_filesystem"
+    },
+    {
+      "id": "negative_repo",
+      "intent": "Implement the music generation MCP tool and update its Skill.",
+      "skill": "gemini-web-mcp-development",
+      "calls": [],
+      "handoff": "repository_development"
+    }
+  ]
+}

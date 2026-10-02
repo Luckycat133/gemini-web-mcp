@@ -1,0 +1,4 @@
+interface:
+  display_name: "Gemini Create"
+  short_description: "Create and recover Gemini media artifacts"
+  default_prompt: "Use $gemini-create to create verified media and recover the same operation without resubmitting."

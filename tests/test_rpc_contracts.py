@@ -86,6 +86,8 @@ def test_registry_owns_probe_payloads_and_evidence():
 
 
 def test_parameterized_payload_builders_preserve_observed_shapes():
+    assert json.loads(get_contract("gems.system_registry").build_payload(locale="en")) == [3, ["en"], 0]
+    assert json.loads(get_contract("gems.custom_registry").build_payload(locale="en")) == [2, ["en"], 0]
     assert json.loads(get_contract("media.music_chat").build_payload(chat_id="c_1")) == [
         "c_1", 10, None, 1, [1], [4], None, 1,
     ]
@@ -109,6 +111,12 @@ def test_parameterized_payload_builders_preserve_observed_shapes():
     ]
     assert json.loads(get_contract("scheduled.get").build_payload(action_id="task-1")) == ["task-1"]
     assert json.loads(get_contract("scheduled.delete").build_payload(action_id="task-1")) == [None, ["task-1"]]
+
+
+@pytest.mark.parametrize("case_name", ["success", "empty", "rejected", "changed_shape"])
+def test_system_gem_contract_shares_fixture_backed_registry_shape(case_name):
+    case = PARSER_FIXTURES["custom_gems"]["cases"][case_name]
+    assert parse_contract_body("gems.system_registry", case["body"], reject_code=case.get("reject_code")).status == case_name
 
 
 def test_music_chat_parser_keeps_media_identity_without_raw_response():

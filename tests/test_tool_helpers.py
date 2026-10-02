@@ -421,9 +421,9 @@ def test_resolve_media_request_music_thinking_level_does_not_claim_backend():
 def test_resolve_media_request_video_does_not_claim_omni_mode():
     """通用聊天的视频参数不能冒充 Omni 视频模式。"""
     out = resolve_media_request("flash", "video")
-    assert out["backend_label"] == "Gemini Web generic chat"
+    assert out["backend_label"] == "Gemini Web video feature"
     assert out["effective_alias"] == "flash"
-    assert "未证实" in out["note"]
+    assert "实际后端版本" in out["note"]
 
 
 # ---------------------------------------------------------------------------

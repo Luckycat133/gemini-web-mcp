@@ -92,7 +92,7 @@ def test_runtime_skill_is_task_first_and_artifact_aware() -> None:
         "Do **not** call the manifest before every known workflow",
         "pass that file or URI to the next relevant tool",
         "Start Deep Research without waiting for completion",
-        "There is currently no `status`, `result`, or `cancel` tool",
+        "Focused Research exposes action=status/result/cancel",
         "The Skill supplies routing instructions; an MCP server must also be connected",
         "opaque, restart-safe handle",
         "local SQLite",
@@ -109,8 +109,9 @@ def test_runtime_skill_is_task_first_and_artifact_aware() -> None:
 
 def test_runtime_skill_focused_assist_examples_match_registered_arguments() -> None:
     workflows = (PUBLIC_SKILL_DIR / "references" / "workflows.md").read_text(encoding="utf-8")
-    assist_source = (PROJECT_ROOT / "src" / "surfaces" / "assist.py").read_text(encoding="utf-8")
-    module = ast.parse(assist_source)
+    focused_source = "\n".join((PROJECT_ROOT / "src" / "surfaces" / filename).read_text(encoding="utf-8")
+                               for filename in ("assist.py", "create.py"))
+    module = ast.parse(focused_source)
     registered = {
         node.name: {arg.arg for arg in node.args.args}
         for node in module.body
@@ -131,6 +132,8 @@ def test_runtime_skill_focused_assist_examples_match_registered_arguments() -> N
         "gemini_ask": "prompt",
         "gemini_understand_image": "image",
         "gemini_understand": "task",
+        "gemini_generate_image": "prompt",
+        "gemini_edit_image": "image_path",
     }
     assert all(argument in registered[name] for name, argument in examples.items())
 
@@ -183,7 +186,7 @@ def test_project_skill_openai_metadata_is_task_first() -> None:
     assert "TODO" not in metadata
 
 
-def test_description_names_the_assist_sibling_and_states_the_preference() -> None:
+def test_description_names_the_focused_siblings_and_states_the_preferences() -> None:
     skill = PUBLIC_SKILL_DIR / "SKILL.md"
     lines = skill.read_text(encoding="utf-8").splitlines()
     assert lines[0] == "---"
@@ -193,14 +196,13 @@ def test_description_names_the_assist_sibling_and_states_the_preference() -> Non
     assert description is not None
     description_text = description.group(1)
 
-    # The gemini-assist Skill claims the same assistance lanes, so this
-    # description must disambiguate by naming the focused sibling and deferring
-    # to it when only assistance and understanding are needed.
-    assert "gemini-assist" in description_text
-    assert (
-        "prefer the focused gemini-assist skill when only assistance"
-        " and understanding are needed" in description_text
-    )
+    # Focused Skills own single-purpose intents; the compatibility router names
+    # each actual sibling rather than competing with its trigger description.
+    for preference in (
+        "prefer gemini-assist for assistance/understanding", "gemini-create for creation",
+        "gemini-account for explicit account work",
+    ):
+        assert preference in description_text
 
 
 def test_project_skill_names_are_unique_across_discovery_roots() -> None:

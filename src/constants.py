@@ -226,8 +226,8 @@ def resolve_media_request(
             "requested_alias": alias,
             "effective_alias": alias,
             "request_model": resolve_model_name(alias),
-            "backend_label": "Gemini Web generic chat",
-            "note": "当前通用聊天请求未证实进入 Gemini Omni 视频模式；需验证视频产物。",
+            "backend_label": "Gemini Web video feature",
+            "note": "请求已选择网页视频模式；实际后端版本和完成状态仍须响应与视频产物验证。",
         }
 
     return {

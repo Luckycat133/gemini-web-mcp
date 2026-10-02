@@ -73,17 +73,17 @@ Do not relabel a source-free answer as grounded and do not invent source URLs. W
 
 ## Information, Not Artifacts
 
-Search and understanding return information to the calling agent, not files. Synthesize the answer or analysis into the user's task instead of dumping raw Gemini output. A completed Deep Research report stays in the retained Gemini chat; recover it through the preserved chat identity instead of expecting a downloaded Artifact from these tools.
+Search and understanding return information to the calling agent, not files. Synthesize the answer or analysis into the user's task instead of dumping raw Gemini output. A completed Deep Research report stays in the retained Gemini chat; recover through the same operation handle and its known source. Report locators and readiness are returned without persisting report text in SQLite.
 
 ## Deep Research Starts Asynchronously
 
-`gemini_research` starts one Deep Research run and returns immediately after the upstream research has started:
+`gemini_research` starts one Deep Research run and returns an accepted opaque operation handle immediately; upstream plan/start runs in the background:
 
 - the structured result carries an opaque `operation_id` plus the preserved `upstream_operation_id` and `upstream_chat_id`;
-- `state` is `queued` or `running`; a started run is never a completed report;
+- `state` starts as `accepted`, then may become `queued` or `running`; a start is never a completed report;
 - `timeout_seconds` bounds only the plan and start phases, never the report itself;
 - the research chat is retained by default so the report stays recoverable;
-- preserve every returned identifier and never start a duplicate run because one call timed out.
+- preserve every returned identifier and never start a duplicate run because one call timed out. Use `gemini_research(action="status"|"result"|"cancel", operation_id=...)` on the same handle; use an opaque idempotency_key for start response loss.
 
 Deep Research requires an AI Plus subscription; report the typed `CAPABILITY_UNAVAILABLE` result instead of retrying.
 
@@ -100,4 +100,4 @@ Deep Research requires an AI Plus subscription; report the typed `CAPABILITY_UNA
 2. Supply the smallest complete input: a prompt with optional context, one image, or one typed input list.
 3. Read the structured result before trusting the compatibility text.
 4. Continue the user's task with the returned information.
-5. For Deep Research, preserve the handle and recover the report later.
+5. For Deep Research, preserve the handle and recover the report later with action=status/result. Seven-day authentication-scoped metadata stores no prompts, reports or credentials; cancel_requested is not confirmed provider cancellation. local_cancelled_before_start verifies local cancellation before provider submission.

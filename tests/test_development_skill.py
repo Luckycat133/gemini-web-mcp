@@ -151,7 +151,9 @@ def test_development_skill_keeps_settled_decisions_out_of_owner_questions() -> N
     assert "Package D — Shared SQLite OperationService" in roadmap
     assert "Package F — `gemini-account`" in roadmap
     assert "Remaining Owner Choice" in roadmap
-    assert "The remaining owner-level choice is the first officially supported client/OS/distribution matrix" in skill
+    assert "evidence-backed client/OS/distribution matrix" in skill
+    assert "docs/client-examples.md" in skill
+    assert "all five repository Skills" in skill
     assert "Next Monotonic Python Package Release" not in roadmap
 
 

@@ -22,3 +22,13 @@ def scheduled_read(value):
         "reject_code": None,
         "read_back_valid": True,
     }
+
+
+def notebook_read_diagnostic(value):
+    return scheduled_read(value)[1]
+
+
+def notebook_move_response(body):
+    return SimpleNamespace(status_code=200, text=json.dumps([
+        ["wrb.fr", get_contract("notebooks.move_chat").rpc_id, json.dumps(body)],
+    ]))

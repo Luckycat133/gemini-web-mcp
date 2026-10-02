@@ -198,4 +198,8 @@ Only after A–H are stable: Drive import, Canvas, richer recurrence, Notebook C
 
 ## Remaining Owner Choice
 
-Choose the first officially supported client/OS/distribution matrix. Until then, report individual combinations as tested examples rather than broad support promises.
+The initial distribution is Python wheel/uvx over MCP stdio. macOS arm64 has
+installation, protocol and bounded signed-in media evidence; Linux CI covers
+offline contracts. The current [client/OS evidence](../../../../docs/client-examples.md#client-and-os-evidence)
+separates those checks from configuration-only desktop examples. Expand the
+matrix only after actual client installation and protocol checks.

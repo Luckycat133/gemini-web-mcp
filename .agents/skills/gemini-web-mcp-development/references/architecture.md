@@ -16,7 +16,7 @@ The repository currently ships:
 - account, Notebook, Scheduled, Gem, Prompt, Doctor, Cleanup, and compatibility services;
 - MCP Python SDK v2 adapters with modern and legacy protocol smoke.
 
-These remain supported compatibility surfaces while the create and account focused products are introduced.
+These remain supported compatibility surfaces alongside the three focused products.
 
 ## Product Priority
 
@@ -273,13 +273,13 @@ Operation IDs are high-entropy, opaque, restart-safe, and independent of MCP con
 
 ## Remaining Engineering Gaps
 
-- no dedicated create/account entrypoints yet;
-- no restart-safe OperationService yet;
-- no restart-safe Cleanup queue yet;
-- prose-first admin paths remain;
-- mutation verification is uneven outside History/Gems;
-- full current live evidence is incomplete;
-- official client/OS matrix is undecided.
+- native-video artifact success and current Research recovery need signed-in evidence;
+- the dedicated-account full baseline is separate from bounded everyday-account tests;
+- broader OS/client combinations need actual installation and protocol evidence.
+
+The three focused entrypoints, typed action facades, SQLite operations and durable
+cleanup are implemented. See `docs/operations-and-cleanup.md` for credential
+lineage isolation, retention, leases and cancellation boundaries.
 
 ## Deferred UI Parity
 

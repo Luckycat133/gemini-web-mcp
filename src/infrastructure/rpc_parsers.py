@@ -67,7 +67,7 @@ def _extract_parts(response_text: str) -> list[Any]:
     return parsed if isinstance(parsed, list) else [parsed]
 
 
-def parse_rpc_envelope(response_text: str, rpc_id: str) -> RPCEnvelope:
+def parse_rpc_envelope(response_text: str, rpc_id: str, *, expected_identifier: str | None = None) -> RPCEnvelope:
     """Decode only matching ``wrb.fr`` parts without interpreting body shape."""
 
     try:
@@ -80,6 +80,8 @@ def parse_rpc_envelope(response_text: str, rpc_id: str) -> RPCEnvelope:
     reject_code: int | None = None
     for part in parts:
         if _nested(part, [0]) != "wrb.fr" or _nested(part, [1]) != rpc_id:
+            continue
+        if expected_identifier is not None and _nested(part, [-1]) != expected_identifier:
             continue
         code = _nested(part, [5, 0])
         if isinstance(code, int):
@@ -411,7 +413,17 @@ def parse_remy_goals_page(body: Any, **_: Any) -> RPCParseResult:
 def parse_notebook_list(body: Any, **_: Any) -> RPCParseResult:
     if not isinstance(body, list) or len(body) <= 2 or not isinstance(body[2], list):
         return RPCParseResult("changed_shape", raw_type=type(body).__name__)
-    notebooks = [parse_native_notebook(item) for item in body[2]]
+    parsed_items = _result_for_items(
+        body, 2, parse_native_notebook, require_id=True,
+        item_validator=lambda row: len(row) >= 2 and isinstance(row[1], list),
+    )
+    if not parsed_items.ok:
+        return parsed_items
+    notebooks = parsed_items.value
+    if len(body) > 3 and body[3] is not None and not isinstance(body[3], list):
+        return RPCParseResult("changed_shape", warnings=("invalid_categories",))
+    if len(body) > 3 and isinstance(body[3], list) and any(not isinstance(item, list) for item in body[3]):
+        return RPCParseResult("changed_shape", warnings=("invalid_category_entry",))
     categories = (
         [parse_notebook_category(item) for item in body[3]] if len(body) > 3 and isinstance(body[3], list) else []
     )
@@ -421,12 +433,31 @@ def parse_notebook_list(body: Any, **_: Any) -> RPCParseResult:
     )
 
 
-def parse_notebook_move(body: Any, **_: Any) -> RPCParseResult:
+def parse_custom_gems(body: Any, **_: Any) -> RPCParseResult:
+    """Parse the shared system/custom registry shape in supported SDK versions."""
+    def item(row: list[Any]) -> dict[str, str]:
+        return {"id": row[0], "name": row[1][0], "description": row[1][1] or "",
+                "instructions": row[2][0] if row[2] else ""}
+
+    def valid(row: Any) -> bool:
+        return bool(isinstance(row, list) and len(row) >= 3 and isinstance(row[0], str)
+                    and isinstance(row[1], list) and len(row[1]) >= 2 and isinstance(row[1][0], str)
+                    and (row[1][1] is None or isinstance(row[1][1], str))
+                    and (row[2] is None or row[2] == [] or
+                         (isinstance(row[2], list) and row[2] and isinstance(row[2][0], str))))
+
+    return _result_for_items(body, 2, item, require_id=True, item_validator=valid)
+
+
+def parse_notebook_move(body: Any, *, expected_id: str | None = None, **_: Any) -> RPCParseResult:
     if body == [] or body == [None, None]:
         return RPCParseResult("empty", value=None)
     if not isinstance(body, list) or len(body) <= 1 or not isinstance(body[1], list):
         return RPCParseResult("changed_shape", raw_type=type(body).__name__)
-    return RPCParseResult("success", value=parse_conversation_metadata(body[1]))
+    value = parse_conversation_metadata(body[1])
+    if not value.get("id") or (expected_id is not None and value.get("id") != expected_id):
+        return RPCParseResult("changed_shape", value=value, warnings=("returned_id_mismatch",))
+    return RPCParseResult("success", value=value)
 
 
 def parse_scheduled_registry(body: Any, *, max_chars: int = 500, **_: Any) -> RPCParseResult:
@@ -473,7 +504,7 @@ def parse_scheduled_create(body: Any, **_: Any) -> RPCParseResult:
     if body == []:
         return RPCParseResult("empty", value=None)
     candidate = body[0] if isinstance(body, list) and body and isinstance(body[0], list) else body
-    if not isinstance(candidate, list):
+    if not isinstance(candidate, list) or len(candidate) < 2 or not isinstance(candidate[1], list):
         return RPCParseResult("changed_shape", raw_type=type(body).__name__)
     value = parse_scheduled_action_create_body(candidate)
     if not value.get("id"):
@@ -561,6 +592,7 @@ PARSER_FUNCTIONS: Mapping[str, Callable[..., RPCParseResult]] = {
     "remy_goals_page": parse_remy_goals_page,
     "notebook_list": parse_notebook_list,
     "notebook_move": parse_notebook_move,
+    "custom_gems": parse_custom_gems,
     "scheduled_registry": parse_scheduled_registry,
     "scheduled_get": parse_scheduled_get,
     "scheduled_create": parse_scheduled_create,

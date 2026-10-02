@@ -143,4 +143,28 @@
     <question>When an interrupted media request returns a source_chat_id, should the agent preserve and inspect that chat before deciding on another generation? Answer yes or no.</question>
     <answer>yes</answer>
   </qa_pair>
+  <qa_pair>
+    <question>Which installed MCP entrypoint exposes the seven focused multimodal creation tools? Answer with the console command only.</question>
+    <answer>gemini-mcp-create</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>After focused music or video generation returns an operation_id, which tool recovers its verified artifacts after a server restart without starting another generation? Answer with the exact tool name.</question>
+    <answer>gemini_get_operation_result</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>Which optional opaque argument should a focused music/video caller reuse after losing a start response, so the registered operation is returned instead of generating again? Answer with the argument name.</question>
+    <answer>idempotency_key</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>How long are restart-safe operation identifiers and artifact locators retained in private metadata, excluding renewable pending cleanup authority? Answer with the duration.</question>
+    <answer>seven days</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>When an explicit account mutation is accepted but its requested state has no verified read-back proof, what operation state should the account facade return? Answer with the state only.</question>
+    <answer>accepted</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>Which focused account facade lists, retries or requests cancellation of only registered cleanup jobs without scanning unrelated account history? Answer with the exact tool name.</question>
+    <answer>gemini_cleanup</answer>
+  </qa_pair>
 </evaluation>

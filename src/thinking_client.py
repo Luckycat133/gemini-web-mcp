@@ -7,7 +7,7 @@ import inspect
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass, field, replace
-from typing import Any, AsyncGenerator, Iterator
+from typing import Any, AsyncGenerator, Callable, Iterator
 
 import orjson
 from gemini_webapi import GeminiClient
@@ -48,6 +48,7 @@ _web_request: ContextVar[WebRequestOptions | None] = ContextVar(
 
 _request_timeout: ContextVar[tuple[object, float] | None] = ContextVar("gemini_request_timeout", default=None)
 _timeout_initializing_task: ContextVar[tuple[int, int] | None] = ContextVar("gemini_timeout_initializing_task", default=None)
+_generation_once: ContextVar[object | None] = ContextVar("gemini_generation_once", default=None)
 
 
 @dataclass
@@ -59,6 +60,7 @@ class MediaRequestObservation:
     rollback, cancellation, or an outer asyncio.timeout.
     """
 
+    on_chat_observed: Callable[[str], None] | None = None
     chat_id: str | None = field(default=None, init=False)
     _started: bool = field(default=False, init=False)
 
@@ -69,7 +71,10 @@ class MediaRequestObservation:
 
     def observe(self, metadata: list[Any]) -> None:
         if metadata and is_valid_remote_chat_id(metadata[0]):
+            changed = metadata[0] != self.chat_id
             self.chat_id = metadata[0]
+            if changed and self.on_chat_observed is not None:
+                self.on_chat_observed(self.chat_id)
 
 
 class _OwnedMediaChatSession(ChatSession):
@@ -77,13 +82,21 @@ class _OwnedMediaChatSession(ChatSession):
 
     __slots__ = ("_request_metadata", "_request_observation")
 
-    def __init__(self, client: GeminiClient, observation: MediaRequestObservation) -> None:
+    def __init__(self, client: GeminiClient, observation: MediaRequestObservation, *, model: Any = None) -> None:
         # SDK2.0's DEFAULT_METADATA is shared mutable state (2.1 copies it).
         # Use properties backed by our own blank list in both versions, so a
         # previous chat can neither enter this request nor be mutated by it.
         self._request_metadata: list[Any] = ["", "", "", None, None, None, None, None, None, ""]
         self._request_observation = observation
-        super().__init__(client)
+        if model is None:
+            super().__init__(client)
+        else:
+            super().__init__(client, model=model)
+
+    @property
+    def observed_chat_id(self) -> str | None:
+        """Source identity remains available after SDK metadata rollback."""
+        return self._request_observation.chat_id
 
     @property
     def metadata(self) -> list[Any]:
@@ -162,6 +175,24 @@ def client_request_timeout(client: object, timeout_seconds: float) -> Iterator[N
         yield
     finally:
         _request_timeout.reset(token)
+
+
+@contextmanager
+def client_generation_once(client: object) -> Iterator[None]:
+    """Prevent SDK submission retries inside one client-owned workflow.
+
+    The SDK's generation decorator can repost an uncertain request after an
+    API/parse failure. Research plan and confirmation are mutations whose
+    recovery must read the existing source rather than generate again. This
+    scope affects only generation; initialization and read-back keep their own
+    retry policies. Child tasks inherit the scope without changing the shared
+    client or another client's concurrent request.
+    """
+    token = _generation_once.set(client)
+    try:
+        yield
+    finally:
+        _generation_once.reset(token)
 
 
 def _encode_learning_x9b(field_name: str, value: int) -> list[Any]:
@@ -276,6 +307,19 @@ def inject_web_request_options(
 class ThinkingLevelGeminiClient(GeminiClient):
     """Gemini client with scoped thinking, learning, and native media selectors."""
 
+    def start_owned_chat(
+        self, *, model: Any = None, on_chat_observed: Callable[[str], None] | None = None,
+    ) -> ChatSession:
+        """Allocate a blank observable session for one mutation workflow.
+
+        This shares metadata ownership with media requests, independently of
+        response parsing or artifact kind. Observations survive SDK rollback
+        and are delivered before the next stream frame can fail.
+        """
+        observation = MediaRequestObservation(on_chat_observed=on_chat_observed)
+        observation.start()
+        return _OwnedMediaChatSession(self, observation, model=model)
+
     @property
     def timeout(self) -> float:
         default = float(GeminiClient.timeout.__get__(self, type(self)))
@@ -343,7 +387,7 @@ class ThinkingLevelGeminiClient(GeminiClient):
             if media_observation is not None:
                 args, kwargs = _with_owned_media_session(self, args, kwargs, media_observation)
             request = _web_request.get()
-            if request and request.media_mode_id is not None:
+            if _generation_once.get() is self or request and request.media_mode_id is not None:
                 # gemini-webapi's running decorator consumes this before its
                 # HTTP kwargs. A parse/API failure must not duplicate creation.
                 kwargs["current_retry"] = 0
@@ -370,7 +414,7 @@ class ThinkingLevelGeminiClient(GeminiClient):
             if media_observation is not None:
                 args, kwargs = _with_owned_media_session(self, args, kwargs, media_observation)
             request = _web_request.get()
-            if request and request.media_mode_id is not None:
+            if _generation_once.get() is self or request and request.media_mode_id is not None:
                 kwargs["current_retry"] = 0
             args, kwargs = self._with_upstream_thinking(args, kwargs, GeminiClient.generate_content_stream)
             args, kwargs = self._with_learning_prompt(args, kwargs, learning_mode)
@@ -523,6 +567,8 @@ class ThinkingLevelGeminiClient(GeminiClient):
         def stream_with_thinking(method: str, url: str, *args: Any, **kwargs: Any):
             request = _web_request.get()
             data = kwargs.get("data")
+            if url == Endpoint.GENERATE and _generation_once.get() is self and "current_retry" in kwargs:
+                raise ValueError("Upstream generation retry control was not consumed.")
             if request and url == Endpoint.GENERATE:
                 if request.media_mode_id is not None and "current_retry" in kwargs:
                     raise NativeMediaRequestShapeError("Upstream native media retry control was not consumed.")

@@ -204,7 +204,7 @@ Cover:
 - temporary-chat bypass;
 - no private content in storage.
 
-The current in-memory cleanup manager additionally needs rejection/read-back error retries, shared-task cancellation isolation, busy-session expiry protection, and cancellation of old jobs when authentication changes. Late responses from an old authentication context must not schedule deletion against the new account. Same-material cookie refresh should preserve current sessions and jobs.
+The durable cleanup manager must cover rejection/read-back error retries, shared-task cancellation isolation, busy-session expiry protection, and cancellation of old jobs when authentication changes. Late responses from an old authentication context must not schedule deletion against the new account. Same-material cookie refresh should preserve current sessions and jobs. Cross-process claims, expired leases, retain/cancel races and credential-lineage isolation must be tested against the real SQLite repository.
 
 ## Artifact Tests
 
@@ -280,7 +280,7 @@ SOURCE="git+https://github.com/Luckycat133/gemini-web-mcp@${REVIEWED_SHA}"
 uvx --from "$SOURCE" gemini-mcp-onboarding
 ```
 
-The active package and all three repository Skills use `0.2.2`; preserve published tags as immutable history.
+The active package and all five repository Skills use `0.2.2`; preserve published tags as immutable history.
 
 ## Compatibility Runtime Skill
 

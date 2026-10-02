@@ -2,6 +2,82 @@
   "format": 1,
   "sdk_major": 2,
   "surfaces": {
+    "account": [
+      {
+        "annotations_sha256": "139076388a98d13d07bb3df5c31e17088f4e37e0af35e2d89a7d5b112ee0e214",
+        "input_schema_sha256": "43c873f7bd96b8f5083ca77e85b1678a1e00945b3f553f43a925156ec764abb0",
+        "name": "gemini_account",
+        "output_schema_sha256": "369763f047111c047fb07f3487898a056fb44a9379e411178fcf79202fcf7ed9"
+      },
+      {
+        "annotations_sha256": "bbca3f90a8f37a2e09188309470b131134c395dbc4eccad15de06d2c2f94f06a",
+        "input_schema_sha256": "0c028a8bd6cc3d87f05d587efdf770a10eeb162fa635956a34a63f5f4c8a3f26",
+        "name": "gemini_cleanup",
+        "output_schema_sha256": "369763f047111c047fb07f3487898a056fb44a9379e411178fcf79202fcf7ed9"
+      },
+      {
+        "annotations_sha256": "bbca3f90a8f37a2e09188309470b131134c395dbc4eccad15de06d2c2f94f06a",
+        "input_schema_sha256": "1f744ab85bc64d0af8ec143e6e8c308dae6258f641f5509fe143d548e37aa2f8",
+        "name": "gemini_gems",
+        "output_schema_sha256": "369763f047111c047fb07f3487898a056fb44a9379e411178fcf79202fcf7ed9"
+      },
+      {
+        "annotations_sha256": "bbca3f90a8f37a2e09188309470b131134c395dbc4eccad15de06d2c2f94f06a",
+        "input_schema_sha256": "5a1afa4d199f333c4c63eb154d7fe8b2a3264211fcbe90427e3f864c6293e264",
+        "name": "gemini_history",
+        "output_schema_sha256": "369763f047111c047fb07f3487898a056fb44a9379e411178fcf79202fcf7ed9"
+      },
+      {
+        "annotations_sha256": "bbca3f90a8f37a2e09188309470b131134c395dbc4eccad15de06d2c2f94f06a",
+        "input_schema_sha256": "3ad6be75d7362062c499553beee36b0e52910fd0ff26d763dc98de32d30f2a62",
+        "name": "gemini_notebooks",
+        "output_schema_sha256": "369763f047111c047fb07f3487898a056fb44a9379e411178fcf79202fcf7ed9"
+      },
+      {
+        "annotations_sha256": "b15393126f12ebd7533afe7d31a1beb8938a1e37d0bb2a52c382aaba4373f265",
+        "input_schema_sha256": "7a70405f1afe3e7ec56f84fed6cc5f7207b6141c2a821e138cbcdaf298da1cf5",
+        "name": "gemini_prompts",
+        "output_schema_sha256": "369763f047111c047fb07f3487898a056fb44a9379e411178fcf79202fcf7ed9"
+      },
+      {
+        "annotations_sha256": "bbca3f90a8f37a2e09188309470b131134c395dbc4eccad15de06d2c2f94f06a",
+        "input_schema_sha256": "45d9134928e9d858a0f7ab4cf5805d53e08f6b54c310c041268f191deeb0df05",
+        "name": "gemini_scheduled",
+        "output_schema_sha256": "369763f047111c047fb07f3487898a056fb44a9379e411178fcf79202fcf7ed9"
+      }
+    ],
+    "assist": [
+      {
+        "annotations_sha256": "99300d9e2937ba92c763822593cb3ba8ec634d1813f3ab37fad3d6d0432268f9",
+        "input_schema_sha256": "766860eda2e1256fd4fa7e107a5c369a710ec6a629e90ea705723179a667df95",
+        "name": "gemini_ask",
+        "output_schema_sha256": "be68ce03fb96679d72b227c30eabbee2c0035b13c225556c9c9eb59ea03663c8"
+      },
+      {
+        "annotations_sha256": "99300d9e2937ba92c763822593cb3ba8ec634d1813f3ab37fad3d6d0432268f9",
+        "input_schema_sha256": "c0227b15b4fd9b17fb1db9d5035a9dead29d0289e74116cf3d174212bf10a9bc",
+        "name": "gemini_research",
+        "output_schema_sha256": "58d1366f703631472120011283d76743a595309ff03cfbfd12d651aaba0d123f"
+      },
+      {
+        "annotations_sha256": "99300d9e2937ba92c763822593cb3ba8ec634d1813f3ab37fad3d6d0432268f9",
+        "input_schema_sha256": "68f461cd48eb749097b89f0d58a54b481f632ee8c001ef8b01d3d465a08fce88",
+        "name": "gemini_search",
+        "output_schema_sha256": "d3534859fde2c3dd9df7eecabd081e228c6a11fe67190edbf3a6d8df184f07c8"
+      },
+      {
+        "annotations_sha256": "99300d9e2937ba92c763822593cb3ba8ec634d1813f3ab37fad3d6d0432268f9",
+        "input_schema_sha256": "6465b18d66ad9e30e6d595dda7bb1ad98094f87370fc59caa408fba2c1806f93",
+        "name": "gemini_understand",
+        "output_schema_sha256": "37a38e5f0b607863c11947a36ab6a8cef5432a73c977b66852f6d020cad8027a"
+      },
+      {
+        "annotations_sha256": "99300d9e2937ba92c763822593cb3ba8ec634d1813f3ab37fad3d6d0432268f9",
+        "input_schema_sha256": "19781fcc08ae6f7eaf8d903383c1683cc34748d32e96900f571783e2853a5e13",
+        "name": "gemini_understand_image",
+        "output_schema_sha256": "6e05dd12886a800f2d0852af30e2c4fe7402490cb5a1fb5764be348da6b02ab5"
+      }
+    ],
     "compact": [
       {
         "annotations_sha256": "139076388a98d13d07bb3df5c31e17088f4e37e0af35e2d89a7d5b112ee0e214",
@@ -68,6 +144,50 @@
         "input_schema_sha256": "9432b28adfc5e7246152b3fc12ad489db7c90c3e599a1a2ee65227b179c9c4d1",
         "name": "session",
         "output_schema_sha256": "c3805d4d99092e9f4a1bb69def3c63b8146b38554d51f041b2a7026e3164eb45"
+      }
+    ],
+    "create": [
+      {
+        "annotations_sha256": "99300d9e2937ba92c763822593cb3ba8ec634d1813f3ab37fad3d6d0432268f9",
+        "input_schema_sha256": "bcd7cbcec97448e3e2586bbb2a162c3713ac2e41e569db689b2ac3c2925f46f0",
+        "name": "gemini_cancel_operation",
+        "output_schema_sha256": "28951b7673070bd050e06aa5a7dca7a185e587fa432fcf2c1b17ba06ad65e632"
+      },
+      {
+        "annotations_sha256": "99300d9e2937ba92c763822593cb3ba8ec634d1813f3ab37fad3d6d0432268f9",
+        "input_schema_sha256": "8fc64e625f562f1504e18460be794febd81f31bd3a5d96f4c5c1394b365aa9e1",
+        "name": "gemini_edit_image",
+        "output_schema_sha256": "d2243d9c91ee9dda53e0836a486394dd9c6d947a90df0b86eb4eb6f24b840206"
+      },
+      {
+        "annotations_sha256": "99300d9e2937ba92c763822593cb3ba8ec634d1813f3ab37fad3d6d0432268f9",
+        "input_schema_sha256": "92dac2cf4e69483697fb17e954a680d2e269aa41faeddc42d74f488e15de53d1",
+        "name": "gemini_generate_image",
+        "output_schema_sha256": "d2243d9c91ee9dda53e0836a486394dd9c6d947a90df0b86eb4eb6f24b840206"
+      },
+      {
+        "annotations_sha256": "99300d9e2937ba92c763822593cb3ba8ec634d1813f3ab37fad3d6d0432268f9",
+        "input_schema_sha256": "5d125210701880b735e8e91392403eac5f83b28ebf8dd03ec569e7a0b9a83af6",
+        "name": "gemini_generate_music",
+        "output_schema_sha256": "28951b7673070bd050e06aa5a7dca7a185e587fa432fcf2c1b17ba06ad65e632"
+      },
+      {
+        "annotations_sha256": "99300d9e2937ba92c763822593cb3ba8ec634d1813f3ab37fad3d6d0432268f9",
+        "input_schema_sha256": "c2e9e2a94b0838edd5f6064a46b523f9ae396de9fc018629404d4927e6c6da79",
+        "name": "gemini_generate_video",
+        "output_schema_sha256": "28951b7673070bd050e06aa5a7dca7a185e587fa432fcf2c1b17ba06ad65e632"
+      },
+      {
+        "annotations_sha256": "139076388a98d13d07bb3df5c31e17088f4e37e0af35e2d89a7d5b112ee0e214",
+        "input_schema_sha256": "f8560301a00ecacb4261385bdda0f0e4cbc3d5fce9d28fd4ea2c9ebf25fe357c",
+        "name": "gemini_get_operation_result",
+        "output_schema_sha256": "28951b7673070bd050e06aa5a7dca7a185e587fa432fcf2c1b17ba06ad65e632"
+      },
+      {
+        "annotations_sha256": "139076388a98d13d07bb3df5c31e17088f4e37e0af35e2d89a7d5b112ee0e214",
+        "input_schema_sha256": "4a39c82afc874dc284a35d69e9adbf534b6f1654eaf6cd444b73358206abd657",
+        "name": "gemini_get_operation_status",
+        "output_schema_sha256": "28951b7673070bd050e06aa5a7dca7a185e587fa432fcf2c1b17ba06ad65e632"
       }
     ],
     "primary:model": [

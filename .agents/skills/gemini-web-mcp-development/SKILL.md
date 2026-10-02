@@ -42,7 +42,7 @@ git log --oneline -20
 
 Also inspect the affected source/tests, `pyproject.toml`, current tags/releases, changelog, development status, open PRs/issues, CI/CodeQL, live-canary evidence, and public Skill state.
 
-The active package and all three repository Skills declare `0.2.2`. Preserve the published `v0.2.0` and `v0.2.1` tags as immutable history.
+The active package and all five repository Skills declare `0.2.2`. Preserve the published `v0.2.0` and `v0.2.1` tags as immutable history.
 
 A green offline suite proves repository contracts. It does not prove current Gemini Web behavior.
 
@@ -51,16 +51,16 @@ A green offline suite proves repository contracts. It does not prove current Gem
 The repository already has:
 
 - MCP Python SDK v2 plus modern/legacy protocol smoke;
-- profile-based primary server and fixed eleven-tool low-token server;
-- shared client, chat, session, lifecycle, Artifact, and typed-history services;
+- profile-based primary server, fixed eleven-tool low-token server, and dedicated assist/create/account servers;
+- shared client, chat, session, lifecycle, Artifact, typed-history, creation and operation services;
 - text/session, image, video, music, file, URL, and Deep Research workflows;
 - Notebook, Scheduled, account, Gem, Prompt, Cookie, Doctor, and Cleanup surfaces;
 - centralized reverse-engineered RPC contracts and parsers;
-- verified Gem mutations and evidence-based chat deletion;
+- strict Notebook/Scheduled/Gem mutation read-back and evidence-based chat deletion;
 - wheel/sdist/runtime-Skill packaging, clean install, and isolated onboarding;
-- an opt-in compatibility canary and a bounded 2026-08-08 live observation.
+- metadata-only SQLite operation and cleanup recovery, plus an opt-in compatibility canary and dated bounded live observations.
 
-Do not rebuild these foundations. Treat the current broad/compact servers as compatibility surfaces while implementing the focused products below.
+Do not rebuild these foundations. Maintain broad/compact compatibility through the same services as the focused products below.
 
 ## Target Product Architecture
 
@@ -72,7 +72,7 @@ Do not rebuild these foundations. Treat the current broad/compact servers as com
 
 Keep one repository, one Python distribution, one Gemini adapter, and shared domain/services. Do not create three business implementations or three repositories.
 
-The current `gemini-web-mcp` Runtime Skill remains a task-first compatibility router until the dedicated servers and Skills are independently usable.
+The `gemini-web-mcp` Runtime Skill remains a task-first compatibility router. The focused servers and Skills ship in the same distribution.
 
 Read [architecture.md](references/architecture.md) before changing product boundaries.
 
@@ -188,15 +188,17 @@ Treat browser Cookies as sensitive authentication material, but do not turn ordi
 
 ## Active Development Order
 
-1. Finish the task-first compatibility Runtime Skill and its trigger/hand-off contracts.
-2. Implement `gemini-assist` as the first focused vertical slice.
-3. Implement `gemini-create` with Artifact-first image generation/editing.
-4. Add the shared SQLite OperationService; connect Deep Research, video, and music with asynchronous starts.
-5. Implement `gemini-account` from shared account/history services.
-6. Run the dedicated full live baseline through the new surfaces.
-7. Complete typed admin results, mutation verification, and durable SQLite cleanup.
-8. Add multimodal onboarding, real-agent evaluations, and the official client/OS matrix.
-9. Add selected Drive/Canvas/Notebook/sharing parity only after core workflows are reliable.
+Implemented: all three focused products, the compatibility router, shared
+SQLite OperationService, durable cleanup, and typed account facades. Preserve
+these vertical slices and their compatibility/installation gates.
+
+1. Verify current upstream video/music and Research recovery by known IDs;
+   never repeat a start to recover interruption.
+2. Run the dedicated-account full live baseline when its required environment
+   is available; everyday-account bounded tests are separate evidence.
+3. Evaluate realistic agent tasks, trigger boundaries and Artifact handoffs.
+4. Expand the client/OS matrix only from actual installation/protocol evidence.
+5. Add selected Drive/Canvas/Notebook/sharing parity after core workflows pass.
 
 Read [roadmap.md](references/roadmap.md) for issue-sized packages and acceptance criteria.
 
@@ -215,7 +217,7 @@ Do not reopen these during routine work:
 - manifest is for discovery/recovery, not a mandatory call before every known workflow;
 - reliability and agent task completion precede broad UI parity.
 
-The remaining owner-level choice is the first officially supported client/OS/distribution matrix.
+The evidence-backed client/OS/distribution matrix is maintained in `docs/client-examples.md`; expand support only after exercising the new combination.
 
 ## Testing and Real Experience
 

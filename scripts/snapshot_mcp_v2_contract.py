@@ -66,7 +66,7 @@ def _probe(module_name: str, profile: str) -> list[dict[str, Any]]:
 
 
 def build_snapshot() -> dict[str, object]:
-    """Return the checked contract for representative primary and compact surfaces."""
+    """Return the checked contract for primary, compact and three focused surfaces."""
 
     return {
         "format": 1,
@@ -74,6 +74,9 @@ def build_snapshot() -> dict[str, object]:
         "surfaces": {
             "primary:model": _probe("src.server", "model"),
             "compact": _probe("src.skill_server", "model"),
+            "assist": _probe("src.surfaces.assist", "model"),
+            "create": _probe("src.surfaces.create", "model"),
+            "account": _probe("src.surfaces.account", "model"),
         },
     }
 

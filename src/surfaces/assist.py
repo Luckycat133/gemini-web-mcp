@@ -7,7 +7,7 @@ keeping a second copy of request construction, parsing, or persistence.
 """
 
 import logging
-from typing import Optional
+from typing import Literal, Optional
 
 from pydantic import Field
 
@@ -361,7 +361,10 @@ def _render_research_start(data: LongOperationData) -> list[TextContent]:
         sections.append(f"Upstream research ID: {data.upstream_operation_id}")
     if data.upstream_chat_id:
         sections.append(f"Upstream chat ID: {data.upstream_chat_id}")
-    if data.state in {OperationState.QUEUED, OperationState.RUNNING}:
+    for artifact in data.artifacts:
+        if artifact.local_path:
+            sections.append(f"Report artifact: {artifact.local_path}")
+    if data.state in {OperationState.ACCEPTED, OperationState.QUEUED, OperationState.RUNNING}:
         sections.append("This call returned immediately and did not wait for the final report.")
     elif data.state is OperationState.COMPLETED and not data.report_available:
         sections.append("The upstream run completed, but this start call did not return a report.")
@@ -371,42 +374,45 @@ def _render_research_start(data: LongOperationData) -> list[TextContent]:
 @mcp.tool(annotations=MUTATES_REMOTE)
 @domain_error_boundary("gemini_research", logger)
 async def gemini_research(
-    query: str,
+    query: str = "",
     model: str = "flash",
     thinking_level: str = "extended",
     timeout_seconds: int = DEFAULT_RESEARCH_TIMEOUT_SECONDS,
     retain_chat: bool = True,
     delete_after_seconds: Optional[int] = None,
+    action: Literal["start", "status", "result", "cancel"] = "start",
+    operation_id: Optional[str] = None,
+    idempotency_key: Optional[str] = None,
 ) -> list[TextContent]:
-    """Start one Deep Research run asynchronously and return its operation handle.
+    """Start, inspect, retrieve, or request cancellation of Deep Research.
 
-    Use this for multi-source investigation that produces a durable report.
-    The run starts on Gemini Web and this call returns immediately after the
-    upstream research has started, with an opaque high-entropy
-    ``operation_id`` — it never waits for the final report.
-    ``timeout_seconds`` (default 600) bounds only the plan and start phases
-    of that startup: it is clamped to a 30-second floor, and the start phase
-    is additionally capped at 120 seconds. It does not bound the report
-    itself, which can take several minutes after the call has returned. The
-    structured result preserves the upstream operation and chat identifiers
-    (``upstream_operation_id``, ``upstream_chat_id``) with a typed ``state``
-    (``queued`` or ``running``) so the report stays recoverable later; the
-    research chat is retained by default (``retain_chat`` is ``true``)
-    precisely so it is not cleaned up before the report is read. The server
-    keeps no connection-local operation state: the returned identifiers are
-    the only continuation handles. Deep Research requires an AI Plus
-    subscription.
+    ``action=start`` requires query and immediately returns an opaque
+    operation_id. Use ``status``, ``result``, or ``cancel`` with that ID on
+    this or another client. Metadata survives restarts for seven days; report
+    text is saved as a local Artifact, outside the metadata database. Result
+    recovery only reads the existing research chat and never repeats the
+    original query. Missing report evidence stays recoverable. Cancel is
+    best effort: cancel_requested does not claim provider cancellation.
+    Research chats are retained by default and unresolved reports remain
+    protected even when retain_chat=false. Deep Research requires entitlement.
     """
-    result = await _research_service.start(
-        ResearchRequest(
-            query=query,
-            model=model,
-            thinking_level=thinking_level,
-            timeout_seconds=timeout_seconds,
-            retain_chat=retain_chat,
-            delete_after_seconds=delete_after_seconds,
+    if action == "start":
+        result = await _research_service.start(
+            ResearchRequest(
+                query=query,
+                model=model,
+                thinking_level=thinking_level,
+                timeout_seconds=timeout_seconds,
+                retain_chat=retain_chat,
+                delete_after_seconds=delete_after_seconds,
+                idempotency_key=idempotency_key,
+            )
         )
-    )
+    elif not operation_id or not operation_id.strip():
+        return domain_text(_invalid_argument("operation_id is required for this action."),
+                           "operation_id is required for this action.", use_result_data=True)
+    else:
+        result = await getattr(_research_service, action)(operation_id)
     if not result.ok or result.data is None:
         return domain_text(result, domain_failure_text(result), use_result_data=True)
     return attach_domain_result(

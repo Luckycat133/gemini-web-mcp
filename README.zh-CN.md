@@ -41,8 +41,8 @@
 
 ### 🎨 媒体生成
 - **图像**: Flash-Lite 首轮使用 Nano Banana 2 Lite，Flash / Pro 首轮使用 Nano Banana 2；Pro redo 是后续网页操作
-- **视频**: 已验证 Gemini Web 专用 Omni 页面；通用 MCP 视频请求尚未返回可用产物
-- **音乐**: MCP 已保存 MP3 和 MP4；返回结果未标明实际 Lyria 版本，后续一次请求遇到上游技术错误
+- **视频**: 专用 MCP 原生模式已生成并完整解码 1280×720、10 秒 MP4，完成后重启取回通过
+- **音乐**: 专用 MCP 已保存并完整解码约 73 秒 MP3 和配套 MP4，完成后重启取回通过；响应未标明实际 Lyria 版本
 
 ### 💬 对话功能
 - 单次对话（支持图片输入，并可收集 Gemini 上游流）
@@ -64,11 +64,13 @@
 ### 📦 Skill 分发
 - 运行时 skill：`.agents/skills/gemini-web-mcp`（兼容路由）
 - 专注 assistance skill：`.agents/skills/gemini-assist`（第二意见、有据搜索、图像/混合输入理解、异步 Deep Research，入口 `gemini-mcp-assist`）
+- 专注创作 skill：`.agents/skills/gemini-create`（图片/编辑、视频/音乐异步生成与恢复，入口 `gemini-mcp-create`）
+- 专注账号 skill：`.agents/skills/gemini-account`（类型化账号动作与持久化清理，入口 `gemini-mcp-account`）
 - 仓库开发 skill：`.agents/skills/gemini-web-mcp-development`
 - 当前仓库运行时 skill 元数据为 `0.2.2`；可使用 `clawhub install gemini-web-mcp` 安装公开版本，实际版本以 ClawHub 列表为准
 - `.agents/skills` 是唯一仓库来源，避免同时扫描 `.agents` 与 `.codex` 的客户端重复发现同名 skill
 - 各 skill 都可直接从 GitHub 安装，并在 CI 中验证
-- Tag release 工作流构建 standalone skill zip（`gemini-web-mcp` 与 `gemini-assist`）、wheel 和源码包
+- Tag release 工作流构建 standalone skill zip（兼容、assist、create、account 四个 Runtime Skill）、wheel 和源码包
 - `docs/launch-kit.md` 提供社交媒体发布文案和分发清单
 
 ClawHub 上的三文件运行 skill 包按 MIT-0 分发；MCP 服务器源码和仓库开发 skill 继续使用
@@ -111,8 +113,12 @@ pip install browser-cookie3
 
 编辑配置文件 (Claude Desktop):
 - macOS: `~/Library/Application Support/Claude/claude_desktop_config.json`
-- Windows: `%APPDATA%\Claude\claude_desktop_config.json`
+- Windows（仅配置格式参考）：`%APPDATA%\Claude\claude_desktop_config.json`
 - Linux: `~/.config/Claude/claude_desktop_config.json`
+
+当前本地认证服务支持 macOS/Linux；Windows 的私密 SQLite 文件权限机制尚未实现，
+不支持在 Windows 本地运行认证调用。客户端配置格式可参考下例，实际支持范围见
+[客户端和系统验证](docs/client-examples.md#client-and-os-evidence)。
 
 ```json
 {
@@ -162,6 +168,11 @@ GEMINI_TOOLS=all python -m src.server
 
 # 安装后的主入口（等价于 python -m src.server）
 GEMINI_TOOLS=core gemini-mcp-server
+
+# 三个专注入口：按任务选择
+gemini-mcp-assist
+gemini-mcp-create
+gemini-mcp-account
 
 # 安装后的低 token facade 入口
 gemini-mcp-skill-server
@@ -296,10 +307,10 @@ Gemini Web `学习辅导` 输入模式。
 普通对话工具默认按保留时间自动清理网页端对话。需要保留时传入 `retain_chat=true`；需要调整本次调用保留时间时传入 `delete_after_seconds`。
 
 ### 媒体工具
-- `gemini_generate_media`: 图像/音乐生成；`media_type="video"` 仅保留兼容入口，必须检查实际产物
+- `gemini_generate_media`: 图像/视频/音乐生成；显式原生模式仍须实际产物验证
 - `gemini_generate_music`: 音乐生成便捷工具；不要从模型别名推断精确 Lyria 版本
 
-图片/编辑和音乐显式选择网页原生模式，primary 与 compact 默认保存到本地。上游已结束且文件全部验证通过，或响应明确为空时，会立即尝试清理本次新建的源会话，并返回独立删除读回状态。排队、未保存和恢复读取失败会保留会话；primary 可显式保留或延迟。新模式路线仍待账号实测，详见[原生媒体与清理](docs/native-media-mode.md)。
+图片/编辑、视频和音乐显式选择网页原生模式，primary 与 compact 默认保存到本地。上游已结束且文件全部验证通过，或响应明确为空时，会立即尝试清理本次新建的源会话，并返回独立删除读回状态。排队、未保存和恢复读取失败会保留会话；primary 可显式保留或延迟。任务与延迟清理使用本地 metadata-only SQLite，重启可通过同一凭据恢复；当前视频完成状态仍需验证，详见[原生媒体与清理](docs/native-media-mode.md)。
 
 ### 文件和 URL
 - `gemini_upload_file`: 上传并分析本地文件
@@ -483,7 +494,7 @@ mcp dev src/server.py
 primary/compact 间共享 typed result，删除只有在回读确认后才算已验证。2026-08-08 的授权定向测试覆盖
 文本、会话和历史；2026-09-26 的登录 Chrome 定向测试得到 MCP 图片和音乐文件，并从 Gemini Omni 专用
 网页下载视频。通用 MCP 视频请求没有返回视频文件，稍后的音乐重试遇到上游技术错误。两次测试均不等于
-专用账号全量 canary。后续仍需持久化的长任务/清理恢复、更多账号结果验证，以及专注的创作和账号产品。
+专用账号全量 canary。持久化任务/清理恢复、账号动作类型化与专注创作/账号产品现已实现；当前原生 MCP 视频产物及专用账号全量 live 基线仍需验证。详见[任务与清理](docs/operations-and-cleanup.md)。
 当前包与 Skill 元数据为 `0.2.2`；2026-09-26 定向实测带来的改动记在 Changelog 的 `0.2.2` 节。
 
 完整的“已实现 / 部分完成 / 延后 / owner 决策”边界见

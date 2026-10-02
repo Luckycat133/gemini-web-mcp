@@ -1,5 +1,9 @@
 # Full Review Repairs — 2026-10-02
 
+The counts and pending checks in the original sections below describe their
+dated revisions. The [2026-10-03 focused delivery review](#focused-delivery-review--2026-10-03)
+records the current follow-up.
+
 The full review identified 26 product findings and two compatibility issues in the vendored evaluator. Repairs preserve public tool names and delegate shared behavior to services/lifecycle owners. The release remains `0.2.2` preparation until the release PR passes review.
 
 ## Finding map
@@ -93,3 +97,36 @@ Independent reviewers reproduced recovery, thumbnail and queued-output defects b
 | Isolated onboarding | `uvx` wheel preflight passed with `credentials_accessed=false` |
 
 Signed-in generation/deletion acceptance for the new native path remains **NOT_RUN**: Chrome data access was denied by macOS, and browser control later encountered the locked Mac. No old test-chat deletion was positively verified in this pass. The [dated live results](live-ui-coverage.md) and [native source evidence](native-media-mode.md) remain distinct.
+
+## Focused delivery review — 2026-10-03
+
+Independent reviewers examined shared services, durable operations and cleanup,
+account mutation evidence, focused adapters, Skills and distribution. All
+confirmed reproducible findings were repaired and independently rechecked
+within the supported POSIX runtime.
+
+| Finding | Repair | Regression evidence |
+| --- | --- | --- |
+| Research hidden SDK retries | Native plan/start/fallback and report follow-up submit at most once. Streamed source metadata survives SDK rollback. Polling reads existing reports after its one follow-up. | `test_research_transport.py`, actual SDK construction with sealed transport; independently reproduced six submissions reduced to one |
+| Repeated media recovery downloads | Re-probe and reuse matching local artifacts; download missing/corrupt files and missing music companions only. Preserve queued state and source retention. | `test_creation_service.py`; independently reproduced three downloads/files reduced to one |
+| Onboarding start-response loss | Preserve the generated idempotency key and any observed handle through transport, parsing, verification and shutdown failures. Report completion only after independent file verification. | `test_onboarding_media.py`; original sealed response-loss repro now returns the start key after one call |
+| Filesystem support boundary | Private state creation requires POSIX ownership/no-follow APIs and fails with a typed error before writing when unavailable. Windows authenticated runtime is explicitly unsupported. | `test_operation_service.py`; independent missing-API repro; Windows installation/ACL verification remains NOT_RUN |
+
+Final source gates passed: Ruff, Mypy (80 source files), 2,234 offline tests and
+358 architecture/distribution checks. Reviewer test groups overlap and are
+not added to these totals. The SDK submission-count checks use sealed transport
+and make no provider calls.
+
+Fresh agent handoffs exercised realistic mixed-intent and near-miss tasks;
+stale compatibility-router instructions were corrected. The static routing
+fixtures and these handoffs are separate from a measured model-backed trigger
+score. A local downstream product-card preview reused independently verified
+image artifacts with unchanged hashes; see [handoff evidence](../compatibility/focused-agent-handoff-20261003.md).
+
+Bounded authorized focused MCP tests independently decoded image/edit JPEGs,
+music MP3 plus companion MP4, and a native video MP4. Completed music/video
+operations returned their original files after restart. Nineteen exactly
+identified, owned test-chat deletions were positively verified across the
+dated runs. Dedicated-account canaries, unfinished provider recovery after a
+hard crash and current live Research/account mutation coverage remain separate
+in [development status](development-status.md).

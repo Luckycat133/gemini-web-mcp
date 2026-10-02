@@ -24,6 +24,8 @@ class DomainErrorCode(str, Enum):
     RATE_LIMITED = "RATE_LIMITED"
     TIMED_OUT = "TIMED_OUT"
     CANCELLED = "CANCELLED"
+    OPERATION_NOT_FOUND = "OPERATION_NOT_FOUND"
+    OPERATION_EXPIRED = "OPERATION_EXPIRED"
     ARTIFACT_NOT_RETURNED = "ARTIFACT_NOT_RETURNED"
     ARTIFACT_SAVE_FAILED = "ARTIFACT_SAVE_FAILED"
     VERIFICATION_FAILED = "VERIFICATION_FAILED"
@@ -37,7 +39,9 @@ class OperationState(str, Enum):
     COMPLETED = "completed"
     PARTIAL = "partial"
     TIMED_OUT = "timed_out"
+    CANCEL_REQUESTED = "cancel_requested"
     CANCELLED = "cancelled"
+    EXPIRED = "expired"
     FAILED = "failed"
     UNAVAILABLE = "unavailable"
 
@@ -116,6 +120,7 @@ class DomainResult(Generic[T]):
             OperationState.TIMED_OUT,
             OperationState.CANCELLED,
             OperationState.UNAVAILABLE,
+            OperationState.EXPIRED,
         }
         if self.ok and self.meta.operation_state in failed_states:
             raise ValueError("successful DomainResult cannot use a failure operation state")
@@ -270,6 +275,20 @@ _Classification = tuple[DomainErrorCode, str, bool, str | None, OperationState]
 _TextRule = tuple[Callable[[str, str], bool], _Classification]
 
 
+def _curl_transport_type(error: BaseException, name: str) -> bool:
+    # Keep domain imports independent of the optional transport package while
+    # recognizing its typed errors rather than guessing from private messages.
+    return any(base.__module__ == "curl_cffi.requests.exceptions" and base.__name__ == name
+               for base in type(error).__mro__)
+
+
+def is_transient_transport_error(error: BaseException) -> bool:
+    """Recognize typed connection/time-out errors without inspecting private text."""
+    return isinstance(error, (ConnectionError, TimeoutError)) or any(
+        _curl_transport_type(error, name) for name in ("ConnectionError", "Timeout")
+    )
+
+
 def _exception_type_classification(error: BaseException) -> _Classification | None:
     if isinstance(error, asyncio.CancelledError):
         return (
@@ -279,7 +298,7 @@ def _exception_type_classification(error: BaseException) -> _Classification | No
             "Retry the operation if it is still needed.",
             OperationState.CANCELLED,
         )
-    if isinstance(error, TimeoutError):
+    if isinstance(error, TimeoutError) or _curl_transport_type(error, "Timeout"):
         return (
             DomainErrorCode.TIMED_OUT,
             "The upstream operation timed out.",
@@ -303,7 +322,7 @@ def _exception_type_classification(error: BaseException) -> _Classification | No
             "Correct the arguments and retry.",
             OperationState.FAILED,
         )
-    if isinstance(error, ConnectionError):
+    if isinstance(error, ConnectionError) or _curl_transport_type(error, "ConnectionError"):
         return (
             DomainErrorCode.NETWORK_ERROR,
             "The upstream service could not be reached.",

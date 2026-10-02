@@ -1,8 +1,8 @@
 ---
 name: gemini-web-mcp
-description: "Use this skill when an agent should extend itself with Gemini Web: get a second opinion, search current web sources, understand images/files/URLs, run Deep Research, generate image/video/music artifacts, edit images, or explicitly work with Gemini account data. Route by user intent instead of loading every tool. This skill is the compatibility router; prefer the focused gemini-assist skill when only assistance and understanding are needed. Do not use for repository implementation, tests, CI, packaging, or releases—use gemini-web-mcp-development instead."
+description: "Use this skill when an agent should extend itself with Gemini Web: get a second opinion, search current web sources, understand images/files/URLs, run Deep Research, generate image/video/music artifacts, edit images, or explicitly work with Gemini account data. This is the compatibility router: prefer gemini-assist for assistance/understanding, gemini-create for creation, and gemini-account for explicit account work. Do not use for repository implementation, tests, CI, packaging, or releases—use gemini-web-mcp-development instead."
 license: MIT-0
-compatibility: "Requires Python 3.11+ and a connected Gemini Web MCP server. The focused assist server handles assistance, files, URLs, and Deep Research; compatibility servers cover chat, image/music generation, and explicit account work. Video currently uses Gemini Web's dedicated browser mode. Live calls require Gemini Web account Cookies."
+compatibility: "Requires Python 3.11+ and a connected Gemini Web MCP server. The focused assist server handles assistance, files, URLs, and Deep Research; focused create/account servers cover media creation, durable recovery and explicit account work; compatibility servers retain their existing tools. Live calls require Gemini Web account Cookies."
 metadata:
   version: "0.2.2"
   openclaw:
@@ -55,17 +55,17 @@ Choose the next capability for the user's task; switch lanes when the task needs
 | Quick current-web lookup | focused `gemini_search`; fallback chat with an explicit sourcing request | `grounded` only with structured source evidence; verify any links in answer text before citing them |
 | Understand one image or screenshot | focused `gemini_understand_image`; fallback compact or primary image chat | analysis returned to the agent and used in the surrounding task |
 | Understand files, URLs, or mixed evidence | focused `gemini_understand`; fallback primary file/URL/image tools | each source identity and outcome preserved before synthesis |
-| Deep, multi-source research | dedicated `gemini_research`; primary `gemini_deep_research(wait_for_completion=false, retain_chat=true)` | preserve the upstream chat ID for later report retrieval; the dedicated tool also returns a local correlation ID |
-| Generate or edit images | low-token `create(type="image")` / `edit`; primary `gemini_generate_media(..., output_dir=...)` for a chosen destination | a decoded local image Artifact; an empty reply or a search image is insufficient |
-| Generate music | low-token `create(type="music")` or primary media tools | use a verified audio/video Artifact; do not infer the exact Lyria version from a model alias |
-| Generate video | Gemini Web's dedicated [Videos page](https://gemini.google.com/videos) in an authorized browser | use the finished video file; the current generic MCP video path returned no Artifact in the 2026-09-26 live check |
-| History, Notebook, Scheduled, Gem, Prompt, usage, or cleanup | compact account facades where supported; otherwise a narrow primary profile | only the explicitly requested account operation is performed |
+| Deep, multi-source research | dedicated `gemini_research`; primary `gemini_deep_research(wait_for_completion=false, retain_chat=true)` | preserve the upstream chat ID for later report retrieval; the dedicated tool returns an opaque restart-safe handle with status/result/cancel actions |
+| Generate or edit images | focused `gemini_generate_image` / `gemini_edit_image`; compact `create` / `edit` and primary media tools remain compatible | a decoded local image Artifact; an empty reply or a search image is insufficient |
+| Generate music | focused `gemini_generate_music`; compact `create(type="music")` or primary media tools remain compatible | use a verified audio/video Artifact; do not infer the exact Lyria version from a model alias |
+| Generate video | focused `gemini_generate_video` with native mode selection | recover the same operation and use a verified video file; prose or image output is insufficient |
+| History, Notebook, Scheduled, Gem, Prompt, usage, or cleanup | focused `gemini-account` seven facades; compact or narrow primary profiles remain compatible | only the explicitly requested account operation is performed |
 
 Load [workflows.md](references/workflows.md) for detailed task routes.
 
 ## Default Server Choice
 
-Use `gemini-mcp-assist` for assistance and understanding. Use `gemini-mcp-skill-server` for a compact compatibility surface when it can complete generation or explicit account work.
+Use `gemini-mcp-assist` for assistance and understanding, `gemini-mcp-create` for media creation, and `gemini-mcp-account` for explicit account work. Use `gemini-mcp-skill-server` when a compact compatibility workflow is needed.
 
 Use the primary server only for a narrow profile:
 
@@ -79,7 +79,7 @@ Use the primary server only for a narrow profile:
 
 Do not use `GEMINI_TOOLS=all` as a general-agent default.
 
-The repository is migrating toward three dedicated products. `gemini-assist` is now implemented as the dedicated `gemini-mcp-assist` server (`gemini_ask`, `gemini_search`, `gemini_understand_image`, `gemini_understand`, `gemini_research`) with its own `gemini-assist` Skill; `gemini-create` and `gemini-account` are not implemented yet. This Skill remains the compatibility router until they land.
+The three focused products are installed: `gemini-assist` (five tools), `gemini-create` (seven tools) and `gemini-account` (seven action facades), each with its own Runtime Skill and console entrypoint. This Skill remains their compatibility router.
 
 The Skill supplies routing instructions; an MCP server must also be connected. If no Gemini tools are available, load [recovery.md](references/recovery.md) for a credential-free connection check and client setup. Do not ask for Cookie values in chat or put them in command arguments.
 
@@ -112,10 +112,10 @@ Generation normally returns an Artifact. The agent should pass that file or URI 
 
 A path, URI, or success sentence alone is not completion. Load [artifacts.md](references/artifacts.md) for acceptance and handoff rules.
 
-Creation tools select Gemini Web's native image/music feature mode. Primary and
+Creation tools select Gemini Web's native image/video/music feature mode. Primary and
 compact generation save and verify outputs; compact uses `generated_media/` in
 the server's working directory. The Web backend still chooses the effective
-media model. This route needs live verification after upstream changes.
+media model. Re-verify actual artifacts after upstream changes; mode selection alone is not generation evidence.
 
 For a newly created source chat, finished operations with verified local outputs
 and definitive empty responses use immediate, bounded cleanup by default. Inspect
@@ -123,17 +123,19 @@ and definitive empty responses use immediate, bounded cleanup by default. Inspec
 positive absence read-back confirms removal. `pending`, `failed`, or `cancelled`
 requires follow-up. Failed recovery reads, remote-only, queued, timed-out, and partially saved results
 keep their source chat for recovery. Primary callers can explicitly choose
-`retain_chat=true` or `delete_after_seconds`; delayed jobs remain in memory.
+`retain_chat=true` or `delete_after_seconds`; registered delayed cleanup jobs
+survive restart in authentication-scoped SQLite metadata. Pending cleanup
+authority can be renewed until resolved, independently of operation expiry.
 Preserve the local file before deleting a disposable test's source chat. Use
 its recorded ID, with the user's authorization, instead of broad account scans.
 
 ## Long Operations
 
-Deep Research, video, and music can take a long time. Start Deep Research without waiting for completion. Current music compatibility tools may wait for the upstream response or return a queued state; they do not provide a durable operation handle. Use Gemini's dedicated Videos page for video until a verified MCP video route is available.
+Deep Research, video, and music can take a long time. Start Deep Research without waiting for completion. Focused Research, video and music start asynchronously and return opaque operation handles. Use focused creation for the implemented native video/music routes. Native mode selection is routing evidence; a live request succeeds only when actual matching artifacts are returned and verified. Compatibility music/video calls may wait for the upstream response or return a queued state and do not provide durable operation handles.
 
 Preserve every returned `operation_id`, `upstream_operation_id`, `upstream_chat_id`, and Artifact identity. Do not start a duplicate operation merely because one MCP call timed out.
 
-There is currently no `status`, `result`, or `cancel` tool for a local operation ID. The dedicated Research ID is a correlation ID, not a queryable recovery handle. Retain `upstream_chat_id` and inspect that chat later; a completed report may require the primary report extraction tool. The target contract is an opaque, restart-safe handle stored in local SQLite with no prompt, chat, Cookie, or raw-response content.
+Focused Research exposes action=status/result/cancel on its opaque, restart-safe handle. Focused creation exposes gemini_get_operation_status/result and gemini_cancel_operation. Shared local SQLite metadata lasts seven days and stores no prompt, chat/report, Cookie or raw-response content. Recover known locators and never duplicate a timed-out start. A local_cancelled_before_start verification proves cancellation before provider submission; submitted work remains cancel_requested unless provider cancellation is confirmed.
 
 Load [operations.md](references/operations.md) before running or recovering a long operation.
 
