@@ -11,6 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.2.2] - 2026-09-27
 
+This section records release preparation in
+[PR #34](https://github.com/Luckycat133/gemini-web-mcp/pull/34).
+Publication still requires review and merge.
+
 ### Added
 - Added seven-tool `gemini-mcp-create` and seven-facade `gemini-mcp-account` servers with direct typed output schemas, focused Runtime Skills, installation examples and release assets. Primary/compact creation delegates to the shared CreationService.
 - Added metadata-only SQLite operation/cleanup recovery, opaque handles, optional idempotency keys, seven-day operation retention, credential-lineage isolation, transactional claims, renewable leases and CAS. Saved Artifact locators are retained before source cleanup; interruption never resubmits generation.
@@ -53,7 +57,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Raised the supported `gemini-webapi` minimum to `2.1.1`, the version exercised by current live media acceptance, for dynamic model discovery, incomplete-stream recovery and sparse music-card parsing. The dependency contract and compatibility matrix match the installation requirement.
 - Shared primary/compact media requests, recovery, saves and verification in `services/media_generation.py`. Compact creation/editing now saves verified local artifacts by default. Runtime and development Skills document the resulting recovery and cleanup policy.
 - Routed the compatibility Runtime Skill through focused assistance, creation and explicit-account surfaces, retaining compact and narrow primary compatibility paths. Aligned recovery/source/artifact instructions with observed behavior and added a credential-free MCP connection check.
-- Required manual test-chat cleanup through MCP tools, preferring host-connected tools and keeping browser/direct SDK diagnostics separate from MCP acceptance evidence.
+- Verified exact owned test-chat cleanup through focused account and compatibility MCP calls with positive deletion read-back.
 - Centralized the music chat read-back RPC and its four response-shape fixtures in the infrastructure contract/parser boundary, with shared media handling for primary and compact surfaces.
 - Added bounded concurrent isolated profile probes and covered the documented `core` surface in local and CI protocol checks.
 

@@ -68,9 +68,12 @@ npx --yes skills@1.5.21 add \
 
 The two roles are intentionally separate: `gemini-web-mcp` is for tool use; `gemini-web-mcp-development` owns implementation, tests, packaging, compatibility, and releases. `.agents/skills` is the single repository source so clients that scan both `.agents` and `.codex` do not discover duplicate names.
 
-Changes listed under **Unreleased** are available from the current repository source; a published Skill listing may lag behind `main` until its next release.
+`0.2.2` is in release preparation in [PR #34](https://github.com/Luckycat133/gemini-web-mcp/pull/34).
+Its changes are on `codex/release-v0.2.2`; use that branch or a specific commit
+to test them before merge. The default installation examples use `main`.
+Public Skill listings may have an earlier version.
 
-The three-file runtime skill bundle is released on ClawHub under MIT-0. The MCP server source and the
+The runtime Skill bundles use MIT-0. The MCP server source and the
 repository-development skill remain [AGPL-3.0-only](LICENSE).
 
 ## Install The MCP Server

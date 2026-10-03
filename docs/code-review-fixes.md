@@ -178,6 +178,15 @@ headings, dates or a fixed number of routing examples. Both Skill validators,
 29 targeted tests and 345 architecture/distribution checks passed. The pinned
 Skills CLI copied all five packages with source-identical file contents.
 
+The consolidated implementation at `dc2ade5` passed the complete offline
+suite: 2,234 tests locally and on hosted Python 3.11/3.12. The
+[CI run](https://github.com/Luckycat133/gemini-web-mcp/actions/runs/37086461479)
+also passed static checks, the 345 architecture/distribution cases, real
+stdio, Skill installation and clean-wheel/uvx checks;
+[CodeQL Analysis](https://github.com/Luckycat133/gemini-web-mcp/actions/runs/37086461487)
+passed separately. The lower counts follow removal/consolidation of
+prose-dependent Skill tests; runtime regressions remain covered.
+
 An independent agent exercised eight offline tasks involving mixed intent,
 artifact handoff, operation recovery, mutation read-back, local cleanup and
 repository work. Its five proposed MCP requests passed actual schema
