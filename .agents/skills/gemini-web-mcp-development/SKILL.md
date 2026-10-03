@@ -237,6 +237,15 @@ git diff --check
 
 Do not claim a live capability from fixtures, package smoke, a skipped canary, or generated prose alone.
 
+Run authorized generation and manual test-chat cleanup through MCP tools.
+Prefer the host's connected tools; an actual stdio MCP client is valid for
+installation or unconnected-surface verification. For registered cleanup jobs,
+use `gemini_cleanup` with the known `job_id`; for known owned chats, use
+`gemini_history` delete or the primary/compact compatibility tool. Browser
+deletion and direct agent-side SDK/RPC calls are separate diagnostic evidence,
+not MCP acceptance. Automatic source cleanup remains owned by the server's
+shared lifecycle service.
+
 For authorized generation tests on an everyday account, record each source
 chat ID when returned. Save and verify the artifact before cleanup; inspect
 the deletion read-back and finish cleanup of disposable test chats by those
