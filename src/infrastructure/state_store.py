@@ -23,6 +23,8 @@ from ..domain import Artifact, ArtifactKind, ArtifactState, ArtifactVerification
 
 RETENTION_SECONDS = 7 * 24 * 60 * 60
 SCHEMA_VERSION = 3
+_INITIALIZATION_TIMEOUT_SECONDS = 3.0
+_INITIALIZATION_RETRY_INTERVAL_SECONDS = 0.01
 _IDENTIFIER = re.compile(r"^[A-Za-z0-9_:\-]{1,256}$")
 _LABEL = re.compile(r"^[A-Za-z0-9_.:\-]{1,96}$")
 _CLEANUP_STATES = {"pending", "running", "completed", "failed", "retained", "cancelled"}
@@ -150,6 +152,36 @@ class StateStore:
         else:
             os.close(fd)
 
+    @staticmethod
+    def _begin_transaction(connection: sqlite3.Connection) -> None:
+        """Acquire SQLite initialization locks before exposing the transaction.
+
+        journal_mode can return SQLITE_BUSY immediately when another fresh
+        connection owns a lock, even with the connection's busy timeout. Retry
+        only these pre-body statements under one monotonic budget. Schema
+        migrations, caller statements and COMMIT are never replayed.
+        """
+        deadline = time.monotonic() + _INITIALIZATION_TIMEOUT_SECONDS
+        connection.execute("PRAGMA busy_timeout=0").close()
+        for statement in ("PRAGMA secure_delete=ON", "PRAGMA journal_mode=WAL", "BEGIN IMMEDIATE"):
+            while True:
+                try:
+                    cursor = connection.execute(statement)
+                except sqlite3.OperationalError as error:
+                    code = getattr(error, "sqlite_errorcode", 0)
+                    remaining = deadline - time.monotonic()
+                    if code & 0xFF != sqlite3.SQLITE_BUSY or remaining <= 0:
+                        raise
+                    time.sleep(min(_INITIALIZATION_RETRY_INTERVAL_SECONDS, remaining))
+                    if time.monotonic() >= deadline:
+                        raise
+                else:
+                    cursor.close()
+                    break
+        # Preserve the original SQLite lock wait for migrations/caller SQL;
+        # the explicit initialization loop must not add another such wait.
+        connection.execute("PRAGMA busy_timeout=3000").close()
+
     @contextmanager
     def transaction(self) -> Iterator[sqlite3.Connection]:
         with self._lock:
@@ -157,9 +189,7 @@ class StateStore:
             connection = sqlite3.connect(self.path, timeout=3, isolation_level=None)
             connection.row_factory = sqlite3.Row
             try:
-                connection.execute("PRAGMA secure_delete=ON")
-                connection.execute("PRAGMA journal_mode=WAL")
-                connection.execute("BEGIN IMMEDIATE")
+                self._begin_transaction(connection)
                 version = int(connection.execute("PRAGMA user_version").fetchone()[0])
                 if version > SCHEMA_VERSION:
                     raise StateStoreError("State database schema is newer than this installation.")
