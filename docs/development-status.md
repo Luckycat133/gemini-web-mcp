@@ -80,9 +80,14 @@ an unfinished provider generation after an arbitrary hard crash.
 
 Offline regressions, real modern/legacy MCP stdio, clean-wheel installation,
 Skill validation/direct installation and realistic agent handoffs are separate
-gates. The prior full review and media repair evidence is recorded in
-[review fixes](code-review-fixes.md); its passing counts describe that earlier
-revision. Current gate results belong to the delivery commit/CI run.
+gates. The dated full review, media repairs and latest Skill consolidation
+evidence are recorded in [review fixes](code-review-fixes.md). Implementation
+snapshot `dc2ade5` passed 2,234 offline tests on both Python 3.11 and 3.12,
+345 architecture/distribution checks, static checks, real stdio, Skill
+installation and clean-wheel/uvx checks in
+[CI](https://github.com/Luckycat133/gemini-web-mcp/actions/runs/37086461479).
+[CodeQL](https://github.com/Luckycat133/gemini-web-mcp/actions/runs/37086461487)
+also passed. Historical counts describe their own revisions.
 
 The first supported distribution is the installed Python wheel/uvx stdio path.
 The evidence-backed client/OS scope is listed in

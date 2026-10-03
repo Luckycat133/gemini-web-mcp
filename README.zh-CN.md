@@ -73,9 +73,11 @@
 - Tag release 工作流构建 standalone skill zip（兼容、assist、create、account 四个 Runtime Skill）、wheel 和源码包
 - `docs/launch-kit.md` 提供社交媒体发布文案和分发清单
 
-ClawHub 上的三文件运行 skill 包按 MIT-0 分发；MCP 服务器源码和仓库开发 skill 继续使用
+运行时 Skill 包按 MIT-0 分发；MCP 服务器源码和仓库开发 Skill 继续使用
 [AGPL-3.0-only](LICENSE)。
-当前仓库 `Unreleased` 的改动可从 `main` 或指定 commit 安装；公开 Skill 列表可能要到下次发布才同步。
+`0.2.2` 目前在 [PR #34](https://github.com/Luckycat133/gemini-web-mcp/pull/34) 中准备发布。
+这些改动位于 `codex/release-v0.2.2`；合并前测试请使用该分支或指定 commit。
+默认安装示例使用 `main`，公开 Skill 列表可能仍是较早版本。
 
 ---
 
