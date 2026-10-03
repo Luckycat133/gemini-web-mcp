@@ -2,10 +2,15 @@
 
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
+import multiprocessing
 import os
+import sqlite3
+import threading
+from types import SimpleNamespace
 
 import pytest
 
+import src.infrastructure.state_store as state_module
 from src.domain import Artifact, ArtifactKind, ArtifactState, OperationState
 from src.infrastructure.state_store import (
     RETENTION_SECONDS, SCHEMA_VERSION, ArtifactLocator, CleanupJobRecord,
@@ -23,6 +28,47 @@ def _operation(**changes):
 
 def _cleanup(**changes):
     return replace(CleanupJobRecord("job_test", "scope_a", "c_test", "pending", 10, 10, 10, 10 + RETENTION_SECONDS), **changes)
+
+
+def _create_in_process_after_busy(path, index, ready, busy, results):
+    """Independent spawned SQLite client; every other I/O path is absent."""
+    original_connect = sqlite3.connect
+
+    class ObservedConnection(sqlite3.Connection):
+        def execute(self, statement, *args, **kwargs):
+            try:
+                return super().execute(statement, *args, **kwargs)
+            except sqlite3.OperationalError as error:
+                if error.sqlite_errorcode & 0xFF == sqlite3.SQLITE_BUSY:
+                    busy.set()
+                raise
+
+    state_module.sqlite3.connect = lambda *args, **kwargs: original_connect(*args, **kwargs, factory=ObservedConnection)
+    try:
+        ready.wait(timeout=10)
+        record, created = _store(path).operations.create(_operation(operation_id=f"op_{index}", idempotency_key="opaque_same_key"))
+        results.put(("ok", record.operation_id, created))
+    except Exception as error:
+        results.put(("error", type(error).__name__, False))
+    finally:
+        state_module.sqlite3.connect = original_connect
+
+
+def _sqlite_error(code):
+    error = sqlite3.OperationalError("private-sql-argument-must-not-be-exposed")
+    error.sqlite_errorcode = code
+    return error
+
+
+def _virtual_initialization_clock(monkeypatch):
+    now, waits = [0.0], []
+
+    def sleep(duration):
+        waits.append(duration)
+        now[0] += duration
+
+    monkeypatch.setattr(state_module, "time", SimpleNamespace(monotonic=lambda: now[0], sleep=sleep))
+    return now, waits
 
 
 def test_lazy_private_store_and_stable_anonymous_identity(tmp_path):
@@ -106,6 +152,205 @@ def test_two_connections_create_one_idempotent_operation(tmp_path):
     assert len({record.operation_id for record, _created in results}) == 1
     with pytest.raises(ValueError, match="another operation kind"):
         _store(path).operations.create(_operation(operation_id="op_other", operation_type="video", idempotency_key="opaque_same_key"))
+
+
+@pytest.mark.parametrize("existing_wal", [False, True])
+def test_initialization_waits_for_real_sqlite_lock_before_body(tmp_path, monkeypatch, existing_wal):
+    store = _store(tmp_path / "state.sqlite3")
+    store._prepare()
+    original_connect = sqlite3.connect
+    blocker = original_connect(store.path, timeout=0, isolation_level=None)
+    if existing_wal:
+        blocker.execute("PRAGMA journal_mode=WAL").close()
+    blocker.execute("BEGIN IMMEDIATE")
+    busy, errors, body_calls = threading.Event(), [], []
+
+    class ObservedConnection(sqlite3.Connection):
+        def execute(self, statement, *args, **kwargs):
+            try:
+                return super().execute(statement, *args, **kwargs)
+            except sqlite3.OperationalError as error:
+                errors.append((statement, error.sqlite_errorcode))
+                busy.set()
+                raise
+
+    monkeypatch.setattr(state_module.sqlite3, "connect", lambda *args, **kwargs: original_connect(*args, **kwargs, factory=ObservedConnection))
+
+    def enter():
+        with store.transaction() as connection:
+            body_calls.append("entered")
+            assert connection.execute("PRAGMA secure_delete").fetchone()[0] == 1
+            assert connection.execute("PRAGMA journal_mode").fetchone()[0] == "wal"
+            assert connection.execute("PRAGMA busy_timeout").fetchone()[0] == 3000
+
+    try:
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            future = pool.submit(enter)
+            try:
+                assert busy.wait(timeout=5)
+                assert body_calls == []
+                assert not future.done()
+            finally:
+                blocker.execute("COMMIT")
+            future.result(timeout=5)
+    finally:
+        blocker.close()
+    expected = "BEGIN IMMEDIATE" if existing_wal else "PRAGMA journal_mode=WAL"
+    assert errors and {statement for statement, _code in errors} == {expected}
+    assert all(code & 0xFF == sqlite3.SQLITE_BUSY for _statement, code in errors)
+    assert body_calls == ["entered"]
+
+
+def test_first_initialization_and_idempotency_across_spawned_processes(tmp_path):
+    store = _store(tmp_path / "state.sqlite3")
+    store._prepare()
+    blocker = sqlite3.connect(store.path, timeout=0, isolation_level=None)
+    blocker.execute("BEGIN IMMEDIATE")
+    context = multiprocessing.get_context("spawn")
+    ready, busy = context.Barrier(3), [context.Event(), context.Event()]
+    results = context.Queue()
+    workers = [context.Process(target=_create_in_process_after_busy,
+                               args=(store.path, index, ready, busy[index], results)) for index in range(2)]
+    try:
+        for worker in workers:
+            worker.start()
+        ready.wait(timeout=10)
+        try:
+            assert all(event.wait(timeout=5) for event in busy)
+        finally:
+            blocker.execute("COMMIT")
+        received = [results.get(timeout=10) for _ in workers]
+        for worker in workers:
+            worker.join(timeout=10)
+            assert worker.exitcode == 0
+        assert all(status == "ok" for status, _operation_id, _created in received)
+        assert sum(created for _status, _operation_id, created in received) == 1
+        assert len({operation_id for _status, operation_id, _created in received}) == 1
+        with store.transaction() as connection:
+            assert connection.execute("SELECT COUNT(*) FROM operations").fetchone()[0] == 1
+    finally:
+        blocker.close()
+        for worker in workers:
+            if worker.is_alive():
+                worker.terminate()
+            if worker.pid is not None:
+                worker.join(timeout=10)
+        results.close()
+        results.join_thread()
+
+
+@pytest.mark.parametrize("code", [sqlite3.SQLITE_BUSY, sqlite3.SQLITE_BUSY_RECOVERY])
+def test_initialization_retries_only_busy_family_before_body(tmp_path, monkeypatch, code):
+    _now, waits = _virtual_initialization_clock(monkeypatch)
+    original_connect, attempts, bodies = sqlite3.connect, [], []
+
+    class BusyOnceConnection(sqlite3.Connection):
+        def execute(self, statement, *args, **kwargs):
+            attempts.append(statement)
+            if statement == "PRAGMA journal_mode=WAL" and attempts.count(statement) == 1:
+                raise _sqlite_error(code)
+            return super().execute(statement, *args, **kwargs)
+
+    monkeypatch.setattr(state_module.sqlite3, "connect", lambda *args, **kwargs: original_connect(*args, **kwargs, factory=BusyOnceConnection))
+    with _store(tmp_path / "state.sqlite3").transaction():
+        bodies.append("entered")
+    assert attempts.count("PRAGMA journal_mode=WAL") == 2
+    assert attempts.count("PRAGMA secure_delete=ON") == 1
+    assert attempts.count("BEGIN IMMEDIATE") == 1
+    assert attempts.count("COMMIT") == 1
+    assert waits and bodies == ["entered"]
+
+
+@pytest.mark.parametrize("code", [sqlite3.SQLITE_LOCKED, sqlite3.SQLITE_CORRUPT])
+def test_nonbusy_initialization_errors_fail_immediately_and_safely(tmp_path, monkeypatch, code):
+    _now, waits = _virtual_initialization_clock(monkeypatch)
+    original_connect, attempts, bodies = sqlite3.connect, [], []
+
+    class BrokenConnection(sqlite3.Connection):
+        def execute(self, statement, *args, **kwargs):
+            if statement == "PRAGMA journal_mode=WAL":
+                attempts.append(statement)
+                raise _sqlite_error(code)
+            return super().execute(statement, *args, **kwargs)
+
+    monkeypatch.setattr(state_module.sqlite3, "connect", lambda *args, **kwargs: original_connect(*args, **kwargs, factory=BrokenConnection))
+    with pytest.raises(StateStoreError) as raised, _store(tmp_path / "state.sqlite3").transaction():
+        bodies.append("entered")
+    assert len(attempts) == 1
+    assert waits == [] and bodies == []
+    assert "private-sql" not in str(raised.value)
+
+
+@pytest.mark.parametrize("statement", ["PRAGMA secure_delete=ON", "PRAGMA journal_mode=WAL", "BEGIN IMMEDIATE"])
+def test_initialization_busy_wait_has_one_bounded_budget(tmp_path, monkeypatch, statement):
+    now, waits = _virtual_initialization_clock(monkeypatch)
+    original_connect, attempts, bodies = sqlite3.connect, [], []
+
+    class AlwaysBusyConnection(sqlite3.Connection):
+        def execute(self, sql, *args, **kwargs):
+            if sql == statement:
+                attempts.append(sql)
+                raise _sqlite_error(sqlite3.SQLITE_BUSY)
+            return super().execute(sql, *args, **kwargs)
+
+    monkeypatch.setattr(state_module.sqlite3, "connect", lambda *args, **kwargs: original_connect(*args, **kwargs, factory=AlwaysBusyConnection))
+    with pytest.raises(StateStoreError) as raised, _store(tmp_path / "state.sqlite3").transaction():
+        bodies.append("entered")
+    assert len(attempts) > 1
+    assert now[0] == pytest.approx(state_module._INITIALIZATION_TIMEOUT_SECONDS)
+    assert sum(waits) == pytest.approx(state_module._INITIALIZATION_TIMEOUT_SECONDS)
+    assert bodies == []
+    assert "private-sql" not in str(raised.value)
+
+
+def test_initialization_budget_is_shared_across_journal_and_begin(tmp_path, monkeypatch):
+    now, waits = _virtual_initialization_clock(monkeypatch)
+    original_connect, begin_attempts, bodies = sqlite3.connect, [], []
+
+    class DelayedConnection(sqlite3.Connection):
+        def execute(self, statement, *args, **kwargs):
+            if statement == "PRAGMA journal_mode=WAL" and now[0] < 2:
+                raise _sqlite_error(sqlite3.SQLITE_BUSY)
+            if statement == "BEGIN IMMEDIATE":
+                begin_attempts.append(statement)
+                raise _sqlite_error(sqlite3.SQLITE_BUSY)
+            return super().execute(statement, *args, **kwargs)
+
+    monkeypatch.setattr(state_module.sqlite3, "connect", lambda *args, **kwargs: original_connect(*args, **kwargs, factory=DelayedConnection))
+    with pytest.raises(StateStoreError), _store(tmp_path / "state.sqlite3").transaction():
+        bodies.append("entered")
+    assert begin_attempts and bodies == []
+    assert sum(waits) == pytest.approx(state_module._INITIALIZATION_TIMEOUT_SECONDS)
+
+
+@pytest.mark.parametrize("failure_phase", ["body", "commit"])
+def test_busy_after_transaction_entry_never_replays_body_and_rolls_back(tmp_path, monkeypatch, failure_phase):
+    store = _store(tmp_path / "state.sqlite3")
+    store.operations.create(_operation())
+    _now, waits = _virtual_initialization_clock(monkeypatch)
+    original_connect, connections, body_calls = sqlite3.connect, [], []
+
+    class CommitBusyConnection(sqlite3.Connection):
+        def execute(self, statement, *args, **kwargs):
+            if statement == "COMMIT" and failure_phase == "commit":
+                raise _sqlite_error(sqlite3.SQLITE_BUSY)
+            return super().execute(statement, *args, **kwargs)
+
+    def connect(*args, **kwargs):
+        connection = original_connect(*args, **kwargs, factory=CommitBusyConnection)
+        connections.append(connection)
+        return connection
+
+    with monkeypatch.context() as context:
+        context.setattr(state_module.sqlite3, "connect", connect)
+        with pytest.raises(StateStoreError), store.transaction() as connection:
+            body_calls.append("entered")
+            connection.execute("UPDATE operations SET attempt_count=99")
+            if failure_phase == "body":
+                raise _sqlite_error(sqlite3.SQLITE_BUSY)
+    assert len(connections) == 1 and body_calls == ["entered"]
+    assert waits == []
+    assert store.operations.get("scope_a", "op_test").attempt_count == 0
 
 
 def test_scope_filters_handles_and_cleanup_job_ids(tmp_path):

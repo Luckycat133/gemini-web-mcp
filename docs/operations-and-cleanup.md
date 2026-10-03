@@ -45,6 +45,10 @@ processes must share recovery state. Defaults:
 | macOS | `~/Library/Application Support/gemini-web-mcp/state.sqlite3` |
 | Linux | `~/.local/state/gemini-web-mcp/state.sqlite3` |
 
+Concurrent initialization retries SQLite busy errors under one three-second
+budget before the transaction body starts. Other database errors fail directly;
+migrations, caller statements and commits are not replayed by this retry.
+
 The database and its `.key` identity file use restricted permissions. Keep
 both files together across restarts. The store contains IDs, timestamps,
 attempts, state, stable error codes, verification, Artifact locators, output
@@ -108,3 +112,6 @@ a separate explicit action with `dry_run=true` by default.
 For disposable tests, record every returned source ID, finish file verification
 and confirm cleanup. Explicitly discarded test results may be deleted by their
 known ID even when generation failed. Unknown ownership is retained.
+Use the host's connected MCP tools for manual deletion, or a real stdio MCP
+client when testing an installation or unconnected surface. A browser deletion
+or direct agent-side SDK/RPC call is separate diagnostic evidence.

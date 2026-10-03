@@ -112,7 +112,7 @@ within the supported POSIX runtime.
 | Onboarding start-response loss | Preserve the generated idempotency key and any observed handle through transport, parsing, verification and shutdown failures. Report completion only after independent file verification. | `test_onboarding_media.py`; original sealed response-loss repro now returns the start key after one call |
 | Filesystem support boundary | Private state creation requires POSIX ownership/no-follow APIs and fails with a typed error before writing when unavailable. Windows authenticated runtime is explicitly unsupported. | `test_operation_service.py`; independent missing-API repro; Windows installation/ACL verification remains NOT_RUN |
 
-Final source gates passed: Ruff, Mypy (80 source files), 2,234 offline tests and
+Focused delivery source gates passed: Ruff, Mypy (80 source files), 2,234 offline tests and
 358 architecture/distribution checks. Reviewer test groups overlap and are
 not added to these totals. The SDK submission-count checks use sealed transport
 and make no provider calls.
@@ -136,3 +136,30 @@ dependency in the new focused Skill tests. The `dev` extra now declares it
 directly; no runtime dependency was added. Clean development installation and
 the final hosted CI run verify this distribution repair separately from the
 existing local-environment gates.
+
+## Concurrent SQLite initialization — 2026-10-03
+
+The subsequent hosted Python 3.11/3.12 suites both exposed a first-initialization
+race in `test_two_connections_create_one_idempotent_operation`. A real second
+SQLite connection holding `BEGIN IMMEDIATE` reproduced immediate `SQLITE_BUSY`
+from `PRAGMA journal_mode=WAL`; the connection's timeout did not wait for that
+statement. Independent reproduction reached no transaction body.
+
+`StateStore` now retries only pre-body initialization statements for the
+`SQLITE_BUSY` error family under one monotonic three-second budget. It disables
+SQLite's nested wait for that phase, then restores the existing busy timeout.
+Other database errors fail directly. Schema migrations, caller statements,
+transaction commits and remote work are never replayed by this retry.
+
+Regressions cover fresh and existing-WAL connections, independent spawned
+processes sharing one idempotency key, bounded waiting, non-busy failures and
+body/commit rollback without replay. These tests use local SQLite only; no
+Gemini account or provider requests are involved.
+
+Repair source gates passed in the clean development environment: Ruff,
+Mypy (80 source files), 2,247 offline tests, 358 architecture/distribution
+checks, eleven exact profile catalogs and modern/legacy real stdio calls for
+all five surfaces under both model and core profiles. An independent reviewer
+also verified 24 cross-process idempotent creates, a real three-second lock
+deadline, non-busy errors, rollback without replay and a single CAS winner.
+The earlier delivery counts above remain dated evidence for that snapshot.
