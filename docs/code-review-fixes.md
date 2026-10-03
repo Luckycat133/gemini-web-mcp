@@ -1,8 +1,8 @@
 # Full Review Repairs — 2026-10-02
 
-The counts and pending checks in the original sections below describe their
-dated revisions. The [2026-10-03 focused delivery review](#focused-delivery-review--2026-10-03)
-records the current follow-up.
+The counts and pending checks below describe their dated revisions. See the
+[focused delivery review](#focused-delivery-review--2026-10-03) and
+[Skill consolidation](#skill-consolidation--2026-10-03) for later follow-ups.
 
 The full review identified 26 product findings and two compatibility issues in the vendored evaluator. Repairs preserve public tool names and delegate shared behavior to services/lifecycle owners. The release remains `0.2.2` preparation until the release PR passes review.
 
@@ -163,3 +163,24 @@ all five surfaces under both model and core profiles. An independent reviewer
 also verified 24 cross-process idempotent creates, a real three-second lock
 deadline, non-busy errors, rollback without replay and a single CAS winner.
 The earlier delivery counts above remain dated evidence for that snapshot.
+
+## Skill consolidation — 2026-10-03
+
+All five project-owned Skills now keep task selection and stable tool/result
+contracts in their entrypoints. Optional action details remain in linked
+references. Fixed single-tool workflows, repeated catalogs, historical work
+packages and long default prompts were removed. Compatibility notes remain
+in metadata; invocation policy and runtime capabilities are unchanged.
+
+Skill checks validate actual tool schemas, source entrypoints, installation
+commands and complete bundle contents. They no longer depend on prose,
+headings, dates or a fixed number of routing examples. Both Skill validators,
+29 targeted tests and 345 architecture/distribution checks passed. The pinned
+Skills CLI copied all five packages with source-identical file contents.
+
+An independent agent exercised eight offline tasks involving mixed intent,
+artifact handoff, operation recovery, mutation read-back, local cleanup and
+repository work. Its five proposed MCP requests passed actual schema
+validation without submission. The local page and exact filesystem deletion
+were executed. This verifies task guidance under fixture conditions; it does
+not claim new live Gemini results or a measured trigger-accuracy score.

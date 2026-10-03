@@ -1,6 +1,6 @@
 # Account Examples And Routing Cases
 
-Use exact IDs returned by prior authorized reads. Every tool takes a typed request object.
+Use exact IDs provided by the user or returned by authorized reads. Every tool takes a typed request object.
 
 ```json
 {"tool":"gemini_history","arguments":{"request":{"action":"list","limit":20}}}
@@ -19,5 +19,23 @@ Positive triggers: “查我的 Gemini 会话”; “Move this chat into my Note
 Near misses: “Look up current web sources” -> gemini-assist; “Generate a logo” -> gemini-create, without history reads; “Review the account service code” -> development. “Clean up the generated files in this local project” is local filesystem work, not Gemini account deletion.
 
 A cancellation request never establishes that an already submitted deletion was undone. A bounded history page that does not contain an ID never establishes verified absence.
+
+## Action details
+
+`create_daily` requires title, instructions and hour (0–23). Supply the intended
+IANA `timezone_name`; omission uses the server's `Asia/Shanghai` default.
+Gem/Prompt updates leave omitted fields unchanged. Prompt rendering substitutes
+variables in the local library and does not generate content remotely.
+
+Cleanup `status` addresses jobs registered in the current authentication scope.
+`run` with `job_id` targets that job; omission executes due registered jobs.
+Only positive `verified_absent` evidence confirms deletion. The separate
+`test_artifacts` action scans bounded metadata by marker and defaults to a dry
+run; a broad marker is not proof that every match belongs to the requested task.
+
+Operation metadata and cleanup jobs use the server's private local database;
+IDs, states and locators persist there, while credentials and conversation
+contents are excluded. Output files and the local Prompt library are separate
+stores. Read the connected action schema when options or coverage differ.
 
 Reproducible offline call/schema and expected-route cases live in evaluations/focused_skill_cases.json. These fixtures do not claim measured LLM trigger accuracy or live account mutations.

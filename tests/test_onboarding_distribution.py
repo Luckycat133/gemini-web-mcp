@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+import shlex
 import tomllib
 from pathlib import Path
 
@@ -28,16 +29,6 @@ def _assert_primary_model_server(server: dict) -> None:
     assert server["args"] == ["--from", CANONICAL_GIT_SOURCE, "gemini-mcp-server"]
     assert server["env"]["GEMINI_TOOLS"] == "model"
     assert server["env"]["GEMINI_AUTO_REFRESH"] == "false"
-
-
-def _normalize_shell_continuations(text: str) -> str:
-    """Collapse copyable backslash-newline commands without constraining formatting."""
-
-    return " ".join(
-        token
-        for line in text.splitlines()
-        for token in line.removesuffix("\\").split()
-    )
 
 
 def test_codex_configuration_parses_and_forwards_host_secrets() -> None:
@@ -91,23 +82,19 @@ def test_public_docs_distinguish_expected_routing_from_observation() -> None:
     assert "not recorded as a dedicated-account full canary" in changelog
 
 
-def test_runtime_and_development_skills_have_distinct_roles_and_install_paths() -> None:
-    runtime = (PROJECT_ROOT / ".agents" / "skills" / "gemini-web-mcp" / "SKILL.md").read_text(
-        encoding="utf-8"
-    )
-    development = (
-        PROJECT_ROOT / ".agents" / "skills" / "gemini-web-mcp-development" / "SKILL.md"
-    ).read_text(encoding="utf-8")
-    normalized_development = _normalize_shell_continuations(development)
+def test_public_skill_install_commands_resolve_repository_sources() -> None:
     client_doc = (PROJECT_ROOT / "docs" / "client-examples.md").read_text(encoding="utf-8")
+    commands = [
+        shlex.split(line.strip())
+        for line in re.sub(r"\\\s*\n\s*", " ", client_doc).splitlines()
+        if line.strip().startswith("npx ") and SKILLS_CLI in line
+    ]
 
-    assert "Use this Skill to complete the user's task with Gemini" in runtime
-    assert "do not use for repository implementation" in runtime.lower()
-    assert "Develop, refactor, evaluate, package, and release" in development
-    assert "--skill gemini-web-mcp-development --agent codex --copy --yes" in normalized_development
-    assert client_doc.count(SKILLS_CLI) == 2
-    assert "--skill gemini-web-mcp" in client_doc
-    assert "--skill gemini-web-mcp-development" in client_doc
+    for name in ("gemini-web-mcp", "gemini-web-mcp-development"):
+        assert (PROJECT_ROOT / ".agents" / "skills" / name / "SKILL.md").is_file()
+        matching = [args for args in commands if "--skill" in args and args[args.index("--skill") + 1] == name]
+        assert matching
+        assert all("--copy" in args and "--yes" in args and args[args.index("--agent") + 1] == "codex" for args in matching)
 
 
 def test_public_onboarding_docs_do_not_depend_on_the_broken_release_url() -> None:
