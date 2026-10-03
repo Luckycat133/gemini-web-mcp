@@ -56,6 +56,11 @@ uvx --from git+https://github.com/Luckycat133/gemini-web-mcp@main gemini-mcp-acc
 
 ## Explicit Scope, Exact Targets
 
+Perform account mutations through MCP tools. Prefer the host's connected tools;
+use a real MCP stdio client when verifying an installation or a surface the
+host has not connected. Browser deletion and direct agent-side SDK/RPC calls
+are separate diagnostic paths and do not prove that MCP deletion works.
+
 Use private history reads or deletion only when the user asked for that account task. General search, image creation or a cleanup failure does not authorize browsing private conversations. User authorization already given for a specific task persists; do not ask for it repeatedly.
 
 1. Select the requested facade/action. Inspect `meta.actionSemantics` and the discriminated request schema.

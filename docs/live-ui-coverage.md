@@ -102,6 +102,18 @@ their test ownership could not be established. The failed music request had no
 observed ID and was excluded from deletion; no unrelated account scan was used
 to guess its chat.
 
+### Cleanup invocation evidence
+
+An earlier Chrome deletion attempt opened the chat menu but did not reach a
+confirmation or positive absence read-back. It was not counted as a successful
+deletion. The subsequent targeted cleanup used real MCP tool calls, including
+primary `gemini_delete_chat` and focused `gemini_history` with `action=delete`.
+The focused test harness connected an actual MCP client over stdio; its Python
+wrapper collected results from `client.call_tool`, rather than making deletion
+an agent-side SDK diagnostic. Registered-job recovery used `gemini_cleanup`
+with the existing `job_id`. Automatic cleanup executes in the shared server
+lifecycle during MCP generation/recovery, with its own read-back evidence.
+
 ## 2026-10-03 Focused Creation and Native Video Recheck
 
 Signed-in Chrome showed the dedicated Videos page with video mode and a
