@@ -1,4 +1,4 @@
 interface:
   display_name: "Gemini Account"
-  short_description: "Manage explicit Gemini account workflows"
-  default_prompt: "Use $gemini-account for the explicitly requested account action and report observed verification."
+  short_description: "Manage requested Gemini account workflows"
+  default_prompt: "Use $gemini-account to complete the requested account action and verify its result."

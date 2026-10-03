@@ -1,4 +1,4 @@
 interface:
   display_name: "Gemini Web MCP"
-  short_description: "Extend an agent with Gemini assistance, multimodal creation, and explicit account workflows."
-  default_prompt: "Use $gemini-web-mcp to choose the next Gemini capability the user's task needs. Prefer gemini-mcp-assist for assistance, search, understanding and Research; gemini-mcp-create for image/edit/video/music and durable operation recovery; gemini-mcp-account only for explicit account work. Use compatible primary/compact tools when their existing controls are needed. If tools are missing, follow connection recovery. Inspect structured results, require verified matching artifacts, recover the same handle after timeout, and use returned files in the user's task; use the manifest only for discovery or recovery."
+  short_description: "Use Gemini through focused or compatibility tools"
+  default_prompt: "Use $gemini-web-mcp to complete this task with the available Gemini tools."

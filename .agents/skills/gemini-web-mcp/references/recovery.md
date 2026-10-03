@@ -1,134 +1,75 @@
 # Recovery Playbook
 
-Load this reference only when a normal workflow cannot continue.
+Read when the selected workflow cannot continue. Diagnose the returned code and
+state before choosing a recovery action.
 
-## No Gemini MCP Tools Connected
+## Missing Tools or Changed Schema
 
-The Skill is instructions, not an MCP server installation. First run the credential-free preflight from a trusted source checkout or reviewed Git revision:
+A Skill does not connect an MCP server. Check the host's connected catalog and
+schema first. A compatible available tool may already complete the task;
+focused tools are not a reason to replace a working connection.
+
+For connection setup, the credential-free preflight is:
 
 ```bash
 uvx --from git+https://github.com/Luckycat133/gemini-web-mcp@main gemini-mcp-onboarding
 ```
 
-For Codex, connect the focused lane needed for the task, or the compact compatibility server:
+Use the intended source checkout or reviewed revision for reproducible setup.
+Connect the needed lane (`gemini-mcp-assist`, `gemini-mcp-create`,
+`gemini-mcp-account`), compact `gemini-mcp-skill-server`, or primary
+`gemini-mcp-server` with the appropriate profile. For example, in Codex:
 
 ```bash
-codex mcp add gemini-compact -- uvx --from git+https://github.com/Luckycat133/gemini-web-mcp@main gemini-mcp-skill-server
+codex mcp add gemini-assist -- uvx --from git+https://github.com/Luckycat133/gemini-web-mcp@main gemini-mcp-assist
 codex mcp list
 ```
 
-The compact server covers chat, image/music generation, and account facades. Connect `gemini-mcp-assist` for the five focused assistance tools, including file/URL understanding and Deep Research. Connect `gemini-mcp-server` with `GEMINI_TOOLS=core` when a compatibility file, URL, media, or report-extraction tool is required. Client configuration examples are in the project documentation. Restart or reload the client if newly connected tools are not visible in the current task.
+Reload the client if newly connected tools are not visible. This setup does not
+authenticate Gemini. Use the existing private credential setup; keep Cookie
+values out of conversation and command arguments. On compatibility surfaces,
+use the manifest when checking a missing tool/profile/schema. `GEMINI_TOOLS`
+changes registration only when the primary server starts.
 
-For focused assistance or the primary content surface in Codex:
+## Authentication or Capability Failure
 
-```bash
-codex mcp add gemini-create -- uvx --from git+https://github.com/Luckycat133/gemini-web-mcp@main gemini-mcp-create
-codex mcp add gemini-account -- uvx --from git+https://github.com/Luckycat133/gemini-web-mcp@main gemini-mcp-account
-codex mcp add gemini-assist -- uvx --from git+https://github.com/Luckycat133/gemini-web-mcp@main gemini-mcp-assist
-codex mcp add gemini-core --env GEMINI_TOOLS=core -- uvx --from git+https://github.com/Luckycat133/gemini-web-mcp@main gemini-mcp-server
-```
+| Observation | Recovery |
+| --- | --- |
+| Missing/expired authentication | restore the existing private account setup; for an already authorized browser workflow, refresh the selected signed-in Gemini tab and reload its Cookies once |
+| `BROWSER_COOKIE_ACCESS_DENIED` | resolve the MCP host's browser-data permission in system privacy settings; do not confuse this with missing login |
+| `BROWSER_COOKIE_ACCESS_TIMEOUT` | preserve the bounded authorization failure and retry browser loading after the system prompt is resolved |
+| Explicit profile unreadable/signed out | preserve that profile failure; do not switch to another account |
+| `CAPABILITY_UNAVAILABLE` | inspect the diagnostic: SDK capability, model availability and account entitlement are distinct causes; stop repeating a known entitlement failure |
 
-This setup does not authenticate a Gemini account. Keep Cookie values in the client host's secret environment; never put them in command arguments, committed files, or chat. An authentication error after the offline preflight means the connection works but live Gemini access still needs account setup.
+A changed authentication context cancels old sessions/cleanup. Cancellation does
+not mean deletion; reselect the original account before any authorized cleanup
+of its known resources. See [tool_surface.md](tool_surface.md) for these controls.
 
-## Tool Missing or Wrong Schema
+## Missing Evidence or Interrupted Work
 
-1. Inspect the focused server catalog/schema; compatibility servers provide `gemini_get_tool_manifest` or `account(action="manifest")`.
-2. Check the current enabled surface/profile.
-3. Switch to the narrow primary profile required by the workflow.
-4. Do not enable `all` unless the task is repository maintenance or comprehensive verification.
+| Result | Next action |
+| --- | --- |
+| Search answer without observed sources | retain answer_only; independently verify suggested links, or use Research when a broader investigation is needed |
+| Research/video/music timeout | preserve operation/upstream IDs; use status/result for the same run; after start response loss, reuse its preserved idempotency_key |
+| No source ID or expired/auth-mismatched handle | report the recovery limit; missing ownership evidence does not authorize unrelated history scans or another generation |
+| Remote-only/partial/save-failed artifact | recover or save from its known source, then inspect matching file verification; do not regenerate to repair saving |
+| Local unverified media | repair the indicated decoder or verification failure; a non-empty file is insufficient |
+| Accepted but unverified account mutation | retry read-back when supported and preserve incomplete/mismatch/still_present/read_back_error states until positive verification |
 
-## Authentication Failure
-
-Return the stable error code and the required next action. Do not ask for Cookie values in ordinary prose or copy them into logs.
-
-If browser Cookie loading succeeds but client initialization reports an expired
-`__Secure-1PSIDTS`, refresh the already signed-in Gemini Chrome tab, fetch the
-browser Cookies again, and retry once. This recovered the 2026-09-26 live probe.
-If it still fails, report the authentication blocker without exposing values.
-
-Authentication recovery is separate from user-facing task design. Resume the original workflow after the runtime is configured.
-
-`BROWSER_COOKIE_ACCESS_DENIED` means the operating system blocked browser-data
-access. On macOS, the user must allow the MCP host in System Settings → Privacy
-& Security → Files and Folders / Full Disk Access, then retry browser loading.
-Treat this separately from missing login or an expired Cookie. Keep the error;
-use the selected profile after access is restored. Do not ask the user to paste
-Cookie values into the conversation.
-
-If an explicit browser profile fails, preserve that failure and refresh the selected profile. Do not substitute another account. A changed authentication context cancels old sessions and their cleanup; retain cancelled resource IDs as diagnostics, and do not interpret cancellation as deletion. Re-select the original account before any explicitly authorized follow-up cleanup.
-
-## Entitlement Unavailable
-
-Classify a missing account entitlement separately from:
-
-- invalid authentication;
-- upstream drift;
-- implementation failure;
-- queued work.
-
-Do not retry a known entitlement failure repeatedly.
-
-## Quick Search Without Sources
-
-If quick search returns an answer but no observed sources:
-
-1. label it `answer_only` or ungrounded;
-2. avoid presenting it as verified current-web research;
-3. treat links written in answer text as leads and verify them independently before citing;
-4. when a broader source investigation is needed, escalate to Deep Research and inspect its report evidence.
-
-## Long Operation Timeout
-
-1. preserve every operation/upstream ID;
-2. use focused status/result with the returned operation_id; compatibility history reads may be truncated or show only a completion notice;
-3. do not restart automatically;
-4. if the report is absent, try primary `gemini_create_from_research_report(chat_id=..., artifact_type="webpage")` and verify the returned file;
-5. if no source was observed, report the recovery limit and keep the handle; never scan unrelated history or repeat generation. A repeated start may safely reuse its opaque idempotency_key within the metadata window.
-
-## Artifact Missing or Partial
-
-1. inspect structured Artifact state;
-2. retain remote URI and operation IDs if present;
-3. retry local save without repeating upstream generation when possible;
-4. do not claim a file exists until verified;
-5. return the next action.
-
-For local `unverified` media, inspect the decoder diagnostic and install/repair the relevant local decoder before acceptance. An existing non-empty file or a mismatched media kind cannot substitute for verification. File/URL input artifacts only identify what was submitted; an empty response remains empty.
-
-A failed or timed-out media request may already have allocated a source chat.
-Preserve any returned `source_chat_id` and inspect it before deciding whether
-to request another generation. A missing ID means ownership was not observed;
-it does not prove that no chat was created. Do not search unrelated account
-history or restart generation automatically to recover a missing ID. Keep
-failure recovery separate from automatic deletion of completed disposable
-results, and require positive absence read-back for any authorized cleanup.
-
-For video, a text-only response is not a video artifact even when native selection was requested. Inspect cleanup metadata first: definitive empty responses
-are cleaned by default, while interrupted/queued/unsaved results retain recovery.
-If retained, inspect that source chat, then use the native
-`https://gemini.google.com/videos` mode if the user authorized browser work.
-Use focused operation status/result for the known request; never repeat generation to recover it.
-
-## Accepted but Unverified Mutation
-
-Use the verification state:
-
-```text
-not_observed
-read_back_error
-mismatch
-still_present
-incomplete
-```
-
-Do not show success. Retry read-back or tell the agent what must be checked.
+Compatibility history may truncate Research turns or show only a completion
+notice. For a known report chat, primary
+`gemini_create_from_research_report(chat_id=..., artifact_type="webpage")` may
+recover report content; verify its result. Text-only video or search-reference
+images remain failed creation. A generated file can be usable while cleanup is
+pending; handle the cleanup observation separately. Detailed continuation and
+cancellation rules are in [operations.md](operations.md), and result envelopes
+and file acceptance are in [artifacts.md](artifacts.md).
 
 ## Upstream Drift
 
-When a parser, RPC, or capability appears to have changed:
-
-1. capture the stable diagnostic stage and code;
-2. do not persist raw private responses;
-3. run the bounded compatibility probe;
-4. classify the failure as transport, envelope, rejection, parser, or entitlement;
-5. hand the evidence to `gemini-web-mcp-development`.
+Preserve the safe error code, diagnostic stage and observed state; distinguish
+transport/envelope/rejection/parser failures from unavailable entitlement.
+Pass repository defects to `gemini-web-mcp-development`. A compatibility canary
+requires its explicit opt-ins and dedicated test environment; an ordinary tool
+failure does not authorize a live account audit. Keep raw private responses and
+credentials out of diagnostics.

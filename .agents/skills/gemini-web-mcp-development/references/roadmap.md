@@ -1,205 +1,33 @@
-# Settled Decisions and Development Packages
+# Planning a development package
 
-Routine bug fixes and bounded migrations should proceed without reopening settled product choices.
+Read this reference when choosing new work. The checkout's
+`docs/development-status.md` owns current implementation and evidence status;
+`docs/client-examples.md` owns the client/OS matrix. Check those and the relevant
+source before proposing a package.
 
-## Settled Decisions
+The focused assist/create/account surfaces, shared operations, durable cleanup
+and compatibility router are existing foundations. Extend the shared owner
+rather than rebuilding them as separate products.
 
-- Product priority is assistance/understanding, then generated Artifacts, then explicit account management.
-- One repository and Python distribution will expose three focused MCP servers and three focused Runtime Skills.
-- Product names are `gemini-assist`, `gemini-create`, and `gemini-account`.
-- Console entrypoints are `gemini-mcp-assist`, `gemini-mcp-create`, and `gemini-mcp-account`.
-- MCP server names are `gemini_assist_mcp`, `gemini_create_mcp`, and `gemini_account_mcp`.
-- Public tools use the `gemini_` prefix.
-- `gemini_ask` remains a separate assistance tool.
-- Deep Research starts asynchronously by default and immediately returns an opaque operation handle.
-- Status, result, and cancel receive that handle explicitly; no connection-local state is required.
-- Local-only SQLite stores operation and cleanup recovery metadata, never private content or raw responses.
-- Operation metadata defaults to seven-day retention and supports restart/cross-client resume.
-- Cancellation is best effort unless provider cancellation is positively observed.
-- Generated media and reports are Artifacts that the calling agent should use in the user's downstream task.
-- Search and understanding normally return information to the calling agent rather than mandatory files.
-- Manifest is for discovery and recovery, not a mandatory call before every known workflow.
-- Compatibility servers and the umbrella Runtime Skill remain during migration.
-- Preserve published tags; derive each new release tag from the active package version.
+## Choose a bounded outcome
 
-## Package A — Task-First Compatibility Skill
+| Work area | Useful acceptance evidence |
+| --- | --- |
+| Provider compatibility | current request/response evidence, typed drift/unavailable state, sanitized parser fixtures |
+| Long-operation reliability | preserved handle/source, restart recovery, no duplicate start, final artifact or truthful pending state |
+| Account capability | exact target, action schema, pagination/coverage and positive mutation read-back |
+| Agent usability | correct intent/tool choice, usable artifact or answer in the downstream task, close-alternative cases |
+| Distribution/client support | actual installation, entrypoints, negotiated MCP protocol and stated OS support |
 
-Deliverables:
+Take the smallest coherent package that completes the user's requested
+workflow. A package may span adapters, services, examples and evaluation cases
+when the same contract is exposed in each place.
 
-- replace tool-first instructions with user-intent routing;
-- add focused references for workflows, Artifacts, operations, recovery, and detailed account/tool surface;
-- prefer the low-token server when it can finish the task;
-- route files/URLs/Research to the narrow primary profile;
-- make downstream Artifact use explicit;
-- add trigger evaluations and near-miss negatives.
+Additional Web features such as Drive import, Canvas, richer recurrence,
+Notebook CRUD, sharing or Library management need current upstream evidence and
+a clear task benefit. Prioritize them against confirmed gaps in the core
+workflows, rather than reproducing the entire Web UI.
 
-Acceptance criteria:
-
-- known tasks do not require a manifest call first;
-- account tools are not recommended for ordinary coding/multimodal tasks;
-- image/video/music/report Artifacts are used or handed off, not merely described;
-- Deep Research uses start-only behavior and preserves continuation IDs;
-- Runtime Skill passes Agent Skills validation and direct-install byte comparison.
-
-## Package B — `gemini-assist`
-
-Implement:
-
-```text
-gemini_ask
-gemini_search
-gemini_understand_image
-gemini_understand
-gemini_research
-```
-
-Deliverables:
-
-- new focused MCP entrypoint and Skill;
-- `gemini_ask` over shared ChatService;
-- grounded-search state with observed sources;
-- simple image understanding;
-- typed mixed-input understanding;
-- async Research start returning an operation handle;
-- no account/admin tools.
-
-Acceptance criteria:
-
-- deterministic five-tool catalog and schemas;
-- each tool delegates to shared services;
-- `gemini_search` never labels source-free prose as grounded;
-- typed inputs retain identities and per-input outcomes;
-- Skill trigger tests select assistance tasks and reject generation/account-only tasks;
-- real MCP stdio and installed-wheel smoke pass.
-
-## Package C — `gemini-create` Image Vertical Slice
-
-Implement first:
-
-```text
-gemini_generate_image
-gemini_edit_image
-```
-
-Then add video/music start tools after OperationService exists.
-
-Acceptance criteria:
-
-- deterministic focused catalog;
-- local file or resource-link Artifact with structured verification;
-- source-image identity preserved for edits;
-- queued/partial/empty/failed remain distinct;
-- agent-use evaluation proves an agent can place the returned image into another artifact or codebase;
-- no account tools or generic chat tool.
-
-## Package D — Shared SQLite OperationService
-
-Implement:
-
-```text
-start -> operation_id
-status(operation_id)
-result(operation_id)
-cancel(operation_id)
-```
-
-Integrate Deep Research, video, and music.
-
-Acceptance criteria:
-
-- schema migrations and one local database;
-- high-entropy opaque IDs;
-- queued/running/completed/timed_out/cancel_requested/cancelled/failed/expired states;
-- restart and cross-client recovery;
-- seven-day default retention plus pruning;
-- idempotent status/result/cancel;
-- provider IDs and Artifact identity preserved;
-- no prompt/chat/report text, Cookie, raw response, or generated bytes in SQLite;
-- compatibility representation works on clients without MCP Tasks extension;
-- optional protocol-native Tasks integration is additive and negotiated, not required.
-
-## Package E — Complete `gemini-create`
-
-Add:
-
-```text
-gemini_generate_video
-gemini_generate_music
-gemini_get_operation_status
-gemini_get_operation_result
-gemini_cancel_operation
-```
-
-Acceptance criteria:
-
-- modality start calls return immediately with operation handles;
-- result returns playable/usable Artifacts when complete;
-- no duplicate generation after timeout or reconnect;
-- cross-client resume works;
-- Skill trigger tests distinguish generation from understanding;
-- agent-use evaluations prove returned media can be handed to the next tool.
-
-## Package F — `gemini-account`
-
-Implement:
-
-```text
-gemini_history
-gemini_notebooks
-gemini_scheduled
-gemini_gems
-gemini_prompts
-gemini_account
-gemini_cleanup
-```
-
-Acceptance criteria:
-
-- account Skill triggers only on explicit account-data intent;
-- list/read and mutation actions have distinguishable structured state;
-- pagination and truncation are explicit;
-- positive read-back required for mutation success;
-- compact compatibility execution moves into shared services;
-- optional diagnostics lists are paginated and account-scoped.
-
-## Package G — Dedicated Full Live Baseline
-
-Use maintainer-provided local or protected-environment account credentials.
-
-Verify through the focused surfaces:
-
-- ask, grounded search, image and mixed-input understanding;
-- image generation/editing;
-- video and music operation lifecycle;
-- Deep Research start/recovery/report;
-- explicit account read and disposable mutations;
-- direct-ID cleanup.
-
-Acceptance criteria:
-
-- sanitized schema-valid report;
-- each capability classified as observed, unavailable, not entitled, drifted, or failed;
-- every created resource accounted for;
-- no private content, credentials, or raw responses retained.
-
-## Package H — Completeness and Adoption
-
-- complete typed deep-history/admin results;
-- finish mutation verification audit;
-- implement durable SQLite cleanup with retry/backoff/list/retry/cancel;
-- add modality onboarding commands;
-- add task-level evaluations for real agents;
-- exercise official client/OS matrix;
-- complete the release gates for each new version and keep published tags immutable.
-
-## Package I — Selected UI Parity
-
-Only after A–H are stable: Drive import, Canvas, richer recurrence, Notebook CRUD/source management, sharing, settings, or Library workflows with current live evidence.
-
-## Remaining Owner Choice
-
-The initial distribution is Python wheel/uvx over MCP stdio. macOS arm64 has
-installation, protocol and bounded signed-in media evidence; Linux CI covers
-offline contracts. The current [client/OS evidence](../../../../docs/client-examples.md#client-and-os-evidence)
-separates those checks from configuration-only desktop examples. Expand the
-matrix only after actual client installation and protocol checks.
+For publication, resolve the current repository review/release gates and derive
+the new version/tag from package metadata. Historical test totals, release
+branches and unfinished provider observations belong in dated project records.

@@ -1,139 +1,101 @@
-# Gemini Web Tool Surface Reference
+# Tool Surfaces and Account Controls
 
-Compact safety/group map of the Gemini Web MCP tools. Load this only when you need
-to pick tools by safety tier or group. The connected server's source of truth is
-`gemini_get_tool_manifest` (primary server) and `account(action="manifest")`
-(low-token server) — re-check those at runtime because `GEMINI_TOOLS` controls
-which primary tools are registered in the current process. The focused
-`gemini-mcp-assist` server exposes five tools; `gemini-mcp-create` and `gemini-mcp-account` each expose seven tools independent of GEMINI_TOOLS. Their actual input/output schemas and actionSemantics metadata are the focused contracts.
-
-## Annotation legend
-
-- `read_only` — does not mutate remote/local state
-- `destructive` — can delete remote resources or clear MCP/Gemini session data; treat as explicit-user-intent
-- `privacy` — what private data the tool reads or sends (see tiers below)
-
-## Safety tiers
-
-### Destructive tools (require explicit user intent)
-
-| Tool | Group | Purpose |
-|---|---|---|
-| `gemini_reset_session` | core | Clear one MCP/Gemini session and its configured remote-chat lifecycle; never changes agent memory or agent instructions |
-| `gemini_reset` | always | Clear all local sessions and reset the client; deletes non-retained remote chats and reports cleanup verification |
-| `gemini_cleanup_test_artifacts` | history | Find and optionally delete test chats/scheduled actions by marker |
-| `gemini_delete_chat` | history | Request remote chat deletion and report read-back evidence |
-| `gemini_delete_scheduled_action` | account | Delete a scheduled action by id |
-| `gemini_manage_gems` | gems | List/create/update/delete Gems; use an explicit account request for mutation |
-
-### Reads private chat text (require explicit user intent)
-
-| Tool | Group | Privacy |
-|---|---|---|
-| `gemini_read_chat` | history | `reads_private_chat_text` |
-| `gemini_export_chat` | history | `reads_private_chat_text` |
-| `gemini_list_research_report_actions` | research | `reads_private_chat_text` |
-| `gemini_create_from_research_report` | research | `reads_private_chat_text_and_writes_local_file` |
-| `gemini_search_chats` | history | `reads_private_chat_metadata_and_optional_turn_text` (text only when `scan_turns=true`) |
-
-### Read-only discovery / inventory (safe defaults)
-
-| Tool | Group | Purpose |
-|---|---|---|
-| `gemini_get_tool_manifest` | account | Agent-facing manifest with safety/privacy/workflow metadata |
-| `gemini_get_web_capabilities` | account | Static observed Pro Web capability map |
-| `gemini_probe_web_features` | account | Read-only RPC reachability probe (no raw bodies) |
-| `gemini_account_inventory` | account | Read-only facade: links/usage/library/notebooks/scheduled/modes/models |
-| `gemini_inspect_account` | account | Sanitized account feature/RPC status |
-| `gemini_doctor` | cookie | Local preflight: tool groups, cookie, browser profile, media deps |
-| `gemini_get_cookie_status` | cookie | Local cookie availability (no values) |
-| `gemini_list_browser_cookie_profiles` | cookie | Browser profile list + diagnostics (no values) |
-| `gemini_list_models` | account | MCP model aliases + runtime registry |
-
-### Chat / media / files (send user content to Gemini)
-
-| Tool | Group | Privacy |
-|---|---|---|
-| `gemini_chat` / `gemini_chat_stream` | core | `sends_user_prompt_and_optional_files`; `_stream` collects the upstream stream into one MCP result |
-| `gemini_start_chat` / `gemini_send_message` / `gemini_send_message_stream` | core | `sends_user_prompt...`; `_stream` collects the upstream stream into one MCP result |
-| `gemini_list_sessions` | core | `local_session_metadata` (read-only) |
-| `gemini_generate_media` | media | `sends_user_prompt_and_optional_reference_files` |
-| `gemini_generate_music` | media | `sends_user_prompt` |
-| `gemini_upload_file` | files | `sends_local_file_content` |
-| `gemini_analyze_url` | files | `sends_url_to_gemini` |
-| `gemini_deep_research` | research | `sends_research_query`; returns typed queued/running/completed/timed_out state and continuation IDs |
-
-### History metadata (read-only, no turn text unless noted)
-
-| Tool | Group | Privacy |
-|---|---|---|
-| `gemini_history` | history | facade: `reads_private_chat_metadata_and_optional_turn_text` |
-| `gemini_list_chats` | history | `reads_private_chat_metadata` |
-| `gemini_scan_chat_history_sources` | history | `reads_private_chat_metadata` |
-| `gemini_list_public_links` | account | `reads_private_public_link_index` |
-| `gemini_get_usage_limits` | account | `reads_private_usage_state` |
-| `gemini_list_library_capabilities` | account | `reads_template_capabilities` |
-| `gemini_notebooks` / `gemini_list_notebooks` / `gemini_list_notebook_chats` | account | `reads_private_notebook_metadata` |
-| `gemini_move_chat_to_notebook` | account | `moves_private_chat_metadata` (mutates, not destructive) |
-| `gemini_list_scheduled_actions` / `gemini_get_scheduled_action` | account | `reads_private_scheduled_action_*` |
-| `gemini_create_scheduled_action` | account | `creates_private_scheduled_action` (mutates) |
-| `gemini_get_tool_mode_status` | account | `reads_mode_status_only` |
-
-### Authentication and local state
-
-| Tool | Group | Effect |
-|---|---|---|
-| `gemini_get_cookie_from_browser` | cookie | With explicit user approval already given for this task or earlier in the conversation, caches sensitive account-authentication material locally; restrict file access and never log, back up, or share it |
-| `gemini_reset` | always | Destructive reset; local success can accompany partial remote cleanup, so preserve warnings and verification |
+Read for compatibility tool selection, account work or authentication/reset
+diagnostics. The connected catalog/schema is authoritative. Primary
+`gemini_get_tool_manifest` and compact `account(action="manifest")` aid
+discovery; they are not prerequisites for a known workflow.
 
 ## Low-token skill server facade (`src.skill_server`)
 
-Fewer, broader tools with `action` parameters. Same safety tiers apply.
+The compact server exposes these eleven tools. Its mixed-action facades have
+conservative tool annotations; determine the requested action's effect from
+the schema, rather than treating every call as destructive.
 
-| Tool | Annotations | Notes |
-|---|---|---|
-| `chat` | `MUTATES_REMOTE` | text/image chat; sends user content to Gemini |
-| `account` | `READS_PRIVATE_REMOTE` | `action="manifest\|capabilities"` are auth-free; other actions read private inventory |
-| `history` | `DESTRUCTIVE_REMOTE` | `action="list\|search\|read\|export"` read-only; `action="delete"` destructive |
-| `scheduled` | `DESTRUCTIVE_REMOTE` | `action="list\|get"` read-only; `action="create\|delete"` mutate/destroy |
-| `create` | `MUTATES_REMOTE` | native image/video/music selection, local verification and owned source-chat cleanup; actual output of the requested kind is required |
-| `edit` | `MUTATES_REMOTE` | native image editing, local verification and new source-chat cleanup |
-| `session` | `DESTRUCTIVE_REMOTE` | create/send/list/reset actions; reset affects Gemini conversation state |
-| `prompts` | `DESTRUCTIVE_LOCAL` | local prompt list/get/create/delete |
-| `cookie` | `MUTATES_LOCAL` | `action="profiles"` read-only; `action="get"` requires explicit user approval because it caches sensitive account-authentication material locally; restrict file access and remove the cache when no longer needed |
-| `doctor` | `READ_ONLY_LOCAL` | local preflight |
-| `cleanup` | `DESTRUCTIVE_REMOTE` | `dry_run=true` is safe; `dry_run=false` deletes |
-
-History list/search/read/export/delete share typed domain data across primary and compact surfaces. For deletion,
-`verified_absent` is the only positive deletion proof; `not_available` is accepted/unverified, while `still_present` and
-`read_back_error` are `VERIFICATION_FAILED` outcomes. Positive absence requires a complete fresh recent/pinned metadata
-read-back; `read_chat(None)` is inconclusive. Record returned test-chat IDs because Gemini-generated titles may omit prompt
-markers; metadata-only cleanup is a fallback, and `scan_turns=true` requires explicit permission to read turn text. Browser
-profile tools never return Cookie values. On macOS, the system browser-credential prompt only unlocks the browser Cookie
-store for `browser-cookie3`; the workflow does not inspect arbitrary credential files. Authorization timeouts surface as
-`BROWSER_COOKIE_ACCESS_TIMEOUT`.
-
-An explicitly selected browser profile fails closed if unreadable or signed out. Changing authentication retires the old client and sessions, and cancels their cleanup with `cancellation_reason=authentication_context_changed`; it never runs those deletions under the new account. Same-material refresh preserves the active context. Cancelled work is not verified deletion.
-
-Content search exposes `read_failures` and incomplete coverage even when no title or body matched. A bounded history page with `operation_state=partial` and `next_offset=null` cannot be continued through the same cursor. Use the metadata scan with a larger source bound. Prompt changes use atomic, locked storage; an unreadable/corrupt library or failed save must be repaired before reporting success.
+| Tool | Actions or input | Effect |
+| --- | --- | --- |
+| `chat` | message; optional image_path/session_id | sends the prompt and optional image to Gemini |
+| `account` | status, models, manifest, capabilities, features, links, usage, library, notebooks, scheduled, modes | manifest/capabilities are auth-free; remaining actions inspect account data |
+| `history` | list, search, read, export, delete | metadata reads; read/export or search with scan_turns=true reads private text; delete targets chat_id |
+| `scheduled` | list, get, create, delete | create is daily with title/instructions/hour/timezone; get/delete require action_id |
+| `create` | prompt; type=image/video/music; optional image_path | native media request, local saving/verification and owned-source cleanup |
+| `edit` | image_path, prompt | edits a local image; input and generated output remain distinct |
+| `session` | create, send, list, reset, reset_one, reset_all | reset/reset_one require session_id; only reset_all resets all sessions |
+| `prompts` | list, get, create, delete | local library; get/delete identify by name; no Gemini generation |
+| `cookie` | status, profiles, get | status/profiles show availability metadata; get caches browser authentication material |
+| `doctor` | browser; validate_browser=false by default | local diagnostics, optionally validating the selected browser |
+| `cleanup` | markers, target, dry_run=true, max_chats, scan_turns=false | bounded marker preview; dry_run=false requests deletion |
 
 ## Tool group selection (`GEMINI_TOOLS`)
 
-| Group | Tools included | Good default? |
-|---|---|---|
-| `model` / `chat` | chat | model-only agents |
-| `history` | manage:history-read | read-only history |
-| `history-organize` | manage:history-read + notebooks-read/write | history + notebook moves |
-| `account-read` | manage:account-read | read-only inventory |
-| `scheduled-admin` | manage:scheduled-read + scheduled-write | authorized scheduled CRUD |
-| `manage:gems` | manage:gems | explicit Gem list/create/update/delete |
-| `history,manage:history-write` | manage:history-read + history-write | identify a chat, then explicitly delete it or clean test artifacts |
-| `prompts` | prompts | local saved prompts |
-| `core` (default) | chat + media + file + research | broad content workflow |
-| `all` | everything + manage:all | maintenance/verification only |
+Primary profiles select registration at process startup. Choose an appropriate
+profile when configuring a server; an already connected broader profile does
+not expand task authorization.
 
-## Focused creation and account catalogs
+| Profile | Included capability |
+| --- | --- |
+| `model` / `chat` | text/image chat and sessions |
+| `core` (default) | chat, media, files/URLs and Research |
+| `history` | manage:history-read |
+| `history-organize` | history-read plus notebooks-read/write |
+| `account-read` | manage:account-read |
+| `scheduled-admin` | scheduled-read/write |
+| `manage:gems` | Gem list/create/update/delete |
+| `history,manage:history-write` | history identification plus targeted deletion/test cleanup |
+| `prompts` | local Prompt library |
+| `all` | broad content and account tools; use when the authorized task needs that coverage |
 
-Creation: `gemini_generate_image`, `gemini_edit_image`, `gemini_generate_video`, `gemini_generate_music`, `gemini_get_operation_status`, `gemini_get_operation_result`, `gemini_cancel_operation`.
+Primary `_stream` tools collect the upstream stream into one MCP result.
 
-Account: `gemini_history`, `gemini_notebooks`, `gemini_scheduled`, `gemini_gems`, `gemini_prompts`, `gemini_account`, `gemini_cleanup`. Every account facade accepts an action-specific request object; mixed read/mutation facades have conservative annotations and actionSemantics metadata. Account capabilities is static and auth-free.
+Focused assist/create/account catalogs contain 5/7/7 tools independently of
+`GEMINI_TOOLS`. Focused account facades take typed `request` objects and expose
+`meta.actionSemantics` for read/mutation/local scope. Primary and compact
+arguments differ: primary `gemini_history`/`gemini_notebooks` are read-only;
+deletion/move use `gemini_delete_chat`/`gemini_move_chat_to_notebook`.
+
+## Account Scope and Read-back
+
+Private history reads and account deletion require the user's account-task
+intent; existing authorization persists. Resolve targets from known IDs or
+necessary authorized metadata reads. `scan_turns=true` adds private content
+reads. Bounded pages, title searches and `read_chat(None)` cannot prove absence.
+Content search may report `read_failures` and incomplete coverage. A partial
+page with `next_offset=null` has no continuation cursor; primary history scans
+offer larger bounded source coverage when needed.
+
+Chat deletion succeeds only with `verified_absent` from complete fresh metadata
+read-back. `not_available` is accepted/unverified; `still_present` and
+`read_back_error` are verification failures. Notebook moves, Scheduled changes
+and Gem changes likewise need positive target-state read-back. Feature probes
+show RPC reachability, not account entitlement; observed models/usage do not
+establish an exact backend version or inferred quota.
+
+Registered focused cleanup status/run/cancel concerns only jobs in the current
+authentication scope; run without job_id processes due registered jobs.
+`test_artifacts` and compact `cleanup` are separate bounded marker scans.
+Preview the authorized marker set with dry_run=true; a default marker is not
+ownership evidence. Saved Prompt libraries are local and use atomic storage;
+repair unreadable/corrupt data or save failures before claiming a mutation.
+
+## Authentication and Reset
+
+Browser Cookie export (`gemini_get_cookie_from_browser` or compact
+`cookie(action="get")`) needs authorization to access the signed-in browser
+account for this task; prior authorization still applies. It creates sensitive
+account-authentication material in a local cache. Restrict file access and keep
+values out of conversation, command arguments, logs, backups and agent memory.
+Profile tools expose availability, never Cookie values. The macOS credential
+prompt unlocks the browser Cookie store; it does not authorize arbitrary
+credential-file inspection. Access waits are bounded and may return
+`BROWSER_COOKIE_ACCESS_TIMEOUT`.
+
+An explicit unreadable/signed-out profile fails closed; do not substitute an
+account. Authentication changes retire old sessions and cancel their cleanup
+with `authentication_context_changed`, so old deletions never run under a new
+account. Same-material refresh preserves the context. Cancelled cleanup is not
+verified deletion.
+
+Primary `gemini_reset_session` or compact reset/reset_one resets one session.
+Primary `gemini_reset` or compact reset_all resets the client/all sessions and
+can delete non-retained source chats. Reset affects MCP/Gemini state, never
+agent memory or agent instructions; local reset success may coexist with partial
+remote cleanup, so inspect its warnings and verification.
