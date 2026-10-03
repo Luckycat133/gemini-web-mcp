@@ -20,6 +20,8 @@ _format_deep_research_result 走真实实现。
 """
 
 import asyncio
+import os
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -27,6 +29,7 @@ from src.adapters.mcp_sdk import MCPServer
 
 import src.services.research as research_service
 import src.tools.research as research_tools
+import src.client_wrapper as client_wrapper
 from src.services.research import null_scope
 
 
@@ -159,6 +162,9 @@ def _patch_research_env(monkeypatch, client, *, captured_schedule=None,
                         captured_schedule_response=None, captured_cleanup=None):
     """统一 patch research 工具的外部接缝。"""
     monkeypatch.setattr(research_tools, "get_gemini_client", lambda: client)
+    monkeypatch.setattr(client_wrapper, "get_authentication_scope", lambda: "scope_research_offline")
+    monkeypatch.setattr(research_service.ResearchService, "_destination",
+                        staticmethod(lambda _request: str(Path(os.environ["GEMINI_STATE_DB_PATH"]).parent / "reports")))
 
     async def fake_init():
         return None
@@ -170,13 +176,16 @@ def _patch_research_env(monkeypatch, client, *, captured_schedule=None,
     monkeypatch.setattr(research_tools, "cleanup_due_remote_chats", fake_cleanup)
 
     def fake_schedule(cid, *, retain_chat, delete_after_seconds, source):
-        if captured_schedule is not None:
-            captured_schedule.append({
+        entry = {
                 "cid": cid,
                 "retain_chat": retain_chat,
                 "delete_after_seconds": delete_after_seconds,
                 "source": source,
-            })
+            }
+        if captured_schedule is not None:
+            captured_schedule.append(entry)
+        if captured_schedule_response is not None:
+            captured_schedule_response.append(entry)
     monkeypatch.setattr(research_tools, "schedule_remote_chat_cleanup", fake_schedule)
 
     def fake_schedule_response(response, *, retain_chat, delete_after_seconds, source):
@@ -187,8 +196,8 @@ def _patch_research_env(monkeypatch, client, *, captured_schedule=None,
                 "delete_after_seconds": delete_after_seconds,
                 "source": source,
             })
-    monkeypatch.setattr(research_tools, "schedule_remote_chat_cleanup_from_response",
-                        fake_schedule_response)
+    # The shared owner persists and retains the explicit observed CID instead
+    # of passing a mutable SDK response into the lifecycle adapter.
 
 
 def _make_mcp():
@@ -345,7 +354,7 @@ def test_fallback_schedule_receives_response_object(monkeypatch):
                                 query="x", timeout_seconds=5)
 
     asyncio.run(run())
-    assert schedule_calls[0]["response"] is client.last_response
+    assert schedule_calls[0]["cid"] == client.last_response.metadata[0]
 
 
 def test_fallback_forwards_retain_chat_and_delete_after_seconds(monkeypatch):
@@ -380,7 +389,7 @@ def test_fallback_default_retain_chat_false_delete_none(monkeypatch):
                                 query="x", timeout_seconds=5)  # 默认值
 
     asyncio.run(run())
-    assert schedule_calls[0]["retain_chat"] is False
+    assert schedule_calls[0]["retain_chat"] is True
     assert schedule_calls[0]["delete_after_seconds"] is None
 
 
@@ -724,8 +733,9 @@ def test_generic_exception_returns_error_with_message(monkeypatch):
 
     result = asyncio.run(run())
     text = result[0].text
-    assert "❌ Deep Research 失败: capability missing" in text
-    assert "该功能在您所在的区域是否可用" in text
+    assert "❌ Deep Research 失败:" in text
+    assert "capability missing" not in text
+    assert _domain_payload(result[0])["error"]["code"] == "INTERNAL_ERROR"
 
 
 def test_exception_skips_schedule_cleanup(monkeypatch):
@@ -771,7 +781,8 @@ def test_native_wait_generic_exception_returns_error(monkeypatch):
                                 query="x", timeout_seconds=30)
 
     result = asyncio.run(run())
-    assert "❌ Deep Research 失败: network down" in result[0].text
+    assert "❌ Deep Research 失败:" in result[0].text
+    assert _domain_payload(result[0])["error"]["code"] == "NETWORK_ERROR"
 
 
 # ---------------------------------------------------------------------------
@@ -841,9 +852,8 @@ def test_native_can_return_running_without_waiting_for_completion(monkeypatch):
     assert payload["meta"]["operation_state"] == "running"
     assert payload["data"]["upstream_operation_id"] == "r_running"
     assert payload["data"]["upstream_chat_id"] == "c_running"
-    # 兼容面不签发 operation handle（结构化增量是有意为之）；
-    # operation handle 只由异步 gemini_research 签发。
-    assert payload["data"]["operation_id"] is None
+    # Both surfaces issue a handle in the shared restart-safe repository.
+    assert payload["data"]["operation_id"].startswith("op_")
     assert client.captured_wait_plan is None
     assert "本次调用未等待最终报告" in content.text
 

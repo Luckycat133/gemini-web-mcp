@@ -79,4 +79,92 @@
     <question>Inspect the manifest workflows. Which workflow should an agent use after explicit authorization to create, verify, and clean up a scheduled action? Answer with the workflow name.</question>
     <answer>scheduled_action_create_and_cleanup</answer>
   </qa_pair>
+  <qa_pair>
+    <question>Inspect gemini_reset annotations and manifest metadata. Can this client reset delete non-retained remote chats? Answer with its destructiveHint and openWorldHint boolean values.</question>
+    <answer>destructiveHint=true and openWorldHint=true</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>If client reset succeeds locally but remote chat cleanup fails, which operation state must the agent preserve instead of claiming complete cleanup? Answer with the state only.</question>
+    <answer>partial</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>After authentication material changes, what happens to cleanup work belonging to the previous authentication context? Answer with the state and cancellation reason.</question>
+    <answer>cancelled and authentication_context_changed</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>Does an HTTP 200 delete response followed by a malformed or wrong-ID read-back prove that a chat or scheduled action is absent? Answer yes or no.</question>
+    <answer>no</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>Can an image returned for a video or music request satisfy that requested media operation? Answer yes or no.</question>
+    <answer>no</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>When a recognizable local audio/video container cannot be checked because the media decoder is unavailable, what Artifact verification status applies? Answer with the status only.</question>
+    <answer>unverified</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>Can changed chat text or a quota refusal alone prove that no-ID Deep Research completed a report? Answer yes or no.</question>
+    <answer>no</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>Which read-only facade must the scoped notebooks manifest include when history-organize enables it? Answer with the exact tool name.</question>
+    <answer>gemini_notebooks</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>When the bounded history source cannot advance despite more remote records, what operation state and next_offset value should the agent inspect? Answer with both values.</question>
+    <answer>partial and next_offset=null</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>Can a content search with failed chat reads be treated as complete evidence that no matches exist? Answer yes or no.</question>
+    <answer>no</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>Inspect the media creation workflow. Can chat text or a search WebImage alone satisfy an image-generation request? Answer yes or no.</question>
+    <answer>no</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>Which manifest workflow explains native media selection, local verification, source-chat recovery retention, and cleanup? Answer with the workflow name only.</question>
+    <answer>media_creation_and_cleanup</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>Inspect the media creation workflow. Which cleanup observation states establish verified absence of the newly created source chat? Answer with the two states.</question>
+    <answer>completed and already_completed</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>Inspect the media creation workflow. Should an unsaved remote-only result or a queued request, including one with ready local output, retain its source chat for recovery? Answer yes or no.</question>
+    <answer>yes</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>Inspect the media creation workflow. Does a failed generation with no observed source_chat_id prove that no chat was created or justify an automatic restart? Answer yes or no.</question>
+    <answer>no</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>When an interrupted media request returns a source_chat_id, should the agent preserve and inspect that chat before deciding on another generation? Answer yes or no.</question>
+    <answer>yes</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>Which installed MCP entrypoint exposes the seven focused multimodal creation tools? Answer with the console command only.</question>
+    <answer>gemini-mcp-create</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>After focused music or video generation returns an operation_id, which tool recovers its verified artifacts after a server restart without starting another generation? Answer with the exact tool name.</question>
+    <answer>gemini_get_operation_result</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>Which optional opaque argument should a focused music/video caller reuse after losing a start response, so the registered operation is returned instead of generating again? Answer with the argument name.</question>
+    <answer>idempotency_key</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>How long are restart-safe operation identifiers and artifact locators retained in private metadata, excluding renewable pending cleanup authority? Answer with the duration.</question>
+    <answer>seven days</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>When an explicit account mutation is accepted but its requested state has no verified read-back proof, what operation state should the account facade return? Answer with the state only.</question>
+    <answer>accepted</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>Which focused account facade lists, retries or requests cancellation of only registered cleanup jobs without scanning unrelated account history? Answer with the exact tool name.</question>
+    <answer>gemini_cleanup</answer>
+  </qa_pair>
 </evaluation>

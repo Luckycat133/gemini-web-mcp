@@ -5,7 +5,6 @@ Low-token, production-ready.
 """
 
 import asyncio
-import json
 import logging
 import os
 import threading
@@ -22,10 +21,12 @@ from . import __version__
 from .adapters import append_artifact_block, attach_domain_result, domain_text, exception_text
 from .client_wrapper import (
     cleanup_due_remote_chats,
+    finalize_generated_chat_cleanup,
     create_session,
     get_cookie_from_browser,
     get_cookie_status,
     get_gemini_client,
+    init_cookie_manager_integration,
     initialize_client,
     list_browser_cookie_profiles,
     list_sessions,
@@ -56,11 +57,12 @@ from .services import (
     CleanupStrategy,
     SessionMessageRequest,
     StartSessionRequest,
-    artifact_exception_result,
     artifact_from_local_path,
-    artifact_result,
-    classify_artifact_state,
+    classify_media_artifact_state,
     extract_response_artifacts,
+    merge_artifacts,
+    media_artifacts,
+    media_operation_timeout,
     observed_backend_from_response,
     response_chat_id,
 )
@@ -107,6 +109,10 @@ from .services.manifest import (
     web_capabilities_payload as _web_capabilities_payload,
 )
 from .services.notebooks import fetch_native_notebooks as _fetch_native_notebooks
+from .services.media_generation import (
+    media_artifact_result,
+    media_creation_response,
+)
 from .services.scheduled import (
     create_daily_action as _create_daily_action_service,
     delete_action as _delete_scheduled_action_service,
@@ -165,7 +171,7 @@ mcp = MCPServer(
 ## Media behavior
 - image: Flash-Lite -> Nano Banana 2 Lite; Flash / Pro -> Nano Banana 2
 - music: Lyria; upstream responses may not expose the exact version
-- video: a generic chat prompt may return text only; require a verified video artifact
+- video: use the observed native video mode; require a verified local video artifact
 
 ## Quick
 chat(message="hi")
@@ -191,76 +197,53 @@ def _ensure_config_dir() -> None:
 
 def _init_default_prompts() -> None:
     """Initialize with default prompts if none exist."""
+    from .services.prompts import PromptLibrary
+
     _ensure_config_dir()
-    if not PROMPTS_FILE.exists() and DEFAULT_PROMPTS_FILE.is_file():
-        PROMPTS_FILE.write_text(DEFAULT_PROMPTS_FILE.read_text(encoding="utf-8"), encoding="utf-8")
+    if DEFAULT_PROMPTS_FILE.is_file() and PromptLibrary(PROMPTS_FILE).seed_if_absent(DEFAULT_PROMPTS_FILE):
         logger.info("Initialized default prompts")
 
 
 class PromptManager:
-    """Simple prompt storage manager."""
+    """Name-based compatibility adapter over the shared Prompt storage."""
 
     def __init__(self, file_path: Path):
+        from .services.prompts import PromptLibrary
+
         self.file_path = file_path
-        self._data: dict[str, dict] = {}
-        self._load()
+        self._library = PromptLibrary(file_path)
+
+    @property
+    def _data(self) -> dict[str, dict]:
+        return self._library.data
+
+    @_data.setter
+    def _data(self, value: dict[str, dict]) -> None:
+        self._library.data = value
 
     def _load(self) -> None:
         """Load prompts from file."""
-        if self.file_path.exists():
-            try:
-                with open(self.file_path, "r", encoding="utf-8") as f:
-                    data = json.load(f)
-                    self._data = data.get("prompts", {})
-            except (json.JSONDecodeError, IOError) as e:
-                logger.error(f"Failed to load prompts: {e}")
-                self._data = {}
+        self._library.load()
 
     def _save(self) -> None:
         """Save prompts to file."""
-        _ensure_config_dir()
-        try:
-            with open(self.file_path, "w", encoding="utf-8") as f:
-                json.dump(
-                    {"version": "1.0", "prompts": self._data},
-                    f,
-                    ensure_ascii=False,
-                    indent=2,
-                )
-        except IOError as e:
-            logger.error(f"Failed to save prompts: {e}")
+        self._library.save()
 
     def list_all(self) -> list[dict]:
         """List all prompts."""
-        return sorted(self._data.values(), key=lambda x: x.get("name", "").lower())
+        return self._library.list(by_name=True)
 
     def get_by_name(self, name: str) -> Optional[dict]:
         """Get prompt by name."""
-        for p in self._data.values():
-            if p.get("name", "").lower() == name.lower():
-                return p
-        return None
+        return self._library.get_by_name(name)
 
     def create(self, name: str, content: str, category: str = "general") -> str:
         """Create new prompt."""
-        prompt_id = name.lower().replace(" ", "_")
-        self._data[prompt_id] = {
-            "id": prompt_id,
-            "name": name,
-            "content": content,
-            "category": category,
-        }
-        self._save()
-        return prompt_id
+        return self._library.create(name, content, category, unique_name=True, save=self._save)
 
     def delete(self, name: str) -> bool:
         """Delete prompt by name."""
-        prompt = self.get_by_name(name)
-        if prompt:
-            del self._data[prompt["id"]]
-            self._save()
-            return True
-        return False
+        return self._library.delete(name, by_name=True, save=self._save)
 
 
 _prompt_manager: Optional[PromptManager] = None
@@ -512,6 +495,8 @@ async def _history_search_text(
     )
     assert result.data is not None
     lines = []
+    if not result.ok and result.error is not None:
+        lines.append(f"Content search failed: {result.error.message}")
     for match in result.data["matches"]:
         lines.append(f"{match['title']} ({match['id']})")
         for snippet in match.get("snippets", [])[:3]:
@@ -522,6 +507,8 @@ async def _history_search_text(
                     f"  turn {snippet.get('turn_index')} {snippet.get('role')}: "
                     f"{_truncate_text(snippet.get('text', ''), 240)}"
                 )
+    if result.data.get("read_failures"):
+        lines.append(f"Content search incomplete: {len(result.data['read_failures'])} chat reads failed.")
     if result.data["has_more"]:
         lines.append(f"next_offset={result.data['next_offset']}")
     return domain_text(result, "\n".join(lines) if lines else "No matches", use_result_data=True)
@@ -907,7 +894,11 @@ async def _scheduled_create(
     visible = bool(result.get("visible_in_registry"))
     verification_status = result.get("verification_status", "not_attempted")
     suffix = "" if visible else f" ({verification_status}; verify account context)"
-    return [TextContent(type="text", text=f"Created: {created_id or clean_title}{suffix}")]
+    accepted = result.get("accepted") is True
+    label = "Created" if accepted and result.get("verified") is True else (
+        "Accepted create request" if accepted else "Creation not confirmed"
+    )
+    return [TextContent(type="text", text=f"{label}: {created_id or clean_title}{suffix}")]
 
 
 async def _scheduled_delete(client: Any, action_id: str) -> list[TextContent]:
@@ -988,18 +979,24 @@ def _skill_media_result(
     request_model: Optional[str],
     effective_backend: Optional[str],
     media_type: str,
+    observed_artifacts: tuple[Artifact, ...] | None = None,
+    save_failures: tuple[str, ...] = (),
 ) -> tuple[ArtifactResultData, Any]:
     observed_backend = observed_backend_from_response(response)
-    artifacts = extract_response_artifacts(
-        response,
+    remote_artifacts = extract_response_artifacts(
+        media_creation_response(response),
         media_type=media_type,
         requested_backend=requested_model,
         request_model=request_model,
         effective_backend=effective_backend,
         observed_backend=observed_backend,
-    )
+    ) if observed_artifacts is None else ()
+    artifacts = media_artifacts(merge_artifacts(remote_artifacts, observed_artifacts or ()), media_type)
+    state = classify_media_artifact_state(response, artifacts, media_type)
+    if state == ArtifactState.EMPTY and save_failures:
+        state = ArtifactState.FAILED
     data = ArtifactResultData(
-        state=classify_artifact_state(response, artifacts),
+        state=state,
         artifacts=artifacts,
         input_artifacts=input_artifacts,
         requested_model=requested_model,
@@ -1010,21 +1007,84 @@ def _skill_media_result(
         media_type=media_type,
     )
     video_empty_action = (
-        (
-            "Inspect the retained upstream chat. "
-            if data.source_chat_id
-            else "No upstream chat ID was observed. "
-        )
-        + "Generic chat has not been verified to enter Gemini Omni video mode. "
-        "Use https://gemini.google.com/videos in an authorized browser."
+        "Inspect the source chat and https://gemini.google.com/videos before another video request."
         if media_type == "video" and data.state == ArtifactState.EMPTY
-        else None
+        else "Inspect the source chat and capability state before another creation request."
     )
-    return data, artifact_result(
+    return data, media_artifact_result(
         data,
+        response=response,
+        save_failures=save_failures,
         empty_suggested_action=video_empty_action,
-        empty_retryable=media_type != "video",
+        empty_retryable=False,
     )
+
+
+def _build_creation_service():
+    from .services.creation import CreationService
+
+    return CreationService(
+        client_provider=lambda: get_gemini_client(),
+        initializer=lambda: initialize_client(),
+        cleanup_due=lambda client: cleanup_due_remote_chats(client),
+        finalizer=lambda *args, **kwargs: finalize_generated_chat_cleanup(*args, **kwargs),
+        timeout_provider=lambda kind, _override: media_operation_timeout(kind),
+        source="skill_create",
+    )
+
+
+async def _compact_creation(prompt: str, media_type: str, model: str, thinking_level: str,
+                            image_path: Optional[str]) -> list[TextContent]:
+    from .adapters import domain_failure_text
+    from .services.creation import CreationRequest
+
+    if not prompt.strip():
+        return domain_text(_invalid_argument_result("prompt must not be blank."), "Error: prompt must not be blank.")
+    valid, safe_image, message = validate_optional_image_path(image_path)
+    if not valid:
+        return domain_text(_invalid_argument_result(message or "Invalid image path."), f"Error: {message}")
+    try:
+        backend = resolve_media_request(_normalize_model(model), "image" if media_type == "image_edit" else media_type, thinking_level)
+    except Exception as error:
+        return exception_text(error, logger=logger, operation=f"skill_create:{media_type}")
+    responses: list[Any] = []
+    result = await _build_creation_service().generate(CreationRequest(
+        prompt, media_type, model, thinking_level, image_path=safe_image,
+    ), response_sink=responses)
+    data = result.data
+    if responses:
+        try:
+            content = _format_response(
+                media_creation_response(responses[-1]), "image" if media_type == "image_edit" else media_type,
+                backend_label=backend["backend_label"], backend_note=backend["note"],
+            )
+        except Exception as error:
+            from dataclasses import replace
+            from .domain import DomainWarning
+
+            logger.warning("Creation presentation failed error_type=%s", type(error).__name__)
+            result = replace(result, warnings=(*result.warnings, DomainWarning(
+                "PRESENTATION_FAILED", "Compatibility presentation was unavailable; inspect structured artifacts.",
+            )))
+            content = [TextContent(type="text", text="Creation result is available in structured artifacts.")]
+    else:
+        content = [TextContent(type="text", text=domain_failure_text(result))]
+    if not result.ok and responses:
+        content[0].text += "\n\n" + domain_failure_text(result)
+    if data is not None:
+        if data.state == ArtifactState.EMPTY:
+            content[0].text += "\n\nArtifact state: empty (no usable media URI was returned)."
+        elif data.state == ArtifactState.QUEUED:
+            content[0].text += "\n\nArtifact state: queued (no completed media is available yet)."
+        elif data.state == ArtifactState.FAILED:
+            content[0].text += "\n\nArtifact state: failed (local save or verification failed)."
+        paths = [item.local_path for item in data.artifacts if item.local_path and item.verification.status.value == "verified"]
+        if paths:
+            content[0].text += "\n\nSaved files:\n" + "\n".join(paths)
+        if result.meta.details.get("upstream_queued") and data.state != ArtifactState.QUEUED:
+            content[0].text += "\n\nReturned artifacts are available, but the upstream request is still queued or processing; the chat is retained."
+        content = append_artifact_block(content, data.artifacts)
+    return attach_domain_result(content, result, use_result_data=True)
 
 
 @mcp.tool(annotations=MUTATES_REMOTE)
@@ -1035,105 +1095,14 @@ async def create(
     thinking_level: str = "standard",
     image_path: Optional[str] = None,
 ) -> list[TextContent]:
-    """Generate image/video/music."""
-    if not prompt.strip():
-        return domain_text(_invalid_argument_result("prompt must not be blank."), "Error: prompt must not be blank.")
-    requested_model = model
-    media_type = _normalize_media_type(type)
-    request_model: str | None = None
-    effective_backend: str | None = None
-    input_artifacts: tuple[Artifact, ...] = ()
-    try:
-        valid_image, safe_image_path, image_error = validate_optional_image_path(image_path)
-        if not valid_image:
-            return domain_text(
-                _invalid_argument_result(image_error or "Invalid image path."),
-                f"Error: {image_error}",
-            )
+    """Generate native image/video/music output, save locally and verify artifacts.
 
-        client = get_gemini_client()
-        await initialize_client()
-        await cleanup_due_remote_chats(client)
-
-        model = _normalize_model(model)
-        media_request = resolve_media_request(model, media_type, thinking_level)
-        request_model = media_request["request_model"]
-        effective_backend = media_request["backend_label"]
-
-        prefixes = {
-            "image": "Generate image: ",
-            "video": "Generate video: ",
-            "music": "Create music: ",
-        }
-        media_prompt = prefixes.get(media_type, "") + prompt
-        files = [safe_image_path] if safe_image_path else None
-        input_artifacts = _skill_input_artifacts(safe_image_path, requested_model, request_model, effective_backend)
-
-        response = await client.generate_content(
-            prompt=media_prompt,
-            files=files,
-            model=request_model,
-            thinking_level=thinking_level,
-        )
-        input_artifacts = _skill_input_artifacts(
-            safe_image_path,
-            requested_model,
-            request_model,
-            effective_backend,
-            observed_backend=observed_backend_from_response(response),
-            source_chat_id=response_chat_id(response),
-        )
-        data, result = _skill_media_result(
-            response,
-            input_artifacts,
-            requested_model=requested_model,
-            request_model=request_model,
-            effective_backend=effective_backend,
-            media_type=media_type,
-        )
-        if data.state in {ArtifactState.QUEUED, ArtifactState.EMPTY}:
-            schedule_remote_chat_cleanup_from_response(
-                response,
-                retain_chat=True,
-                source=f"skill_create:{media_type}",
-            )
-        else:
-            _schedule_skill_response_cleanup(response, f"skill_create:{media_type}")
-        content = _format_response(
-            response,
-            media_type,
-            backend_label=effective_backend,
-            backend_note=media_request["note"],
-        )
-        if data.state == ArtifactState.EMPTY:
-            content[0].text += "\n\nArtifact state: empty (no usable media URI was returned)."
-            if media_type == "video":
-                content[0].text += " Use the dedicated Gemini Videos page after inspecting this chat."
-        elif data.state == ArtifactState.QUEUED:
-            content[0].text += "\n\nArtifact state: queued (no completed media is available yet)."
-        content = append_artifact_block(content, data.artifacts)
-        return attach_domain_result(content, result, use_result_data=True)
-
-    except Exception as e:
-        data = ArtifactResultData(
-            state=ArtifactState.FAILED,
-            requested_model=requested_model,
-            request_model=request_model,
-            effective_backend=effective_backend,
-            input_artifacts=input_artifacts,
-            media_type=media_type,
-        )
-        result = artifact_exception_result(
-            e,
-            data,
-            logger=logger,
-            operation=f"skill_create:{media_type}",
-        )
-        return attach_domain_result(
-            _error_text(e, "Create"),
-            result,
-            use_result_data=True,
-        )
+    Cleanup applies only to this request's saved or definitively empty new chat.
+    Queued/unsaved output retains its source; meta.details.cleanup is separate
+    from artifact readiness. The focused creation server also supports durable
+    asynchronous video/music handles.
+    """
+    return await _compact_creation(prompt, _normalize_media_type(type), model, thinking_level, image_path)
 
 
 @mcp.tool(annotations=MUTATES_REMOTE)
@@ -1143,93 +1112,14 @@ async def edit(
     model: str = "flash",
     thinking_level: str = "standard",
 ) -> list[TextContent]:
-    """Edit existing image."""
-    if not prompt.strip():
-        return domain_text(_invalid_argument_result("prompt must not be blank."), "Error: prompt must not be blank.")
+    """Edit a local image in native image mode, then save and verify the output.
+
+    Clean only this request's saved or definitively empty new chat. Queued or
+    unsaved outputs retain their source; cleanup metadata is independent.
+    """
     if not image_path.strip():
         return domain_text(_invalid_argument_result("image_path must not be blank."), "Error: image_path must not be blank.")
-    requested_model = model
-    request_model: str | None = None
-    effective_backend: str | None = None
-    input_artifacts: tuple[Artifact, ...] = ()
-    try:
-        valid_image, safe_image_path, image_error = validate_optional_image_path(image_path)
-        if not valid_image:
-            return domain_text(
-                _invalid_argument_result(image_error or "Invalid image path."),
-                f"Error: {image_error}",
-            )
-
-        client = get_gemini_client()
-        await initialize_client()
-        await cleanup_due_remote_chats(client)
-
-        model = _normalize_model(model)
-        media_request = resolve_media_request(model, "image", thinking_level)
-        request_model = media_request["request_model"]
-        effective_backend = media_request["backend_label"]
-        input_artifacts = _skill_input_artifacts(
-            safe_image_path or image_path,
-            requested_model,
-            request_model,
-            effective_backend,
-        )
-
-        response = await client.generate_content(
-            prompt=f"Edit this image: {prompt}",
-            files=[safe_image_path],
-            model=request_model,
-            thinking_level=thinking_level,
-        )
-        input_artifacts = _skill_input_artifacts(
-            safe_image_path or image_path,
-            requested_model,
-            request_model,
-            effective_backend,
-            observed_backend=observed_backend_from_response(response),
-            source_chat_id=response_chat_id(response),
-        )
-        data, result = _skill_media_result(
-            response,
-            input_artifacts,
-            requested_model=requested_model,
-            request_model=request_model,
-            effective_backend=effective_backend,
-            media_type="image_edit",
-        )
-        if data.state in {ArtifactState.QUEUED, ArtifactState.EMPTY}:
-            schedule_remote_chat_cleanup_from_response(response, retain_chat=True, source="skill_edit")
-        else:
-            _schedule_skill_response_cleanup(response, "skill_edit")
-        content = _format_response(
-            response,
-            "image",
-            backend_label=effective_backend,
-            backend_note=media_request["note"],
-        )
-        content = append_artifact_block(content, data.artifacts)
-        return attach_domain_result(content, result, use_result_data=True)
-
-    except Exception as e:
-        data = ArtifactResultData(
-            state=ArtifactState.FAILED,
-            requested_model=requested_model,
-            request_model=request_model,
-            effective_backend=effective_backend,
-            input_artifacts=input_artifacts,
-            media_type="image_edit",
-        )
-        result = artifact_exception_result(
-            e,
-            data,
-            logger=logger,
-            operation="skill_edit",
-        )
-        return attach_domain_result(
-            _error_text(e, "Edit"),
-            result,
-            use_result_data=True,
-        )
+    return await _compact_creation(prompt, "image_edit", model, thinking_level, image_path)
 
 
 async def _session_create(
@@ -1591,6 +1481,7 @@ def _format_response(
 def main() -> None:
     """Run the server."""
     _init_default_prompts()
+    init_cookie_manager_integration()
     mcp.run()
 
 

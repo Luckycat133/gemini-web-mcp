@@ -1,10 +1,10 @@
 ---
 name: gemini-assist
-description: "Use this skill when the user wants a second opinion, critique, code or design review, current-web search that names its sources, image or screenshot understanding, file, URL, or mixed-input understanding, or Deep Research. Prefer this focused skill over the gemini-web-mcp compatibility skill for pure assistance and understanding workloads. Do not use it for pure image, video, or music generation, Gemini account administration, or repository development; route those requests to the creation, account, or development capability instead."
+description: "Use Gemini for second opinions, sourced web search, image/file/URL understanding, and Deep Research. Media generation and account management have separate focused Skills."
 license: MIT-0
-compatibility: "Requires Python 3.11+ and the dedicated gemini-mcp-assist MCP server. Run it with uvx --from git+https://github.com/Luckycat133/gemini-web-mcp@main gemini-mcp-assist. Live calls require Gemini Web account Cookies."
 metadata:
-  version: "0.2.1"
+  compatibility: "Requires a connected gemini-mcp-assist server (Python 3.11+); live calls use the server's private Gemini Web authentication."
+  version: "0.2.2"
   openclaw:
     emoji: "♊️"
     homepage: https://github.com/Luckycat133/gemini-web-mcp
@@ -29,75 +29,45 @@ metadata:
 
 # Gemini Assist
 
-Extend the current task with Gemini assistance: a second opinion, grounded current-web evidence, visual or mixed-input understanding, or Deep Research. Use the user's task to pick one tool; do not tour the Gemini surface.
+Use the connected `gemini-mcp-assist` server (`gemini_assist_mcp`) for the
+analysis or research needed by the user's task. Combine tools when the task
+needs several steps.
 
-This surface deliberately exposes no history, Cookie, Scheduled, Gem, Prompt, manifest, or cleanup tools.
-
-## Choose The Tool
-
-| User intent | Tool | What success means |
+| Task | Tool | Result to use |
 | --- | --- | --- |
-| Second opinion, critique, code or design review | `gemini_ask` | the answer is compared or incorporated into the agent's own conclusion |
-| Current-web question that should name sources | `gemini_search` | answer plus observed `sources` and a truthful `grounding_state` |
-| Understand one image or screenshot | `gemini_understand_image` | analysis tied to that image and used in the surrounding task |
-| Understand files, URLs, or mixed evidence together | `gemini_understand` | every input keeps its id and per-input outcome plus one synthesized analysis |
-| Multi-source investigation that yields a durable report | `gemini_research` | one asynchronous start returns a preserved operation handle |
+| Second opinion, critique, code or design review | `gemini_ask` | answer with optional context |
+| Current-web search | `gemini_search` | answer, observed sources and grounding state |
+| One image or screenshot | `gemini_understand_image` | analysis of the supplied image |
+| Files, URLs or mixed inputs | `gemini_understand` | synthesis with per-input IDs and outcomes |
+| Deep Research | `gemini_research` | operation handle, then report |
 
-## Server And Installation
+Read structured `ok`, `data`, `error` and `meta`. Incorporate the information
+into the requested work. For search, `grounded` requires observed `sources`;
+`answer_only`, `unavailable` and `failed` preserve their reported meaning.
+Keep input identities and failures visible when interpreting mixed evidence.
 
-The dedicated assistance entrypoint is `gemini-mcp-assist`; the MCP server name is `gemini_assist_mcp`.
+## Research
+
+Start with a question; the default asynchronous call returns `operation_id`
+before the report is ready. Preserve the handle and any upstream IDs. Use
+`gemini_research(action="status"|"result"|"cancel", operation_id=...)`
+for continuation, including after reconnect. An optional opaque
+`idempotency_key` lets a repeated start lookup the same run after response loss.
+A timeout alone does not justify starting a second run.
+
+A report is complete when its artifact is ready. `cancel_requested` is best
+effort; confirmed provider cancellation and `local_cancelled_before_start`
+have distinct evidence. Availability comes from the actual tool result.
+
+## Connection and routing
+
+The MCP server must be connected independently of this Skill. If setup is
+needed, the source entrypoint is:
 
 ```bash
 uvx --from git+https://github.com/Luckycat133/gemini-web-mcp@main gemini-mcp-assist
 ```
 
-The catalog is exactly five tools: `gemini_ask`, `gemini_search`, `gemini_understand_image`, `gemini_understand`, and `gemini_research`.
-
-Models: `flash-lite`, `flash` (default), `thinking`, `pro`; `thinking_level` is `standard` or `extended`.
-
-Live calls require Gemini Web account Cookies (`GEMINI_PSID` and the recommended matching `GEMINI_PSIDTS`); without them the tools return typed authentication errors instead of pretending to work.
-
-## Truthful Grounding
-
-`gemini_search` reports one `grounding_state`:
-
-```text
-grounded | answer_only | unavailable | failed
-```
-
-- `grounded` requires observed source URLs in `sources`;
-- an answer without observed evidence is `answer_only` and is never labeled grounded;
-- an empty answer is `unavailable`; an errored search is `failed`.
-
-Do not relabel a source-free answer as grounded and do not invent source URLs. When a question needs evidence the quick search did not observe, escalate to `gemini_research`.
-
-## Information, Not Artifacts
-
-Search and understanding return information to the calling agent, not files. Synthesize the answer or analysis into the user's task instead of dumping raw Gemini output. A completed Deep Research report stays in the retained Gemini chat; recover it through the preserved chat identity instead of expecting a downloaded Artifact from these tools.
-
-## Deep Research Starts Asynchronously
-
-`gemini_research` starts one Deep Research run and returns immediately after the upstream research has started:
-
-- the structured result carries an opaque `operation_id` plus the preserved `upstream_operation_id` and `upstream_chat_id`;
-- `state` is `queued` or `running`; a started run is never a completed report;
-- `timeout_seconds` bounds only the plan and start phases, never the report itself;
-- the research chat is retained by default so the report stays recoverable;
-- preserve every returned identifier and never start a duplicate run because one call timed out.
-
-Deep Research requires an AI Plus subscription; report the typed `CAPABILITY_UNAVAILABLE` result instead of retrying.
-
-## Boundaries
-
-- Pure image, video, or music generation is a creation task, not assistance.
-- Gemini account administration — history, Notebooks, Scheduled, Gems, Prompts, cleanup — needs explicit account surfaces.
-- Developing the gemini-web-mcp repository itself is development work, not assistance.
-- Do not call tools outside the five-tool catalog above; this surface has none.
-
-## Standard Workflow
-
-1. Identify the assistance intent and choose exactly one tool.
-2. Supply the smallest complete input: a prompt with optional context, one image, or one typed input list.
-3. Read the structured result before trusting the compatibility text.
-4. Continue the user's task with the returned information.
-5. For Deep Research, preserve the handle and recover the report later.
+Use the server's private authentication setup. For generated media use
+`$gemini-create`; for requested account work use `$gemini-account`.
+Repository changes use `$gemini-web-mcp-development`.

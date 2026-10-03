@@ -43,6 +43,8 @@ jobs:
           skills-ref validate .agents/skills/gemini-web-mcp-development
           skills-ref validate .agents/skills/gemini-web-mcp
           skills-ref validate .agents/skills/gemini-assist
+          skills-ref validate .agents/skills/gemini-create
+          skills-ref validate .agents/skills/gemini-account
       - name: Snapshot source profiles and MCP protocol
         run: |
           python scripts/smoke_profiles.py

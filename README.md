@@ -2,7 +2,7 @@
   <img src="docs/assets/gemini-web-mcp-banner.svg" alt="Gemini Web MCP" width="100%">
 </p>
 
-<h1 align="center">Gemini Web MCP (v0.2.1)</h1>
+<h1 align="center">Gemini Web MCP (v0.2.2)</h1>
 
 <p align="center">
   An agent-first MCP Python SDK v2 gateway and skills for Gemini Web workflows.
@@ -27,7 +27,12 @@
 
 Gemini Web MCP exposes Gemini Web capabilities to MCP-compatible clients such as Codex, Claude Desktop, VS Code MCP clients, and other agent runtimes.
 
-The main design choice is controlled tool layering. Agents should not see every private, account-level, or destructive operation by default. This server ships narrow `GEMINI_TOOLS` profiles, facade tools, MCP annotations, and a public Codex skill that tells agents how to choose the right surface.
+The authenticated local server currently targets macOS/Linux. Windows local
+authentication is unsupported until its private state-file/ACL implementation
+is accepted; client configuration templates describe formats only. See the
+[client/OS evidence](docs/client-examples.md#client-and-os-evidence).
+
+The main design choice is controlled tool layering. Agents can connect focused assistance, creation and account servers for the current task. Compatibility profiles, typed action facades, MCP annotations and task-first Skills guide surface selection.
 
 ## MCP Protocol Compatibility
 
@@ -37,7 +42,7 @@ The supported runtime is `mcp>=2,<3` plus `mcp-types>=2,<3`. CI exercises both c
 
 ## Install The Runtime Skill
 
-The repository runtime Skill is `0.2.1`. Install the public listing from ClawHub (and verify its displayed version when publication state matters):
+The repository runtime Skill is `0.2.2`. Install the public listing from ClawHub (and verify its displayed version when publication state matters):
 
 ```bash
 clawhub install gemini-web-mcp
@@ -63,9 +68,12 @@ npx --yes skills@1.5.21 add \
 
 The two roles are intentionally separate: `gemini-web-mcp` is for tool use; `gemini-web-mcp-development` owns implementation, tests, packaging, compatibility, and releases. `.agents/skills` is the single repository source so clients that scan both `.agents` and `.codex` do not discover duplicate names.
 
-Changes listed under **Unreleased** are available from the current repository source; a published Skill listing may lag behind `main` until its next release.
+`0.2.2` is in release preparation in [PR #34](https://github.com/Luckycat133/gemini-web-mcp/pull/34).
+Its changes are on `codex/release-v0.2.2`; use that branch or a specific commit
+to test them before merge. The default installation examples use `main`.
+Public Skill listings may have an earlier version.
 
-The three-file runtime skill bundle is released on ClawHub under MIT-0. The MCP server source and the
+The runtime Skill bundles use MIT-0. The MCP server source and the
 repository-development skill remain [AGPL-3.0-only](LICENSE).
 
 ## Install The MCP Server
@@ -130,6 +138,20 @@ gemini-mcp-assist
 
 See [copyable Codex, Claude Desktop, Claude Code, and VS Code configurations plus verified text/image walkthroughs](docs/client-examples.md). Live examples require explicit account opt-in; no live Gemini request is part of PR CI.
 
+## Focused products
+
+| Task | Entrypoint | Runtime Skill |
+| --- | --- | --- |
+| Assistance, search, understanding, Research | `gemini-mcp-assist` | `gemini-assist` |
+| Image/edit/video/music Artifacts and recovery | `gemini-mcp-create` | `gemini-create` |
+| Explicit account administration and cleanup | `gemini-mcp-account` | `gemini-account` |
+
+These deterministic 5/7/7 tool catalogs share services with primary/compact
+compatibility servers. Video/music start once with an opaque handle; Research
+uses explicit actions within its five-tool catalog. See
+[operation/cleanup recovery](docs/operations-and-cleanup.md) and
+[focused client configurations](docs/client-examples.md).
+
 ## Tool Profiles
 
 | Profile | Use When | Surface |
@@ -151,12 +173,14 @@ Use `model` as the primary starting profile for text-only work, `core` for multi
 | --- | --- |
 | Models | Gemini Web model aliases for Flash-Lite, Flash, Pro, thinking levels, and guided learning modes |
 | Chat | One-shot chat, normalized collection of Gemini upstream streams, local sessions, temporary chat, saved Gem usage |
-| Media | Image generation/editing and music through MCP with verified local artifacts; video through Gemini Web's dedicated Omni mode while the generic MCP route remains unverified |
+| Media | Explicit native image/edit/video/music selection; bounded 2026-10-03 focused MCP tests returned independently decoded local artifacts for all four workflows |
 | History | List, scan, search, read, export, delete, and cleanup test artifacts |
 | Notebooks | List native Gemini notebooks, inspect notebook chats, move chats into notebooks |
 | Account Inventory | Public links, usage limits, library capabilities, modes, models, scheduled actions |
 | Safety Metadata | MCP annotations, tool manifest, privacy/destructive-operation guidance |
 | Distribution | Standalone Codex skill zip, wheel, source distribution, launch kit |
+
+Image/edit, video and music calls select the native Web feature and save locally by default. A finished operation with verified outputs, or a definitive empty response, triggers bounded cleanup of its newly created source chat. Queued or failed recovery stays recoverable; primary callers can retain the chat or request a delay. Creation, async operation recovery and delayed cleanup share services and private SQLite metadata. A selected mode alone does not establish live acceptance. See [native media and cleanup](docs/native-media-mode.md).
 
 ## Development Status
 
@@ -165,9 +189,8 @@ history list/search/read/export/delete share typed results; deletion is verified
 An authorized 2026-08-08 run checked text, sessions, and history. A separate signed-in Chrome check on 2026-09-26
 produced MCP image and music files and a video through Gemini Web's dedicated Omni page; the generic MCP video call
 returned no video artifact, and a later music retry showed an upstream technical error. These targeted observations are
-not a dedicated-account full canary. Remaining work includes durable operation/cleanup recovery, more account-result
-verification, and the focused creation/account products. The active package and Skill metadata remain `0.2.1`; these
-post-tag changes are recorded under **Unreleased**.
+not a dedicated-account full canary. Focused creation/account products, typed facades and durable operation/cleanup recovery are implemented. Bounded 2026-10-03 focused MCP tests verified image/edit, music and native video files, plus completed-operation recovery after restart. The dedicated-account full baseline remains separate. The active package and Skill metadata are `0.2.2`; the
+changes from the 2026-09-26 live check are recorded in the `0.2.2` changelog section.
 
 See [Development status and next steps](docs/development-status.md) for the implemented, partial, deferred, and owner-decision
 boundaries. Offline CI or package success is not presented as current live Gemini behavior.
@@ -180,6 +203,8 @@ The tag release workflow builds:
 
 - `gemini-web-mcp-skill-*.zip`: standalone Codex compatibility skill package
 - `gemini-assist-skill-*.zip`: standalone Codex assistance skill package
+- `gemini-create-skill-*.zip`: standalone Codex multimodal creation skill package
+- `gemini-account-skill-*.zip`: standalone Codex account management skill package
 - `gemini_mcp_server-*-py3-none-any.whl`: Python wheel
 - `gemini_mcp_server-*.tar.gz`: source distribution with docs, evaluations, and public skill files
 

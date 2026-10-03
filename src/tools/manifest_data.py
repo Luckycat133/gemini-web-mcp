@@ -12,6 +12,7 @@ from ..infrastructure.rpc_contracts import WEB_FEATURE_PROBES as RPC_WEB_FEATURE
 
 WEB_UI_CAPABILITIES = {
     "observed_at": "2026-09-26",
+    "model_picker_observed_at": "2026-10-02",
     "account_tier": "Gemini Web Pro",
     "locale": "zh-CN",
     "models": [
@@ -85,6 +86,7 @@ WEB_UI_CAPABILITIES = {
     ],
     "notes": [
         "Model picker and image/video/music entries were rechecked in a signed-in Chrome session on 2026-09-26; other menu and settings entries retain older evidence.",
+        "The model picker, Create image selection and Create video entry were rechecked on 2026-10-02. Public frontend source identifies native image/music selectors; their new MCP route still needs signed-in generation verification.",
         "Runtime model registry is still preferred when available.",
         "Drive picker, link mutation, settings mutation, and memory import mutation are not automated without a safer confirmed RPC contract.",
         "Scheduled actions support daily create and explicit delete through observed Web RPCs; edit/toggle remain disabled until stable RPC contracts are confirmed.",
@@ -166,7 +168,7 @@ TOOL_MANIFEST: list[dict[str, Any]] = [
     {
         "name": "gemini_generate_media",
         "group": "media",
-        "purpose": "Generate image or music artifacts; the generic video argument is compatibility-only and is not a verified Gemini Omni route.",
+        "purpose": "Select observed native image/video/music modes, save and verify matching local artifacts, and clean the new source chat when recoverable outputs no longer depend on it. A selector alone does not prove generation or an exact backend version.",
         "read_only": False,
         "destructive": False,
         "privacy": "sends_user_prompt_and_optional_reference_files",
@@ -175,7 +177,7 @@ TOOL_MANIFEST: list[dict[str, Any]] = [
     {
         "name": "gemini_generate_music",
         "group": "media",
-        "purpose": "Convenience music-generation wrapper; exact Lyria version requires upstream evidence.",
+        "purpose": "Select native music generation, save and verify local audio, and report source-chat cleanup independently; exact Lyria version requires upstream evidence.",
         "read_only": False,
         "destructive": False,
         "privacy": "sends_user_prompt",
@@ -508,10 +510,10 @@ TOOL_MANIFEST: list[dict[str, Any]] = [
     {
         "name": "gemini_reset",
         "group": "cookie",
-        "purpose": "Reset the local Gemini client instance.",
+        "purpose": "Reset the client and all local sessions, deleting non-retained remote chats with read-back verification.",
         "read_only": False,
-        "destructive": False,
-        "privacy": "local_runtime_state",
+        "destructive": True,
+        "privacy": "deletes_non_retained_remote_chats",
         "pagination": False,
     },
     {

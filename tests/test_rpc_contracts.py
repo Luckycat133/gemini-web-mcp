@@ -49,6 +49,30 @@ def test_registered_parser_fixture_status(parser_name: str, case_name: str):
     assert result.status == case_name
 
 
+@pytest.mark.parametrize("url", [None, "", "  ", 123, False, [], {}])
+def test_observed_music_card_with_invalid_url_is_changed_shape(url):
+    body = json.loads(json.dumps(PARSER_FIXTURES["music_chat"]["cases"]["success"]["body"]))
+    body[0][0][3][0][0][12][0]["87"][0][1][7][1] = url
+    assert parse_contract_body("media.music_chat", body).status == "changed_shape"
+
+
+def test_music_empty_chat_and_non_media_turn_remain_verified_empty():
+    assert parse_contract_body("media.music_chat", [[]]).status == "empty"
+    assert parse_contract_body("media.music_chat", [[[None, None, None, [[["rc_1"]]]]]]).status == "empty"
+
+
+@pytest.mark.parametrize(
+    ("contract_key", "body"),
+    [
+        (fixture["contract_key"], body)
+        for fixture in PARSER_FIXTURES.values()
+        for body in fixture.get("malformed_items", [])
+    ],
+)
+def test_valid_outer_envelope_does_not_hide_malformed_items(contract_key, body):
+    assert parse_contract_body(contract_key, body).status == "changed_shape"
+
+
 def test_registry_owns_probe_payloads_and_evidence():
     assert len(WEB_FEATURE_PROBES) == 21
     assert tuple(contract.key for contract in WEB_FEATURE_PROBE_CONTRACTS) == WEB_FEATURE_PROBE_KEYS
@@ -62,6 +86,8 @@ def test_registry_owns_probe_payloads_and_evidence():
 
 
 def test_parameterized_payload_builders_preserve_observed_shapes():
+    assert json.loads(get_contract("gems.system_registry").build_payload(locale="en")) == [3, ["en"], 0]
+    assert json.loads(get_contract("gems.custom_registry").build_payload(locale="en")) == [2, ["en"], 0]
     assert json.loads(get_contract("media.music_chat").build_payload(chat_id="c_1")) == [
         "c_1", 10, None, 1, [1], [4], None, 1,
     ]
@@ -85,6 +111,12 @@ def test_parameterized_payload_builders_preserve_observed_shapes():
     ]
     assert json.loads(get_contract("scheduled.get").build_payload(action_id="task-1")) == ["task-1"]
     assert json.loads(get_contract("scheduled.delete").build_payload(action_id="task-1")) == [None, ["task-1"]]
+
+
+@pytest.mark.parametrize("case_name", ["success", "empty", "rejected", "changed_shape"])
+def test_system_gem_contract_shares_fixture_backed_registry_shape(case_name):
+    case = PARSER_FIXTURES["custom_gems"]["cases"][case_name]
+    assert parse_contract_body("gems.system_registry", case["body"], reject_code=case.get("reject_code")).status == case_name
 
 
 def test_music_chat_parser_keeps_media_identity_without_raw_response():

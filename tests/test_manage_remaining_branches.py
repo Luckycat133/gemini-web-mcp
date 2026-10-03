@@ -453,7 +453,9 @@ def test_search_chats_markdown_renders_snippet_error(monkeypatch):
     text = result[0].text
     assert "## Gemini 历史搜索" in text
     assert "fields=title" in text  # title 匹配（read error 不影响 title 匹配）
-    assert "read error: ValueError: boom" in text
+    assert "read error: ValueError" in text
+    assert "coverage is incomplete" in text
+    assert "boom" not in text
 
 
 def test_search_chats_markdown_renders_has_more_footer(monkeypatch):

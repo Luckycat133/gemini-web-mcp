@@ -1,0 +1,37 @@
+{
+  "mcpServers": {
+    "gemini-assist": {
+      "command": "uvx",
+      "args": [
+        "--from",
+        "git+https://github.com/Luckycat133/gemini-web-mcp@main",
+        "gemini-mcp-assist"
+      ],
+      "env": {
+        "GEMINI_AUTO_REFRESH": "false"
+      }
+    },
+    "gemini-create": {
+      "command": "uvx",
+      "args": [
+        "--from",
+        "git+https://github.com/Luckycat133/gemini-web-mcp@main",
+        "gemini-mcp-create"
+      ],
+      "env": {
+        "GEMINI_AUTO_REFRESH": "false"
+      }
+    },
+    "gemini-account": {
+      "command": "uvx",
+      "args": [
+        "--from",
+        "git+https://github.com/Luckycat133/gemini-web-mcp@main",
+        "gemini-mcp-account"
+      ],
+      "env": {
+        "GEMINI_AUTO_REFRESH": "false"
+      }
+    }
+  }
+}

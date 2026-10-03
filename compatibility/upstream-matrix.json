@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "reviewed_at": "2026-08-03",
+  "reviewed_at": "2026-10-02",
   "python": {
     "supported": ">=3.11",
     "offline_ci": [
@@ -16,24 +16,25 @@
       "live_verified": false
     },
     "gemini-webapi": {
-      "requirement": "gemini-webapi>=2.0.0,<3",
-      "fixture_verified": "2.0.0",
+      "requirement": "gemini-webapi>=2.1.1,<3",
+      "fixture_verified": "2.1.1",
       "live_verified": false
     },
     "mcp": {
       "requirement": "mcp>=2.0.0,<3",
-      "fixture_verified": "2.0.0",
+      "fixture_verified": "2.2.0",
       "live_verified": false
     },
     "mcp-types": {
       "requirement": "mcp-types>=2.0.0,<3",
-      "fixture_verified": "2.0.0",
+      "fixture_verified": "2.2.0",
       "live_verified": false
     }
   },
   "evidence": {
     "offline": "fixture, package, profile, and MCP protocol gates",
     "live": "not_observed_in_this_change",
+    "manual_media": "docs/live-ui-coverage.md#2026-10-02-native-media-recheck (bounded acceptance; not the dedicated full registry canary)",
     "workflow": ".github/workflows/live-canary.yml"
   }
 }

@@ -10,8 +10,12 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any, TypeVar
 
+from mcp import Client, StdioServerParameters
+from mcp.client.sse import sse_client
+from mcp.client.streamable_http import streamable_http_client
 from mcp.server import MCPServer as SDKMCPServer
-from mcp_types import Icon, TextContent, ToolAnnotations
+from mcp.shared._httpx_utils import create_mcp_http_client
+from mcp_types import CallToolResult, Icon, TextContent, ToolAnnotations
 
 
 _CallableT = TypeVar("_CallableT", bound=Callable[..., Any])
@@ -48,7 +52,13 @@ class MCPServer(SDKMCPServer):
 
 
 __all__ = [
+    "Client",
+    "CallToolResult",
     "MCPServer",
+    "StdioServerParameters",
     "TextContent",
     "ToolAnnotations",
+    "create_mcp_http_client",
+    "sse_client",
+    "streamable_http_client",
 ]

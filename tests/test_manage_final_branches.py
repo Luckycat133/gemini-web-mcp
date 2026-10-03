@@ -31,8 +31,9 @@
 
 import asyncio
 import json
-from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
+
+from tests._account_rpc_fakes import scheduled_ack_response, scheduled_read
 
 import src.tools.manage as manage_tools
 from src.tools.manage import (
@@ -60,17 +61,17 @@ def test_payload_scheduled_rpc_accepted_but_not_deleted_state(monkeypatch):
     """
     client = MagicMock()
     # _batch_execute 返回非空 response（_extract_rpc_bodies 会返回非空 bodies）
-    client._batch_execute = AsyncMock(return_value=SimpleNamespace(text='["wrb.fr","Q4Gw3c","body"]'))
+    client._batch_execute = AsyncMock(return_value=scheduled_ack_response())
 
     entries = [{"id": "task-codex-1", "title": "Codex", "instructions": "", "schedule_label": ""}]
     monkeypatch.setattr(
         manage_tools, "_fetch_scheduled_registry",
-        AsyncMock(return_value=(entries, {"ok": True})),
+        AsyncMock(return_value=scheduled_read(entries)),
     )
     # task_after_delete.task_state_id=3 (running) != 6 (deleted) → 未达删除态
     monkeypatch.setattr(
         manage_tools, "_fetch_scheduled_task_by_id",
-        AsyncMock(return_value=({"task_state_id": 3}, {})),
+        AsyncMock(return_value=scheduled_read({"id": "task-codex-1", "task_state_id": 3})),
     )
     # _extract_rpc_bodies 返回非空 → bodies 真值 → RPC 接受
     monkeypatch.setattr(manage_tools, "_extract_rpc_bodies", lambda *a, **kw: ["body"])
@@ -92,17 +93,17 @@ def test_payload_scheduled_rpc_accepted_with_task_after_none(monkeypatch):
     deleted=False，verification_status='still_visible_in_registry'。
     """
     client = MagicMock()
-    client._batch_execute = AsyncMock(return_value=SimpleNamespace(text='["wrb.fr","Q4Gw3c","body"]'))
+    client._batch_execute = AsyncMock(return_value=scheduled_ack_response())
 
     entries = [{"id": "task-codex-1", "title": "Codex", "instructions": "", "schedule_label": ""}]
     monkeypatch.setattr(
         manage_tools, "_fetch_scheduled_registry",
-        AsyncMock(return_value=(entries, {"ok": True})),
+        AsyncMock(return_value=scheduled_read(entries)),
     )
     # task_after_delete=None → 按 id 复检不可读
     monkeypatch.setattr(
         manage_tools, "_fetch_scheduled_task_by_id",
-        AsyncMock(return_value=(None, {})),
+        AsyncMock(return_value=scheduled_read(None)),
     )
     monkeypatch.setattr(manage_tools, "_extract_rpc_bodies", lambda *a, **kw: ["body"])
 

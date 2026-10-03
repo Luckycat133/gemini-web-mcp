@@ -176,6 +176,15 @@ ASSIST_TOOLS = frozenset(
     {"gemini_ask", "gemini_research", "gemini_search", "gemini_understand", "gemini_understand_image"}
 )
 
+CREATE_TOOLS = frozenset({
+    "gemini_generate_image", "gemini_edit_image", "gemini_generate_video", "gemini_generate_music",
+    "gemini_get_operation_status", "gemini_get_operation_result", "gemini_cancel_operation",
+})
+ACCOUNT_TOOLS = frozenset({
+    "gemini_history", "gemini_notebooks", "gemini_scheduled", "gemini_gems",
+    "gemini_prompts", "gemini_account", "gemini_cleanup",
+})
+
 
 async def _list_module_tools(module_name: str) -> list[str]:
     module = importlib.import_module(module_name)
@@ -198,10 +207,12 @@ def _safe_environment(profile: str) -> dict[str, str]:
 
 def _installed_surface(module_name: str, profile: str) -> frozenset[str]:
     with tempfile.TemporaryDirectory(prefix="gemini-profile-smoke-") as directory:
+        environment = _safe_environment(profile)
+        environment["GEMINI_STATE_DB_PATH"] = str(Path(directory) / "state.sqlite3")
         completed = subprocess.run(
             [sys.executable, str(Path(__file__).resolve()), "--probe", module_name],
             cwd=directory,
-            env=_safe_environment(profile),
+            env=environment,
             capture_output=True,
             text=True,
             timeout=30,
@@ -244,6 +255,8 @@ def main() -> None:
         [
             ("compact", "src.skill_server", "model", COMPACT_TOOLS),
             ("assist", "src.surfaces.assist", "model", ASSIST_TOOLS),
+            ("create", "src.surfaces.create", "model", CREATE_TOOLS),
+            ("account", "src.surfaces.account", "model", ACCOUNT_TOOLS),
         ]
     )
     # Profile probes use separate interpreters to preserve import-time tool

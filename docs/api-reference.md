@@ -38,6 +38,12 @@ Use narrow `GEMINI_TOOLS` profiles for agent-facing deployments:
 `gemini_get_tool_manifest` reports these profiles in JSON and Markdown output,
 with `availability` and `current_enabled` per tool.
 
+For focused agent deployments, `gemini-mcp-assist` exposes five assistance tools,
+`gemini-mcp-create` exposes seven creation and operation tools, and
+`gemini-mcp-account` exposes seven account facades. Their catalogs and task-first
+Skills are documented in [tools](tools.md) and [client examples](client-examples.md).
+The tables below document the primary surface.
+
 ---
 
 ## Default Tools (`GEMINI_TOOLS=core`)
@@ -81,7 +87,7 @@ chunk semantics and counts.
 
 | Tool | Purpose |
 |------|---------|
-| `gemini_generate_media` | Generate image, video, or music |
+| `gemini_generate_media` | Native image, reference-image editing, video, and music creation with verified local artifacts |
 | `gemini_generate_music` | Convenience wrapper for music generation |
 
 Current Gemini Web media routing:
@@ -91,13 +97,16 @@ Current Gemini Web media routing:
 | `media_type=image`, `model=flash-lite` | `Nano Banana 2 Lite` route; exact observed backend may be unavailable |
 | `media_type=image`, `model=flash` / `pro` | First pass reports `Nano Banana 2`; Pro redo is separate |
 | `media_type=music` | `Lyria` family; exact version is unverified unless upstream identifies it |
-| `media_type=video` | Generic chat route is not a verified Omni video mode; require a video Artifact |
+| `media_type=video` | Explicit native video feature mode 11; require a matching video Artifact, with backend version reported only when observed |
 
 `model=pro` does not directly select a different first-pass image backend than
 Flash. The Pro image redo control is a post-generation Gemini Web UI action.
-The signed-in 2026-09-26 live check produced images and music through MCP, while
-generic MCP video returned `ARTIFACT_NOT_RETURNED`; Gemini Web's dedicated
-Videos page produced a downloadable Omni video.
+Bounded signed-in focused MCP tests on 2026-10-03 produced independently decoded
+image/edit JPEGs, music MP3 plus companion MP4, and a native 1280×720 video MP4.
+Earlier generic-video and interrupted requests remain separate dated observations
+in [live UI coverage](live-ui-coverage.md).
+
+Primary and compact creation save and verify local output by default. Image/edit, video, and music select their native Web features explicitly. Finished verified outputs or definitive empty responses trigger bounded cleanup of the request's new source chat. Queued, unsaved and failed recovery results retain the source. Primary `retain_chat` / `delete_after_seconds` overrides the default; structured cleanup observations do not replace Artifact verification. Focused video/music return durable operation handles for polling and completed-file retrieval after restart. See [native media and cleanup](native-media-mode.md) and [operations](operations-and-cleanup.md).
 
 ### File And URL
 

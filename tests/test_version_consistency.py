@@ -57,6 +57,8 @@ def _write_valid_release_artifacts(tmp_path: Path, metadata) -> None:
 
     (tmp_path / metadata.skill_filename).touch()
     (tmp_path / metadata.assist_skill_filename).touch()
+    (tmp_path / metadata.create_skill_filename).touch()
+    (tmp_path / metadata.account_skill_filename).touch()
 
 
 def _write_active_version_consumers(tmp_path: Path, metadata) -> None:
@@ -64,6 +66,8 @@ def _write_active_version_consumers(tmp_path: Path, metadata) -> None:
         ".agents/skills/gemini-web-mcp/SKILL.md",
         ".agents/skills/gemini-web-mcp-development/SKILL.md",
         ".agents/skills/gemini-assist/SKILL.md",
+        ".agents/skills/gemini-create/SKILL.md",
+        ".agents/skills/gemini-account/SKILL.md",
     ):
         target = tmp_path / relative_path
         target.parent.mkdir(parents=True, exist_ok=True)
@@ -118,7 +122,7 @@ def test_public_onboarding_surfaces_use_the_canonical_source_install(tmp_path):
         target.write_bytes(source.read_bytes())
     (tmp_path / "pyproject.toml").write_bytes((PROJECT_ROOT / "pyproject.toml").read_bytes())
     _write_active_version_consumers(tmp_path, metadata)
-    for relative_path in ("src/__init__.py", "src/server.py", "src/skill_server.py"):
+    for relative_path in ("src/__init__.py", "src/server.py", "src/skill_server.py", "src/surfaces/assist.py", "src/surfaces/create.py", "src/surfaces/account.py"):
         source = PROJECT_ROOT / relative_path
         target = tmp_path / relative_path
         target.parent.mkdir(parents=True, exist_ok=True)
@@ -153,7 +157,7 @@ def test_versioned_wheel_url_is_optional_but_must_match_when_present(tmp_path):
         target.write_text(CANONICAL_GIT_SOURCE, encoding="utf-8")
     (tmp_path / "pyproject.toml").write_bytes((PROJECT_ROOT / "pyproject.toml").read_bytes())
     _write_active_version_consumers(tmp_path, metadata)
-    for relative_path in ("src/__init__.py", "src/server.py", "src/skill_server.py"):
+    for relative_path in ("src/__init__.py", "src/server.py", "src/skill_server.py", "src/surfaces/assist.py", "src/surfaces/create.py", "src/surfaces/account.py"):
         source = PROJECT_ROOT / relative_path
         target = tmp_path / relative_path
         target.parent.mkdir(parents=True, exist_ok=True)
@@ -199,7 +203,7 @@ def test_skill_and_changelog_versions_must_match_package(tmp_path):
         target.write_text(CANONICAL_GIT_SOURCE, encoding="utf-8")
     (tmp_path / "pyproject.toml").write_bytes((PROJECT_ROOT / "pyproject.toml").read_bytes())
     _write_active_version_consumers(tmp_path, metadata)
-    for relative_path in ("src/__init__.py", "src/server.py", "src/skill_server.py"):
+    for relative_path in ("src/__init__.py", "src/server.py", "src/skill_server.py", "src/surfaces/assist.py", "src/surfaces/create.py", "src/surfaces/account.py"):
         source = PROJECT_ROOT / relative_path
         target = tmp_path / relative_path
         target.parent.mkdir(parents=True, exist_ok=True)

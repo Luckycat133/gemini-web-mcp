@@ -72,6 +72,8 @@ Codex、Claude Desktop、Claude Code 和 VS Code 的逐文件示例见
 | --- | --- |
 | `GEMINI_TOOLS=model` | 文本/模型调用的首选起点 |
 | `GEMINI_TOOLS=core` | 图片、音乐、文件、URL 或 Deep Research；视频暂用 Gemini Web 专用页面 |
+| `gemini-mcp-create` | 专注图片生成/编辑、视频/音乐异步任务和重启恢复的七工具面 |
+| `gemini-mcp-account` | 明确请求历史、Notebook、Scheduled、Gem、Prompt 或已登记清理任务的七入口 |
 | `gemini-mcp-skill-server` | 需要固定十一工具、低 token facade |
 | `gemini-mcp-assist` | 只需要第二意见、有据搜索、图像/混合输入理解或异步 Deep Research 的专注五工具面 |
 | `GEMINI_TOOLS=all` | 维护者验证账号、历史和管理能力；不适合作为通用默认 |

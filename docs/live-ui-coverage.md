@@ -43,7 +43,136 @@ they are not backend identifiers observed in the MCP response. See the
 [music](https://blog.google/innovation-and-ai/products/gemini-app/better-tracks-lyria-gemini/)
 sources.
 
-## Observed Native UI
+## 2026-10-02 Native Media Recheck
+
+Signed-in Chrome showed `3.5 Flash-Lite`, `3.8 Flash` and `3.1 Pro`. Selecting
+Create image changed the composer to the image feature with styles and aspect
+ratio controls; Create video was also visible in the tools menu. Other account
+menus were not revalidated in this pass.
+
+Public frontend source establishes image mode 14 and music mode 21 at the
+StreamGenerate inner array's index 49. MCP now selects these modes explicitly
+and shares local saving, verification and source-chat cleanup across primary
+and compact creation. See [the source chain and policy](native-media-mode.md).
+After the user enabled macOS browser-data access, a fresh current-code stdio
+session negotiated MCP `2026-07-28` with SDK `2.2.0` and `gemini-webapi 2.0.0`.
+Primary image generation and local-image editing each saved a 2816×1536 JPEG.
+Both files passed independent full decoding, size/MIME/dimension checks and
+visual inspection. Image source cleanup initially returned `pending`.
+Subsequent targeted MCP deletion positively verified both owned source chats
+as `verified_absent`. Both saved files still decoded with unchanged SHA256
+hashes after deletion.
+
+The native music request raised the upstream SDK's `APIError` with a message
+reporting a possible upstream interruption. No music artifact or source-chat ID was returned; the original
+MCP response classified it as `INTERNAL_ERROR`. This is a failed live music
+attempt, not a successful creation or proof of a quota/entitlement cause.
+
+After adding safe API-error classification, isolated request-owned metadata
+and supported thinking-argument synchronization, a separate fresh MCP session
+used SDK `2.1.1`. One native music request returned a verified MP3
+(`audio/mpeg`, 2,947,046 bytes, 122.540333 seconds) and companion MP4
+(`video/mp4`, 9,532,928 bytes, 1024×1024, 122.54 seconds). Independent FFmpeg
+full-stream decoding passed for both files. Initial cleanup was `pending`;
+targeted follow-up returned `ok=true`, `deleted=true` and
+`verification.status=verified_absent`. Both files still fully decoded with
+unchanged SHA256 hashes after deletion. The MP4 is music's companion output,
+not evidence that the generic video-generation route works.
+
+The updated compact MCP (`create` then `edit`) was also exercised with SDK
+`2.1.1`, using its default `generated_media/` destination. Both outputs were
+decoded 2816×1536 JPEGs; visual inspection confirmed the blue fox and the added
+gold star while preserving the subject and background. Exact-ID follow-up
+returned positive deletion proof for each source chat, and the saved files
+remained usable. The installable package now requires `gemini-webapi>=2.1.1,<3`
+to include the current model, stream-recovery and music-parser paths.
+
+The original failed request still has no observed ID or artifact; the later
+successful request does not establish its cause or final account state. No
+generation retry was used to recover that unknown request. The 2026-09-26
+observations remain separate. These bounded user-authorized acceptance runs
+are not the dedicated-account full canary or a guarantee of repeatability.
+
+Targeted account cleanup additionally verified absence for seven historical
+test chats whose ownership was established by exact recorded IDs and test
+markers. Together with four new image sources and one new music source,
+twelve deletions had
+positive read-back evidence. Three historical candidates were retained because
+their test ownership could not be established. The failed music request had no
+observed ID and was excluded from deletion; no unrelated account scan was used
+to guess its chat.
+
+### Cleanup invocation evidence
+
+An earlier Chrome deletion attempt opened the chat menu but did not reach a
+confirmation or positive absence read-back. It was not counted as a successful
+deletion. The subsequent targeted cleanup used real MCP tool calls, including
+primary `gemini_delete_chat` and focused `gemini_history` with `action=delete`.
+The focused test harness connected an actual MCP client over stdio; its Python
+wrapper collected results from `client.call_tool`, rather than making deletion
+an agent-side SDK diagnostic. Registered-job recovery used `gemini_cleanup`
+with the existing `job_id`. Automatic cleanup executes in the shared server
+lifecycle during MCP generation/recovery, with its own read-back evidence.
+
+## 2026-10-03 Focused Creation and Native Video Recheck
+
+Signed-in Chrome showed the dedicated Videos page with video mode and a
+16:9 landscape control. Re-fetched public frontend modules confirmed native
+video mode 11 in the same index-49 StreamGenerate feature chain used for
+image mode 14 and music mode 21. This establishes the request selection, not
+the generator Google actually dispatched or successful creation.
+
+One native primary MCP video request observed its new source chat, then
+returned `UPSTREAM_REJECTED` after a possible upstream interruption. It
+produced no video file. Exact-ID disposal subsequently returned positive
+`verified_absent` evidence. The cause remains unconfirmed; no exclusive
+generator endpoint or verified model-bypass route was established.
+
+The focused seven-tool creation server was exercised over real MCP
+`2026-07-28` stdio with SDK `2.2.0` and `gemini-webapi 2.1.1`. One image
+request and one local-image edit each returned a saved 2816×1536 JPEG.
+Independent decoding confirmed their MIME, dimensions and hashes; visual
+inspection confirmed the blue wooden cat became gold with its shape,
+tabletop and camera composition preserved. Both automatic cleanup jobs
+completed, then exact-ID follow-up independently verified their sources
+absent. At this stage fifteen owned-source deletions had positive read-back
+proof, including the earlier twelve and the failed primary video source above.
+
+Two focused asynchronous music starts failed in TLS initialization before
+the media request was submitted. The second run reported `NETWORK_ERROR`
+with `generation_not_started`; no observed source or artifact was returned.
+Reading their failed handles after process restart worked, but that is not
+proof of completed asynchronous music/video artifact recovery. A separate
+authenticated model-registry read succeeded. These bounded personal-account
+tests do not satisfy the dedicated-account full-canary gate.
+
+Subsequent testing distinguished interrupted generation from completed-file
+recovery. Two deliberately interrupted asynchronous music attempts observed
+their sources but returned no local files: one recovery failed in transport,
+the other with an upstream SDK failure. Their exact sources were discarded and
+verified absent. A focused video start also failed before submission in TLS
+initialization. No request was automatically repeated. Client initialization
+now bounds typed transient transport retries to three; authentication and
+argument failures are not retried.
+
+One uninterrupted focused music start then completed with an MP3
+(`audio/mpeg`, 1,764,013 bytes, 73.247292 seconds) and its companion MP4
+(`video/mp4`, 5,688,253 bytes, 1024×1024, 73.247007 seconds). A separate native
+video start completed with a 1280×720 H.264/AAC MP4 (`video/mp4`, 1,731,336
+bytes, 10.005 seconds). Full FFmpeg stream decoding passed for all three files;
+a sampled native-video frame showed the requested green paper cat. Each start
+was submitted once. After the server exited, a new focused stdio process
+retrieved the same completed operation's saved locators with no new generation.
+
+Exact-ID follow-up returned positive absence proof for both successful
+operations. The failed automatic music cleanup job was also resumed through
+its existing durable job and became `completed/verified_absent`. Saved music
+files still decoded with unchanged hashes after deletion. Nineteen recorded
+owned test-chat deletions now have positive read-back evidence. This proves
+current focused image/edit/music/video artifacts and completed-file recovery;
+unfinished-provider recovery after a hard crash remains a separate live gate.
+
+## Observed Native UI (2026-06-18)
 
 The chat surface exposed:
 
@@ -79,8 +208,8 @@ NotebookLM, help/feedback, and location entries.
 | Gems | Covered in part | CRUD and chat use via `gemini_manage_gems` and `gem_id` |
 | Upload file | Covered | Local files use `gemini_upload_file` |
 | Import code | Covered in part | Local code files can be uploaded; UI import workflows are not replicated |
-| Create image/music | Covered in part | Generic web generation plus response parsing; account/UI gates still apply |
-| Create video | Web UI only | Dedicated Gemini Omni mode works in Chrome; generic MCP chat route did not return a video Artifact |
+| Create image/music | Verified in bounded runs | Native primary/compact image/edit/music files and focused image/edit plus completed asynchronous music files were decoded; focused completed-file restart retrieval passed on 2026-10-03 |
+| Create video | Verified in a bounded native MCP run | Mode 11 produced a decoded 1280×720, 10.005-second MP4 and completed-file restart retrieval on 2026-10-03; earlier failed requests and dedicated Chrome video remain separate evidence |
 | Deep Research | Covered | Full workflow when the installed client exposes research helpers |
 | Dynamic model discovery | Covered | `gemini_list_models` reports the account model registry after init |
 | Observed Web Pro capability manifest | Covered | `gemini_get_web_capabilities` returns observed models, thinking levels, menu entries, and MCP coverage |

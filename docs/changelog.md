@@ -9,21 +9,57 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Changed
-- Routed the compatibility Runtime Skill through the installed five-tool assist server, the compact image/music and explicit-account facade, and narrow primary profiles. Removed examples for the not-yet-implemented dedicated creation/account servers, aligned long-operation/source/artifact/browser-video recovery with observed behavior, and added a credential-free MCP connection check.
-- Centralized the music chat read-back RPC and its four response-shape fixtures in the infrastructure contract/parser boundary, with shared media handling for primary and compact surfaces.
-- Added bounded concurrent isolated profile probes and covered the documented `core` surface in local and CI protocol checks.
+## [0.2.2] - 2026-09-27
+
+This section records release preparation in
+[PR #34](https://github.com/Luckycat133/gemini-web-mcp/pull/34).
+Publication still requires review and merge.
+
+### Added
+- Added seven-tool `gemini-mcp-create` and seven-facade `gemini-mcp-account` servers with direct typed output schemas, focused Runtime Skills, installation examples and release assets. Primary/compact creation delegates to the shared CreationService.
+- Added metadata-only SQLite operation/cleanup recovery, opaque handles, optional idempotency keys, seven-day operation retention, credential-lineage isolation, transactional claims, renewable leases and CAS. Saved Artifact locators are retained before source cleanup; interruption never resubmits generation.
+- Added explicit Research start/status/result/cancel actions while retaining the five-tool assist catalog, plus local report Artifacts and exact-source recovery.
+- Added multimodal onboarding with opt-in video/music starts and explicit operation recovery, and an evidence-backed client/OS/distribution matrix.
 
 ### Fixed
+- Required strict fresh Notebook membership, complete custom Gem registry and matching Scheduled acknowledgement/read-back before mutation success. HTTP failures, rejected envelopes, missing child rows and partial registries cannot prove empty state or deletion.
+- Persisted delayed cleanup and preserved retained/cancelled authority across restarts, account changes and concurrent workers. Remote-only/partial Artifact locators remain recoverable even if a later response omits them.
+- Selected observed native video mode 11 at StreamGenerate index 49 from the re-fetched public frontend source; completion requires a matching independently verified local video artifact.
+- Disabled hidden SDK generation retries for native/fallback Research and its report follow-up, preserved streamed source IDs before SDK metadata rollback, and limited report requests to one before read-only polling. Real SDK offline transport counters cover the behavior.
+- Reused matching existing local media during queued/partial recovery, with fresh verification and re-download for missing or damaged files. Partial music downloads only its missing companion.
+- Preserved onboarding handles/start keys after transport, protocol or verification failure without automatic resubmission. Bounded typed transient initialization retries to three and kept pre-submission failures distinct.
+- Declared Windows authenticated local runtime unsupported and failed safely before private state creation when POSIX protections are missing; no Windows ACL acceptance is claimed.
+- Declared PyYAML as a direct development dependency for focused Skill contract tests, resolving collection failures in clean Python environments.
+- Retried SQLite `SQLITE_BUSY` during concurrent first initialization under one three-second budget before exposing the transaction; migrations, caller statements and commits are never replayed.
+- Cleaned only the generation request's newly created source chat after a finished operation's outputs are saved and verified, or after definitive empty output, with positive deletion read-back and a 10-second caller-wait budget. Explicit retention/delay and unsaved/queued/partial results retain recovery; cleanup status is separate from artifact success. Delayed cleanup now persists in SQLite; and automatic due work rejects stale retention/deadline/attempt snapshots.
+- Preserved generated-image identity when the SDK upgrades its source URI, reserved output filenames atomically, and suppressed unrequested SDK music thumbnails without mutating the response. Music recovery distinguishes trusted empty responses from failed transport, rejected RPCs and malformed observed cards. A queued request with a ready local output retains its source and queued operation state.
+- Distinguished operating-system browser-data denial as `BROWSER_COOKIE_ACCESS_DENIED`, preserved Chrome profile identity for modern `Network/Cookies` layouts, and preferred one cookie database per profile.
+- Fixed the 2026-10-02 full review findings: cleanup now requires positive absence read-back, account changes cancel cleanup belonging to the previous authentication context, reset exposes its remote deletion semantics, busy sessions and independent callers survive expiry/cancellation, and proxy credentials are redacted.
+- Centralized Prompt storage with UUID identities, atomic replacement, failed-write rollback, damaged-file preservation, and locked cross-process read-modify-write transactions. Primary and compact adapters share the same persistence owner.
+- Rejected malformed RPC child rows, wrong-ID scheduled read-backs, and incomplete history coverage; pagination stops instead of returning a repeated empty cursor, and content searches expose unreadable chats independently of matches. Doctor no longer recommends accounts that failed validation; scoped Notebook manifests include the enabled facade.
+- Matched media artifacts to the requested modality, independently saved music audio/video files, decoded local images/WAV files and probed audio/video streams before verified acceptance, and bounded generation, recovery, verification, and save under one deadline. Concurrent requests use isolated timeout/watchdog settings. Empty file/URL responses remain empty even when input artifacts exist.
+- Bounded Deep Research start recovery and no-ID polling/report retrieval; changed chat text and refusals do not count as completed reports. Added the project-owned SDK v2 MCP evaluation bridge, preserving upstream Skill files and JSON-serializing native content blocks.
 - Rechecked Gemini Web in a signed-in Chrome account on 2026-09-26: the model picker showed 3.5 Flash-Lite, 3.8 Flash, and 3.1 Pro. Updated Flash-Lite's runtime request name and image route, and verified Flash and Flash-Lite images, compact image editing, and a primary image edit saved locally. One Flash music call saved verified MP3 and MP4 files; a later call showed an upstream technical error.
 - Corrected saved image filenames and MIME metadata using file signatures: Gemini Web returned JPEG bytes even when a `.png` filename was requested. A fresh live image call saved a `.jpg` file and reported `image/jpeg` consistently.
 - Stopped inferring exact Lyria versions from model aliases or thinking level when upstream media responses provide no backend identifier. A generic MCP video prompt returned text and `ARTIFACT_NOT_RETURNED`, while the account's dedicated Gemini Omni Web mode generated a downloadable MP4; media errors, capability manifest, and the runtime Skill now direct video work to the verified route.
 - Preserved the repository's structured-output contract on MCP SDK 2.1 by making content-block tools explicitly structured at the project-owned adapter boundary, and aligned CI contracts with the updated pinned GitHub Actions.
-- Rejected blank media prompts and unsafe filenames, prevented repeated saves from overwriting an existing artifact, and retained upstream chats when media was queued or returned empty. Client initialization failures now return typed media errors.
+- Rejected blank media prompts and unsafe filenames, prevented repeated saves from overwriting an existing artifact, and retained upstream chats when media was queued or needed recovery. Client initialization failures now return typed media errors.
 - Kept `gemini_search` at `answer_only` unless structured source evidence was observed; model-written links alone no longer imply grounded search. Preserved typed `gemini_ask` failures.
 - Preserved Deep Research's upstream chat ID when it appeared only in the start response, including timeout results; completed runs without a report no longer claim `report_observed`.
 - Required field-matched Gem creation read-back and target-Notebook read-back before claiming a move succeeded. Test cleanup counts only positively verified chat and scheduled-action deletion; scheduled results no longer render unverified success.
 - Made local Prompt storage atomic with in-memory rollback on write failure and preserved corrupt source files for recovery.
+
+### Changed
+- Simplified the five Gemini Skills around intent, real tool contracts and conditional references. Removed fixed single-tool workflows, repeated catalogs, historical development packages and long default prompts; Skill tests validate installation, schemas and package contents instead of prose wording.
+- Selected native Gemini Web image/music modes from the 2026-10-02 public frontend contract instead of relying only on a chat prompt. Shape drift fails before transport with `UPSTREAM_CHANGED`; selected model headers remain independent. Fresh authorized MCP calls verified image generation/editing and a separate SDK 2.1.1 music request. The earlier SDK 2.0.0 music failure remains recorded. Targeted follow-up verified the owned source chats absent, with saved files intact.
+- Verified current focused image/edit, completed asynchronous music (about 73 seconds), native 1280×720 video (10.005 seconds), completed-file recovery across process restart, and exact-source/durable-job cleanup in bounded 2026-10-03 stdio tests. Unfinished-provider recovery and the dedicated-account canary remain separate.
+- Preserved request-owned source-chat IDs through SDK metadata rollback and total media deadlines. SDK API failures now return safe stable errors without inferred quota causes or automatic generation retries. Supported SDK thinking arguments keep request headers and bodies consistent; primary and compact media paths share the behavior.
+- Raised the supported `gemini-webapi` minimum to `2.1.1`, the version exercised by current live media acceptance, for dynamic model discovery, incomplete-stream recovery and sparse music-card parsing. The dependency contract and compatibility matrix match the installation requirement.
+- Shared primary/compact media requests, recovery, saves and verification in `services/media_generation.py`. Compact creation/editing now saves verified local artifacts by default. Runtime and development Skills document the resulting recovery and cleanup policy.
+- Routed the compatibility Runtime Skill through focused assistance, creation and explicit-account surfaces, retaining compact and narrow primary compatibility paths. Aligned recovery/source/artifact instructions with observed behavior and added a credential-free MCP connection check.
+- Verified exact owned test-chat cleanup through focused account and compatibility MCP calls with positive deletion read-back.
+- Centralized the music chat read-back RPC and its four response-shape fixtures in the infrastructure contract/parser boundary, with shared media handling for primary and compact surfaces.
+- Added bounded concurrent isolated profile probes and covered the documented `core` surface in local and CI protocol checks.
 
 ## [0.2.1] - 2026-08-23
 

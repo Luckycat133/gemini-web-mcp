@@ -26,6 +26,7 @@ class CleanupState(str, Enum):
     COMPLETED = "completed"
     ALREADY_COMPLETED = "already_completed"
     FAILED = "failed"
+    CANCELLED = "cancelled"
     INVALID_ID = "invalid_id"
 
 
@@ -77,6 +78,7 @@ class CleanupObservation:
     attempts: int = 0
     diagnostic_id: str | None = None
     idempotent: bool = False
+    cancellation_reason: str | None = field(default=None, metadata={"domain_exclude_if_none": True})
     source: str = field(default="", metadata={"domain_exclude": True})
     delete_at: float | None = field(
         default=None,

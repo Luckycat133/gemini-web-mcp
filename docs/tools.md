@@ -20,6 +20,28 @@
 
 下面这份清单对应当前仓库真实注册结果，而不是历史文档残留。
 
+### 专用工具面
+
+| 入口 | 固定目录 | 用途 |
+| --- | --- | --- |
+| `gemini-mcp-assist` | `gemini_ask`、`gemini_search`、`gemini_understand_image`、`gemini_understand`、`gemini_research` | 协助、搜索、混合输入理解、研究 |
+| `gemini-mcp-create` | `gemini_generate_image`、`gemini_edit_image`、`gemini_generate_video`、`gemini_generate_music`、`gemini_get_operation_status`、`gemini_get_operation_result`、`gemini_cancel_operation` | 生成及获取本地产物 |
+| `gemini-mcp-account` | `gemini_history`、`gemini_notebooks`、`gemini_scheduled`、`gemini_gems`、`gemini_prompts`、`gemini_account`、`gemini_cleanup` | 显式账户操作和本地提示词 |
+
+图片和改图同步返回 Artifact；视频、音乐和研究默认异步，返回不透明的
+`operation_id`。恢复时使用原句柄，不能重新提交提示词。`gemini_research`
+通过 `action=start/status/result/cancel` 保持五工具目录。
+账户工具使用 `request.action`，按动作校验参数。例如：
+
+```json
+{"request": {"action": "models"}}
+```
+
+上述参数对应 `gemini_account`；`gemini_cleanup` 的 `status/cancel` 查询本地
+清理记录，`run` 执行已授权的到期任务。广泛测试记录清理另用
+`test_artifacts`，默认 `dry_run=true`。账户删除成功要求明确的读回证据。
+详见[任务恢复和清理策略](operations-and-cleanup.md)。
+
 ### 默认启用 (`GEMINI_TOOLS=core`)
 
 - `gemini_chat`
@@ -164,7 +186,7 @@ report 本地产物；history 的 list/search/read/export/delete 也在 primary 
       "observed_backend": null,
       "verification": {
         "status": "verified",
-        "methods": ["file_exists", "size_checked", "size_nonzero", "image_dimensions"]
+        "methods": ["file_exists", "size_checked", "size_nonzero", "image_mime_signature", "image_decoded", "image_dimensions"]
       }
     }
   ],
@@ -179,12 +201,14 @@ report 本地产物；history 的 list/search/read/export/delete 也在 primary 
 ```
 
 - `state=remote`：响应含可用 URI，但尚未验证远端内容；artifact 的 verification 是 `unverified`。
-- `state=local`：本地文件存在且非零；记录大小和可推断的 MIME，尺寸和时长在探针可用时填写。
+- `state=local`：本地文件存在且非零；是否能验收还需检查 `verification.status`。图片需解码成功，WAV 需校验流，其他音视频需探针观察到对应流；缺少解码依赖时为 `unverified`，操作为 `partial`。
 - `state=queued`：上游明确返回 pending/processing/queued 等状态，操作结果仍为 `ok=true`、
   `operation_state=queued`。
 - `state=empty`：请求完成但没有可用产物，返回 `ARTIFACT_NOT_RETURNED`，不把普通文本当作媒体成功。
 - `state=failed`：保存或验证失败；完全失败使用 `ARTIFACT_SAVE_FAILED`/`VERIFICATION_FAILED`，
   远端 URI 仍可用但本地保存失败时使用 `operation_state=partial` 和 `ARTIFACT_SAVE_PARTIAL` 告警。
+
+缺少本地媒体验证依赖时，`meta.verification_status` 为 `artifact_saved_unverified` 或 `input_artifact_unverified`，并附 `ARTIFACT_VERIFICATION_UNAVAILABLE` 告警；不改写为已验证成功。
 
 `artifacts` 是输出，`input_artifacts` 是本地文件、URL 或参考图。相同类型和 URI 的 artifact ID
 在 primary 与 compact 表面一致。`response_format="json"` 的 research report 正文仍保持合法 JSON；
@@ -297,7 +321,7 @@ report 本地产物；history 的 list/search/read/export/delete 也在 primary 
 
 ### gemini_generate_media
 
-通用媒体生成。
+生成并保存媒体。图片和音乐请求显式选择 Gemini Web 原生生成模式；视频参数保留现有兼容路线。
 
 **参数：**
 - `prompt`: str - 生成描述
@@ -305,6 +329,11 @@ report 本地产物；history 的 list/search/read/export/delete 也在 primary 
 - `model`: str - MCP 别名或运行时模型名 (默认: `flash`)
 - `thinking_level`: str - `standard` / `extended` (默认: `standard`)
 - `image_path`: str - 可选参考图片
+- `timeout_seconds`: int - 生成、恢复读取、验证和保存的总时限
+- `output_dir`: str - 输出目录，默认 `generated_media/`
+- `filename`: str - 可选单个文件名，已有文件不会被覆盖
+- `retain_chat`: bool - 保留本次生成的源会话，默认 `false`
+- `delete_after_seconds`: int | None - 显式延迟清理；正值覆盖立即清理，任务仅保存在当前进程
 
 **真实网页行为：**
 - `image`: Flash-Lite 使用 `Nano Banana 2 Lite`；Flash / Pro 使用 `Nano Banana 2`
@@ -312,10 +341,17 @@ report 本地产物；history 的 list/search/read/export/delete 也在 primary 
 - `video`: 当前通用聊天路线可能只返回文本；需要结构化视频 Artifact 才算成功，已验证的网页入口是 Gemini Omni 专用视频模式
 - `image + model=pro` 不会直接切换首轮图像后端；Pro redo 是网页生成后的二次操作
 
-**artifact 行为：** 成功响应会公开远端 URI；指定输出目录后，实际写入的文件会再检查存在性、
-非零大小、MIME，以及可用的尺寸/时长。排队、空响应和保存失败有独立结构化状态。
+**artifact 行为：** primary 与 compact 均默认保存到本地；响应保留远端 URI，实际写入的文件会检查存在性、
+非零大小、真实格式和解码/流证据。排队、空响应和保存失败有独立结构化状态。
 `prompt` 不可为空；`filename` 只能是单个文件名，若目标文件已存在会另取不冲突的名字。
-排队或未返回媒体的聊天会保留以便回看，结构化结果中的 `source_chat_id` 只在上游实际提供时出现。
+排队、仅远端、保存失败或尚未验证的产物会保留聊天以便恢复，结构化结果中的 `source_chat_id` 只在上游实际提供时出现。
+上游已结束且所有输出都已本地保存并验证，或响应/可信读回明确没有生成产物时，默认立即清理本次新建的源聊天。
+即使部分文件已可用，上游仍明确排队时也会保留源聊天；音乐恢复读取失败不会被当成空结果。
+清理最多等待 10 秒，结果在 `_meta.domain_result.meta.details.cleanup`；只有 `completed` / `already_completed` 表示删除已读回验证。
+`pending` / `failed` / `cancelled` 不表示已删除，也不会改写已验证本地文件的成功状态。显式保留优先。
+只有请求类型匹配的输出才计入完成状态，图片不能满足视频或音乐请求；音乐完成需要音频，封面视频是辅助产物。
+搜索返回的 `WebImage` 和聊天文字不能计作生成图片。
+音乐的音频和视频分别选择不冲突的路径，并禁用未请求的缩略图下载，避免覆盖已有文件。`timeout_seconds` 覆盖生成、恢复读取、验证和保存；超时会保留已观察的 URI/聊天 ID，避免自动重复生成。超时/看门狗参数按请求隔离，不会改写其他并发请求的默认值。
 
 ### gemini_generate_music
 
@@ -326,8 +362,10 @@ report 本地产物；history 的 list/search/read/export/delete 也在 primary 
 - `model`: str - MCP 别名或运行时模型名 (默认: `flash`)
 - `thinking_level`: str - `standard` / `extended` (默认: `extended`)
 
-媒体工具通过 Gemini Web 通用生成接口触发图像、视频和音乐能力。
+音乐便捷工具还支持上述 `timeout_seconds`、`output_dir`、`filename`、`retain_chat` 和 `delete_after_seconds`。
+图片和音乐在现有传输中携带网页原生模式选择，服务端仍决定实际后端、账号可用性与输出。
 账号可用性、上游排队和响应形状仍由 Gemini Web 决定。
+公开字段证据和实测边界见 [原生媒体模式](native-media-mode.md)。
 
 ---
 
@@ -444,6 +482,7 @@ Gemini Web 历史对话只读聚合入口。推荐给 `GEMINI_TOOLS=history` 和
 
 结构化结果的 `count` / `offset` / `limit` 描述本次扫描的来源页，`match_count` 描述该页命中数。
 当前分页在过滤前应用，不是对全局匹配结果分页；`scan_turns=true` 也只读取当前来源页。
+来源达到上限或空页无法继续时，返回 `operation_state=partial`、覆盖告警和 `next_offset=null`，不会返回重复的游标。正文读取失败单独列在 `read_failures`；部分读取失败为 `partial`，全部失败为 `VERIFICATION_FAILED`，不能据此认定没有匹配。
 
 ### gemini_scan_chat_history_sources
 
@@ -668,7 +707,7 @@ JSON 输出包含 `visible_in_registry`、`readable_by_id_after_create` 和
 
 JSON 输出包含 `verification_status`、`visible_after_delete`、`readable_by_id_after_delete`
 和 `deleted_by_id_after_delete`。Gemini 的 `GetTask` 在删除后可能仍返回 tombstone 对象；
-只有按 ID 读到 `task_state=deleted` 时，工具才把删除标记为已校验。
+读到相同 ID 的 `task_state=deleted` tombstone，或有效 registry 与有效 GetTask 都确认缺失时，工具才把删除标记为已校验。读回必须包含 HTTP 200、匹配 RPC 的可解析包络、无拒绝和合法条目；错误、错误 ID 和形状漂移不能作为缺失证据。
 如果 mutation 响应没有可解析 body，`verification_status="rpc_unconfirmed"`；调用方不能把它当作
 已删除。
 这个工具是 destructive 远端操作。只删除用户明确指定或当前验证流程刚创建的任务。
@@ -812,7 +851,8 @@ macOS Keychain 读取由 `GEMINI_BROWSER_COOKIE_TIMEOUT_SECONDS` 限制，默认
 
 ### gemini_reset
 
-重置客户端。
+重置客户端和全部本地会话，并尝试立即删除未设置 `retain_chat` 的远端聊天。工具标注为 destructive 远端操作。
+本地连接重置成功而远端清理失败时，保留 `partial`、告警和清理诊断；只有新鲜读回 `verified_absent` 才能称聊天已删除。
 
 **参数：** 无
 
@@ -825,8 +865,8 @@ macOS Keychain 读取由 `GEMINI_BROWSER_COOKIE_TIMEOUT_SECONDS` 限制，默认
 | Tool | Purpose |
 |------|---------|
 | `chat` | 对话，支持图片和 session |
-| `create` | 生成图片、视频或音乐 |
-| `edit` | 基于参考图片编辑 |
+| `create` | 原生图片/音乐生成并保存验证；视频保留兼容参数 |
+| `edit` | 原生图片模式编辑参考图并保存验证 |
 | `session` | 创建、发送、列出、重置本地多轮会话 |
 | `history` | 远端 Gemini Web 历史对话 list/search/read/export/delete 和测试产物清理 |
 | `cleanup` | dry-run 或删除匹配显式 marker 的测试聊天/定时任务 |
@@ -838,8 +878,15 @@ macOS Keychain 读取由 `GEMINI_BROWSER_COOKIE_TIMEOUT_SECONDS` 限制，默认
 
 compact `session` 支持 `create` / `send` / `list` / `reset`（或 `reset_one`）/ `reset_all`。`reset` 与 `reset_one` 都必须提供 `session_id`，且只删除该会话；只有显式 `reset_all` 才会清空全部会话并重置客户端。旧的 `action="reset"` 保留为单会话别名，不再把缺少 ID 解释为全量重置。
 
+compact `create` / `edit` 复用 `src/services/media_generation.py`，默认在服务进程工作目录的 `generated_media/` 保存并验证。
+源聊天清理与 primary 采用相同规则及结构化状态。需要自定义目录、显式保留或延迟时使用 primary 媒体工具。
+
 compact 的 history/account/scheduled/doctor/cleanup 直接导入共享 service 和 RPC parser；加载
 `src.skill_server` 不再初始化 4k 行的 `src.tools.manage` 兼容适配器。
+
+primary 与 compact 的 Prompt 适配器共用 `src/services/prompts.py`：新条目使用 UUID，保留原有 ID；变更在跨进程锁内重新读取并原子替换 JSON。文件损坏、读取或保存失败会返回错误并保留原文件。持久锁文件位于库旁的 `.prompts.json.lock`，不保存提示词内容，也不能在写入期间移除。
+
+两个表面的 Cookie 更新会退役旧客户端。认证材料真正变化时，旧会话和清理任务取消，诊断为 `cancellation_reason=authentication_context_changed`；不会用新账号执行旧账号的删除。相同材料刷新保留会话和任务。显式指定的浏览器 profile 读取失败不会回退到另一个 profile；Doctor 将 cookie 存在和账号验证成功分开报告。
 
 ---
 
@@ -853,9 +900,9 @@ compact 的 history/account/scheduled/doctor/cleanup 直接导入共享 service 
 | `gemini_search` | 带观测来源的当前网页搜索；`grounding_state` 如实报告 grounded / answer_only / unavailable / failed |
 | `gemini_understand_image` | 理解单张本地图片或 http(s) 图片 URI |
 | `gemini_understand` | 文本、图片、文件、URL 的类型化混合输入理解（最多 16 个输入，逐输入记录结果） |
-| `gemini_research` | 异步启动一次 Deep Research 并返回保留的 operation handle 与上游 ID |
+| `gemini_research` | 通过显式 action=start/status/result/cancel 启动及恢复 Deep Research，返回 operation handle 与上游 ID |
 
-`gemini_search` 与 `gemini_understand` 返回信息而不是 Artifact；完成的 Deep Research 报告保留在远端聊天中，通过返回的上游标识找回。对应 Runtime Skill 为 `gemini-assist`。
+`gemini_search` 与 `gemini_understand` 返回信息而不是 Artifact；完成的 Deep Research 报告保存为本地 Artifact；通过显式 operation_id 恢复，同一任务不重复启动。对应 Runtime Skill 为 `gemini-assist`。
 
 ---
 

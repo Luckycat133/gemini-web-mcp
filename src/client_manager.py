@@ -9,6 +9,7 @@ import socket
 import tempfile
 import threading
 import logging
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Optional, Any, Dict
 from urllib.parse import urlparse
@@ -23,6 +24,10 @@ except ImportError:
     logger.warning("cookie_manager 模块不可用")
 
 from .constants import DEFAULT_CHAT_RETENTION_SECONDS  # noqa: E402  (follows optional try/except import)
+from .domain.results import is_transient_transport_error  # noqa: E402
+
+INITIALIZATION_ATTEMPTS = 3
+INITIALIZATION_RETRY_DELAY_SECONDS = 0.25
 
 
 def validate_config() -> None:
@@ -47,7 +52,9 @@ def get_configured_proxy() -> Optional[str]:
             with socket.create_connection((host, port), timeout=0.25):
                 pass
         except OSError:
-            logger.warning("GEMINI_PROXY=%s is not reachable; continuing without proxy", proxy)
+            public_host = f"[{host}]" if ":" in host else host
+            endpoint = f"{parsed.scheme}://{public_host}:{port}"
+            logger.warning("GEMINI_PROXY endpoint %s is not reachable; continuing without proxy", endpoint)
             return None
     return proxy
 
@@ -74,6 +81,10 @@ def get_extra_cookies() -> Dict[str, str]:
         return {}
     cookie_data = get_cookie_manager().get_cookie()
     if not cookie_data:
+        return {}
+    # A Cookie update publishes its snapshot before the integration callback
+    # swaps the environment/client generation. Do not mix those two accounts.
+    if cookie_data.psid != os.environ.get("GEMINI_PSID", ""):
         return {}
     return cookie_data.extra_cookies
 
@@ -129,6 +140,23 @@ class ClientManager:
                 self._create_client()
         return self._client
 
+    def authentication_matches(self, cookies: Mapping[str, str]) -> bool:
+        """Compare the active material without storing another credential copy."""
+        with self._lock:
+            current = getattr(self._client, "cookies", None)
+            if isinstance(current, Mapping):
+                return dict(current) == dict(cookies)
+            environment_cookies = {
+                name: os.environ[env]
+                for name, env in (
+                    ("__Secure-1PSID", "GEMINI_PSID"),
+                    ("__Secure-1PSIDTS", "GEMINI_PSIDTS"),
+                    ("__Secure-1PSIDCC", "GEMINI_PSIDCC"),
+                )
+                if os.environ.get(env)
+            }
+            return environment_cookies == dict(cookies)
+
     async def initialize(self) -> Any:
         """Initialize one current client and share the attempt across callers."""
         loop = asyncio.get_running_loop()
@@ -162,11 +190,27 @@ class ClientManager:
         current_task = asyncio.current_task()
         try:
             logger.info("正在调用 client.init()...")
-            await client.init(
-                timeout=30,
-                auto_close=False,
-                auto_refresh=os.environ.get("GEMINI_AUTO_REFRESH", "true").lower() == "true",
-            )
+            for attempt in range(INITIALIZATION_ATTEMPTS):
+                with self._lock:
+                    if self._generation != generation or self._client is not client:
+                        raise ClientInitializationResetError("client reset during initialization")
+                if client is None:
+                    raise ClientInitializationResetError("client reset during initialization")
+                try:
+                    # Initialization obtains tokens and account capabilities;
+                    # it submits no generation prompt or account deletion.
+                    await client.init(
+                        timeout=30,
+                        auto_close=False,
+                        auto_refresh=os.environ.get("GEMINI_AUTO_REFRESH", "true").lower() == "true",
+                    )
+                    break
+                except Exception as error:
+                    if attempt + 1 == INITIALIZATION_ATTEMPTS or not is_transient_transport_error(error):
+                        raise
+                    logger.warning("Transient connection failure; retrying Gemini initialization (%s/%s).",
+                                   attempt + 2, INITIALIZATION_ATTEMPTS)
+                    await asyncio.sleep(INITIALIZATION_RETRY_DELAY_SECONDS * (2 ** attempt))
             with self._lock:
                 if self._generation != generation or self._client is not client:
                     raise ClientInitializationResetError("client reset during initialization")

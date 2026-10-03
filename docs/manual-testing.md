@@ -53,6 +53,7 @@
 | 1.2 | 调 `gemini_get_cookie_status` | `status="ok"`、`source` 指向环境变量或浏览器 |
 | 1.3 | 调 `gemini_list_browser_cookie_profiles` | 列出 Chrome profile，`Default` 与 `Profile 1` 等；`has_psid` 至少一个为 true |
 | 1.3a | 在 macOS 拒绝/不响应 Keychain 授权并重试 profile list | 在 `GEMINI_BROWSER_COOKIE_TIMEOUT_SECONDS` 内返回 `BROWSER_COOKIE_ACCESS_TIMEOUT`；进程不挂起、响应无 Cookie 值 |
+| 1.3b | 系统拒绝读取 Chrome 数据目录 | 返回 `BROWSER_COOKIE_ACCESS_DENIED`；由用户在系统隐私设置允许 MCP 宿主读取，再重试；不改用其他账号 |
 | 1.4 | 删掉 `GEMINI_PSID`，重启，调 `gemini_doctor` | `cookie_status.status="missing"`，但工具不崩 |
 | 1.5 | 提供过期 `GEMINI_PSID`，调 `gemini_chat` | 返回明确的认证错误文本，不返回空字符串 |
 
@@ -102,25 +103,36 @@
 | 4.2 | `media_type="image", model="flash-lite"` | 使用运行时 `Flash-Lite` 路线；返回可验证图片，按网页帮助标注 Nano Banana 2 Lite |
 | 4.3 | `media_type="image", model="pro"` | 首轮仍走 Nano Banana 2；Pro redo 是网页二次操作 |
 | 4.4 | `gemini_generate_media(..., media_type="video")` | 仅在结构化结果包含可验证视频 Artifact 时通过；2026-09-26 通用聊天路线返回 `ARTIFACT_NOT_RETURNED`，当前需要 Gemini Omni 专用网页模式 |
-| 4.5 | `gemini_generate_music(prompt="轻快钢琴", model="flash")` | 返回可验证音频或封面视频文件；无上游版本证据时只报告 Lyria |
+| 4.5 | `gemini_generate_music(prompt="轻快钢琴", model="flash")` | 返回可验证音频，封面视频为辅助产物；无上游版本证据时只报告 Lyria |
 | 4.6 | `gemini_generate_music(prompt="交响乐", model="pro")` | 返回可验证产物；不要从 `thinking_level` 推断 Lyria 版本或曲长 |
 | 4.7 | `image_path="/abs/ref.jpg"` 作为参考图 | 不崩；如果上游不支持参考图，错误要明确 |
 | 4.8 | 用 MCP Inspector 查看一次成功图片/音乐结果的 `_meta.domain_result.data` | `state=remote` 或 `local`；`artifacts[].id/uri/kind` 完整，primary 与 compact 对同一 URI 的 ID 一致 |
-| 4.9 | 指定 `output_dir` 保存产物并检查对应 artifact | 文件真实存在且非零，`verification.status=verified`，MIME/bytes 与磁盘一致；图片有尺寸、音视频在 ffprobe 可用时有时长 |
+| 4.9 | 指定 `output_dir` 保存产物并检查对应 artifact | 格式/流证据正确才为 `verified`；缺解码器为 `unverified` / `partial`，损坏或 HTML 内容验证失败；音乐音频/视频路径不同 |
 | 4.10 | 观测一次上游 queued/empty，或用离线 fixture 重放 | queued 为 `ok=true/operation_state=queued`；empty 为 `ARTIFACT_NOT_RETURNED`，两者不混淆 |
 | 4.11 | 使用不可写输出目录测试一个仍返回远端 URI 的请求 | 远端 artifact 保留，结果为 `partial` 并带 `ARTIFACT_SAVE_PARTIAL`；不得宣称本地保存成功 |
 | 4.12 | 指定 `filename="image.png"`，上游实际返回 JPEG 字节 | 落盘后缀调整为 `.jpg`，结构化 `mime_type=image/jpeg`，与文件签名一致 |
 | 4.13 | 指定已有文件名或 `filename="../escape.png"` | 已有文件不被覆盖；路径型文件名在请求前返回 `INVALID_ARGUMENT` |
-| 4.14 | 媒体结果为 queued/empty 且含上游聊天 ID | 默认保留聊天供回看，不将其排入自动清理 |
+| 4.14 | 媒体结果为 queued 或未保存远端且含上游聊天 ID | 默认保留聊天供恢复；不将其排入自动清理 |
+| 4.15 | 图片提示只写“极简图标：蓝色圆形，白色背景”；记录本次 ID | 原生图片模式仍返回生成图片；文字或搜索图片不能算成功。若 definitive empty，默认清理本次源聊天 |
+| 4.16 | compact `create` / `edit` 成功 | 本地文件可解码，所有输出保存后 `meta.details.cleanup` 返回读回状态；清理后文件仍可用 |
+| 4.17 | 默认生成与显式 `retain_chat=true` 分别测试 | 默认本地验证通过后清理；显式保留返回 `retained`，不删除。只针对本次新建聊天 |
+| 4.18 | 清理传输或读回挂起（离线 fixture） | 最多等待 10 秒后返回 `pending` 和诊断；后续真实读回才能更新完成；不重复发起生成 |
+| 4.19 | 音乐生成返回已知会话，但恢复读取网络失败、RPC 拒绝或形状改变（离线 fixture） | 保留会话并返回恢复失败诊断；不把查询失败当作可信 empty，只有成功解析的空结果可自动清理 |
+| 4.20 | 上游仍 queued/processing，但已经有一个本地验证通过的文件（离线 fixture） | 文件可用，操作状态仍 queued；保留源会话，primary/compact 一致 |
+| 4.21 | 真实 SDK 音乐保存带缩略图，目标目录已有同名缩略图（离线 HTTP fixture） | 原文件字节不变；音频/视频可验证，响应原对象不被修改 |
+| 4.22 | 真实 SDK 收到本次新建会话 metadata 后抛错或超时（离线流 fixture） | `source_chat_id` 保留，结果失败或超时并保留恢复；SDK metadata rollback 不丢 ID，不删除其他会话 |
+| 4.23 | SDK 报 silently aborted / 无法解析响应（离线 fixture） | 分别返回 `UPSTREAM_REJECTED` / `UPSTREAM_CHANGED`；未知原始响应不进入公开文本，不猜测配额，不自动重新生成 |
+| 4.24 | 支持的 SDK 版本分别构造 standard/extended 原生媒体请求（离线 fixture） | 请求 body 与模型 header 的 thinking 字段一致；只发一次 generation HTTP；旧 SDK 不泄漏新版控制参数 |
 
 **关键校验**：
 - 图片首轮按 Flash-Lite 与 Flash/Pro 分流；`observed_backend=null` 时，后端标签只是当前网页帮助支持的路由判断
 - 音乐只报告 Lyria 家族，直到响应提供实际版本证据
 - 当前通用 MCP 视频提示未进入 Gemini Omni 专用模式；请保留失败状态，避免重复发起生成
 - 文件实际落到磁盘，`generated_media/` 目录被 `.gitignore`
-- 远端 URI 只标记 `unverified`；只有本地文件存在且非零才标记 `verified`
+- 远端 URI 只标记 `unverified`；本地文件需解码或音视频流证据才标记 `verified`
+- 清理只以 `completed` / `already_completed` 验收；失败或等待超时需用记录的完整测试 ID 跟进。测试者决定丢弃未保存产物后，显式删除该测试聊天并验证，不扫描或删除其他用户聊天
 - `requested_model`、`request_model`、`effective_backend`、`observed_backend` 分开记录；没有观测证据时 `observed_backend=null`
-- 失败时返回**清晰的上游错误文本**，不能是空字符串（单元测试 `test_media_tool_returns_clear_upstream_failure` 验了形状，实机要验内容真实可读）
+- 失败时返回清晰的稳定错误、已观测恢复 ID 和下一步；不透出未经处理的响应正文或凭据。缺少 ID 不能证明没有新建聊天
 
 ### 5. Deep Research（`gemini_deep_research`）
 
@@ -324,8 +336,9 @@
 
 | # | 步骤 | 预期 |
 |---|---|---|
-| 20.1 | `pytest tests/test_evaluations.py -v` | 2 个测试通过，17 个 QA 答案与 manifest 一致 |
-| 20.2 | 人工读 [evaluations/gemini_web_mcp_contract.xml](../evaluations/gemini_web_mcp_contract.xml) | 17 个 qa_pair，问题/答案与当前工具面一致 |
+| 20.1 | `pytest tests/test_evaluations.py -v` | 评估 XML 与 manifest / 安全契约一致 |
+| 20.2 | 人工读 [evaluations/gemini_web_mcp_contract.xml](../evaluations/gemini_web_mcp_contract.xml) | 问题/答案与当前工具面及实际结果状态一致 |
+| 20.3 | `python scripts/run_mcp_builder_evaluation.py --help` | SDK v2 评估入口可用；真实模型评估依赖与命令见 [验证说明](agent-verification.md)，与离线通过分开记录 |
 
 ### 21. 自动 Live Canary（专用账号、显式 opt-in）
 

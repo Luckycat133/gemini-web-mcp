@@ -1,4 +1,4 @@
-"""Build Python distributions and the standalone Codex skill zip."""
+"""Build Python distributions and the four standalone Runtime Skill packages."""
 
 from __future__ import annotations
 
@@ -36,6 +36,8 @@ ROOT = PROJECT_ROOT
 SKILL_SOURCES = {
     "gemini-web-mcp": ROOT / ".agents" / "skills" / "gemini-web-mcp",
     "gemini-assist": ROOT / ".agents" / "skills" / "gemini-assist",
+    "gemini-create": ROOT / ".agents" / "skills" / "gemini-create",
+    "gemini-account": ROOT / ".agents" / "skills" / "gemini-account",
 }
 
 

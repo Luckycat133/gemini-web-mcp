@@ -27,7 +27,7 @@ from .services.manifest import (
     tool_manifest_payload as _tool_manifest_payload,
 )
 from .tools import groups_enable_manage, register_tools
-from .tools.annotations import MUTATES_LOCAL, READ_ONLY_LOCAL
+from .tools.annotations import DESTRUCTIVE_REMOTE, MUTATES_LOCAL, READ_ONLY_LOCAL
 
 ResponseFormat = Literal["markdown", "json"]
 
@@ -102,11 +102,21 @@ if not _tool_groups_include_manage():
         return [TextContent(type="text", text=_format_tool_manifest_markdown(payload))]
 
 
-@mcp.tool(annotations=MUTATES_LOCAL)
+@mcp.tool(annotations=DESTRUCTIVE_REMOTE)
 @domain_error_boundary("gemini_reset", logger)
 async def gemini_reset() -> list[TextContent]:
-    """重置客户端"""
-    await reset_client_async()
+    """重置客户端和全部本地会话，并立即删除未设置 retain_chat 的远端聊天。
+
+    已保留聊天不会删除；远端清理失败会返回 partial 和可重试诊断。
+    """
+    reset_result = await reset_client_async()
+    if reset_result is not None:
+        data = reset_result.to_dict()["data"]
+        data["client_state"] = "reset"
+        text = "✅ 客户端已重置"
+        if reset_result.warnings:
+            text += "\n⚠️ 远端聊天清理未完成：" + "；".join(warning.message for warning in reset_result.warnings)
+        return domain_text(reset_result, text, data=data)
     return domain_text(
         DomainResult.success(
             {"client_state": "reset"},

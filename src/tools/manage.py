@@ -46,6 +46,7 @@ from ..services.gems import (
     create_gem as create_gem_service,
     delete_gem as delete_gem_service,
     iter_gem_values as registered_iter_gems,
+    list_gems as list_gems_service,
     update_gem as update_gem_service,
 )
 from ..services.history import (
@@ -68,6 +69,8 @@ from ..services.manifest import (
     web_capabilities_payload as registered_web_capabilities_payload,
 )
 from ..services.notebooks import (
+    fetch_native_notebooks as fetch_native_notebooks_service,
+    fetch_notebook_chats as fetch_notebook_chats_service,
     move_chat_to_notebook as move_chat_to_notebook_service,
     move_chat_to_notebook_payload as registered_move_chat_payload,
     native_notebooks_payload as registered_notebooks_payload,
@@ -76,6 +79,8 @@ from ..services.notebooks import (
 from ..services.scheduled import (
     create_daily_action as create_daily_action_service,
     delete_action as delete_action_service,
+    fetch_scheduled_registry as fetch_scheduled_registry_service,
+    fetch_scheduled_task_by_id as fetch_scheduled_task_by_id_service,
     scheduled_daily_payload as registered_scheduled_daily_payload,
 )
 from .annotations import (
@@ -210,31 +215,7 @@ async def _execute_observed_rpc(client, probe: dict[str, str]):
 
 
 async def _fetch_scheduled_registry(client, max_chars: int) -> tuple[list[dict[str, Any]], dict[str, Any]]:
-    probe = _get_probe("scheduled", "scheduled_actions_registry")
-    response = await _execute_observed_rpc(client, probe)
-    bodies = _extract_rpc_bodies(response.text, probe["rpcid"])
-    body = bodies[0] if bodies else []
-    raw_entries = body[0] if isinstance(body, list) and body and isinstance(body[0], list) else []
-    entries = [_parse_scheduled_action_task_entry(item, max_chars) for item in raw_entries]
-    diagnostic = {
-        "source_rpc": probe["rpcid"],
-        "observed": probe["observed"],
-        "status_code": getattr(response, "status_code", None),
-        "response_length": len(getattr(response, "text", "") or ""),
-        "body_present": bool(bodies),
-        "raw_entry_count": len(raw_entries),
-        "client_language": getattr(client, "language", None),
-        "client_build_label": getattr(client, "build_label", None),
-        "has_session_id": bool(getattr(client, "session_id", None)),
-        "account_status": str(getattr(client, "account_status", "")),
-    }
-    if not entries:
-        diagnostic["empty_hint"] = (
-            "The current Gemini cookie/session returned an empty scheduled-actions registry. "
-            "If the Gemini Web UI shows scheduled actions, refresh cookies from the same signed-in "
-            "Chrome profile or check Google multi-account context."
-        )
-    return entries, diagnostic
+    return await fetch_scheduled_registry_service(client, max_chars)
 
 
 def _get_scheduled_task_entry_from_body(body: Any) -> Any:
@@ -253,73 +234,14 @@ async def _fetch_scheduled_task_by_id(
     action_id: str,
     max_chars: int,
 ) -> tuple[dict[str, Any] | None, dict[str, Any]]:
-    contract = get_contract("scheduled.get")
-    response = await client._batch_execute(
-        [_RawRPCData(contract.rpc_id, contract.build_payload(action_id=action_id))],
-        source_path=contract.source_path,
-        close_on_error=False,
-    )
-    bodies = _extract_rpc_bodies(response.text, contract.rpc_id)
-    body = bodies[0] if bodies else []
-    raw_entry = _get_scheduled_task_entry_from_body(body)
-    entry = _parse_scheduled_action_task_entry(raw_entry, max_chars) if raw_entry is not None else None
-    matched_task = bool(entry and entry.get("id") == action_id)
-    diagnostic = {
-        "source_rpc": contract.rpc_id,
-        "contract_key": contract.key,
-        "observed": contract.observed,
-        "status_code": getattr(response, "status_code", None),
-        "response_length": len(getattr(response, "text", "") or ""),
-        "body_present": bool(bodies),
-        "raw_body_type": type(body).__name__,
-        "raw_top_level_count": len(body) if isinstance(body, list) else None,
-        "matched_task": matched_task,
-        "client_language": getattr(client, "language", None),
-        "client_build_label": getattr(client, "build_label", None),
-        "has_session_id": bool(getattr(client, "session_id", None)),
-        "account_status": str(getattr(client, "account_status", "")),
-    }
-    if entry and not matched_task:
-        diagnostic["returned_id"] = entry.get("id", "")
-    if not matched_task:
-        diagnostic["empty_hint"] = (
-            "The current Gemini cookie/session did not return this scheduled action by id. "
-            "Check that the id belongs to the same Gemini account/profile context."
-        )
-    return (entry if matched_task else None), diagnostic
+    return await fetch_scheduled_task_by_id_service(client, action_id, max_chars)
 
 
 
 
 
 async def _fetch_native_notebooks(client, locale: str = "zh-CN") -> tuple[list[dict[str, Any]], dict[str, Any]]:
-    contract = get_contract("notebooks.list")
-    response = await client._batch_execute(
-        [_RawRPCData(contract.rpc_id, _native_notebooks_payload(locale))],
-        source_path=contract.source_path,
-        close_on_error=False,
-    )
-    bodies = _extract_rpc_bodies(response.text, contract.rpc_id)
-    body = bodies[0] if bodies else []
-    raw_entries = body[2] if isinstance(body, list) and len(body) > 2 and isinstance(body[2], list) else []
-    raw_categories = body[3] if isinstance(body, list) and len(body) > 3 and isinstance(body[3], list) else []
-    notebooks = [_parse_native_notebook(item) for item in raw_entries]
-    diagnostic = {
-        "source_rpc": contract.rpc_id,
-        "contract_key": contract.key,
-        "observed": contract.observed,
-        "status_code": getattr(response, "status_code", None),
-        "response_length": len(getattr(response, "text", "") or ""),
-        "body_present": bool(bodies),
-        "raw_entry_count": len(raw_entries),
-        "categories": [_parse_notebook_category(item) for item in raw_categories],
-        "client_language": getattr(client, "language", None),
-        "client_build_label": getattr(client, "build_label", None),
-    }
-    return notebooks, diagnostic
-
-
-
+    return await fetch_native_notebooks_service(client, locale)
 
 
 async def _fetch_conversation_metadata_source(
@@ -691,52 +613,7 @@ async def _fetch_notebook_chats(
     limit: int,
     offset: int,
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
-    contract = get_contract("notebooks.chats")
-    safe_limit = clamp_int(limit, default=20, minimum=1, maximum=100)
-    safe_offset = clamp_int(offset, default=0, minimum=0, maximum=10000)
-    target_count = safe_offset + safe_limit
-    page_size = min(max(target_count, 10), 100)
-    items: list[dict[str, Any]] = []
-    next_page_token: str | None = None
-    response_length = 0
-    page_count = 0
-
-    while len(items) < target_count:
-        response = await client._batch_execute(
-            [_RawRPCData(contract.rpc_id, _notebook_chats_payload(notebook_id, page_size, next_page_token))],
-            source_path=contract.source_path.format(notebook_slug=notebook_id.rsplit("/", 1)[-1]),
-            close_on_error=False,
-        )
-        response_length += len(getattr(response, "text", "") or "")
-        page_count += 1
-        bodies = _extract_rpc_bodies(response.text, contract.rpc_id)
-        body = bodies[0] if bodies else []
-        raw_entries = body[2] if isinstance(body, list) and len(body) > 2 and isinstance(body[2], list) else []
-        items.extend(_parse_conversation_metadata(item) for item in raw_entries)
-        next_page_token = body[1] if isinstance(body, list) and len(body) > 1 and isinstance(body[1], str) else None
-        if not next_page_token or not raw_entries:
-            break
-
-    page = items[safe_offset : safe_offset + safe_limit]
-    diagnostic = {
-        "source_rpc": contract.rpc_id,
-        "contract_key": contract.key,
-        "observed": contract.observed,
-        "response_length": response_length,
-        "page_count": page_count,
-        "fetched_count": len(items),
-        "has_remote_more": bool(next_page_token),
-        "next_page_token_present": bool(next_page_token),
-    }
-    page_info = {
-        "total_count": len(items),
-        "count": len(page),
-        "offset": safe_offset,
-        "limit": safe_limit,
-        "has_more": bool(next_page_token) or safe_offset + len(page) < len(items),
-        "next_offset": safe_offset + len(page) if bool(next_page_token) or safe_offset + len(page) < len(items) else None,
-    }
-    return page, {**page_info, "diagnostic": diagnostic}
+    return await fetch_notebook_chats_service(client, notebook_id, limit, offset)
 
 
 def _find_notebook(
@@ -819,6 +696,7 @@ async def _fetch_recent_conversation_metadata(
         "contract_key": contract.key,
         "observed": contract.observed,
         "target_count_per_bucket": safe_target,
+        "max_offset": 5000,
         "pinned": pinned_diag,
         "recent": recent_diag,
         "has_remote_more": bool(
@@ -970,11 +848,15 @@ def _register_history_scan_tools(mcp: MCPServer, enabled_tool_names: set[str], t
             assert result.data is not None
             payload = result.data
             page = payload["items"]
-            if not page:
-                return domain_text(result, "暂无历史对话。", use_result_data=True)
-
             if response_format == "json":
                 return attach_domain_result(_json_response(payload), result, use_result_data=True)
+
+            if not page:
+                message = (
+                    "历史扫描达到当前来源上限，覆盖不完整；请使用深度扫描提高上限。"
+                    if result.warnings else "暂无历史对话。"
+                )
+                return domain_text(result, message, use_result_data=True)
 
             chat_list = [
                 "## 📜 历史对话",
@@ -1202,7 +1084,9 @@ def _register_history_read_tools(mcp: MCPServer, enabled_tool_names: set[str], t
                 f"Scanned: {payload['scanned_count']}/{payload['total_count']} · Matches: {payload['match_count']}",
             ]
             if not matches:
-                lines.append("未在当前页找到匹配项。")
+                lines.append("正文读取失败，无法确认是否存在匹配项。" if not result.ok else "未在当前页找到匹配项。")
+            for warning in result.warnings:
+                lines.append(f"⚠️ {warning.message}")
             for idx, match in enumerate(matches, 1):
                 fields_str = ", ".join(match["matched_fields"])
                 time_text = f" · {match['time']}" if match.get("time") else ""
@@ -2396,18 +2280,22 @@ def _register_gem_tools(mcp: MCPServer, enabled_tool_names: set[str]) -> None:
 
         try:
             if action == "list":
-                gems = await client.fetch_gems()
-                if not gems:
-                    return [TextContent(type="text", text="暂无保存的 Gems。")]
-
+                result = await list_gems_service(client)
+                items = (result.data or {}).get("items", [])
+                if not result.ok:
+                    return domain_text(result, "无法核实 Gems 列表。", use_result_data=True)
+                if not items and not result.warnings:
+                    return domain_text(result, "暂无保存的 Gems。", use_result_data=True)
                 gem_list = ["## 💎 Gems 列表"]
-                for i, gem in enumerate(_iter_gem_values(gems), 1):
-                    gem_name = getattr(gem, "name", "Untitled")
-                    gem_id_val = getattr(gem, "id", "")
-                    gem_desc = getattr(gem, "description", "")[:30]
+                if not items:
+                    gem_list.append("已观察的集合中暂无 Gems。")
+                for i, gem in enumerate(items, 1):
+                    gem_name = gem.get("name") or "Untitled"
+                    gem_id_val = gem.get("id", "")
+                    gem_desc = gem.get("description", "")[:30]
                     gem_list.append(f"{i}. {gem_name} (ID: {gem_id_val})\n   {gem_desc}")
-                
-                return [TextContent(type="text", text="\n".join(gem_list))]
+                gem_list.extend(f"⚠️ {warning.message}" for warning in result.warnings)
+                return domain_text(result, "\n".join(gem_list), use_result_data=True)
 
             elif action == "create":
                 if not name:
