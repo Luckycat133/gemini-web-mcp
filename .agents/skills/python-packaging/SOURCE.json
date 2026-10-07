@@ -1,0 +1,22 @@
+{
+  "skill": "python-packaging",
+  "upstream": {
+    "source": "wshobson/agents",
+    "sourceType": "github",
+    "skillPath": "plugins/python-development/skills/python-packaging/SKILL.md",
+    "computedHash": "f909306678a23ce30ce7f792e86fb721a6d339d7a01ace7acd3b122781f55a31"
+  },
+  "local_revision": {
+    "id": "20261006-cross-client-compatibility",
+    "scope": "Client-neutral path/tool/reference correction; no product implementation changes.",
+    "files": [
+      {
+        "path": "references/details.md",
+        "before_sha256": "947a58e5489293e06dc367f875d984f1d0d6c26c3a0e64e2875460969c3ceb58",
+        "after_sha256": "50ba1760085eab3eb29d6dabadd1962e2cc7bb097f903d630a5082ceffe18d14",
+        "change": "Correct sibling advanced-patterns reference from the references directory."
+      }
+    ]
+  },
+  "note": "Retained lockfile source/computedHash is provenance, not a verified upstream commit or current package hash. Local content hashes are recorded separately."
+}

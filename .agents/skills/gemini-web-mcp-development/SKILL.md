@@ -2,7 +2,6 @@
 name: gemini-web-mcp-development
 description: "Develop, refactor, evaluate, package, and release gemini-web-mcp as three focused agent capability products: Gemini assistance and understanding, multimodal creation, and explicit Gemini account management. Use for repository audits, MCP surface design, task-first Agent Skills, shared services, long-operation recovery, artifacts, live compatibility, tests, packaging, or releases."
 license: AGPL-3.0-only
-compatibility: Requires a checkout of Luckycat133/gemini-web-mcp, Python 3.11+, git, and the project development dependencies. Offline tests are the default. Current Gemini behavior may only be claimed from an explicitly authorized live run.
 metadata:
   author: Luckycat133
   project: gemini-web-mcp
@@ -40,11 +39,18 @@ git status -sb
 git log --oneline -20
 ```
 
-Also inspect the affected source/tests, `pyproject.toml`, current tags/releases, changelog, development status, open PRs/issues, CI/CodeQL, live-canary evidence, and public Skill state.
+Inspect the affected source/tests or documentation first. Read `pyproject.toml`, release history, development status, PRs/issues, CI/CodeQL, live-canary evidence, and public Skill state when needed for the task or a current compatibility/distribution claim.
 
 The active package and both current public Skills declare `0.2.1`. Preserve the existing `v0.2.0` tag and use `v0.2.1` for the audited patch release.
 
 A green offline suite proves repository contracts. It does not prove current Gemini Web behavior.
+
+## Current source before target topology
+
+The source/contract routing table in [validation.md](references/validation.md)
+separates implemented entrypoints from the create/account/SQLite target design.
+Inspect it before exposing a tool or claiming restart recovery. A target catalog
+in this Skill is not proof that the corresponding package entrypoint exists.
 
 ## Current Compatibility Baseline
 
@@ -221,7 +227,7 @@ The remaining owner-level choice is the first officially supported client/OS/dis
 
 Use [validation.md](references/validation.md) for the evidence ladder and [tool-design.md](references/tool-design.md) for agent-use and handoff evaluations.
 
-Minimum offline gates:
+Start with focused checks for the affected behavior. Documentation-only changes use relevant content/link checks. The following full offline gates apply to broad runtime changes and release readiness; retain profile/protocol and package checks whenever those contracts are affected:
 
 ```bash
 python -m ruff check src tests scripts
@@ -256,7 +262,7 @@ Do not claim a live capability from fixtures, package smoke, a skipped canary, o
 
 ## Handoff
 
-End development work with:
+Use the relevant fields below for development handoff; omit unaffected fields for small changes and mark required but unrun checks explicitly:
 
 ```text
 Baseline commit:

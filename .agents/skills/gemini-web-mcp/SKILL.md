@@ -2,7 +2,10 @@
 name: gemini-web-mcp
 description: "Use this skill when an agent should extend itself with Gemini Web: get a second opinion, search current web sources, understand images/files/URLs, run Deep Research, generate image/video/music artifacts, edit images, or explicitly work with Gemini account data. Route by user intent instead of loading every tool. This skill is the compatibility router; prefer the focused gemini-assist skill when only assistance and understanding are needed. Do not use for repository implementation, tests, CI, packaging, or releases—use gemini-web-mcp-development instead."
 license: MIT-0
+<<<<<<< Updated upstream
 compatibility: "Requires Python 3.11+ and a connected Gemini Web MCP server. The focused assist server handles assistance, files, URLs, and Deep Research; compatibility servers cover chat, image/music generation, and explicit account work. Video currently uses Gemini Web's dedicated browser mode. Live calls require Gemini Web account Cookies."
+=======
+>>>>>>> Stashed changes
 metadata:
   version: "0.2.1"
   openclaw:

@@ -282,3 +282,45 @@ Record surface/tool selection, calls, retries, duplicate starts, structured stat
 A bounded 2026-08-08 run observed authentication, text, sessions, typed history, and verified chat cleanup. It does not prove media, files, URLs, Research, account mutations, tier, locale, or Web build.
 
 A full live baseline should verify the new focused surfaces, classify entitlement absence separately from drift/failure, and account for every created resource by returned ID. Retain only sanitized state and metadata—never credentials, private content, or raw responses.
+
+## Implemented source and focused contract routing (2026-10-03)
+
+Re-read pyproject.toml and the current sources before reporting implementation.
+The inspected package exposes `gemini-mcp-server`, `gemini-mcp-skill-server`,
+`gemini-mcp-onboarding`, and `gemini-mcp-assist`. `src/surfaces/assist.py` owns
+five assistance tools. Dedicated create/account entrypoints and a durable shared
+SQLite OperationService are target architecture in these documents; their names
+must not become active Runtime Skill promises before source and package evidence.
+
+| Change | Shared owner / contract | First useful checks |
+|---|---|---|
+| Assist schema/catalog/presentation | `src/surfaces/assist.py`, `src/adapters/mcp_sdk.py` | `tests/test_assist_surface.py`, `tests/test_assist_skill.py` |
+| Source-backed search | `src/services/search.py` | `tests/test_search_service.py`, assist surface checks |
+| Mixed input understanding | `src/services/understanding.py` | `tests/test_understanding_service.py`, assist surface checks |
+| Research async start/recovery IDs | `src/services/research.py`, `src/tools/research.py` | `tests/test_research_tools.py`, assist surface checks |
+| Usable generated artifacts | `src/services/artifacts.py` | `tests/test_artifacts.py`, `tests/test_media_tools.py` |
+| Account/history parity or verified mutation | `src/services/history.py`, `gems.py`, `cleanup.py` | `tests/test_history_typed_parity.py`, `tests/test_manage_gem_verification_contract.py`, `tests/test_remote_chat_cleanup_manager.py` |
+| Public skill packaging | Existing .agents skill directories and `scripts/package_release.py` | `tests/test_development_skill.py`, `tests/test_skill_packaging.py`, `tests/test_package_integrity.py` |
+
+ResearchService currently returns an opaque operation_id while preserving
+upstream identifiers, and explicitly keeps no connection-local registry. Do not
+infer that opaque ID alone supports persisted status/result lookup after restart.
+Trace the actual recovery route and tests before claiming that level of support.
+A timeout after start must not trigger a duplicate upstream research request.
+
+Focused documentation/skill checks can run without Gemini access:
+
+```bash
+python -m pytest -q tests/test_development_skill.py
+```
+
+Use the repository environment. `test_development_skill.py` validates the exact
+public file set and reference links: extend existing references for a routing
+clarification rather than adding stray files to a published Skill. If the
+package contract intentionally changes, update its test deliberately with the
+implementation; do not regenerate golden output just to remove a failure.
+
+For a runtime edit, select tests above, then protocol and installed-wheel checks
+only when their boundary is affected. The fastmcp shim remains a fixture; source
+inspection, mock pass, real MCP discovery and live Gemini calls are different
+claims. No account/cookie access is needed to maintain this routing table.
