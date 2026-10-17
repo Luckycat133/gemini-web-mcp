@@ -7,6 +7,7 @@ boundaries. They do not claim an LLM trigger accuracy measurement or live media.
 import asyncio
 import json
 import re
+import shlex
 import tomllib
 import zipfile
 from pathlib import Path
@@ -41,10 +42,27 @@ def test_focused_skill_complete_package_and_real_catalog(name, entry, catalog):
     assert isinstance(metadata["description"], str) and metadata["description"].strip()
     compatibility = metadata.get("compatibility", metadata["metadata"].get("compatibility"))
     assert isinstance(compatibility, str) and compatibility.strip()
-    assert f"uvx --from {CANONICAL_GIT_SOURCE} {entry}" in text
     project = tomllib.loads((ROOT / "pyproject.toml").read_text())
-    lane = name.removeprefix("gemini-")
-    assert project["project"]["scripts"][entry] == f"src.surfaces.{lane}:main"
+    surface = {"gemini-create": create, "gemini-account": account}[name]
+    commands = [
+        shlex.split(line)
+        for block in re.findall(r"```bash\s*\n(.*?)```", text, re.DOTALL)
+        for line in block.replace("\\\n", "").splitlines()
+        if line.strip()
+    ]
+    assert commands
+    for command in commands:
+        assert len(command) == 4
+        assert command[:2] == ["uvx", "--from"]
+        source, _, suffix = command[2].partition("[")
+        assert Path(source).is_absolute()
+        extras = set(suffix.removesuffix("]").split(",")) if suffix else set()
+        assert extras <= project["project"]["optional-dependencies"].keys()
+        if name == "gemini-create":
+            assert "image" in extras
+        assert command[3] == entry
+        assert project["project"]["scripts"][command[3]] == f"{surface.__name__}:main"
+    assert callable(surface.main)
     openclaw = metadata["metadata"]["openclaw"]
     assert "uvx" in openclaw["requires"]["bins"]
     assert openclaw["primaryEnv"] == "GEMINI_PSID"
@@ -52,7 +70,7 @@ def test_focused_skill_complete_package_and_real_catalog(name, entry, catalog):
     for env_name in ("GEMINI_PSID", "GEMINI_PSIDTS", "GEMINI_PSIDCC", "GEMINI_PROXY", "GEMINI_STATE_DB_PATH"):
         assert env_vars[env_name]["required"] is False
     assert "TODO" not in text
-    server = {"gemini-create": create.mcp, "gemini-account": account.mcp}[name]
+    server = surface.mcp
     registered = {tool.name for tool in asyncio.run(server.list_tools())}
     assert registered == catalog
     documentation = "\n".join(path.read_text() for path in directory.rglob("*.md"))

@@ -41,8 +41,9 @@ needs several steps.
 | Files, URLs or mixed inputs | `gemini_understand` | synthesis with per-input IDs and outcomes |
 | Deep Research | `gemini_research` | operation handle, then report |
 
-Read structured `ok`, `data`, `error` and `meta`. Incorporate the information
-into the requested work. For search, `grounded` requires observed `sources`;
+Read `ok`, `data`, `error` and `meta` from `content[0]._meta.domain_result`
+(or the SDK's `structuredContent.result[0]._meta.domain_result` wrapper).
+Use the information in the requested work. Search is `grounded` only with observed `sources`;
 `answer_only`, `unavailable` and `failed` preserve their reported meaning.
 Keep input identities and failures visible when interpreting mixed evidence.
 
@@ -61,11 +62,11 @@ have distinct evidence. Availability comes from the actual tool result.
 
 ## Connection and routing
 
-The MCP server must be connected independently of this Skill. If setup is
-needed, the source entrypoint is:
+The MCP server must be connected independently of this Skill. Use a checkout
+or installed version providing these tools and parameters; for a checkout:
 
 ```bash
-uvx --from git+https://github.com/Luckycat133/gemini-web-mcp@main gemini-mcp-assist
+uvx --from /absolute/path/to/gemini-web-mcp gemini-mcp-assist
 ```
 
 Use the server's private authentication setup. For generated media use

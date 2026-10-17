@@ -9,12 +9,13 @@ from __future__ import annotations
 
 import asyncio
 import re
+import shlex
 import tomllib
 from pathlib import Path
 
 import yaml
 
-from scripts.release_metadata import CANONICAL_GIT_SOURCE, load_release_metadata
+from scripts.release_metadata import load_release_metadata
 from scripts.smoke_profiles import ASSIST_TOOLS
 from src.surfaces import assist
 
@@ -81,8 +82,20 @@ def test_assist_skill_documents_the_real_surface_catalog() -> None:
 def test_assist_skill_documents_the_installed_entrypoint() -> None:
     text = _skill_text()
     project = tomllib.loads((PROJECT_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
-    assert project["project"]["scripts"][ASSIST_ENTRYPOINT] == "src.surfaces.assist:main"
-    assert f"uvx --from {CANONICAL_GIT_SOURCE} {ASSIST_ENTRYPOINT}" in text
+    commands = [
+        shlex.split(line)
+        for block in re.findall(r"```bash\s*\n(.*?)```", text, re.DOTALL)
+        for line in block.replace("\\\n", "").splitlines()
+        if line.strip()
+    ]
+    assert commands
+    for command in commands:
+        assert len(command) == 4
+        assert command[:2] == ["uvx", "--from"]
+        assert Path(command[2]).is_absolute()
+        assert command[3] == ASSIST_ENTRYPOINT
+        assert project["project"]["scripts"][command[3]] == f"{assist.__name__}:main"
+    assert callable(assist.main)
     assert ASSIST_SERVER_NAME in text
 
 

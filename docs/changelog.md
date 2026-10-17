@@ -22,6 +22,7 @@ Publication still requires review and merge.
 - Added multimodal onboarding with opt-in video/music starts and explicit operation recovery, and an evidence-backed client/OS/distribution matrix.
 
 ### Fixed
+- Aligned focused Skill setup with a compatible checkout, included image verification dependencies in creation setup, and clarified Assist's domain-result envelope. Setup tests validate commands and installed entrypoints rather than a moving source URL.
 - Corrected creation and Research recovery annotations to cover saved files and stored-policy source-chat deletion; status/result are not read-only.
 - Preserved requested asynchronous media filenames across SQLite recovery and upgraded older records without resubmitting generation. Corrected the delayed-cleanup documentation and described exact-job cancellation.
 - Required strict fresh Notebook membership, complete custom Gem registry and matching Scheduled acknowledgement/read-back before mutation success. HTTP failures, rejected envelopes, missing child rows and partial registries cannot prove empty state or deletion.

@@ -1,6 +1,16 @@
 # Client installation and verified onboarding
 
-These examples use the current `main` source through `uvx`, which creates an isolated tool environment. Pin `@main` to a reviewed commit SHA when you need an immutable installation. Do not substitute `releases/latest` blindly: a release tag and wheel filename must both match the source version you intend to run.
+The default templates use the canonical `main` source through `uvx`, which
+creates an isolated tool environment. Select a checkout or reviewed revision
+that provides the intended tools and arguments; a template does not establish
+that another revision has the same capabilities. Pin `@main` to a reviewed
+commit SHA when you need an immutable installation. Do not substitute
+`releases/latest` blindly: a release tag and wheel filename must both match
+the source version you intend to run.
+
+For local checkout installation, replace the `--from` source with its absolute
+path. Include the `image` extra for local image verification, for example
+`uvx --from '/absolute/path/to/gemini-web-mcp[image]' gemini-mcp-create`.
 
 ## One-command offline proof
 
