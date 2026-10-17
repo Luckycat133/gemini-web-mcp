@@ -69,13 +69,13 @@ executes due work, and `cancel` withdraws eligible work. It cannot undo an
 already in-flight deletion. `test_artifacts` is a separate bounded marker scan;
 preview its default dry run and ensure deletion matches the authorized targets.
 
-If setup is needed, the source entrypoint is:
+Use a checkout or installed version providing these tools and parameters.
+For a checkout:
 
 ```bash
-uvx --from git+https://github.com/Luckycat133/gemini-web-mcp@main gemini-mcp-account
+uvx --from /absolute/path/to/gemini-web-mcp gemini-mcp-account
 ```
 
-Use an installed version or checkout that provides this entrypoint and the
-server's private authentication setup. Load [examples.md](references/examples.md)
+Use the server's private authentication setup. Load [examples.md](references/examples.md)
 for calls and action-specific details. Assistance and media generation use
 `$gemini-assist` and `$gemini-create`; repository changes use `$gemini-web-mcp-development`.

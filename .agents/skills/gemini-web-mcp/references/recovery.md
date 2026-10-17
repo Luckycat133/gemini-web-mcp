@@ -9,19 +9,19 @@ A Skill does not connect an MCP server. Check the host's connected catalog and
 schema first. A compatible available tool may already complete the task;
 focused tools are not a reason to replace a working connection.
 
-For connection setup, the credential-free preflight is:
+For setup, use a checkout or installed version providing the needed tools and
+parameters. A checkout's credential-free preflight is:
 
 ```bash
-uvx --from git+https://github.com/Luckycat133/gemini-web-mcp@main gemini-mcp-onboarding
+uvx --from /absolute/path/to/gemini-web-mcp gemini-mcp-onboarding
 ```
 
-Use the intended source checkout or reviewed revision for reproducible setup.
 Connect the needed lane (`gemini-mcp-assist`, `gemini-mcp-create`,
 `gemini-mcp-account`), compact `gemini-mcp-skill-server`, or primary
 `gemini-mcp-server` with the appropriate profile. For example, in Codex:
 
 ```bash
-codex mcp add gemini-assist -- uvx --from git+https://github.com/Luckycat133/gemini-web-mcp@main gemini-mcp-assist
+codex mcp add gemini-assist -- uvx --from /absolute/path/to/gemini-web-mcp gemini-mcp-assist
 codex mcp list
 ```
 

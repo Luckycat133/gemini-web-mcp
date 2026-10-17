@@ -226,3 +226,51 @@ Local verification used Python 3.13.12, MCP SDK 2.2.0 and gemini-webapi 2.1.1:
 These results cover local recovery and protocol behavior without live Gemini
 account calls. Earlier hosted and live evidence above remains tied to its
 original revision.
+
+## Main integration — 2026-10-17
+
+Merged `origin/main` at `3d5e517` into the release work. The three Skill
+conflicts retain the concise runtime contracts and add current-source
+verification guidance, without restoring obsolete implementation snapshots.
+The development and compatibility entrypoints remain 50 and 65 lines.
+Committed conflict markers in the incoming `AGENTS.md` were also removed.
+
+Discovery now counts symlinks to the same Skill source once, while retaining
+independent copies for duplicate-name detection. The existing failure was
+reproduced, then two filesystem regressions and the actual five-Skill catalog
+check passed. Third-party Skill packages and discovery links remain identical
+to main; their existing formatting is preserved.
+
+A fresh Python 3.13.12 environment resolved MCP SDK 2.3.0. Ruff, Mypy (80 source
+files), 2,248 offline tests, 353 architecture/distribution checks, all eleven
+profile catalogs and modern/legacy stdio on all five surfaces in model/core
+profiles passed. Both validators accepted all five project Skills, and the
+pinned Skills CLI installed a source-identical development package. Manually
+edited paths passed whitespace checks. No live Gemini calls were made.
+
+## Skill usability review — 2026-10-17
+
+Independent contract and task reviews found that focused Skill setup selected
+`main`, whose entrypoints and Research arguments did not yet match the release
+Skills. Setup now uses a compatible installed version or a local checkout;
+temporary branch names and release status remain outside the Skills. Assist
+also identifies its content-block domain envelope explicitly.
+
+Creation setup includes the `image` extra. In isolated installations, the same
+valid 64×64 PNG was unverified without the decoder and verified with that extra.
+Actual documented checkout commands were started over stdio outside the repo:
+Assist/Create/Account exposed 5/7/7 tools, including the Research continuation
+arguments. No Gemini tool or account calls were submitted.
+
+An independent offline agent exercised five requests covering mixed image
+analysis/edit/handoff, music continuation, exact-ID deletion, search plus a
+text-only prompt, and a small documentation change. Eleven proposed calls
+matched real schemas; four wrong-surface argument shapes were rejected. The
+agent preserved missing-connection and unfinished-output limits instead of
+claiming remote work or broadening authorization.
+
+Command-aware setup regressions, 2,248 offline tests, 353 architecture contracts,
+Ruff, Mypy and both validators for all five project Skills passed. Four rebuilt
+runtime bundles matched source file sets and bytes. These results verify local
+guidance, installation and schemas; they add no live-generation acceptance or
+measured model-trigger accuracy claim.

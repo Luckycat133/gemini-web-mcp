@@ -71,14 +71,14 @@ while source cleanup is pending or failed. Read cleanup independently and use
 
 ## Connection and details
 
-If setup is needed, the source entrypoint is:
+Use a checkout or installed version providing these tools and parameters.
+For a checkout with local image verification:
 
 ```bash
-uvx --from git+https://github.com/Luckycat133/gemini-web-mcp@main gemini-mcp-create
+uvx --from '/absolute/path/to/gemini-web-mcp[image]' gemini-mcp-create
 ```
 
-Use an installed version or checkout that provides this entrypoint and the
-server's private authentication setup. Load [examples.md](references/examples.md)
+Use the server's private authentication setup. Load [examples.md](references/examples.md)
 for call examples, recovery, cancellation and source-retention details.
 For understanding or research use `$gemini-assist`; requested account
 management uses `$gemini-account`; repository work uses `$gemini-web-mcp-development`.
