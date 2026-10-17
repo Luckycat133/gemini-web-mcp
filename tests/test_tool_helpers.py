@@ -333,6 +333,8 @@ def test_resolve_model_name_known_alias_returns_configured_name():
     assert resolve_model_name("flash-lite") == "Flash-Lite"
     assert resolve_model_name("3.5 Flash-Lite") == "Flash-Lite"
     assert resolve_model_name("3.8 Flash") == "gemini-3-flash"
+    assert resolve_model_name("thinking") == "gemini-3-flash"
+    assert resolve_model_name("gemini-3-flash-thinking") == "gemini-3-flash"
 
 
 def test_resolve_model_name_unknown_passthrough():

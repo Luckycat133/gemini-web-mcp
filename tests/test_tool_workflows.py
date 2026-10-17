@@ -864,7 +864,7 @@ def test_chat_tools_forward_gem_and_temporary_chat_settings(monkeypatch):
 
     assert calls == [
         ("chat", "Use the gem.", None, "gemini-3-flash", "gem-writer", True, "standard"),
-        ("start", "gemini-3-flash-thinking", "gem-research"),
+        ("start", "gemini-3-flash", "gem-research"),
         ("send", "Keep this temporary.", None, True, "standard"),
     ]
 
@@ -1265,7 +1265,10 @@ def test_skill_server_account_and_history_tools(monkeypatch):
                 metadata[14] = ["📐"]
                 body = [None, None, [["notebooks/math", metadata, ["Math notebook summary"]]]]
             elif rpcid == "MaZiqc":
-                body = [None, None, [["task-1", "Morning brief", True, None, None, [1781794431, 0], None, "Daily", None, 2]]]
+                rows = [["task-1", "Morning brief", True, None, None, [1781794431, 0], None, "Daily", None, 2]]
+                if "c_1" not in deleted:
+                    rows.append(["c_1", "Chat one", False])
+                body = [None, None, rows]
             elif rpcid == "XPSWpd":
                 body = [[
                     [
@@ -1907,8 +1910,9 @@ def test_web_capabilities_manifest_describes_observed_pro_surface():
         )
         payload = json.loads(_tool_text(json_result))
         assert payload["account_tier"] == "Gemini Web Pro"
-        assert [item["alias"] for item in payload["models"]] == ["flash-lite", "flash", "pro"]
-        assert payload["thinking_levels"][1]["id"] == "extended"
+        assert [item["alias"] for item in payload["models"]] == ["flash-lite", "flash", "pro", "argon"]
+        assert [(level["id"], level["level_id"]) for level in payload["thinking_levels"]] == [("low", 1), ("medium", 4), ("high", 2)]
+        assert payload["thinking_aliases"] == {"standard": "low", "extended": "high"}
         assert any(item["name"] == "scheduled_actions" for item in payload["settings_menu"])
         assert any(probe["rpcid"] == "K4WWud" for probe in payload["feature_probes"])
         assert any(probe["rpcid"] == "MaZiqc" for probe in payload["feature_probes"])
@@ -1952,7 +1956,7 @@ def test_tool_manifest_and_annotations_expose_agent_safety_metadata():
         )
         payload = json.loads(_tool_text(json_result))
         assert payload["scope"] == "history"
-        assert payload["groups"] == {"history": 8}
+        assert payload["groups"] == {"history": 9}
         history_entry = next(item for item in payload["tools"] if item["name"] == "gemini_history")
         assert history_entry["read_only"] is True
         assert history_entry["availability"] == ["history", "history-organize", "manage", "all"]
@@ -2013,7 +2017,7 @@ def test_tool_manifest_marks_currently_enabled_tools(monkeypatch):
     all_tools = {item["name"]: item for item in all_payload["tools"]}
     assert all_tools["gemini_get_tool_manifest"]["current_enabled"] is True
     assert all_tools["gemini_manage_prompts"]["current_enabled"] is False
-    assert all_payload["current_enabled_count"] == 46
+    assert all_payload["current_enabled_count"] == 47
 
     monkeypatch.setenv("GEMINI_TOOLS", "model")
     model_payload = manage_tools._tool_manifest_payload("all")

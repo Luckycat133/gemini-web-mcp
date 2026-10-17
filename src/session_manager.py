@@ -46,10 +46,18 @@ class SessionState:
     upstream_chat_id: str | None = None
     retain_chat: bool = False
     delete_after_seconds: int | None = None
+    task_mode: bool = False
+    task_pending: bool = field(default=False, metadata={"domain_exclude": True})
     lifecycle_state: SessionLifecycleState = SessionLifecycleState.ACTIVE
     _authentication_invalidated: bool = field(default=False, repr=False, metadata={"domain_exclude": True})
     _authentication_generation: int | None = field(default=None, repr=False, metadata={"domain_exclude": True})
     _send_lock: asyncio.Lock = field(
+        default_factory=asyncio.Lock,
+        repr=False,
+        compare=False,
+        metadata={"domain_exclude": True},
+    )
+    _workflow_lock: asyncio.Lock = field(
         default_factory=asyncio.Lock,
         repr=False,
         compare=False,
@@ -100,7 +108,7 @@ class SessionOperationResult(DomainResult[SessionOperationData]):
                 getattr(session.session, "cid", None) or session.upstream_chat_id if session is not None else None
             ),
             session_state=observed_state,
-            retain_chat=session.retain_chat if session is not None else False,
+            retain_chat=(session.retain_chat or session.task_pending) if session is not None else False,
             delete_after_seconds=(session.delete_after_seconds if session is not None else None),
             cleanup=cleanup or CleanupObservation(),
         )
@@ -212,6 +220,7 @@ class SessionService:
         temporary: bool = False,
         retain_chat: bool = False,
         delete_after_seconds: int | None = None,
+        task_mode: bool = False,
     ) -> SessionOperationResult:
         """Create a session with one opaque collision-resistant local ID."""
         with self._lock:
@@ -226,6 +235,7 @@ class SessionService:
                 temporary,
                 retain_chat,
                 delete_after_seconds,
+                task_mode,
             )
             self._sessions[session_id] = data
         return SessionOperationResult.success(
@@ -243,6 +253,7 @@ class SessionService:
         temporary: bool = False,
         retain_chat: bool = False,
         delete_after_seconds: int | None = None,
+        task_mode: bool = False,
     ) -> SessionData:
         """存储会话"""
         with self._lock:
@@ -255,6 +266,7 @@ class SessionService:
                 temporary,
                 retain_chat,
                 delete_after_seconds,
+                task_mode,
             )
             self._sessions[session_id] = data
             return data
@@ -361,7 +373,7 @@ class SessionService:
             return lookup
         data = lookup.session
 
-        async with data._send_lock:
+        async with data._workflow_lock, data._send_lock:
             with self._lock:
                 self._clean_expired_sessions()
                 if self._sessions.get(session_id) is not data:
@@ -404,7 +416,7 @@ class SessionService:
 
         removed: list[SessionData] = []
         for data in snapshot:
-            async with data._send_lock:
+            async with data._workflow_lock, data._send_lock:
                 with self._lock:
                     if self._sessions.get(data.session_id) is not data:
                         continue
@@ -452,7 +464,8 @@ class SessionService:
         expired = [
             sid
             for sid, data in self._sessions.items()
-            if now - data.created_at > self._max_age and not data._send_lock.locked()
+            if (now - data.created_at > self._max_age
+                and not data._send_lock.locked() and not data._workflow_lock.locked())
         ]
         for sid in expired:
             data = self._sessions.pop(sid)
@@ -478,6 +491,7 @@ class SessionService:
         temporary: bool,
         retain_chat: bool,
         delete_after_seconds: int | None,
+        task_mode: bool,
     ) -> SessionData:
         now = time.time()
         return SessionData(
@@ -492,6 +506,8 @@ class SessionService:
             upstream_chat_id=getattr(session, "cid", None),
             retain_chat=retain_chat,
             delete_after_seconds=delete_after_seconds,
+            task_mode=task_mode,
+            task_pending=task_mode,
         )
 
 

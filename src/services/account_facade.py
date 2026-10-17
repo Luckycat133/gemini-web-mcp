@@ -17,8 +17,13 @@ from ..infrastructure.rpc_parsers import parse_contract_body, parse_rpc_envelope
 from . import cleanup
 from .account import execute_observed_rpc, sanitize_account_status
 from .gems import GemMutationNotVerified, create_gem, delete_gem, list_gems, update_gem
-from .history import delete_chat_result, export_chat_result, list_chats_result, paginate_items, read_chat_result, search_chats_result
+from .history import (
+    delete_chat_result, export_chat_result, list_chat_history_result,
+    paginate_items, read_chat_result, search_chat_history_result,
+)
 from .manifest import web_capabilities_payload
+from .history_mutations import update_chat_metadata_result
+from .tasks import get_task_status_result
 from .notebooks import fetch_native_notebooks, fetch_notebook_chats, move_chat_to_notebook
 from .prompts import PromptLibrary
 from .scheduled import create_daily_action, delete_action, fetch_scheduled_registry, fetch_scheduled_task_by_id
@@ -51,44 +56,9 @@ async def _read_contract(client: Any, key: str, **arguments: Any) -> DomainResul
     if not parsed.ok or parsed.warnings:
         return _unobserved(diagnostic)
     return DomainResult.success(
-        {"value": parsed.value, "continuation": envelope.bodies[0][1] if key == "history.page" else None},
+        {"value": parsed.value},
         verification_status="observed", details=diagnostic,
     )
-
-
-async def fetch_history_metadata(client: Any, target_count: int) -> DomainResult[Any]:
-    """Bounded, strict metadata listing; never infer empty from a rejected page."""
-    combined: dict[str, dict[str, Any]] = {}
-    more = False
-    for pinned in (True, False):
-        token: str | None = None
-        seen_tokens: set[str] = set()
-        count = 0
-        while count < target_count:
-            result = await _read_contract(
-                client, "history.page", filter_payload=[pinned, None, True],
-                page_size=min(max(target_count, 10), 100), next_page_token=token,
-            )
-            if not result.ok:
-                return result
-            assert result.data is not None
-            entries = result.data["value"]
-            for item in entries:
-                combined.setdefault(item["id"], item)
-            count += len(entries)
-            token = result.data["continuation"]
-            if not token or not entries:
-                break
-            if token in seen_tokens:
-                more = True
-                break
-            seen_tokens.add(token)
-        more = more or bool(token)
-    items = list(combined.values())
-    return DomainResult.success({"items": items, "diagnostic": {
-        "source": "history.page", "has_remote_more": more,
-        "max_offset": 5000, "fetched_count": len(items),
-    }}, verification_status="observed")
 
 
 def _mutation(payload: dict[str, Any]) -> DomainResult[dict[str, Any]]:
@@ -137,7 +107,7 @@ class AccountFacadeService:
     async def execute(self, facade: str, request: Request) -> DomainResult[dict[str, Any]]:
         arguments = request.model_dump(exclude_none=True)
         action = arguments.pop("action")
-        mutations = {"history": {"delete"}, "notebooks": {"move"}, "scheduled": {"create_daily", "delete"},
+        mutations = {"history": {"delete", "update"}, "notebooks": {"move"}, "scheduled": {"create_daily", "delete"},
                      "gems": {"create", "update", "delete"}, "prompts": {"create", "update", "delete"},
                      "cleanup": {"run", "cancel"}}
         effect = "mutation" if action in mutations.get(facade, set()) or (
@@ -167,24 +137,24 @@ class AccountFacadeService:
         }))
 
     async def _history(self, client: Any, action: str, args: dict[str, Any]) -> DomainResult[Any]:
+        if action == "task_status":
+            return await get_task_status_result(client, args["chat_id"])
+        if action == "update":
+            return await update_chat_metadata_result(client, **args)
         if action == "read":
             return await read_chat_result(client, args["chat_id"], args["limit"], args["max_chars"], max_limit=200)
         if action == "export":
             return await export_chat_result(client, args["chat_id"], args["limit"], args["max_chars"], include_metadata=False)
         if action == "delete":
             return await delete_chat_result(client, args["chat_id"])
-        fetched = await fetch_history_metadata(client, min(args["offset"] + args["limit"], 5000))
-        if not fetched.ok:
-            return fetched
-        assert fetched.data is not None
         if action == "search":
-            return await search_chats_result(
-                client, fetched.data["items"], args["query"], args["limit"], args["offset"],
+            return await search_chat_history_result(
+                client, args["query"], args["limit"], args["offset"],
                 scan_turns=args["scan_turns"], turns_per_chat=args["turns_per_chat"],
-                max_chars_per_turn=args["max_chars"], diagnostic=fetched.data["diagnostic"], max_limit=100,
+                max_chars_per_turn=args["max_chars"], max_limit=100,
+                max_turns_per_chat=100, max_chars=20000,
             )
-        return list_chats_result(fetched.data["items"], args["limit"], args["offset"],
-                                 diagnostic=fetched.data["diagnostic"], max_limit=100)
+        return await list_chat_history_result(client, args["limit"], args["offset"], max_limit=100)
 
     async def _notebooks(self, client: Any, action: str, args: dict[str, Any]) -> DomainResult[Any]:
         if action == "move":

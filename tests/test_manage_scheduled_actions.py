@@ -31,6 +31,8 @@ import json
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
+import pytest
+
 from tests._account_rpc_fakes import scheduled_ack_response, scheduled_read
 
 from src.adapters.mcp_sdk import MCPServer
@@ -57,6 +59,7 @@ class _FakeBatchClient:
         self._raise_exc = raise_exc
         self.call_count = 0
         self.captured_payloads = []
+        self.response_lengths = []
 
     async def _batch_execute(self, raw_rpc_list, *, source_path=None, close_on_error=False):
         self.call_count += 1
@@ -67,9 +70,12 @@ class _FakeBatchClient:
             text = self._responses.pop(0)
         else:
             text = ""
-        if text == "resp" and raw_rpc_list[0].rpcid == get_contract("scheduled.create_daily").rpc_id:
+        if (
+            text == "resp" and raw_rpc_list[0].rpcid == get_contract("scheduled.create_daily").rpc_id
+        ) or raw_rpc_list[0].rpcid == get_contract("history.remy_goals").rpc_id:
             bodies = manage_tools._extract_rpc_bodies(text, raw_rpc_list[0].rpcid)
             text = json.dumps([["wrb.fr", raw_rpc_list[0].rpcid, json.dumps(body)] for body in bodies])
+        self.response_lengths.append(len(text))
         return SimpleNamespace(text=text, status_code=self._status_code)
 
 
@@ -307,21 +313,22 @@ def test_remy_goal_aggregates_response_length(monkeypatch):
     monkeypatch.setattr(manage_tools, "_extract_rpc_bodies",
                         lambda _t, _r: pages.pop(0))
 
-    client = _FakeBatchClient(responses=["aaaa", "bbbbbb"])  # 4 + 6 = 10
+    client = _FakeBatchClient(responses=["aaaa", "bbbbbb"])
     result = _run(manage_tools._fetch_remy_goal_conversation_refs(client, max_items=100))
 
-    assert result["diagnostic"]["response_length"] == 10
+    assert result["diagnostic"]["response_length"] == sum(client.response_lengths)
 
 
-def test_remy_goal_empty_bodies_falls_back_to_empty_page(monkeypatch):
-    """_extract_rpc_bodies 返回空 list → body=[] → raw_entries=[] → 'empty_page'。"""
+def test_remy_goal_missing_response_body_is_unverified_not_empty(monkeypatch):
+    """缺少 RPC body 不能证明 Remy 来源为空。"""
     monkeypatch.setattr(manage_tools, "_extract_rpc_bodies", lambda _t, _r: [])
 
     client = _FakeBatchClient(responses=["r1"])
-    result = _run(manage_tools._fetch_remy_goal_conversation_refs(client, max_items=100))
+    with pytest.raises(manage_tools.HistoryMetadataReadError) as raised:
+        _run(manage_tools._fetch_remy_goal_conversation_refs(client, max_items=100))
 
-    assert result["diagnostic"]["stopped_reason"] == "empty_page"
-    assert result["items"] == []
+    assert raised.value.result.ok is False
+    assert raised.value.result.meta.verification_status == "read_back_unavailable"
 
 
 def test_remy_goal_pages_diagnostic_records_per_page_metadata(monkeypatch):

@@ -628,7 +628,7 @@ def test_chat_top_level_exception_returns_error_text(monkeypatch):
 
 
 def test_history_list_returns_no_chats_when_empty(monkeypatch):
-    client = SimpleNamespace()
+    client = SimpleNamespace(list_chats=lambda: [])
     _patch_client_seams(monkeypatch, client)
     result = _run(skill_server.history(action="list"))
     assert result[0].text == "No chats"

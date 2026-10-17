@@ -21,6 +21,10 @@
 
 ---
 
+当前模型、三档思考等级和原生任务模式见 [模型与模式](docs/models.md)。
+历史记录支持 fresh 列表/搜索、读取/导出、重命名/固定/取消固定及回读验证删除；
+实际调用范围见 [实测记录](docs/live-ui-coverage.md)。
+
 ## MCP 协议兼容性
 
 本服务器通过专用 `MCPServer` 适配层，把 discovery、版本协商、JSON-RPC 帧、旧式 `initialize` 握手、结果校验和结构化协议错误委托给官方 `mcp` Python SDK v2。仓库不自建协议栈；`error_handler.py` 里的 `NO_COOKIE` / `INVALID_COOKIE` / `SESSION_NOT_FOUND` 等是工具结果中的应用层错误，不是 JSON-RPC 协议错误。
@@ -35,7 +39,8 @@
 - **flash-lite** → Web UI `3.5 Flash-Lite`
 - **flash** / **fast** → Web UI `3.8 Flash`
 - **pro** → Web UI `3.1 Pro`
-- 上述三个模型都支持 `thinking_level=standard` / `extended`
+- 当前目录还包含 `4 Argon`；用模型盘点工具核对当前账号，名称动态解析。
+- 思考等级为 `low` / `medium` / `high`，兼容 `standard` / `extended`
 - **thinking** 仍保留为旧兼容别名
 - `learning_mode` 可触发网页 `学习辅导` companion：互动测验、抽认卡、模拟测试、备考/学习指南
 
@@ -202,7 +207,7 @@ gemini-mcp-skill-server
 |--------|---------|------|-----------|
 | `model` / `chat` | 仅对话和会话工具 | 只想调用 Gemini 模型的 AI agent | 低 |
 | `history` | `gemini_history` 聚合 list/scan/search/read/export + manifest | 只整理或导出对话历史，不暴露删除/账号写操作 | 低 |
-| `history-organize` | `gemini_history` + `gemini_notebooks` + Notebook move | 把选定对话整理进 Gemini 原生 Notebook | 中 |
+| `history-organize` | `gemini_history` + 重命名/固定 + `gemini_notebooks` + Notebook move | 重命名、固定选定对话或整理进 Gemini 原生 Notebook | 中 |
 | `account-read` | `gemini_account_inventory` 聚合账号只读盘点 | 账号能力和 Web surface 审计 | 低 |
 | `scheduled-admin` | scheduled list/get/create/delete | 明确授权后管理定时操作 | 中 |
 | `core` | 对话 + 媒体 + 文件/URL + Deep Research | 通用内容工作流 | 中 |
@@ -302,7 +307,7 @@ gemini-mcp-skill-server
 - `gemini_list_sessions`: 列会话
 - `gemini_reset_session`: 重置会话
 
-对话工具支持 `thinking_level=standard|extended`，并可选
+对话工具支持 `thinking_level=low|medium|high`（兼容 `standard|extended`），并可选
 `learning_mode=interactive_quiz|flashcards|practice_test|study_guide` 来对齐
 Gemini Web `学习辅导` 输入模式。
 

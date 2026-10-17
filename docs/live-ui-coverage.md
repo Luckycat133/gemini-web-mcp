@@ -4,6 +4,53 @@ This page records dated observations of signed-in Gemini Web and related MCP
 checks. Each section identifies the tested surface and evidence scope;
 historical observations do not establish current availability.
 
+## 2026-10-18 Models, History and Native Tasks
+
+The user authorized this bounded run on their signed-in Chrome account. Current
+public frontend build `BardChatUi.zh_CN.D3Wg_SjWYeA.2018.O` and real MCP SDK
+2.2.0 stdio calls used the checkout on Python 3.13.12 / gemini-webapi 2.1.1.
+Protocol source references and hashes are in
+[the source record](../compatibility/web-request-source-20261018.json).
+
+- Chrome and runtime discovery showed 3.5 Flash-Lite, 3.8 Flash, 3.1 Pro and
+  4 Argon. Current low/medium/high thinking options map to 1/4/2. MCP generation
+  succeeded with Argon + medium and Flash + high; captured request selectors
+  matched between body and header. Native Task calls also exercised low.
+- On one disposable chat, focused account renamed/pinned it, compact unpinned
+  it, and primary renamed/pinned it again. Each update returned independently
+  verified metadata. MCP search, read, export and final deletion also passed.
+- The webpage Task sample and primary/compact MCP Task calls reached a matching
+  Goal `done` read-back. The current Task request includes selector 40 and the
+  observed field-84 boolean. Restarting the primary client and reading the same
+  Task through compact did not create another generation.
+- A compact callback signature error was found and fixed with real adapter
+  wiring regressions. Its source was identified through MCP metadata and an
+  exact disposable-prompt read. A later SDK timeout preserved its source ID;
+  MCP recovered the same Goal as done and retrieved the model's expected answer.
+  Neither attempt was automatically resubmitted. The timeout's cause is not
+  attributed to the subsequently completed request contract.
+- A completed Task with `delete_after_seconds=1` was automatically deleted and
+  reported `completed / verified_absent`, without an explicit cleanup run for
+  that source. The normal 30-minute policy was observed on the compact sample;
+  that exact registered job was then explicitly executed during teardown.
+
+All **nine** conversations created by this run were removed through MCP: eight
+explicit deletions/exact-job cleanups and one automatic cleanup, each with
+`verified_absent` evidence. Fresh metadata contained no owned source IDs, and
+complete Task-registry pagination contained no owned Task references. No pending
+cleanup jobs remained in the run's private state. Temporary clients and the
+agent-created browser tab were closed; broad private history snapshots were
+discarded after extracting these bounded observations.
+
+Offline verification passed: Ruff, Mypy, 2,590 pytest cases, 361 contract cases,
+representative profiles, modern/legacy MCP protocol smokes for model/core, and
+an isolated built-wheel auth-free onboarding preflight. Task session concurrency,
+mode switching and invalid creation text also passed an independent local
+review. This is bounded manual-account evidence, not a dedicated live canary or
+verification of every external Task action. Provider Task cancellation is not
+exposed; a nonterminal source remains retained, and status recovery alone does
+not delete it after later completion.
+
 ## 2026-10-17 Multimodal Generation, Recovery and Cleanup
 
 The user's signed-in Chrome account was explicitly authorized for this bounded

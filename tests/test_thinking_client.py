@@ -33,7 +33,10 @@ from types import SimpleNamespace
 import orjson
 import pytest
 from gemini_webapi import GeminiClient
-from gemini_webapi.constants import Endpoint
+from gemini_webapi.constants import Endpoint, MODEL_HEADER_KEY
+
+from src.constants import resolve_thinking_level_id, resolve_thinking_mode_id
+from src.infrastructure.web_request_contracts import ThinkingRequestShapeError, synchronize_thinking_headers
 
 from src.thinking_client import (
     ThinkingLevelGeminiClient,
@@ -77,6 +80,12 @@ def _parse_inner(patched):
     """从 patched request_data 中解析出 inner_request 列表。"""
     outer = orjson.loads(patched["f.req"])
     return orjson.loads(outer[1])
+
+
+def _model_headers(mode_id=1):
+    selector = [None] * 15
+    selector[0], selector[4], selector[14] = 1, "offline-model", mode_id
+    return {MODEL_HEADER_KEY: orjson.dumps(selector).decode()}
 
 
 def _new_client():
@@ -298,53 +307,17 @@ def test_encode_learning_goa_wraps_mode_id():
 # ---------------------------------------------------------------------------
 
 
-def test_inject_web_request_options_returns_unchanged_when_f_req_not_str():
-    """f.req 非 str（如 dict）→ 原样返回，不修改。"""
-    request_data = {"at": "token", "f.req": {"not": "a string"}}
-    result = inject_web_request_options(
-        request_data, WebRequestOptions(thinking_mode_id=1, thinking_level_id=2)
-    )
-    assert result is request_data
-
-
-def test_inject_web_request_options_returns_unchanged_when_outer_not_list():
-    """f.req 解析后非 list → 原样返回。"""
-    request_data = {"f.req": orjson.dumps("not-a-list").decode("utf-8")}
-    result = inject_web_request_options(
-        request_data, WebRequestOptions(thinking_mode_id=1, thinking_level_id=2)
-    )
-    assert result is request_data
-
-
-def test_inject_web_request_options_returns_unchanged_when_outer_too_short():
-    """outer_request 长度 < 2 → 原样返回。"""
-    request_data = {"f.req": orjson.dumps([None]).decode("utf-8")}
-    result = inject_web_request_options(
-        request_data, WebRequestOptions(thinking_mode_id=1, thinking_level_id=2)
-    )
-    assert result is request_data
-
-
-def test_inject_web_request_options_returns_unchanged_when_inner_payload_not_str():
-    """outer[1] 非 str → 原样返回。"""
-    request_data = {"f.req": orjson.dumps([None, 42]).decode("utf-8")}
-    result = inject_web_request_options(
-        request_data, WebRequestOptions(thinking_mode_id=1, thinking_level_id=2)
-    )
-    assert result is request_data
-
-
-def test_inject_web_request_options_returns_unchanged_when_inner_not_list():
-    """inner_request 解析后非 list → 原样返回。"""
-    request_data = {
-        "f.req": orjson.dumps(
-            [None, orjson.dumps("not-a-list").decode("utf-8")]
-        ).decode("utf-8")
-    }
-    result = inject_web_request_options(
-        request_data, WebRequestOptions(thinking_mode_id=1, thinking_level_id=2)
-    )
-    assert result is request_data
+@pytest.mark.parametrize("request_data", [
+    {}, {"f.req": {"not": "a string"}}, {"f.req": "invalid"},
+    {"f.req": '"not-a-list"'}, {"f.req": "[null]"}, {"f.req": "[null,42]"},
+    {"f.req": '[null,"invalid"]'}, _make_request_data("not-a-list"),
+    _make_request_data([]), _make_request_data([None] * 81),
+])
+@pytest.mark.parametrize("level_id", [1, 2, 3, 4])
+def test_changed_thinking_request_shape_is_rejected(request_data, level_id):
+    with pytest.raises(ThinkingRequestShapeError) as error:
+        inject_web_request_options(request_data, WebRequestOptions(thinking_mode_id=1, thinking_level_id=level_id))
+    assert error.value.code == "UPSTREAM_CHANGED"
 
 
 def test_inject_web_request_options_raises_when_learning_metadata_incomplete():
@@ -493,6 +466,50 @@ def test_set_web_request_chinese_thinking_level_resolves():
     assert opts.thinking_level_id == 1
 
 
+@pytest.mark.parametrize("level,expected", [
+    ("low", 1), ("medium", 4), ("high", 2), ("低点", 1), ("中等", 4), ("高点", 2),
+    ("standard", 1), ("extended", 2), ("标准", 1), ("扩展", 2), ("deep_think", 3),
+])
+def test_thinking_levels_follow_the_observed_enum(level, expected):
+    assert resolve_thinking_level_id(level) == expected
+
+
+def test_dynamic_model_category_precedes_legacy_name_metadata():
+    model = SimpleNamespace(model_number=8, model_name="gemini-3-flash", display_name="Runtime model")
+    assert resolve_thinking_mode_id(model) == 8
+
+
+def test_unknown_model_with_explicit_thinking_is_not_silently_ignored():
+    client = _new_client()
+    with pytest.raises(ValueError, match="no observed thinking category"):
+        client._set_web_request("not-in-the-runtime-catalog", "medium", None)
+    assert _web_request.get() is None
+
+
+@pytest.mark.parametrize("has_session", [False, True])
+def test_thinking_header_synchronization_preserves_model_and_session(has_session):
+    selector = orjson.loads(_model_headers(8)[MODEL_HEADER_KEY])
+    if has_session:
+        selector.extend([1, "offline-instance"])
+    original = {MODEL_HEADER_KEY: orjson.dumps(selector).decode(), "unrelated": "kept"}
+    patched = synchronize_thinking_headers(original, mode_id=8, level_id=4)
+    expected = list(selector)
+    if has_session:
+        expected[15] = 4
+    else:
+        expected.append(4)
+    assert orjson.loads(patched[MODEL_HEADER_KEY]) == expected
+    assert patched["unrelated"] == "kept"
+    assert orjson.loads(original[MODEL_HEADER_KEY]) == selector
+    assert original is not patched
+
+
+@pytest.mark.parametrize("header", [None, "invalid", "{}", "[]", "[null]", '[null,null,null,null,"id"]'])
+def test_changed_thinking_header_shape_is_rejected(header):
+    with pytest.raises(ThinkingRequestShapeError):
+        synchronize_thinking_headers({MODEL_HEADER_KEY: header}, mode_id=8, level_id=4)
+
+
 # ---------------------------------------------------------------------------
 # _with_learning_prompt + _prefix_learning_prompt
 # ---------------------------------------------------------------------------
@@ -624,6 +641,33 @@ def test_generate_content_resets_token_on_exception(monkeypatch):
         asyncio.run(
             client.generate_content("p", model="flash", thinking_level="standard")
         )
+    assert _web_request.get() is None
+
+
+def test_concurrent_thinking_levels_keep_request_scope_isolated(monkeypatch):
+    client = _new_client()
+
+    async def run():
+        both_entered = asyncio.Event()
+        active = []
+
+        async def fake_generate(self, *args, **kwargs):
+            request = _web_request.get()
+            active.append(request.thinking_level_id)
+            if len(active) == 2:
+                both_entered.set()
+            await both_entered.wait()
+            assert _web_request.get() is request
+            return request.thinking_level_id
+
+        monkeypatch.setattr(GeminiClient, "generate_content", fake_generate)
+        results = await asyncio.gather(
+            client.generate_content("fixture", model="flash", thinking_level="medium"),
+            client.generate_content("fixture", model="flash", thinking_level="high"),
+        )
+        assert results == [4, 2]
+
+    asyncio.run(run())
     assert _web_request.get() is None
 
 
@@ -787,8 +831,7 @@ def test_install_thinking_transport_skips_when_url_not_generate():
     assert "x-goog-ext-73010990-jspb" not in (calls[0].get("headers") or {})
 
 
-def test_install_thinking_transport_skips_when_data_not_dict():
-    """url==GENERATE 但 data 非 dict → 调原始 stream，不注入。"""
+def test_install_thinking_transport_rejects_malformed_form_before_io():
     client = _new_client()
     _web_request.set(WebRequestOptions(thinking_mode_id=1, thinking_level_id=1))
     calls = []
@@ -800,8 +843,9 @@ def test_install_thinking_transport_skips_when_data_not_dict():
     session = SimpleNamespace(stream=original_stream)
     client.client = session
     client._install_thinking_transport()
-    session.stream("POST", Endpoint.GENERATE, data="not-a-dict")
-    assert "x-goog-ext-73010990-jspb" not in (calls[0].get("headers") or {})
+    with pytest.raises(ThinkingRequestShapeError):
+        session.stream("POST", Endpoint.GENERATE, data="not-a-dict")
+    assert calls == []
 
 
 def test_install_thinking_transport_injects_on_generate_with_dict_data():
@@ -818,7 +862,8 @@ def test_install_thinking_transport_injects_on_generate_with_dict_data():
     client.client = session
     client._install_thinking_transport()
     request_data = _make_request_data()
-    session.stream("POST", Endpoint.GENERATE, data=request_data)
+    session.stream("POST", Endpoint.GENERATE, data=request_data,
+                   headers=_model_headers())
     injected = calls[0]
     # data 被注入（f.req 改变）
     assert injected["data"]["f.req"] != request_data["f.req"]
@@ -842,7 +887,7 @@ def test_install_thinking_transport_preserves_existing_headers():
     session.stream(
         "POST", Endpoint.GENERATE,
         data=_make_request_data(),
-        headers={"existing": "kept"},
+        headers={"existing": "kept", **_model_headers()},
     )
     assert calls[0]["headers"]["existing"] == "kept"
     assert calls[0]["headers"]["x-goog-ext-73010990-jspb"] == "[0,0,0]"

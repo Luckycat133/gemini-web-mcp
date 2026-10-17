@@ -1,4 +1,13 @@
 {
+  "task_goal": {
+    "contract_key": "tasks.get",
+    "cases": {
+      "success": {"body": [["goal_fixture", "Private fixture description", 2, null, null, null, null, null, null, null, null, null, null, "c_task_fixture"]]},
+      "empty": {"body": []},
+      "rejected": {"body": [], "reject_code": 7},
+      "changed_shape": {"body": [["goal_fixture", null, "DONE", null, null, null, null, null, null, null, null, null, null, "c_task_fixture"]]}
+    }
+  },
   "music_chat": {
     "contract_key": "media.music_chat",
     "cases": {
@@ -566,5 +575,48 @@
         ]
       }
     }
+  },
+  "conversation_update": {
+    "contract_key": "history.update",
+    "cases": {
+      "success": {
+        "body": [
+          null,
+          [
+            "c_fixture",
+            "Renamed fixture",
+            true
+          ]
+        ]
+      },
+      "empty": {
+        "body": []
+      },
+      "rejected": {
+        "body": [],
+        "reject_code": 7
+      },
+      "changed_shape": {
+        "body": [
+          null,
+          {
+            "changed": true
+          }
+        ]
+      }
+    },
+    "malformed": [
+      {
+        "new_shape": []
+      },
+      [
+        null,
+        [
+          "c_fixture",
+          "Fixture",
+          "true"
+        ]
+      ]
+    ]
   }
 }

@@ -75,6 +75,7 @@ PRIMARY_PROFILE_TOOLS = {
             "gemini_history",
             "gemini_list_browser_cookie_profiles",
             "gemini_move_chat_to_notebook",
+            "gemini_update_chat",
             "gemini_notebooks",
             "gemini_reset",
         }
@@ -141,6 +142,7 @@ PRIMARY_PROFILE_TOOLS = {
             "gemini_list_sessions",
             "gemini_manage_gems",
             "gemini_move_chat_to_notebook",
+            "gemini_update_chat",
             "gemini_notebooks",
             "gemini_probe_web_features",
             "gemini_read_chat",

@@ -88,8 +88,9 @@ no history, Cookie, Scheduled, Gem, Prompt, or cleanup tools.
   the research chat is retained by default so the report stays recoverable
 
 ## Models
-- flash-lite, flash (default), thinking, pro
-- thinking_level: standard or extended (gemini_ask, gemini_research)
+- flash-lite, flash (default), pro, or a current runtime model name
+- thinking is a legacy flash alias; thinking_level is an independent parameter
+- thinking_level: low / medium / high; standard=low and extended=high remain compatible
 """,
 )
 

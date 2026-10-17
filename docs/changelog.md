@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- Followed the 2026-10-18 signed-in UI: dynamic Argon selection, low/medium/high thinking with synchronized body/header values, native Task execution and read-only state recovery.
+- Added exact-chat rename/pin/unpin with field masks and independent read-back. History listing/search/export/deep scans now reject failed or malformed metadata instead of reporting an empty account.
+- Preserved unfinished Task sources across stream end, timeout and local session reset/expiry; status reads never restart execution.
+
 ## [0.2.2] - 2026-09-27
 
 This section records release preparation in

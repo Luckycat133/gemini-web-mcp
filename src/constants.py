@@ -5,6 +5,8 @@ Gemini 常量配置
 from enum import Enum
 from typing import TypedDict
 
+from .infrastructure.web_request_contracts import THINKING_LEVEL_VALUES
+
 
 class RPC(str, Enum):
     """Gemini Web RPC identifiers used by compatible tooling."""
@@ -62,7 +64,7 @@ MODEL_CONFIG: dict[str, ModelConfig] = {
         "thinking_mode_id": 1,
     },
     "thinking": {
-        "name": "gemini-3-flash-thinking",
+        "name": "gemini-3-flash",
         "hex_id": "5bf011840784117a",
         "capacity_tail": 1,
         "advanced_only": False,
@@ -78,8 +80,12 @@ MODEL_CONFIG: dict[str, ModelConfig] = {
 }
 
 THINKING_LEVEL_IDS = {
-    "standard": 1,
-    "extended": 2,
+    **THINKING_LEVEL_VALUES,
+    "low": 1,
+    "high": 2,
+    "低点": 1,
+    "中等": 4,
+    "高点": 2,
     "标准": 1,
     "扩展": 2,
 }
@@ -158,6 +164,7 @@ def resolve_model_name(model: str | None) -> str:
         "3.5 flash-lite": "flash-lite",
         "3.8 flash": "flash",
         "3.1 pro": "pro",
+        "gemini-3-flash-thinking": "thinking",
     }
     alias = current_web_names.get(model.strip().lower(), model)
     config = MODEL_CONFIG.get(alias)
@@ -247,6 +254,9 @@ def describe_model_name(model: str) -> str:
 
 def resolve_thinking_mode_id(model: object) -> int | None:
     """Resolve the current Web UI thinking-level mode bucket for a model."""
+    model_number = getattr(model, "model_number", None)
+    if type(model_number) is int and model_number > 0:
+        return model_number
     if isinstance(model, str):
         keys = [model, resolve_model_name(model)]
     else:
@@ -265,7 +275,7 @@ def resolve_thinking_mode_id(model: object) -> int | None:
 
 
 def resolve_thinking_level_id(thinking_level: str | None) -> int | None:
-    """Resolve the Web UI standard/extended thinking-level selector."""
+    """Resolve observed protocol levels, retaining the standard/extended API."""
     if thinking_level is None:
         return None
     return THINKING_LEVEL_IDS.get(thinking_level.strip().lower())

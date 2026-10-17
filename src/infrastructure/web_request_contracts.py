@@ -17,19 +17,88 @@ compatibility check.
 """
 
 from types import MappingProxyType
-from typing import Final
+from typing import Any, Final, Mapping
 
+import orjson
+from gemini_webapi.constants import MODEL_HEADER_KEY
 from gemini_webapi.exceptions import GeminiError
 
 
-MEDIA_FEATURE_MODE_INDEX: Final = 49
+FEATURE_MODE_INDEX: Final = 49
+MEDIA_FEATURE_MODE_INDEX: Final = FEATURE_MODE_INDEX
 NATIVE_MEDIA_MODE_IDS = MappingProxyType({"image": 14, "video": 11, "music": 21})
+# 2026-10-18 main.js flag 45829880 and mwljBd's Task selection use 40;
+# GzXWE's task sendRequest passes Cf=40 into JSPB field 50 and Rk=true
+# into field 84 (main.js's Ayd request builder).
+NATIVE_TASK_MODE_ID: Final = 40
+TASK_REQUEST_FLAG_INDEX: Final = 83
+
+# 2026-10-18 official main.js: EF/Eqd/Twd enumerate these values; PCb
+# writes header fields 15/16 and the generation builder writes fields 80/81.
+# SHA256: 5d9d08be834ebd7682e1f9c0859603710fc7a6bf16df3747f71fa7b8261e2e54.
+THINKING_LEVEL_VALUES = MappingProxyType({"standard": 1, "extended": 2, "deep_think": 3, "medium": 4})
+THINKING_MODE_INDEX: Final = 79
+THINKING_LEVEL_INDEX: Final = 80
+MODEL_HEADER_MODE_INDEX: Final = 14
+MODEL_HEADER_LEVEL_INDEX: Final = 15
 
 
 class NativeMediaRequestShapeError(GeminiError):
     """Fail before sending; bypass upstream's APIError wrapping and retries."""
 
     code = "UPSTREAM_CHANGED"
+
+
+class ThinkingRequestShapeError(GeminiError):
+    """Reject changed thinking request shapes before a provider submission."""
+
+    code = "UPSTREAM_CHANGED"
+
+
+class NativeTaskRequestShapeError(GeminiError):
+    """Reject a changed native Task selector before any provider submission."""
+
+    code = "UPSTREAM_CHANGED"
+
+
+def synchronize_thinking_headers(
+    headers: Mapping[str, Any], *, mode_id: int | None, level_id: int,
+) -> dict[str, Any]:
+    """Copy a known model selector and preserve its identity/session fields."""
+    if type(level_id) is not int or level_id not in THINKING_LEVEL_VALUES.values():
+        raise ThinkingRequestShapeError("Thinking level is outside the observed request contract.")
+    if mode_id is not None and (type(mode_id) is not int or mode_id <= 0):
+        raise ThinkingRequestShapeError("Thinking model category is invalid.")
+    patched = dict(headers)
+    if MODEL_HEADER_KEY not in patched and mode_id is None:
+        # An intentionally unspecified/default model has no selector header.
+        return patched
+    raw_header = patched.get(MODEL_HEADER_KEY)
+    if not isinstance(raw_header, str):
+        raise ThinkingRequestShapeError("Thinking request is missing its model selector header.")
+    try:
+        selector = orjson.loads(raw_header)
+    except orjson.JSONDecodeError as error:
+        raise ThinkingRequestShapeError("Thinking model selector is not valid JSON.") from error
+    if (
+        not isinstance(selector, list) or len(selector) <= MODEL_HEADER_MODE_INDEX
+        or not isinstance(selector[4], str) or not selector[4]
+        or type(selector[MODEL_HEADER_MODE_INDEX]) is not int
+        or selector[MODEL_HEADER_MODE_INDEX] <= 0
+    ):
+        raise ThinkingRequestShapeError("Thinking model selector shape changed.")
+    if len(selector) > MODEL_HEADER_LEVEL_INDEX and selector[MODEL_HEADER_LEVEL_INDEX] is not None and (
+        type(selector[MODEL_HEADER_LEVEL_INDEX]) is not int
+    ):
+        raise ThinkingRequestShapeError("Thinking model selector level shape changed.")
+    if len(selector) <= MODEL_HEADER_LEVEL_INDEX:
+        selector.append(level_id)
+    else:
+        selector[MODEL_HEADER_LEVEL_INDEX] = level_id
+    if mode_id is not None:
+        selector[MODEL_HEADER_MODE_INDEX] = mode_id
+    patched[MODEL_HEADER_KEY] = orjson.dumps(selector).decode("utf-8")
+    return patched
 
 
 def native_media_mode_id(mode: str) -> int:

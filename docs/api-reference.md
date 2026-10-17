@@ -27,8 +27,8 @@ Use narrow `GEMINI_TOOLS` profiles for agent-facing deployments:
 | Profile | Use case |
 |---------|----------|
 | `model` / `chat` | Call Gemini models only; no history, media, file, research, or account tools |
-| `history` | One read-only `gemini_history` facade for list/scan/search/read/export, without delete, scheduled actions, or Gems |
-| `history-organize` | `gemini_history`, read-only `gemini_notebooks`, and the explicit Notebook move operation |
+| `history` | One read-only `gemini_history` facade for list/scan/search/read/export/task_status, without delete, scheduled actions, or Gems |
+| `history-organize` | `gemini_history`, `gemini_update_chat` for rename/pin/unpin, read-only `gemini_notebooks`, and the explicit Notebook move operation |
 | `account-read` | One read-only `gemini_account_inventory` facade for links, usage, library, notebooks, scheduled entries, modes, and models |
 | `scheduled-read` | Scheduled-action list/get only |
 | `scheduled-admin` | Scheduled-action list/get/create/delete after explicit authorization |
@@ -48,6 +48,11 @@ The tables below document the primary surface.
 
 ## Default Tools (`GEMINI_TOOLS=core`)
 
+For native Tasks, include a history profile (for example `GEMINI_TOOLS=core,history`)
+to read `gemini_history(action="task_status", chat_id=...)` after reconnect.
+Task status is read-only and does not resubmit execution. Unsupported cancel
+semantics are not inferred from chat deletion.
+
 ### Chat
 
 | Tool | Purpose |
@@ -64,8 +69,9 @@ Common chat parameters:
 
 | Parameter | Type | Notes |
 |-----------|------|-------|
-| `model` | `str` | `flash-lite`, `flash`, `pro`; `fast` and `thinking` remain compatibility aliases |
-| `thinking_level` | `str` | `standard` or `extended` |
+| `model` | `str` | Stable aliases or a current runtime directory name, including `4 Argon` when available |
+| `thinking_level` | `str` | `low`, `medium`, `high`; `standard=low`, `extended=high` remain compatible |
+| `task_mode` | `bool` | Native Task execution; omitted session values inherit. Read status by exact chat ID; unfinished sources are retained |
 | `learning_mode` | `str` | Optional guided-learning companion: `interactive_quiz`/`quiz`, `flashcards`, `practice_test`, `study_guide`/`exam_prep` |
 | `image_paths` | `list[str]` | Optional local image attachments |
 | `gem_id` | `str` | Optional Gem ID for one-shot or session creation |

@@ -99,3 +99,12 @@ Primary `gemini_reset` or compact reset_all resets the client/all sessions and
 can delete non-retained source chats. Reset affects MCP/Gemini state, never
 agent memory or agent instructions; local reset success may coexist with partial
 remote cleanup, so inspect its warnings and verification.
+
+## Native Tasks
+
+Use primary chat tools or compact `chat` / `session` with `task_mode=true` for
+the webpage's native Task mode. Preserve the returned upstream chat ID and read
+`gemini_history` / compact `history` with `action="task_status"` after interruption.
+The query does not resubmit execution. A final text response alone does not
+establish terminal Task state; inspect `task_status` and source retention.
+Task cancellation is not exposed without confirmed provider semantics.

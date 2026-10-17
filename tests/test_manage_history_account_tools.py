@@ -39,6 +39,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 from src.adapters.mcp_sdk import MCPServer
+from src.domain import DomainResult
 from src.services import history as history_service
 
 import src.tools.manage as manage_tools
@@ -328,8 +329,8 @@ def test_search_chats_scan_turns_read_error_becomes_snippet_error(monkeypatch):
     assert payload["diagnostic"]["content_scan_complete"] is False
 
 
-def test_search_chats_batch_execute_path_uses_fetch_recent(monkeypatch):
-    """有 _batch_execute → 走 _fetch_recent_conversation_metadata 路径。"""
+def test_search_chats_batch_execute_path_uses_shared_metadata(monkeypatch):
+    """分页参数传给共享的实时元数据读取服务。"""
     client = _FakeBatchClient()
     _patch_seams(monkeypatch, client)
     captured = {}
@@ -337,8 +338,9 @@ def test_search_chats_batch_execute_path_uses_fetch_recent(monkeypatch):
     async def fake_fetch(client_arg, target_count):
         captured["client"] = client_arg
         captured["target"] = target_count
-        return ([_chat("c_1", "Alpha")], {"has_remote_more": False, "source_rpc": "MaZiqc"})
-    monkeypatch.setattr(manage_tools, "_fetch_recent_conversation_metadata", fake_fetch)
+        return DomainResult.success({"items": [_chat("c_1", "Alpha")],
+                                     "diagnostic": {"has_remote_more": False, "source_rpc": "MaZiqc"}})
+    monkeypatch.setattr(history_service, "fetch_history_metadata", fake_fetch)
     mcp = _make_mcp()
     result = _run(_call(mcp, "gemini_search_chats", query="alpha", limit=5, offset=0))
     assert captured["client"] is client
@@ -353,8 +355,8 @@ def test_search_chats_has_remote_more_overrides_pagination(monkeypatch):
 
     async def fake_fetch(_c, _t):
         # 单条结果，limit=10 → pagination.has_more=False，但 diagnostic 说远端还有
-        return ([_chat("c_1", "Alpha")], {"has_remote_more": True})
-    monkeypatch.setattr(manage_tools, "_fetch_recent_conversation_metadata", fake_fetch)
+        return DomainResult.success({"items": [_chat("c_1", "Alpha")], "diagnostic": {"has_remote_more": True}})
+    monkeypatch.setattr(history_service, "fetch_history_metadata", fake_fetch)
     mcp = _make_mcp()
     result = _run(_call(mcp, "gemini_search_chats", query="alpha", response_format="json"))
     payload = json.loads(result[0].text)
@@ -394,13 +396,13 @@ def test_search_chats_snippet_text_newlines_replaced(monkeypatch):
 
 
 def test_search_chats_top_level_exception_returns_error(monkeypatch):
-    """_fetch_recent_conversation_metadata 抛异常 → 顶层 except 返回错误。"""
+    """共享元数据读取抛异常时保留现有顶层错误响应。"""
     client = _FakeBatchClient()
     _patch_seams(monkeypatch, client)
 
     async def boom(_c, _t):
         raise RuntimeError("rpc down")
-    monkeypatch.setattr(manage_tools, "_fetch_recent_conversation_metadata", boom)
+    monkeypatch.setattr(history_service, "fetch_history_metadata", boom)
     mcp = _make_mcp()
     result = _run(_call(mcp, "gemini_search_chats", query="x"))
     assert "❌ 搜索失败" in result[0].text

@@ -467,7 +467,7 @@ client = GeminiClient(psid, psidts, ...)
 
 聊天、文件、媒体和研究工具会先解析这些 MCP 别名；别名之外的模型
 字符串会原样交给 `gemini-webapi` 的运行时模型注册表处理。网页端
-`standard` / `extended` 思考等级作为独立 `thinking_level` 传输字段处理。
+`low` / `medium` / `high`（兼容 `standard` / `extended`） 思考等级作为独立 `thinking_level` 传输字段处理。
 
 ### 媒体模型绑定
 
@@ -548,3 +548,12 @@ workflow 不引用这些 secrets，也不调用 live canary。
 - 遵循代码风格与规范
 - 更新文档与示例
 - 测试功能完整性
+
+### 当前模型、历史与任务边界
+
+`services/history.py` 统一严格 fresh 元数据读取；`history_mutations.py` 以字段掩码
+更新 title/pinned，独立读回后确认。`services/tasks.py` 只按已有 conversation ID
+读取原生 Task 状态，Task 创建仍走共享 `ChatService`，不会在状态查询中重交提示。
+request-local `task_scope` 与 media/learning 选择互斥；模型类别来自初始化目录，
+正文和 header 的思考等级同步。Task pending 元数据保护本地 reset/expire 时的
+来源；状态未知、超时和流结束都不能独自解除该保护。

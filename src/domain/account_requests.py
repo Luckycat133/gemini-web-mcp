@@ -40,8 +40,26 @@ class HistoryDelete(Request):
     chat_id: NonBlank
 
 
+class HistoryUpdate(Request):
+    action: Literal["update"]
+    chat_id: NonBlank
+    title: NonBlank | None = None
+    pinned: Annotated[bool, Field(strict=True)] | None = None
+
+    @model_validator(mode="after")
+    def require_metadata_change(self) -> "HistoryUpdate":
+        if self.title is None and self.pinned is None:
+            raise ValueError("A title or pinned value is required.")
+        return self
+
+
+class HistoryTaskStatus(Request):
+    action: Literal["task_status"]
+    chat_id: NonBlank
+
+
 HistoryRequest: TypeAlias = Annotated[
-    HistoryList | HistorySearch | HistoryRead | HistoryDelete, Field(discriminator="action"),
+    HistoryList | HistorySearch | HistoryRead | HistoryDelete | HistoryUpdate | HistoryTaskStatus, Field(discriminator="action"),
 ]
 
 

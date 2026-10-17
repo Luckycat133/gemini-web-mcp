@@ -1,0 +1,95 @@
+{
+  "observed_at": "2026-10-18",
+  "build": "BardChatUi.zh_CN.D3Wg_SjWYeA.2018.O",
+  "evidence_kind": "public_frontend_static",
+  "files": [
+    {
+      "file": "main.js",
+      "url": "https://gemini.gstatic.com/_/mss/boq-gemini-web-uiserver/_/js/k=boq-gemini-web-uiserver.BardChatUi.zh_CN.D3Wg_SjWYeA.2018.O/ck=boq-gemini-web-uiserver.BardChatUi.vdtO_D010b4.L.B1.O/am=8QsB2PAPMPv2QQu_CB0MKMAIdEEAPQAAAABC/d=1/exm=_b/excm=_b/ed=1/br=1/wt=2/ujg=1/rs=AKrAJMoCJAvHKm2rBUnhCaAGw5CO3yIbUA/ee=DGWCxb:CgYiQ;EmZ2Bf:zr1jrb;NJ1rfe:yGfSdd;Pjplud:PoEs9b;QGR0gd:Mlhmy;ScI3Yc:e7Hzgb;UYRIEb:HzTAQc;YIZmRd:A1yn5d;cEt90b:ws9Tlc;dIoSBb:SpsfSb;dowIGb:ebZ3mb;eBAeSb:zbML3c;iFQyKf:vfuNJf;oGtAuc:sOXFj;qQEoOc:KUM7Z;qddgKe:xQtZb;wR5FRb:siKnQd;yxTchf:KUM7Z/dti=1/m=xqG9Nd?wli=BardChatUi.t6Zy63jb7qM.libheifWasm.O%3A%3BBardChatUi.spde9pvPkaw.mediaIntentWasm.O%3A%3B",
+      "bytes": 3309608,
+      "sha256": "5d9d08be834ebd7682e1f9c0859603710fc7a6bf16df3747f71fa7b8261e2e54"
+    },
+    {
+      "file": "mwljBd.js",
+      "url": "https://gemini.gstatic.com/_/mss/boq-gemini-web-uiserver/_/js/k=boq-gemini-web-uiserver.BardChatUi.zh_CN.D3Wg_SjWYeA.2018.O/ck=boq-gemini-web-uiserver.BardChatUi.vdtO_D010b4.L.B1.O/am=8QsB2PAPMPv2QQu_CB0MKMAIdEEAPQAAAABC/d=1/exm=ABELSd,AdpaDf,BIsfnb,BenWQc,C0Qatc,C3yBDb,CK6Z6b,CMdPsb,CsakMb,DTcCS,E3fsbf,FRlTNb,G5GDje,GzXWE,HbEaCf,HwBxOc,ItLZxc,JKGJfb,KkfGCf,LVUOyb,MGIlxc,N9BqIf,No94jc,OWHuje,OpU7Tc,PU1dDc,PdaDwd,QuxHpf,RTzAed,TK6Kl,TRJwtb,Tsm3ee,UE0P2d,VSiC6e,XuiMae,Z1MNA,Z8wCif,ZQlXXb,_b,bNyBZd,bnLiYc,cteZTb,eK0zfd,euv2wd,f8N0N,fSXoCf,h4lope,hSZKtd,ir0vzb,jCFZSc,k9O9ef,mqe9lc,nShoMc,o2mxrc,o2nH0b,ponblb,pwgmXb,q6pD8e,qxlpjc,sAsF2c,tCaMKd,uEAQfd,uEXP3c,v6p8ad,v9r4Te,xmtx9e,xqG9Nd,xrScke,xy0Mif,zSgmx/excm=_b/ed=1/br=1/wt=2/ujg=1/rs=AKrAJMoCJAvHKm2rBUnhCaAGw5CO3yIbUA/ee=DGWCxb:CgYiQ;EmZ2Bf:zr1jrb;NJ1rfe:yGfSdd;Pjplud:PoEs9b;QGR0gd:Mlhmy;ScI3Yc:e7Hzgb;UYRIEb:HzTAQc;YIZmRd:A1yn5d;cEt90b:ws9Tlc;dIoSBb:SpsfSb;dowIGb:ebZ3mb;eBAeSb:zbML3c;iFQyKf:vfuNJf;oGtAuc:sOXFj;qQEoOc:KUM7Z;qddgKe:xQtZb;wR5FRb:siKnQd;yxTchf:KUM7Z/dti=1/m=mwljBd?wli=BardChatUi.t6Zy63jb7qM.libheifWasm.O%3A%3BBardChatUi.spde9pvPkaw.mediaIntentWasm.O%3A%3B",
+      "bytes": 17380,
+      "sha256": "a9c996f6ebd8a1599a52d71abc54b79ce81cbf46fd7a3f3794a8ec12368151b2"
+    },
+    {
+      "file": "GzXWE.js",
+      "url": "https://gemini.gstatic.com/_/mss/boq-gemini-web-uiserver/_/js/k=boq-gemini-web-uiserver.BardChatUi.zh_CN.D3Wg_SjWYeA.2018.O/ck=boq-gemini-web-uiserver.BardChatUi.vdtO_D010b4.L.B1.O/am=8QsB2PAPMPv2QQu_CB0MKMAIdEEAPQAAAABC/d=1/exm=ABELSd,AdpaDf,BenWQc,C0Qatc,HbEaCf,HwBxOc,LVUOyb,MGIlxc,No94jc,OpU7Tc,QuxHpf,UE0P2d,XuiMae,Z1MNA,Z8wCif,ZQlXXb,_b,fSXoCf,o2mxrc,pwgmXb,q6pD8e,uEAQfd,v9r4Te,xqG9Nd,zSgmx/excm=_b/ed=1/br=1/wt=2/ujg=1/rs=AKrAJMoCJAvHKm2rBUnhCaAGw5CO3yIbUA/ee=DGWCxb:CgYiQ;EmZ2Bf:zr1jrb;NJ1rfe:yGfSdd;Pjplud:PoEs9b;QGR0gd:Mlhmy;ScI3Yc:e7Hzgb;UYRIEb:HzTAQc;YIZmRd:A1yn5d;cEt90b:ws9Tlc;dIoSBb:SpsfSb;dowIGb:ebZ3mb;eBAeSb:zbML3c;iFQyKf:vfuNJf;oGtAuc:sOXFj;qQEoOc:KUM7Z;qddgKe:xQtZb;wR5FRb:siKnQd;yxTchf:KUM7Z/dti=1/m=GzXWE?wli=BardChatUi.t6Zy63jb7qM.libheifWasm.O%3A%3BBardChatUi.spde9pvPkaw.mediaIntentWasm.O%3A%3B",
+      "bytes": 17640,
+      "sha256": "fee6b731366d6363e09de16e3a3c1fa57871611d6053096740968ee983c33eed"
+    }
+  ],
+  "thinking": {
+    "enum": {
+      "low": 1,
+      "medium": 4,
+      "high": 2
+    },
+    "aliases": {
+      "standard": "low",
+      "extended": "high"
+    },
+    "chain": [
+      "main.js:1269-1271 EF/Juc decode level enum and display labels",
+      "main.js:1287 ivc reads user status field25 thinking registry",
+      "main.js:3756-3760 PCb/NCb sets header mode field15 and level field16",
+      "main.js:3996-4015 Rwd/Twd sets body mode field80 and level field81"
+    ]
+  },
+  "history_update": {
+    "rpc_id": "MUAZcd",
+    "method": "BardFrontendService.UpdateConversation",
+    "request_metadata_field": 3,
+    "request_field_mask_field": 2,
+    "response_metadata_field": 2,
+    "metadata_fields": {
+      "conversation_id": 1,
+      "title": 2,
+      "pinned": 3
+    },
+    "chain": [
+      "main.js:4166 RPC descriptor",
+      "main.js:4417-4418 VQd sets only requested title/pinned fields and FieldMask",
+      "main.js:4521 Zia requires returned metadata field2"
+    ]
+  },
+  "task": {
+    "feature_mode": 40,
+    "stream_generate_index": 49,
+    "selector_chain": [
+      "main.js:2222 task selector flag default 40",
+      "mwljBd.js:19-23 Task toggle dispatches the selected feature mode",
+      "main.js:4629,4663-4668 selected mode becomes request.Cf",
+      "main.js:4008-4009,4145 Cf maps to StreamGenerate proto field50",
+      "GzXWE.js:24 native Task helper explicitly submits Cf40",
+      "GzXWE.js:24 sets Rk=true; main.js:4008 writes proto field84 (array83), SDK2.1.1 default body has only81 fields"
+    ],
+    "status_rpc": "mXV10b",
+    "status_method": "BardFrontendService.GetRemyGoal",
+    "get_request_conversation_field": 1,
+    "get_response_goal_field": 1,
+    "goal_conversation_field": 14,
+    "goal_state_field": 3,
+    "status_chain": [
+      "GzXWE.js:37-39 Tic uses the response conversationId",
+      "main.js:1946 GetRemyGoal requires goal field1"
+    ],
+    "states": {
+      "1": "pending",
+      "2": "running",
+      "3": "done",
+      "4": "failed",
+      "5": "blocked",
+      "6": "monitoring",
+      "7": "scheduled",
+      "8": "cancelled"
+    },
+    "cancel_mutation_verified": false,
+    "request_flag_index": 83,
+    "request_flag_value": true
+  },
+  "privacy": "Public JavaScript fetched without browser authentication. No account contents, credentials, chat IDs or session identifiers included."
+}

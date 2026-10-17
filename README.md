@@ -23,6 +23,11 @@
 
 > Disclaimer: this project is for technical research and educational use. It uses reverse-engineered Gemini Web behavior, which may violate Google service terms and may put accounts at risk. Use it at your own discretion.
 
+Current models, thinking levels and native Tasks are documented in
+[models and modes](docs/models.md). History supports fresh list/search/read/export,
+targeted rename/pin/unpin, and independently verified deletion; see the
+[dated live checks](docs/live-ui-coverage.md).
+
 ## What It Does
 
 Gemini Web MCP exposes Gemini Web capabilities to MCP-compatible clients such as Codex, Claude Desktop, VS Code MCP clients, and other agent runtimes.
@@ -158,7 +163,7 @@ uses explicit actions within its five-tool catalog. See
 | --- | --- | --- |
 | `model` / `chat` | The agent only needs Gemini model calls | Smallest model-call surface |
 | `history` | The agent is organizing or searching chat history | `gemini_history` facade plus safe helpers |
-| `history-organize` | The agent can move chats into native Gemini notebooks | History facade, notebook facade, explicit move tool |
+| `history-organize` | The agent can move chats into native Gemini notebooks | History facade, rename/pin/unpin, notebook facade, explicit move tool |
 | `account-read` | The agent needs read-only account inventory | `gemini_account_inventory` facade |
 | `scheduled-read` | The agent only needs to inspect scheduled actions | Read-only scheduled actions |
 | `scheduled-admin` | The user explicitly authorized scheduled-action create/delete | Scheduled mutation tools |
