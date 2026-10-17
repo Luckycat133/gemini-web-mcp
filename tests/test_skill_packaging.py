@@ -129,13 +129,14 @@ def test_project_skill_ui_metadata_can_invoke_the_skill() -> None:
     assert f"${PUBLIC_SKILL_DIR.name}" in interface["default_prompt"]
 
 
-def test_project_skill_names_are_unique_across_discovery_roots() -> None:
-    skill_files = sorted(
-        path
-        for root in (PROJECT_ROOT / ".agents" / "skills", PROJECT_ROOT / ".codex" / "skills")
+def _project_skill_names(project_root: Path) -> list[str]:
+    # Discovery links share a source; independent copies must still be counted.
+    skill_files = sorted({
+        path.resolve(strict=True)
+        for root in (project_root / ".agents" / "skills", project_root / ".codex" / "skills")
         if root.exists()
         for path in root.glob("*/SKILL.md")
-    )
+    })
     discovered_names = []
     for skill_file in skill_files:
         text = skill_file.read_text(encoding="utf-8")
@@ -144,8 +145,32 @@ def test_project_skill_names_are_unique_across_discovery_roots() -> None:
         name = yaml.safe_load(frontmatter)["name"]
         if name.startswith("gemini-"):
             discovered_names.append(name)
+    return discovered_names
 
+
+def test_project_skill_names_are_unique_across_discovery_roots() -> None:
+    discovered_names = _project_skill_names(PROJECT_ROOT)
     assert set(discovered_names) == {
         "gemini-web-mcp", "gemini-web-mcp-development", "gemini-assist", "gemini-create", "gemini-account",
     }
     assert len(discovered_names) == len(set(discovered_names))
+
+
+def test_project_skill_discovery_counts_symlink_source_once(tmp_path: Path) -> None:
+    source = tmp_path / ".agents" / "skills" / "gemini-web-mcp"
+    source.mkdir(parents=True)
+    (source / "SKILL.md").write_text("---\nname: gemini-web-mcp\n---\n", encoding="utf-8")
+    aliases = tmp_path / ".codex" / "skills"
+    aliases.mkdir(parents=True)
+    (aliases / source.name).symlink_to(source, target_is_directory=True)
+
+    assert _project_skill_names(tmp_path) == ["gemini-web-mcp"]
+
+
+def test_project_skill_discovery_retains_independent_duplicate(tmp_path: Path) -> None:
+    for directory in (".agents", ".codex"):
+        source = tmp_path / directory / "skills" / "gemini-web-mcp"
+        source.mkdir(parents=True)
+        (source / "SKILL.md").write_text("---\nname: gemini-web-mcp\n---\n", encoding="utf-8")
+
+    assert _project_skill_names(tmp_path) == ["gemini-web-mcp", "gemini-web-mcp"]

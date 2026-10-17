@@ -1,7 +1,10 @@
 # Verification by changed boundary
 
-Use the checkout's `docs/agent-verification.md` for maintained commands and
-release gates. Select evidence for the actual change:
+Use the checkout's `docs/agent-verification.md` for required commands and
+release gates. Trace current source and packaged entrypoints before claiming
+functionality or restart recovery; a planned topology is not implementation
+evidence. Select focused checks for the affected behavior, then the required
+gates for its boundary:
 
 | Change | Relevant checks |
 | --- | --- |
@@ -14,7 +17,9 @@ release gates. Select evidence for the actual change:
 
 Documentation-only changes do not need a live account run or the complete
 repository suite. New tests should verify observable behavior or an actual
-contract, rather than matching headings, prose or sample counts.
+contract, rather than matching headings, prose or sample counts. Update schema
+or package fixtures with intentional contract changes; investigate unexpected
+golden drift before replacing expected output.
 
 ## Commands
 

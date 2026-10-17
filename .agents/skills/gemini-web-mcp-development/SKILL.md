@@ -12,9 +12,10 @@ metadata:
 
 # Gemini Web MCP Development
 
-Work in a checkout of `gemini-web-mcp`. Read its `AGENTS.md`, inspect the current
-changes and affected implementation/tests, and preserve unrelated work. Package
-metadata, tool schemas and dated acceptance evidence come from the checkout.
+Work in a checkout of `gemini-web-mcp`. Read its `AGENTS.md`, inspect the affected
+source/tests or documentation, and preserve unrelated work. Resolve implemented
+entrypoints and recovery paths from current source and package metadata; use
+dated acceptance evidence only for the claims it supports.
 
 ## Choose the shared owner
 

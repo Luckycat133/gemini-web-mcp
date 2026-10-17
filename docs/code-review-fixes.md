@@ -226,3 +226,24 @@ Local verification used Python 3.13.12, MCP SDK 2.2.0 and gemini-webapi 2.1.1:
 These results cover local recovery and protocol behavior without live Gemini
 account calls. Earlier hosted and live evidence above remains tied to its
 original revision.
+
+## Main integration — 2026-10-17
+
+Merged `origin/main` at `3d5e517` into the release work. The three Skill
+conflicts retain the concise runtime contracts and add current-source
+verification guidance, without restoring obsolete implementation snapshots.
+The development and compatibility entrypoints remain 50 and 65 lines.
+Committed conflict markers in the incoming `AGENTS.md` were also removed.
+
+Discovery now counts symlinks to the same Skill source once, while retaining
+independent copies for duplicate-name detection. The existing failure was
+reproduced, then two filesystem regressions and the actual five-Skill catalog
+check passed. Third-party Skill packages and discovery links remain identical
+to main; their existing formatting is preserved.
+
+A fresh Python 3.13.12 environment resolved MCP SDK 2.3.0. Ruff, Mypy (80 source
+files), 2,248 offline tests, 353 architecture/distribution checks, all eleven
+profile catalogs and modern/legacy stdio on all five surfaces in model/core
+profiles passed. Both validators accepted all five project Skills, and the
+pinned Skills CLI installed a source-identical development package. Manually
+edited paths passed whitespace checks. No live Gemini calls were made.
