@@ -274,3 +274,22 @@ Ruff, Mypy and both validators for all five project Skills passed. Four rebuilt
 runtime bundles matched source file sets and bytes. These results verify local
 guidance, installation and schemas; they add no live-generation acceptance or
 measured model-trigger accuracy claim.
+
+## Unfinished media recovery — 2026-10-17
+
+Authorized live MCP testing exposed premature source deletion after restarting
+an unfinished video. A valid SDK model turn without a media card or queued flag
+was classified as definitive empty output. Recovery now keeps such read-backs
+queued and retains the source, including when completion text or an earlier
+preview is present. Actual read, identity and save errors remain failures.
+
+Regressions cover the real SDK turn shape, wrong media kinds, partial music with
+a later companion-only read-back, and video/music SQLite restarts with one
+generation submission, preserved handle/filename and cleanup only after
+verified output. Offline recovery fixtures do not require a system ffprobe.
+Ruff, Mypy, 2,268 offline tests and 353 architecture/distribution checks passed.
+A fresh live video survived a
+controlled unfinished-operation restart and completed through the same handle;
+the initial failed sample remains recorded. Image/edit, music, completed-file
+recovery, delayed cleanup and all five exact owned deletions are documented in
+[the dated live report](live-ui-coverage.md#2026-10-17-multimodal-generation-recovery-and-cleanup).

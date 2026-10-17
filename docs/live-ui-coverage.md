@@ -1,9 +1,72 @@
 # Gemini Web Live UI Coverage
 
-This page records the native Gemini Web surface observed in a signed-in Pro
-account session on 2026-06-18 and maps it to the primary MCP server in
-`src.server`. Browser extension UI injected into Gemini was ignored during this
-pass.
+This page records dated observations of signed-in Gemini Web and related MCP
+checks. Each section identifies the tested surface and evidence scope;
+historical observations do not establish current availability.
+
+## 2026-10-17 Multimodal Generation, Recovery and Cleanup
+
+The user's signed-in Chrome account was explicitly authorized for this bounded
+manual run. Real MCP SDK `2.2.0` stdio clients called the checkout's focused
+creation/account servers on Python `3.13.12` with `gemini-webapi 2.1.1` and
+Pillow `12.3.0`. The baseline was `3678586`; the video recovery retest included
+the `CreationService.recover` fix in this change. A fresh private state database
+contained only this run's operation handles and cleanup jobs.
+
+Chrome's model picker and the MCP model registry both showed `3.5 Flash-Lite`,
+`3.8 Flash`, `3.1 Pro` and `4 Argon`. The Web tools menu exposed image, video and
+music creation. Generation used the existing `flash` alias; this run does not
+establish a generation route for Argon or identify Google's dispatched media
+backend.
+
+| Workflow | Observed output | Verification |
+| --- | --- | --- |
+| Image generation | 2752×1536 JPEG, 2,003,850 bytes | Independent full image decode and visual check of the requested blue teapot. |
+| Local-image edit | 2752×1536 JPEG, 1,547,449 bytes | Independent full image decode; gold glaze with shape, composition and background retained. |
+| Music | MP3, 85.524833 seconds; companion 1024×1024 MP4, 85.533333 seconds | Audio/video streams probed and fully decoded with FFmpeg. |
+| Video after unfinished-operation restart | 1280×720 H.264/AAC MP4, 10.005 seconds | Same operation handle recovered the requested filename; streams probed and fully decoded; sampled frames showed the requested teapot, steam and camera orbit. |
+
+The requested `.png` image names correctly became `.jpg` for the returned JPEG
+bytes. Duration requests remained provider prompts: the music prompt requested
+about 30 seconds and video about eight seconds; the table records measured
+output. Frame checks and full decoding do not establish continuous audiovisual
+viewing or a listening review.
+
+The first unfinished-video restart exposed a defect: a valid SDK model turn
+without a media card or queued flag was treated as definitive empty output,
+and automatic cleanup deleted its source before cancellation could withdraw
+the job. That attempt produced no local video and remains a failed sample.
+Recovery now retains the source when a read-back supplies no relevant output,
+or the combined saved and observed artifacts lack the required modality.
+Verified saved audio can still combine with a later companion-video download.
+A separate new video request exercised the repair: restart while
+running, queued recovery, successful exact-source MCP history read, then the
+same handle's completed video. Repeating an earlier start key also returned
+its existing handle. Recovery submitted no replacement generation.
+
+Music's delayed cleanup was pending with zero attempts when all servers stopped.
+It remained pending after its deadline passed. Restarting the account MCP
+server and binding the same credentials resumed automatic cleanup, which became
+`completed/verified_absent` without an explicit cleanup run. After another
+creation-server restart, completed music and video handles returned the same
+local Artifact identities and paths.
+
+MCP cleanup status positively verified absence for all five exact sources from
+this run: two images, music, the failed video and the repaired video sample.
+Registered targets exactly matched the run's recorded source IDs. No earlier
+conversation or broad marker sweep was used. All five saved files remained
+usable after cleanup; hashes of previously verified files were unchanged.
+Private receipts, source IDs, state files, credentials and generated media
+remain outside the repository.
+
+Ruff, Mypy (80 source files), 2,268 offline tests and 353 architecture/distribution
+checks passed. New regressions cover incomplete SDK model turns, misleading
+completion text, wrong media kinds, saved previews, preserved errors and
+video/music recovery across repeated SQLite-backed service restarts, including
+partial music with a later companion-only read-back. This run
+verifies controlled unfinished-video restart and completed-file recovery;
+arbitrary hard-crash recovery and the dedicated-account full canary remain
+separate evidence.
 
 ## 2026-09-26 Chrome and MCP Recheck
 

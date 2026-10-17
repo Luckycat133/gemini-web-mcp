@@ -270,6 +270,18 @@ class CreationService:
                     existing_artifacts=stored,
                 )
                 artifacts = media_artifacts(merge_artifacts(stored, materialized.artifacts), media_type)
+                if (
+                    not materialized.saved.failures
+                    and (
+                        not materialized.artifacts
+                        or classify_media_artifact_state(None, artifacts, media_type) == ArtifactState.EMPTY
+                    )
+                ):
+                    # A valid history turn can be an interim reply without an
+                    # explicit queued flag. It proves neither completion nor
+                    # definitive empty output. Require relevant output in this
+                    # read-back, including a companion to retained required media.
+                    response = SimpleNamespace(metadata=[cid], images=[], videos=[], media=[], queued=True)
                 data = ArtifactResultData(
                     state=classify_media_artifact_state(response, artifacts, media_type),
                     artifacts=artifacts, source_chat_id=cid, media_type=media_type,

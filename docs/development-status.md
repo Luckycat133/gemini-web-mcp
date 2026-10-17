@@ -76,6 +76,16 @@ at most three retries for typed transient transport errors; generation is never
 retried. Live completion here proves completed-file recovery, not recovery of
 an unfinished provider generation after an arbitrary hard crash.
 
+The [2026-10-17 Chrome/MCP recheck](live-ui-coverage.md#2026-10-17-multimodal-generation-recovery-and-cleanup)
+verified 2752×1536 image generation/editing, music MP3/companion MP4 (about
+85.5 seconds), and a 1280×720 video (10.005 seconds). A controlled restart during
+video generation exposed premature cleanup on an incomplete model turn. The
+shared recovery fix kept the retest queued with its source intact until the
+same handle returned verified video. Completed music/video files survived
+another restart. Delayed cleanup resumed after all servers stopped and its
+deadline passed; all five sources from this run were verified absent through
+MCP cleanup status. The earlier failed video remains a failed sample.
+
 ## Verification
 
 Offline regressions, real modern/legacy MCP stdio, clean-wheel installation,
@@ -87,6 +97,10 @@ recovery repairs passed Ruff, Mypy (80 source files), 2,246 offline tests and
 profile catalogs and real modern/legacy stdio calls on all five surfaces passed
 under both model and core profiles. These are offline/local protocol results;
 no new Gemini account checks were performed.
+
+The subsequent live-recovery fix passed Ruff, Mypy, 2,268 offline tests and
+353 architecture/distribution checks. Its authorized account results are
+recorded separately in the recheck above.
 
 The earlier implementation snapshot `dc2ade5` passed 2,234 offline tests on
 both Python 3.11 and 3.12,
@@ -103,8 +117,8 @@ configuration examples do not prove those desktop applications were run.
 
 ## Remaining external evidence
 
-- Live recovery of an unfinished provider generation after a hard process crash;
-  completed-file restart retrieval is already verified.
+- Live recovery after an arbitrary hard process crash; controlled unfinished-video
+  restart and completed-file retrieval are already verified.
 - Current signed-in Research report recovery, and broader account mutations,
   in a dedicated disposable-account environment.
 - The opt-in dedicated-account full canary; everyday-account manual tests do

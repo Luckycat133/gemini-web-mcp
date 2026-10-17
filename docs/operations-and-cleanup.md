@@ -38,6 +38,13 @@ requires verified local video; music requires audio and any returned companion
 outputs to be saved and verified. Research requires a saved report. A provider
 completion message or local preview alone is insufficient.
 
+An interrupted media operation can return a valid SDK model turn before its
+media card appears. A read-back with no relevant output remains queued and
+retains its source, including when the text says the result is ready. Previously
+verified audio can combine with a later companion-video download; every output
+still needs verification. Read, identity and save failures remain errors;
+recovery never resubmits.
+
 Cancellation is best effort. `cancel_requested` does not prove that Google
 stopped generation. `cancelled` requires observed provider confirmation or a
 transactional `local_cancelled_before_start` result proving the producer never
