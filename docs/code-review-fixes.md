@@ -293,3 +293,16 @@ controlled unfinished-operation restart and completed through the same handle;
 the initial failed sample remains recorded. Image/edit, music, completed-file
 recovery, delayed cleanup and all five exact owned deletions are documented in
 [the dated live report](live-ui-coverage.md#2026-10-17-multimodal-generation-recovery-and-cleanup).
+
+## Cleanup heartbeat regression — 2026-10-18
+
+The [Python 3.11 CI run](https://github.com/Luckycat133/gemini-web-mcp/actions/runs/39047055535)
+exposed scheduler sensitivity in an existing heartbeat test using a 60 ms lease
+and a 150 ms sleep. The test now waits for a real SQLite lease renewal, advances
+controlled time past the original deadline while remaining inside the renewed
+lease, and checks that a second instance cannot claim the job. Attempt and
+deletion counts remain one. The clock replacement is confined to the cleanup
+module; production lease timing and deletion behavior retain their contracts.
+The repaired case passed 20 independent repetitions. An in-memory negative
+control that disabled heartbeat renewal failed at the bounded handshake as
+expected. Ruff, Mypy, 2,268 offline tests and 353 contract checks passed locally.
