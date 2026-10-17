@@ -22,6 +22,7 @@ Publication still requires review and merge.
 - Added multimodal onboarding with opt-in video/music starts and explicit operation recovery, and an evidence-backed client/OS/distribution matrix.
 
 ### Fixed
+- Retained unfinished media sources when a recovery history turn has no matching media card, even if its text announces completion. Added SQLite restart regressions and verified a live unfinished-video restart through the same MCP handle, followed by exact owned-source cleanup.
 - Aligned focused Skill setup with a compatible checkout, included image verification dependencies in creation setup, and clarified Assist's domain-result envelope. Setup tests validate commands and installed entrypoints rather than a moving source URL.
 - Corrected creation and Research recovery annotations to cover saved files and stored-policy source-chat deletion; status/result are not read-only.
 - Preserved requested asynchronous media filenames across SQLite recovery and upgraded older records without resubmitting generation. Corrected the delayed-cleanup documentation and described exact-job cancellation.
@@ -53,6 +54,7 @@ Publication still requires review and merge.
 - Made local Prompt storage atomic with in-memory rollback on write failure and preserved corrupt source files for recovery.
 
 ### Changed
+- Rechecked multimodal creation through Chrome-authenticated focused MCP on 2026-10-17: image generation/editing, native video, music, unfinished-video recovery, completed-file retrieval and delayed cleanup across restart. All five sources from this run were verified absent; dated measurements and the initial failed recovery sample are recorded in `docs/live-ui-coverage.md`.
 - Simplified the five Gemini Skills around intent, real tool contracts and conditional references. Removed fixed single-tool workflows, repeated catalogs, historical development packages and long default prompts; Skill tests validate installation, schemas and package contents instead of prose wording.
 - Selected native Gemini Web image/music modes from the 2026-10-02 public frontend contract instead of relying only on a chat prompt. Shape drift fails before transport with `UPSTREAM_CHANGED`; selected model headers remain independent. Fresh authorized MCP calls verified image generation/editing and a separate SDK 2.1.1 music request. The earlier SDK 2.0.0 music failure remains recorded. Targeted follow-up verified the owned source chats absent, with saved files intact.
 - Verified current focused image/edit, completed asynchronous music (about 73 seconds), native 1280×720 video (10.005 seconds), completed-file recovery across process restart, and exact-source/durable-job cleanup in bounded 2026-10-03 stdio tests. Unfinished-provider recovery and the dedicated-account canary remain separate.
