@@ -18,7 +18,7 @@ except ImportError:
     exit(1)
 
 from . import __version__
-from .adapters import append_artifact_block, attach_domain_result, domain_text, exception_text
+from .adapters import append_artifact_block, attach_domain_result, domain_failure_text, domain_text, exception_text
 from .client_wrapper import (
     cleanup_due_remote_chats,
     finalize_generated_chat_cleanup,
@@ -95,12 +95,14 @@ from .services.doctor import (
     format_doctor_markdown as _format_doctor_markdown,
 )
 from .services.history import (
+    HistoryMetadataReadError,
     _format_chat_export_markdown,
     delete_chat_result as _delete_chat_result,
     export_chat_result as _export_chat_result,
-    list_chats_result as _list_chats_result,
+    fetch_history_metadata as _fetch_history_metadata,
+    list_chat_history_result as _list_chat_history_result,
     read_chat_result as _read_chat_result,
-    search_chats_result as _search_chats_result,
+    search_chat_history_result as _search_chat_history_result,
 )
 from .services.manifest import (
     format_tool_manifest_markdown as _format_tool_manifest_markdown,
@@ -108,6 +110,8 @@ from .services.manifest import (
     tool_manifest_payload as _tool_manifest_payload,
     web_capabilities_payload as _web_capabilities_payload,
 )
+from .services.history_mutations import update_chat_metadata_result as _update_chat_metadata_result
+from .services.tasks import get_task_status_result as _get_task_status_result
 from .services.notebooks import fetch_native_notebooks as _fetch_native_notebooks
 from .services.media_generation import (
     media_artifact_result,
@@ -165,8 +169,9 @@ mcp = MCPServer(
 - **cleanup**: dry-run or delete test artifacts by marker
 
 ## Models
-- flash-lite, flash (default), pro
-- thinking_level: standard or extended
+- flash-lite, flash (default), pro, or a current account model name from account(models)
+- thinking_level: low / medium / high (standard=low, extended=high remain compatible)
+- task_mode=true selects native Tasks; history(task_status, chat_id=...) reads the same Task without resubmitting
 
 ## Media behavior
 - image: Flash-Lite -> Nano Banana 2 Lite; Flash / Pro -> Nano Banana 2
@@ -370,6 +375,7 @@ async def chat(
     learning_mode: Optional[str] = None,
     image_path: Optional[str] = None,
     session_id: Optional[str] = None,
+    task_mode: Optional[bool] = None,
 ) -> list[TextContent]:
     """Chat with Gemini - supports images and sessions."""
     try:
@@ -389,6 +395,7 @@ async def chat(
                     message=message,
                     files=files,
                     learning_mode=learning_mode,
+                    task_mode=task_mode,
                     thinking_level=thinking_level,
                     prepare_client=True,
                     include_temporary=False,
@@ -400,7 +407,8 @@ async def chat(
             if not result.ok or result.data is None:
                 return domain_text(
                     result,
-                    f"SESSION_NOT_FOUND: Invalid session: {session_id}",
+                    f"SESSION_NOT_FOUND: Invalid session: {session_id}" if result.error_code == "SESSION_NOT_FOUND" else domain_failure_text(result),
+                    use_result_data=True,
                 )
         else:
             result = await _chat_service.generate(
@@ -409,6 +417,7 @@ async def chat(
                     model=model,
                     thinking_level=thinking_level,
                     learning_mode=learning_mode,
+                    task_mode=bool(task_mode),
                     files=files,
                     cleanup_source="skill_chat",
                     include_gem_argument=False,
@@ -416,6 +425,8 @@ async def chat(
                 )
             )
 
+        if not result.ok or result.data is None:
+            return domain_text(result, domain_failure_text(result), use_result_data=True)
         assert result.data is not None
 
         return attach_domain_result(
@@ -426,12 +437,14 @@ async def chat(
                     "session_id": session_id,
                     "model": result.data.requested_model,
                     "lifecycle": result.data.lifecycle,
+                    **({"task_mode": result.data.task_mode, "task_status": result.data.task_status} if result.data.task_mode or result.data.task_status is not None else {}),
                 }
                 if session_id
                 else {
                     "model": result.data.normalized_model,
                     "resolved_model": result.data.effective_model,
                     "lifecycle": result.data.lifecycle,
+                    **({"task_mode": result.data.task_mode, "task_status": result.data.task_status} if result.data.task_mode or result.data.task_status is not None else {}),
                 }
             ),
         )
@@ -446,9 +459,9 @@ async def chat(
 
 
 async def _history_list_text(client: object, limit: int, offset: int) -> list[TextContent]:
-    chats = client.list_chats() if hasattr(client, "list_chats") else []
-    chats = chats or []
-    result = _list_chats_result(chats, limit, offset, max_limit=50)
+    result = await _list_chat_history_result(client, limit, offset, max_limit=50)
+    if not result.ok:
+        return domain_text(result, "History metadata could not be verified")
     assert result.data is not None
     page = result.data["items"]
     if not page:
@@ -469,22 +482,8 @@ async def _history_search_text(
     scan_turns: bool,
 ) -> list[TextContent]:
     needle = (query or "").strip()
-    if not needle or (scan_turns and not hasattr(client, "read_chat")):
-        result = await _search_chats_result(
-            client,
-            [],
-            needle,
-            limit,
-            offset,
-            scan_turns=scan_turns,
-        )
-        fallback = "query required" if not needle else "read_chat unavailable"
-        return domain_text(result, fallback)
-    chats = client.list_chats() if hasattr(client, "list_chats") else []
-    chats = chats or []
-    result = await _search_chats_result(
+    result = await _search_chat_history_result(
         client,
-        chats,
         needle,
         limit,
         offset,
@@ -493,6 +492,14 @@ async def _history_search_text(
         max_chars_per_turn=1000,
         max_limit=50,
     )
+    if result.data is None:
+        if not needle:
+            fallback = "query required"
+        elif scan_turns and not hasattr(client, "read_chat"):
+            fallback = "read_chat unavailable"
+        else:
+            fallback = "History metadata could not be verified"
+        return domain_text(result, fallback)
     assert result.data is not None
     lines = []
     if not result.ok and result.error is not None:
@@ -529,9 +536,11 @@ async def _history_read_text(client: object, chat_id: Optional[str], limit: int)
 
 async def _history_export_text(client: object, chat_id: Optional[str], limit: int) -> list[TextContent]:
     async def _load_export_metadata() -> list[object]:
-        if not hasattr(client, "list_chats"):
-            return []
-        return list(client.list_chats() or [])
+        result = await _fetch_history_metadata(client, 500)
+        if not result.ok:
+            raise HistoryMetadataReadError(result)
+        assert result.data is not None
+        return list(result.data["items"])
 
     result = await _export_chat_result(
         client,
@@ -584,12 +593,14 @@ async def _history_delete_text(client: object, chat_id: Optional[str]) -> list[T
 
 @mcp.tool(annotations=DESTRUCTIVE_REMOTE)
 async def history(
-    action: Literal["list", "search", "read", "export", "delete"],
+    action: Literal["list", "search", "read", "export", "update", "delete", "task_status"],
     chat_id: Optional[str] = None,
     query: Optional[str] = None,
     limit: int = 10,
     offset: int = 0,
     scan_turns: bool = False,
+    title: Optional[str] = None,
+    pinned: Optional[bool] = None,
 ) -> list[TextContent]:
     """Manage remote Gemini Web chat history."""
     try:
@@ -598,6 +609,9 @@ async def history(
 
         if action == "list":
             return await _history_list_text(client, limit, offset)
+        if action == "task_status":
+            result = await _get_task_status_result(client, chat_id or "")
+            return domain_text(result, "Native Task status read-back.", use_result_data=True)
         if action == "search":
             return await _history_search_text(client, query, limit, offset, scan_turns)
         if action == "read":
@@ -606,6 +620,10 @@ async def history(
             return await _history_export_text(client, chat_id, limit)
         if action == "delete":
             return await _history_delete_text(client, chat_id)
+        if action == "update":
+            result = await _update_chat_metadata_result(client, chat_id or "", title=title, pinned=pinned)
+            text = "Metadata updated and verified." if result.meta.verification_status == "verified_updated" else "Metadata update is not verified."
+            return domain_text(result, text, use_result_data=True)
 
         return [TextContent(type="text", text="Invalid action")]
 
@@ -1126,15 +1144,19 @@ async def _session_create(
     model: str,
     thinking_level: str,
     learning_mode: Optional[str],
+    task_mode: bool = False,
 ) -> list[TextContent]:
     result = await _chat_service.start_session(
         StartSessionRequest(
             model=model,
             thinking_level=thinking_level,
             learning_mode=learning_mode,
+            task_mode=task_mode,
             include_gem_argument=False,
         )
     )
+    if not result.ok or result.data is None:
+        return domain_text(result, domain_failure_text(result), use_result_data=True)
     sid = result.data.session_id if result.data is not None else ""
     normalized_model = result.data.normalized_model if result.data is not None else _normalize_model(model)
     effective_model = (
@@ -1161,6 +1183,7 @@ async def _session_send(
     learning_mode: Optional[str],
     safe_image_path: Optional[str],
     model: str,
+    task_mode: Optional[bool] = None,
 ) -> list[TextContent]:
     if not session_id:
         return domain_text(
@@ -1173,6 +1196,7 @@ async def _session_send(
             message=message or "",
             files=(safe_image_path,) if safe_image_path else (),
             learning_mode=learning_mode,
+            task_mode=task_mode,
             thinking_level=thinking_level,
             prepare_client=True,
             include_temporary=False,
@@ -1184,7 +1208,8 @@ async def _session_send(
     if not result.ok or result.data is None:
         return domain_text(
             result,
-            f"SESSION_NOT_FOUND: Invalid session: {session_id}",
+            f"SESSION_NOT_FOUND: Invalid session: {session_id}" if result.error_code == "SESSION_NOT_FOUND" else domain_failure_text(result),
+            use_result_data=True,
         )
     return attach_domain_result(
         _format_response(result.data.response),
@@ -1193,6 +1218,7 @@ async def _session_send(
             "session_id": session_id,
             "model": result.data.requested_model,
             "lifecycle": result.data.lifecycle,
+            **({"task_mode": result.data.task_mode, "task_status": result.data.task_status} if result.data.task_mode or result.data.task_status is not None else {}),
         },
     )
 
@@ -1264,6 +1290,7 @@ async def session(
     thinking_level: str = "standard",
     learning_mode: Optional[str] = None,
     image_path: Optional[str] = None,
+    task_mode: Optional[bool] = None,
 ) -> list[TextContent]:
     """Manage shared sessions; reset/reset_one need an ID and only reset_all clears all."""
     try:
@@ -1275,9 +1302,9 @@ async def session(
             )
 
         if action == "create":
-            return await _session_create(model, thinking_level, learning_mode)
+            return await _session_create(model, thinking_level, learning_mode, bool(task_mode))
         if action == "send":
-            return await _session_send(session_id, message, thinking_level, learning_mode, safe_image_path, model)
+            return await _session_send(session_id, message, thinking_level, learning_mode, safe_image_path, model, task_mode)
         if action == "list":
             return _session_list()
         if action in {"reset", "reset_one"}:

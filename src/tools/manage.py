@@ -33,6 +33,8 @@ from ..infrastructure.rpc_parsers import (
     summarize_rpc_response as summarize_registered_rpc_response,
 )
 from ..services.account import sanitize_account_status
+from ..services.history_mutations import update_chat_metadata_result
+from ..services.tasks import get_task_status_result
 from ..services.cleanup import (
     cleanup_test_artifacts_payload as cleanup_test_artifacts_payload_service,
     format_cleanup_markdown,
@@ -50,16 +52,18 @@ from ..services.gems import (
     update_gem as update_gem_service,
 )
 from ..services.history import (
-    chat_to_dict,
+    HistoryMetadataReadError,
     clamp_int,
     conversation_history_payload as registered_conversation_history_payload,
     delete_chat_result,
     export_chat_result,
     format_chat_export_markdown,
-    list_chats_result,
+    history_metadata_failure,
+    list_chat_history_result,
     paginate_items,
     read_chat_result,
-    search_chats_result,
+    read_history_metadata_page,
+    search_chat_history_result,
 )
 from ..services.manifest import (
     format_tool_manifest_markdown as format_registered_tool_manifest,
@@ -115,7 +119,7 @@ FeatureSurface = Literal[
 ]
 UsageScope = Literal["quota", "model_state", "all"]
 ScheduledScope = Literal["active", "inactive", "all"]
-HistoryAction = Literal["list", "scan", "search", "read", "export"]
+HistoryAction = Literal["list", "scan", "search", "read", "export", "task_status"]
 NotebookAction = Literal["list", "chats"]
 AccountInventorySurface = Literal[
     "capabilities",
@@ -264,17 +268,15 @@ async def _fetch_conversation_metadata_source(
     stopped_reason = "max_pages"
 
     for page_index in range(safe_max_pages):
-        response = await client._batch_execute(
-            [_RawRPCData(contract.rpc_id, _conversation_history_payload(filter_payload, safe_page_size, next_page_token))],
-            source_path=contract.source_path,
-            close_on_error=False,
+        result = await read_history_metadata_page(
+            client, filter_payload=filter_payload, page_size=safe_page_size, next_page_token=next_page_token,
         )
-        response_text = getattr(response, "text", "") or ""
-        response_length += len(response_text)
-        bodies = _extract_rpc_bodies(response_text, contract.rpc_id)
-        body = bodies[0] if bodies else []
-        raw_entries = body[2] if isinstance(body, list) and len(body) > 2 and isinstance(body[2], list) else []
-        parsed_entries = [_parse_conversation_metadata(item) for item in raw_entries]
+        if not result.ok:
+            raise HistoryMetadataReadError(result)
+        assert result.data is not None
+        response_size = int(result.meta.details["response_length"])
+        response_length += response_size
+        parsed_entries = [dict(item) for item in result.data["items"]]
         new_unique_count = 0
         for item in parsed_entries:
             item_id = item.get("id")
@@ -287,15 +289,15 @@ async def _fetch_conversation_metadata_source(
             if len(items) >= safe_max_items:
                 break
 
-        next_page_token = body[1] if isinstance(body, list) and len(body) > 1 and isinstance(body[1], str) else None
+        next_page_token = result.data["continuation"]
         pages.append(
             {
                 "page": page_index + 1,
-                "raw_count": len(raw_entries),
+                "raw_count": len(parsed_entries),
                 "new_unique_count": new_unique_count,
                 "unique_so_far": len(items),
                 "next_page_token_present": bool(next_page_token),
-                "response_length": len(response_text),
+                "response_length": response_size,
                 "first_id": parsed_entries[0].get("id") if parsed_entries else "",
                 "last_id": parsed_entries[-1].get("id") if parsed_entries else "",
                 "last_title": parsed_entries[-1].get("title") if parsed_entries else "",
@@ -305,7 +307,7 @@ async def _fetch_conversation_metadata_source(
         if len(items) >= safe_max_items:
             stopped_reason = "max_items"
             break
-        if not raw_entries:
+        if not parsed_entries:
             stopped_reason = "empty_page"
             break
         if not next_page_token:
@@ -348,6 +350,8 @@ async def _collect_notebook_chat_sources(
     diagnostic: dict[str, Any] | None = None
     source_blocks: list[dict[str, Any]] = []
     notebooks, diagnostic = await _fetch_native_notebooks(client)
+    if diagnostic.get("read_back_valid") is not True:
+        raise HistoryMetadataReadError(history_metadata_failure(diagnostic))
     for notebook in notebooks:
         notebook_id = notebook.get("id", "")
         if not notebook_id:
@@ -358,6 +362,9 @@ async def _collect_notebook_chat_sources(
         while len(notebook_items) < safe_max_items:
             batch_limit = min(100, safe_max_items - len(notebook_items))
             page_items, page_payload = await _fetch_notebook_chats(client, notebook_id, batch_limit, next_offset)
+            page_diagnostic = page_payload.get("diagnostic", {})
+            if page_diagnostic.get("read_back_valid") is not True:
+                raise HistoryMetadataReadError(history_metadata_failure(page_diagnostic))
             source_name = f"notebook:{notebook.get('title') or notebook_id}"
             for item in page_items:
                 item["history_source"] = source_name
@@ -536,17 +543,15 @@ async def _fetch_remy_goal_conversation_refs(
     stopped_reason = "max_pages"
 
     for page_index in range(safe_max_pages):
-        response = await client._batch_execute(
-            [_RawRPCData(contract.rpc_id, contract.build_payload(page_size=safe_page_size, next_page_token=next_page_token))],
-            source_path=contract.source_path,
-            close_on_error=False,
+        result = await read_history_metadata_page(
+            client, contract_key=contract.key, page_size=safe_page_size, next_page_token=next_page_token,
         )
-        response_text = getattr(response, "text", "") or ""
-        response_length += len(response_text)
-        bodies = _extract_rpc_bodies(response_text, contract.rpc_id)
-        body = bodies[0] if bodies else []
-        raw_entries = body[0] if isinstance(body, list) and body and isinstance(body[0], list) else []
-        parsed_entries = [_parse_remy_goal_entry(item) for item in raw_entries]
+        if not result.ok:
+            raise HistoryMetadataReadError(result)
+        assert result.data is not None
+        response_size = int(result.meta.details["response_length"])
+        response_length += response_size
+        parsed_entries = [dict(item) for item in result.data["items"]]
         new_unique_count = 0
         for item in parsed_entries:
             item_id = item.get("id")
@@ -559,21 +564,21 @@ async def _fetch_remy_goal_conversation_refs(
             if len(items) >= safe_max_items:
                 break
 
-        next_page_token = body[1] if isinstance(body, list) and len(body) > 1 and isinstance(body[1], str) else None
+        next_page_token = result.data["continuation"]
         pages.append(
             {
                 "page": page_index + 1,
-                "raw_count": len(raw_entries),
+                "raw_count": len(parsed_entries),
                 "new_unique_count": new_unique_count,
                 "unique_so_far": len(items),
                 "next_page_token_present": bool(next_page_token),
-                "response_length": len(response_text),
+                "response_length": response_size,
             }
         )
         if len(items) >= safe_max_items:
             stopped_reason = "max_items"
             break
-        if not raw_entries:
+        if not parsed_entries:
             stopped_reason = "empty_page"
             break
         if not next_page_token:
@@ -835,16 +840,9 @@ def _register_history_scan_tools(mcp: MCPServer, enabled_tool_names: set[str], t
         await initialize_client()
 
         try:
-            if hasattr(client, "_batch_execute"):
-                target_count = clamp_int(limit, default=10, minimum=1, maximum=50) + clamp_int(
-                    offset, default=0, minimum=0, maximum=5000
-                )
-                items, diagnostic = await _fetch_recent_conversation_metadata(client, target_count)
-            else:
-                chats = client.list_chats() or []
-                items = list(chats)
-                diagnostic = {"source": "client_cache", "fetched_count": len(items), "has_remote_more": False}
-            result = list_chats_result(items, limit, offset, diagnostic=diagnostic, max_limit=50)
+            result = await list_chat_history_result(client, limit, offset, max_limit=50)
+            if not result.ok:
+                return domain_text(result, "❌ 无法验证历史对话元数据。")
             assert result.data is not None
             payload = result.data
             page = payload["items"]
@@ -963,6 +961,8 @@ def _register_history_scan_tools(mcp: MCPServer, enabled_tool_names: set[str], t
                 return _json_response(payload)
 
             return [TextContent(type="text", text=_format_scan_history_markdown(payload, page))]
+        except HistoryMetadataReadError as error:
+            return domain_text(error.result, "❌ 历史深度扫描的来源未获验证。")
         except Exception as e:
             logger.error(f"深度扫描聊天历史失败: {e}")
             return [TextContent(type="text", text=f"❌ 深度扫描失败: {str(e)}")]
@@ -1031,46 +1031,19 @@ def _register_history_read_tools(mcp: MCPServer, enabled_tool_names: set[str], t
         await initialize_client()
 
         needle = (query or "").strip()
-        if not needle or (scan_turns and not hasattr(client, "read_chat")):
-            result = await search_chats_result(
-                client,
-                [],
-                needle,
-                limit,
-                offset,
-                scan_turns=scan_turns,
-                turns_per_chat=turns_per_chat,
-                max_chars_per_turn=max_chars_per_turn,
-            )
-            fallback = (
-                "❌ 搜索聊天需要提供 query。"
-                if not needle
-                else "❌ 当前 gemini-webapi 不支持正文搜索需要的 read_chat。"
-            )
-            return domain_text(result, fallback)
-
         try:
-            safe_limit = clamp_int(limit, default=10, minimum=1, maximum=50)
-            safe_offset = clamp_int(offset, default=0, minimum=0, maximum=5000)
-            if hasattr(client, "_batch_execute"):
-                chats, diagnostic = await _fetch_recent_conversation_metadata(client, safe_limit + safe_offset)
-            else:
-                chats = [chat_to_dict(chat) for chat in client.list_chats() or []]
-                diagnostic = {"source": "client_cache", "fetched_count": len(chats), "has_remote_more": False}
-            safe_turn_limit = clamp_int(turns_per_chat, default=20, minimum=1, maximum=50)
-            safe_chars = clamp_int(max_chars_per_turn, default=1000, minimum=100, maximum=4000)
-            result = await search_chats_result(
-                client,
-                chats,
-                needle,
-                safe_limit,
-                safe_offset,
-                scan_turns=scan_turns,
-                turns_per_chat=safe_turn_limit,
-                max_chars_per_turn=safe_chars,
-                diagnostic=diagnostic,
-                max_limit=50,
+            result = await search_chat_history_result(
+                client, needle, limit, offset, scan_turns=scan_turns,
+                turns_per_chat=turns_per_chat, max_chars_per_turn=max_chars_per_turn, max_limit=50,
             )
+            if result.data is None:
+                if not needle:
+                    fallback = "❌ 搜索聊天需要提供 query。"
+                elif scan_turns and not hasattr(client, "read_chat"):
+                    fallback = "❌ 当前 gemini-webapi 不支持正文搜索需要的 read_chat。"
+                else:
+                    fallback = "❌ 无法验证历史对话元数据。"
+                return domain_text(result, fallback)
             assert result.data is not None
             payload = result.data
             matches = payload["matches"]
@@ -1180,10 +1153,18 @@ def _register_history_facade_tools(mcp: MCPServer, enabled_tool_names: set[str],
         response_format: ResponseFormat = "markdown",
     ) -> list[TextContent]:
         """
-        Read, scan, search, or export Gemini Web chat history through action=list/scan/search/read/export.
+        Read/scan/search/export chat history, or read one native Task's task_status.
 
         This read-only entrypoint never deletes or moves chats. Use it for narrow history agents.
         """
+        if action == "task_status":
+            try:
+                client = get_gemini_client()
+                await initialize_client()
+                result = await get_task_status_result(client, chat_id)
+                return domain_text(result, "Native Task status read-back.", use_result_data=True)
+            except Exception as error:
+                return exception_text(error, logger=logger, operation="gemini_history.task_status")
         if action == "list":
             return await tool_functions["gemini_list_chats"](limit=limit, offset=offset, response_format=response_format)
         if action == "scan":
@@ -1223,6 +1204,23 @@ def _register_history_facade_tools(mcp: MCPServer, enabled_tool_names: set[str],
                 include_metadata=include_metadata,
             )
         return [TextContent(type="text", text=f"❌ 不支持的 history action: {action}")]
+
+    @_tool("gemini_update_chat", MUTATES_REMOTE)
+    async def gemini_update_chat(
+        chat_id: str, title: Optional[str] = None, pinned: Optional[bool] = None,
+    ) -> list[TextContent]:
+        """Rename/pin one exact chat; pinned=false unpins. Omitted fields are preserved.
+
+        verified_updated requires independent fresh metadata read-back.
+        """
+        try:
+            client = get_gemini_client()
+            await initialize_client()
+            result = await update_chat_metadata_result(client, chat_id, title=title, pinned=pinned)
+            text = "聊天元数据已更新并回读确认。" if result.meta.verification_status == "verified_updated" else "聊天元数据更新尚未验证。"
+            return domain_text(result, text, use_result_data=True)
+        except Exception as error:
+            return exception_text(error, logger=logger, operation="gemini_update_chat", prefix="❌ 更新失败")
 
     @_tool("gemini_delete_chat", DESTRUCTIVE_REMOTE)
     async def gemini_delete_chat(chat_id: str) -> list[TextContent]:
@@ -2204,28 +2202,11 @@ def _register_model_tools(mcp: MCPServer, enabled_tool_names: set[str], tool_fun
     @_tool("gemini_list_models", READS_PRIVATE_REMOTE)
     async def gemini_list_models() -> list[TextContent]:
         """列出所有可用模型及其说明"""
-        aliases = """🤖 MCP 模型别名:
-
-1. flash-lite / lite → Web UI 3.5 Flash-Lite (request name: Flash-Lite)
-   - 网页端极速模型
-
-2. flash / fast → gemini-3-flash
-   - 2026-09-26 网页端 3.8 Flash；fast 保留为兼容别名
-
-3. pro → gemini-3-pro
-   - 网页端 3.1 Pro，是否可用取决于当前账户
-
-4. thinking → gemini-3-flash-thinking
-   - 旧兼容别名；新网页思考等级请用 thinking_level=standard/extended
-
-媒体规则:
-- 图像: Flash-Lite → Nano Banana 2 Lite；Flash / Pro → Nano Banana 2
-- 音乐: Lyria；网页公告为 3.5，MCP 结果未必标明实际版本
-- 视频: 当前普通聊天请求不等于 Gemini Omni 视频模式；需要验证实际视频产物
-
----
-
-运行时模型:
+        aliases = """🤖 MCP 模型别名与选择:
+- flash-lite / lite、flash / fast、pro 保持稳定别名；thinking 兼容映射为 flash。
+- 也接受下方运行时目录的 model_name、display_name 或 model_id（例如目录存在时的 4 Argon）。
+- thinking_level=low / medium / high；standard=low、extended=high 保持兼容。
+- 当前账号目录如下；静态网页观察不代表其他账号权限。
 """
         try:
             client = get_gemini_client()

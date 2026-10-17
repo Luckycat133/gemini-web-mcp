@@ -175,4 +175,20 @@
     <question>Which focused account facade lists, retries or requests cancellation of only registered cleanup jobs without scanning unrelated account history? Answer with the exact tool name.</question>
     <answer>gemini_cleanup</answer>
   </qa_pair>
+  <qa_pair>
+    <question>Which primary tool renames or pins one exact Gemini chat while preserving omitted fields and requiring independent metadata read-back? Answer with the exact tool name.</question>
+    <answer>gemini_update_chat</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>What three current English thinking_level values correspond to the webpage's low, medium and high thinking choices? Answer with the values in that order.</question>
+    <answer>low, medium, high</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>Which read-only history action queries an existing native Task by chat_id after reconnect without submitting its prompt again? Answer with the action only.</question>
+    <answer>task_status</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>Does the end of a native Task response stream alone prove the Task is terminal or authorize deletion of an unfinished source? Answer yes or no.</question>
+    <answer>no</answer>
+  </qa_pair>
 </evaluation>

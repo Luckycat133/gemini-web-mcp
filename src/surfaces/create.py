@@ -37,8 +37,8 @@ existing authenticated Gemini Web account.
 """,
 )
 
-Model = Literal["flash-lite", "flash", "thinking", "pro"]
-ThinkingLevel = Literal["standard", "extended"]
+Model = str
+ThinkingLevel = Literal["low", "medium", "high", "standard", "extended"]
 Timeout = Annotated[int | None, Field(ge=1, le=1800)]
 CleanupDelay = Annotated[int | None, Field(ge=0, le=86400)]
 IdempotencyKey = Annotated[str | None, Field(min_length=1, max_length=128, pattern=r"^[A-Za-z0-9_-]+$")]

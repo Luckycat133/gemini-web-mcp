@@ -36,10 +36,13 @@ def _semantics(*, read: list[str], mutate: list[str], local: bool = False) -> di
                                 "scope": "local" if local else "account"}}
 
 
-@mcp.tool(annotations=DESTRUCTIVE_REMOTE, meta=_semantics(read=["list", "read", "search", "export"], mutate=["delete"]))
+@mcp.tool(annotations=DESTRUCTIVE_REMOTE, meta=_semantics(read=["list", "read", "search", "export", "task_status"], mutate=["update", "delete"]))
 async def gemini_history(request: HistoryRequest) -> AccountToolResult:
-    """List/search metadata or explicitly read/export/delete one Gemini chat.
+    """List/search metadata or explicitly read/export/update/delete one Gemini chat.
 
+    Update changes only title and/or pinned; verified_updated requires fresh
+    metadata read-back. pinned=false unpins. Omitted fields are preserved.
+    task_status reads one native Task by chat_id without resubmitting or deleting.
     Delete requires an exact chat_id; verified_absent is deletion proof. Bounded
     metadata listings and title searches do not establish full account coverage.
     """

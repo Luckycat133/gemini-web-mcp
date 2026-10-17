@@ -6,13 +6,14 @@ import json
 from types import SimpleNamespace
 
 import pytest
+import jsonschema
 from gemini_webapi import GeminiClient
 import gemini_webapi.client as upstream_client
 from gemini_webapi.constants import Endpoint, MODEL_HEADER_KEY
 from gemini_webapi.exceptions import APIError, GeminiError
 
 import src.thinking_client as transport
-from src.infrastructure.web_request_contracts import NativeMediaRequestShapeError
+from src.infrastructure.web_request_contracts import NativeMediaRequestShapeError, ThinkingRequestShapeError
 from src.thinking_client import (
     MediaRequestObservation,
     ThinkingLevelGeminiClient,
@@ -198,7 +199,9 @@ def test_native_api_error_does_not_retry_a_generation(monkeypatch):
 
 
 @pytest.mark.parametrize("mode", ["image", "music"])
-@pytest.mark.parametrize("thinking_level,level_id", [("standard", 1), ("extended", 2)])
+@pytest.mark.parametrize("thinking_level,level_id", [
+    ("standard", 1), ("extended", 2), ("low", 1), ("medium", 4), ("high", 2), ("deep_think", 3),
+])
 @pytest.mark.parametrize("streaming", [False, True])
 def test_real_sdk_native_thinking_header_and_body_agree(monkeypatch, mode, thinking_level, level_id, streaming):
     captured = []
@@ -222,11 +225,85 @@ def test_real_sdk_native_thinking_header_and_body_agree(monkeypatch, mode, think
     assert _parse_inner(request["data"])[80] == level_id
     assert "extended_thinking" not in request
     method = GeminiClient.generate_content_stream if streaming else GeminiClient.generate_content
+    selector = json.loads(request["headers"][MODEL_HEADER_KEY])
+    assert selector[14] == _parse_inner(request["data"])[79] == 1
+    assert selector[15] == level_id
     if "extended_thinking" in inspect.signature(method).parameters:
-        # The real2.1 builder appends [thinking_level, sessionid] to the model
-        # header.2.0 has no appended field; its native body remains verified.
-        assert json.loads(request["headers"][MODEL_HEADER_KEY])[-2] == level_id
+        assert len(selector) >= 17  # Preserve the installed SDK's session field.
     assert _web_request.get() is None
+
+
+@pytest.mark.parametrize("streaming", [False, True])
+@pytest.mark.parametrize("use_alias", [False, True])
+def test_runtime_model_category_drives_thinking_header_and_body(monkeypatch, streaming, use_alias):
+    captured = []
+    client = sdk_client_at_http_boundary(monkeypatch, captured)
+    if not hasattr(client, "_model_registry"):
+        pytest.skip("Dynamic model discovery is unavailable in this older SDK")
+    from gemini_webapi.types.availablemodel import AvailableModel
+
+    model = AvailableModel(
+        model_id="offline-runtime-model", model_name="gemini-runtime-next", display_name="Runtime next",
+        description="Synthetic dynamic registry entry", capacity=1, model_number=8,
+    )
+    client._model_registry.clear()
+    if use_alias:
+        # A known compatibility alias must use newly observed category metadata.
+        model.model_name = "gemini-3-flash"
+    client._model_registry[model.model_id] = model
+
+    async def run():
+        name = "flash" if use_alias else model.display_name
+        with pytest.raises(StopAtHTTPBoundary):
+            if streaming:
+                async for _ in client.generate_content_stream("fixture", model=name, thinking_level="medium"):
+                    pass
+            else:
+                await client.generate_content("fixture", model=name, thinking_level="medium")
+
+    # The SDK accepts its own canonical name; the wrapper accepts stable aliases.
+    if use_alias:
+        model.aliases.append("flash")
+    asyncio.run(run())
+    assert len(captured) == 1
+    selector = json.loads(captured[0]["headers"][MODEL_HEADER_KEY])
+    assert selector[4] == model.model_id
+    assert selector[14:16] == _parse_inner(captured[0]["data"])[79:81] == [8, 4]
+    assert _web_request.get() is None
+
+
+@pytest.mark.parametrize("corrupt", ["form", "payload", "header"])
+def test_changed_thinking_wire_shape_stops_before_network(monkeypatch, corrupt):
+    captured = []
+    client = sdk_client_at_http_boundary(monkeypatch, captured)
+    installed_stream = client.client.stream
+
+    def corrupt_request(method, url, *args, **kwargs):
+        if corrupt == "form":
+            kwargs["data"] = None
+        elif corrupt == "payload":
+            kwargs["data"] = {"f.req": "[null]"}
+        else:
+            kwargs["headers"] = {**kwargs["headers"], MODEL_HEADER_KEY: "{}"}
+        return installed_stream(method, url, *args, **kwargs)
+
+    client.client.stream = corrupt_request
+    with pytest.raises(ThinkingRequestShapeError):
+        asyncio.run(client.generate_content("fixture", model="gemini-3-flash", thinking_level="medium"))
+    assert captured == []
+    assert _web_request.get() is None
+
+
+def test_focused_creation_schema_accepts_runtime_models_and_current_thinking_levels():
+    from src.surfaces.create import mcp
+
+    tools = {tool.name: tool for tool in asyncio.run(mcp.list_tools())}
+    for name in ("gemini_generate_image", "gemini_generate_video", "gemini_generate_music"):
+        for level in ("low", "medium", "high", "standard", "extended"):
+            jsonschema.validate(
+                {"prompt": "fixture", "model": "Runtime next", "thinking_level": level},
+                tools[name].input_schema,
+            )
 
 
 @pytest.mark.parametrize("streaming", [False, True])

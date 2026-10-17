@@ -117,8 +117,28 @@ def _move_chat_payload(*, chat_id: str, notebook_id: str, project_type: int = 2)
     return _compact([None, [["bot_id", "bot_project_metadata"]], conversation])
 
 
+def _update_chat_payload(*, chat_id: str, title: str | None = None, pinned: bool | None = None) -> str:
+    """Update only the requested metadata fields (UpdateConversation FieldMask)."""
+    fields: list[str] = []
+    conversation: list[Any] = [chat_id]
+    if title is not None:
+        fields.append("title")
+        conversation.append(title)
+    if pinned is not None:
+        fields.append("pinned")
+        conversation.extend([None] * (3 - len(conversation)))
+        conversation[2] = pinned
+    if not fields:
+        raise ValueError("A title or pinned value is required.")
+    return _compact([None, [fields], conversation])
+
+
 def _scheduled_get_payload(*, action_id: str) -> str:
     return _compact([action_id])
+
+
+def _task_goal_payload(*, chat_id: str) -> str:
+    return _compact([chat_id])
 
 
 def _scheduled_daily_payload(
@@ -182,6 +202,17 @@ def _contract(
 
 _CONTRACT_LIST = [
     _contract(
+        "tasks.get",
+        "tasks",
+        "get_task_goal",
+        "mXV10b",
+        "/app",
+        _task_goal_payload,
+        "task_goal",
+        "2026-10-18 public BardChatUi / GetRemyGoal OUd and GzXWE Tic conversationId",
+        stability="preview",
+    ),
+    _contract(
         "media.music_chat",
         "media",
         "music_chat_readback",
@@ -224,6 +255,19 @@ _CONTRACT_LIST = [
         "conversation_page",
         "2026-07-04 Pro UI / paginated conversation metadata",
         stability="preview",
+    ),
+    _contract(
+        "history.update",
+        "history",
+        "update_conversation_metadata",
+        "MUAZcd",
+        "/app",
+        _update_chat_payload,
+        "conversation_update",
+        "2026-10-18 signed-in UI / pin and rename; BardChatUi D3Wg_SjWYeA.2018.O VQd/Zia",
+        mode="mutation",
+        stability="preview",
+        verification_strategy="independent_history_metadata_read_back",
     ),
     _contract(
         "history.remy_goals",

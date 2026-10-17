@@ -12,7 +12,9 @@ from ..infrastructure.rpc_contracts import WEB_FEATURE_PROBES as RPC_WEB_FEATURE
 
 WEB_UI_CAPABILITIES = {
     "observed_at": "2026-09-26",
-    "model_picker_observed_at": "2026-10-02",
+    "model_picker_observed_at": "2026-10-18",
+    "history_menu_observed_at": "2026-10-18",
+    "task_composer_observed_at": "2026-10-18",
     "account_tier": "Gemini Web Pro",
     "locale": "zh-CN",
     "models": [
@@ -37,27 +39,38 @@ WEB_UI_CAPABILITIES = {
             "thinking_mode_id": 3,
             "advanced_only": True,
         },
+        {
+            "alias": "argon",
+            "display_name": "4 Argon",
+            "description": "复杂任务",
+            "thinking_mode_id": 8,
+            "advanced_only": None,
+        },
     ],
     "thinking_levels": [
-        {
-            "id": "standard",
-            "display_name": "标准",
-            "description": "最适合回答大多数问题",
-            "level_id": 1,
-        },
-        {
-            "id": "extended",
-            "display_name": "扩展",
-            "description": "擅长解决复杂问题",
-            "level_id": 2,
-        },
+        {"id": "low", "display_name": "低点", "description": "快速高效", "level_id": 1},
+        {"id": "medium", "display_name": "中等", "description": "深度适中", "level_id": 4},
+        {"id": "high", "display_name": "高点", "description": "超级详尽", "level_id": 2},
+    ],
+    "thinking_aliases": {"standard": "low", "extended": "high"},
+    "conversation_modes": [
+        {"name": "chat", "label": "对话", "coverage": "gemini_chat / chat"},
+        {"name": "task", "label": "任务", "coverage": "task_mode=true; history task_status"},
+    ],
+    "history_menu": [
+        {"name": "pin", "label": "固定", "coverage": "gemini_update_chat / history update"},
+        {"name": "rename", "label": "重命名", "coverage": "gemini_update_chat / history update"},
+        {"name": "download_pdf", "label": "下载 PDF", "coverage": "ui_only"},
+        {"name": "export_docs", "label": "导出到 Google 文档", "coverage": "ui_only"},
+        {"name": "notebook", "label": "添加至笔记本", "coverage": "gemini_move_chat_to_notebook"},
+        {"name": "delete", "label": "删除", "coverage": "gemini_delete_chat / history delete"},
     ],
     "tool_menu": [
         {"name": "upload_file", "label": "上传文件", "coverage": "gemini_upload_file"},
         {"name": "google_drive", "label": "从云端硬盘添加", "coverage": "ui_only"},
         {"name": "import_code", "label": "导入代码", "coverage": "gemini_upload_file"},
         {"name": "create_image", "label": "图片", "coverage": "gemini_generate_media"},
-        {"name": "create_video", "label": "视频", "coverage": "web_ui_only"},
+        {"name": "create_video", "label": "视频", "coverage": "gemini_generate_video"},
         {"name": "canvas", "label": "Canvas", "coverage": "library_capability"},
         {"name": "deep_research", "label": "Deep Research", "coverage": "gemini_deep_research"},
         {"name": "create_music", "label": "音乐", "coverage": "gemini_generate_music"},
@@ -87,7 +100,7 @@ WEB_UI_CAPABILITIES = {
     "notes": [
         "Model picker and image/video/music entries were rechecked in a signed-in Chrome session on 2026-09-26; other menu and settings entries retain older evidence.",
         "The model picker, Create image selection and Create video entry were rechecked on 2026-10-02. Public frontend source identifies native image/music selectors; their new MCP route still needs signed-in generation verification.",
-        "Runtime model registry is still preferred when available.",
+        "The four-model picker, low/medium/high thinking levels, Task composer and chat pin/rename menu were verified on 2026-10-18. Runtime model discovery remains authoritative for the current account.",
         "Drive picker, link mutation, settings mutation, and memory import mutation are not automated without a safer confirmed RPC contract.",
         "Scheduled actions support daily create and explicit delete through observed Web RPCs; edit/toggle remain disabled until stable RPC contracts are confirmed.",
         "Native Gemini Web Notebooks are covered for list, recent-chat list, and chat move operations; this is distinct from external NotebookLM.",
@@ -290,6 +303,15 @@ TOOL_MANIFEST: list[dict[str, Any]] = [
         "destructive": False,
         "privacy": "reads_private_chat_text",
         "pagination": True,
+    },
+    {
+        "name": "gemini_update_chat",
+        "group": "history",
+        "purpose": "Rename/pin/unpin one exact chat and verify fresh metadata read-back; omitted fields are preserved.",
+        "read_only": False,
+        "destructive": False,
+        "privacy": "uses_private_chat_id_and_reads_metadata",
+        "pagination": False,
     },
     {
         "name": "gemini_delete_chat",

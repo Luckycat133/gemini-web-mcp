@@ -76,7 +76,7 @@ HISTORY_READ_TOOL_NAMES = {
     "gemini_read_chat",
     "gemini_export_chat",
 }
-HISTORY_WRITE_TOOL_NAMES = {"gemini_cleanup_test_artifacts", "gemini_delete_chat"}
+HISTORY_WRITE_TOOL_NAMES = {"gemini_cleanup_test_artifacts", "gemini_delete_chat", "gemini_update_chat"}
 NOTEBOOKS_READ_TOOL_NAMES = {"gemini_list_notebooks", "gemini_list_notebook_chats"}
 NOTEBOOKS_WRITE_TOOL_NAMES = {"gemini_move_chat_to_notebook"}
 ACCOUNT_READ_TOOL_NAMES = {
@@ -96,6 +96,7 @@ GEMS_TOOL_NAMES = {"gemini_manage_gems"}
 MANAGE_TOOL_LAYER_NAMES = {
     "history-read": HISTORY_FACADE_TOOL_NAMES,
     "history-write": HISTORY_WRITE_TOOL_NAMES,
+    "history-update": {"gemini_update_chat"},
     "history-granular": HISTORY_READ_TOOL_NAMES,
     "notebooks-read": NOTEBOOKS_FACADE_TOOL_NAMES,
     "notebooks-write": NOTEBOOKS_WRITE_TOOL_NAMES,
@@ -273,7 +274,7 @@ def _configured_manage_layers(configured: list[str]) -> set[str]:
         "admin": {"all"},
         "history": {"history-read"},
         "history-read": {"history-read"},
-        "history-organize": {"history-read", "notebooks-read", "notebooks-write"},
+        "history-organize": {"history-read", "history-update", "notebooks-read", "notebooks-write"},
         "account-read": {"account-read"},
         "scheduled-read": {"scheduled-read"},
         "scheduled-admin": {"scheduled-read", "scheduled-write"},
@@ -327,6 +328,8 @@ def _tool_availability(tool: dict[str, Any]) -> list[str]:
         return ["account-read", "manage", "all"]
     if name in HISTORY_READ_TOOL_NAMES:
         return ["manage", "all"]
+    if name == "gemini_update_chat":
+        return ["history-organize", "admin", "manage", "all"]
     if name in HISTORY_WRITE_TOOL_NAMES:
         return ["admin", "manage", "all"]
     if name in NOTEBOOKS_READ_TOOL_NAMES:

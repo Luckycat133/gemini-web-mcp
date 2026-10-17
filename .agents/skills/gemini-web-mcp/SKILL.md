@@ -60,6 +60,6 @@ use `$gemini-web-mcp-development`.
 - [operations.md](references/operations.md): async starts, timeout/restart
   recovery, cancellation and source cleanup.
 - [tool_surface.md](references/tool_surface.md): compact facades, primary
-  profiles and account/authentication controls.
+  profiles, native Tasks and account/authentication controls.
 - [recovery.md](references/recovery.md): missing tools, authentication failures
   and upstream drift.

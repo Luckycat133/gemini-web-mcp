@@ -225,7 +225,7 @@ report 本地产物；history 的 list/search/read/export/delete 也在 primary 
 **参数：**
 - `message`: str - 要发送的消息
 - `model`: str - `flash-lite` / `flash` / `pro`，兼容别名，或运行时模型名 (默认: `flash`)
-- `thinking_level`: str - `standard` / `extended` (默认: `standard`)
+- `thinking_level`: str - `low` / `medium` / `high`（兼容 `standard` / `extended`） (默认: `standard`)
 - `learning_mode`: str - 可选；`interactive_quiz`/`quiz`、`flashcards`、`practice_test`、`study_guide`/`exam_prep`
 - `image_paths`: list[str] - 可选图片路径
 - `gem_id`: str - 可选 Gem ID
@@ -241,7 +241,7 @@ report 本地产物；history 的 list/search/read/export/delete 也在 primary 
 **参数：**
 - `message`: str - 要发送的消息
 - `model`: str - MCP 别名或运行时模型名 (默认: `flash`)
-- `thinking_level`: str - `standard` / `extended` (默认: `standard`)
+- `thinking_level`: str - `low` / `medium` / `high`（兼容 `standard` / `extended`） (默认: `standard`)
 - `learning_mode`: str - 可选，含义同 `gemini_chat`
 - `image_paths`: list[str] - 可选图片路径
 - `gem_id`: str - 可选 Gem ID
@@ -257,7 +257,7 @@ report 本地产物；history 的 list/search/read/export/delete 也在 primary 
 
 **参数：**
 - `model`: str - MCP 别名或运行时模型名 (默认: `flash`)
-- `thinking_level`: str - 创建会话后默认沿用的 `standard` / `extended`
+- `thinking_level`: str - 创建会话后默认沿用的 `low` / `medium` / `high`（兼容 `standard` / `extended`）
 - `learning_mode`: str - 可选，创建会话后默认沿用的学习模式
 - `gem_id`: str - 可选 Gem ID
 - `temporary`: bool - 后续会话消息默认沿用的 Temporary chat 状态
@@ -327,7 +327,7 @@ report 本地产物；history 的 list/search/read/export/delete 也在 primary 
 - `prompt`: str - 生成描述
 - `media_type`: "image" | "video" | "music"
 - `model`: str - MCP 别名或运行时模型名 (默认: `flash`)
-- `thinking_level`: str - `standard` / `extended` (默认: `standard`)
+- `thinking_level`: str - `low` / `medium` / `high`（兼容 `standard` / `extended`） (默认: `standard`)
 - `image_path`: str - 可选参考图片
 - `timeout_seconds`: int - 生成、恢复读取、验证和保存的总时限
 - `output_dir`: str - 输出目录，默认 `generated_media/`
@@ -364,7 +364,7 @@ report 本地产物；history 的 list/search/read/export/delete 也在 primary 
 **参数：**
 - `prompt`: str - 音乐描述
 - `model`: str - MCP 别名或运行时模型名 (默认: `flash`)
-- `thinking_level`: str - `standard` / `extended` (默认: `extended`)
+- `thinking_level`: str - `low` / `medium` / `high`（兼容 `standard` / `extended`） (默认: `extended`)
 
 音乐便捷工具还支持上述 `timeout_seconds`、`output_dir`、`filename`、`retain_chat` 和 `delete_after_seconds`。
 图片和音乐在现有传输中携带网页原生模式选择，服务端仍决定实际后端、账号可用性与输出。
@@ -385,7 +385,7 @@ Gemini Web 的 Google Drive 选择器。
 
 **关键参数：**
 - `model`: str - MCP 别名或运行时模型名
-- `thinking_level`: str - `standard` / `extended` (默认: `standard`)
+- `thinking_level`: str - `low` / `medium` / `high`（兼容 `standard` / `extended`） (默认: `standard`)
 
 ### gemini_analyze_url
 
@@ -396,7 +396,7 @@ Gemini Web 的 Google Drive 选择器。
 
 **关键参数：**
 - `model`: str - MCP 别名或运行时模型名
-- `thinking_level`: str - `standard` / `extended` (默认: `standard`)
+- `thinking_level`: str - `low` / `medium` / `high`（兼容 `standard` / `extended`） (默认: `standard`)
 
 ---
 
@@ -408,7 +408,7 @@ Gemini Web 的 Google Drive 选择器。
 
 **关键参数：**
 - `model`: str - MCP 别名或运行时模型名
-- `thinking_level`: str - `standard` / `extended` (默认: `extended`)
+- `thinking_level`: str - `low` / `medium` / `high`（兼容 `standard` / `extended`） (默认: `extended`)
 - `timeout_seconds`: int - 等待最终报告的时间上限（默认: `600`）
 - `poll_interval_seconds`: int - 轮询间隔，最小 3 秒
 - `wait_for_completion`: bool - 默认 `true`；设为 `false` 时只完成 plan/start 阶段并立即返回
@@ -986,3 +986,20 @@ GEMINI_TOOLS=scheduled-admin
 # 完整维护/验证工具面
 GEMINI_TOOLS=all
 ```
+
+## 当前任务和历史更新参数
+
+primary 的五个 chat/start/send/stream 工具支持 `task_mode`；compact 的 `chat`
+和 `session` 采用相同共享服务。Task 响应包含来源 ID 和独立读回的 `task_status`；
+未知或非终态保留来源，重连后读同一 ID，不重复执行。详情见 [模型与模式](models.md)。
+
+primary `gemini_update_chat(chat_id, title?, pinned?)`、compact
+`history(action="update", chat_id=..., title=..., pinned=...)`，以及 focused
+`gemini_history(request={"action":"update","chat_id":...,"title":...,"pinned":...})`
+可重命名、固定和取消固定；至少传一个变更，省略字段保留原值。
+只有独立、无冲突的 fresh metadata 回读匹配才报告 `verified_updated`。
+`history-organize` 提供该更新工具并保留已有 Notebook 操作，未增加删除工具。
+
+三个历史表面都支持 `task_status` 只读动作。列表/搜索从 fresh RPC 读取双分组，
+拒绝 HTTP 错误、RPC 拒绝和坏形状；分页/扫描仍保留各自覆盖范围。focused 内容
+搜索支持最多 100 轮、20000 字符，primary/compact 保留已有上限。

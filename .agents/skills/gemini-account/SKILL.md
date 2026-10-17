@@ -38,7 +38,7 @@ requested account task. All seven tools take a typed `request` object whose
 
 | Task | Tool | Available actions |
 | --- | --- | --- |
-| History | `gemini_history` | list, search, read, export, delete |
+| History | `gemini_history` | list, search, read, export, update, delete, task_status |
 | Notebooks | `gemini_notebooks` | list, chats, move |
 | Scheduled actions | `gemini_scheduled` | list, get, create_daily, delete |
 | Gems | `gemini_gems` | list, create, update, delete |

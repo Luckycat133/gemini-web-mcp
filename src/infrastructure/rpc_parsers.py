@@ -403,7 +403,13 @@ def _result_for_items(
 def parse_conversation_page(body: Any, **_: Any) -> RPCParseResult:
     if isinstance(body, list) and len(body) > 1 and body[1] is not None and not isinstance(body[1], str):
         return RPCParseResult("changed_shape", warnings=("invalid_continuation",), raw_type=type(body[1]).__name__)
-    return _result_for_items(body, 2, parse_conversation_metadata, require_id=True)
+    return _result_for_items(
+        body, 2, parse_conversation_metadata, require_id=True,
+        item_validator=lambda row: (
+            (len(row) < 2 or row[1] is None or isinstance(row[1], str))
+            and (len(row) < 3 or row[2] is None or isinstance(row[2], bool))
+        ),
+    )
 
 
 def parse_remy_goals_page(body: Any, **_: Any) -> RPCParseResult:
@@ -460,11 +466,44 @@ def parse_notebook_move(body: Any, *, expected_id: str | None = None, **_: Any) 
     return RPCParseResult("success", value=value)
 
 
+def parse_conversation_update(body: Any, *, expected_id: str | None = None, **_: Any) -> RPCParseResult:
+    """The updated metadata is response field 2; it is acknowledgement, not read-back."""
+    result = parse_notebook_move(body, expected_id=expected_id)
+    if result.status != "success":
+        return result
+    row = body[1]
+    if ((len(row) > 1 and row[1] is not None and not isinstance(row[1], str))
+            or (len(row) > 2 and row[2] is not None and not isinstance(row[2], bool))):
+        return RPCParseResult("changed_shape", warnings=("invalid_metadata_fields",))
+    return result
+
+
 def parse_scheduled_registry(body: Any, *, max_chars: int = 500, **_: Any) -> RPCParseResult:
     return _result_for_items(
         body, 0, lambda item: parse_scheduled_action_task_entry(item, max_chars),
         require_id=True, item_validator=_valid_scheduled_entry,
     )
+
+
+def parse_task_goal(body: Any, *, expected_id: str | None = None, **_: Any) -> RPCParseResult:
+    """Read only Task identity/status, excluding descriptions and other goal text."""
+    if body == [] or body == [None]:
+        return RPCParseResult("empty", value=None)
+    if not isinstance(body, list) or not body or not isinstance(body[0], list):
+        return RPCParseResult("changed_shape", raw_type=type(body).__name__)
+    goal = body[0]
+    if len(goal) < 14:
+        return RPCParseResult("changed_shape", warnings=("missing_goal_fields",))
+    chat_id, status = goal[13], goal[2]
+    if not isinstance(chat_id, str) or not chat_id.strip() or (expected_id is not None and chat_id != expected_id):
+        return RPCParseResult("changed_shape", warnings=("returned_id_mismatch",))
+    if type(status) is not int or status not in range(9):
+        return RPCParseResult("changed_shape", warnings=("invalid_task_status",))
+    names = ("unspecified", "pending", "running", "done", "failed", "blocked", "monitoring", "scheduled", "cancelled")
+    value = {"chat_id": chat_id, "status": names[status], "status_id": status, "terminal": status in {3, 4, 8}}
+    if isinstance(goal[0], str) and goal[0].strip():
+        value["goal_id"] = goal[0]
+    return RPCParseResult("success", value=value)
 
 
 def _valid_scheduled_entry(entry: Any) -> bool:
@@ -588,10 +627,12 @@ def parse_music_chat(body: Any, **_: Any) -> RPCParseResult:
 
 
 PARSER_FUNCTIONS: Mapping[str, Callable[..., RPCParseResult]] = {
+    "task_goal": parse_task_goal,
     "conversation_page": parse_conversation_page,
     "remy_goals_page": parse_remy_goals_page,
     "notebook_list": parse_notebook_list,
     "notebook_move": parse_notebook_move,
+    "conversation_update": parse_conversation_update,
     "custom_gems": parse_custom_gems,
     "scheduled_registry": parse_scheduled_registry,
     "scheduled_get": parse_scheduled_get,

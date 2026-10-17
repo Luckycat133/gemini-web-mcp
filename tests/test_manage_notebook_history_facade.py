@@ -708,7 +708,7 @@ def test_scan_chat_history_sources_includes_notebook_chats(monkeypatch):
                         AsyncMock(return_value=[]))
     notebooks = [_notebook("n_1", "Math")]
     monkeypatch.setattr(manage_tools, "_fetch_native_notebooks",
-                        AsyncMock(return_value=(notebooks, {"source_rpc": "CNgdBe"})))
+                        AsyncMock(return_value=(notebooks, {**notebook_read_diagnostic(notebooks), "source_rpc": "CNgdBe"})))
     notebook_items = [{"id": "c_nb", "title": "Notebook Chat", "time": ""}]
     monkeypatch.setattr(manage_tools, "_fetch_notebook_chats",
                         AsyncMock(return_value=(notebook_items, {

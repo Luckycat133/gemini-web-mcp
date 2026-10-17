@@ -435,3 +435,17 @@ P2.2 实现阶段没有可用的专用账号，因此只完成离线 fixture/wor
 - [docs/faq.md](./faq.md) — 概念性问题
 - [evaluations/gemini_web_mcp_contract.xml](../evaluations/gemini_web_mcp_contract.xml) — 只读 QA 评估
 - [AGENTS.md](../AGENTS.md) — 仓库安全与构建规范
+
+## Current native Task and history checks
+
+Use disposable, explicitly authorized samples. Check runtime model discovery and
+low/medium/high thinking choices against the current webpage. Exercise history
+rename/pin/unpin with an exact ID and inspect `verified_updated`.
+
+For native Tasks, submit once with `task_mode=true`, preserve the returned chat
+ID, and reconnect to read `history(task_status)` plus `history(read)` if needed.
+A timeout does not authorize another start. Confirm nonterminal retention and
+terminal read-back; use a short explicit `delete_after_seconds` to verify automatic
+cleanup without waiting the normal retention interval. Delete only recorded
+test sources through MCP and verify their absence. Keep account observations
+separate from offline and mock checks.

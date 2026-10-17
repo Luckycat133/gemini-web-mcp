@@ -74,7 +74,7 @@ def test_representative_profile_snapshots_are_explicit_and_exhaustive() -> None:
         "all",
     }
     assert all(PRIMARY_PROFILE_TOOLS.values())
-    assert len(PRIMARY_PROFILE_TOOLS["all"]) == 46
+    assert len(PRIMARY_PROFILE_TOOLS["all"]) == 47
     assert COMPACT_TOOLS == {
         "account",
         "chat",

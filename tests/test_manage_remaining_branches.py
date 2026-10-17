@@ -38,6 +38,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 from tests._fastmcp_shim import FastMCP
+from tests._account_rpc_fakes import notebook_read_diagnostic
 
 import src.tools.manage as manage_tools
 
@@ -276,7 +277,7 @@ def test_scan_chat_history_sources_notebook_without_id_skipped(monkeypatch):
     # notebook 无 "id" 字段 → notebook.get("id", "")="" → continue
     monkeypatch.setattr(
         manage_tools, "_fetch_native_notebooks",
-        AsyncMock(return_value=([{"title": "No ID Notebook"}], {"source_rpc": "CNgdBe"})),
+        AsyncMock(return_value=([{"title": "No ID Notebook"}], {**notebook_read_diagnostic([1]), "source_rpc": "CNgdBe"})),
     )
     mcp = _make_mcp()
     result = _run(_call(mcp, "gemini_scan_chat_history_sources",
@@ -298,13 +299,13 @@ def test_scan_chat_history_sources_notebook_next_offset_non_int_breaks(monkeypat
     )
     monkeypatch.setattr(
         manage_tools, "_fetch_native_notebooks",
-        AsyncMock(return_value=([{"id": "n_1", "title": "Math"}], {"source_rpc": "CNgdBe"})),
+        AsyncMock(return_value=([{"id": "n_1", "title": "Math"}], {**notebook_read_diagnostic([1]), "source_rpc": "CNgdBe"})),
     )
     # has_more=True + next_offset="not_an_int" → break via `not isinstance(new_offset, int)`
     items = [{"id": "c_1", "title": "Chat 1", "is_pinned": False, "timestamp": 1000}]
     monkeypatch.setattr(
         manage_tools, "_fetch_notebook_chats",
-        AsyncMock(return_value=(items, {"has_more": True, "next_offset": "not_an_int"})),
+        AsyncMock(return_value=(items, {"has_more": True, "next_offset": "not_an_int", "diagnostic": notebook_read_diagnostic(items)})),
     )
     mcp = _make_mcp()
     result = _run(_call(mcp, "gemini_scan_chat_history_sources",
@@ -329,13 +330,13 @@ def test_scan_chat_history_sources_notebook_next_offset_le_current_breaks(monkey
     )
     monkeypatch.setattr(
         manage_tools, "_fetch_native_notebooks",
-        AsyncMock(return_value=([{"id": "n_1", "title": "Math"}], {"source_rpc": "CNgdBe"})),
+        AsyncMock(return_value=([{"id": "n_1", "title": "Math"}], {**notebook_read_diagnostic([1]), "source_rpc": "CNgdBe"})),
     )
     # has_more=True + next_offset=0 (== current 0) → break via `new_offset <= next_offset`
     items = [{"id": "c_1", "title": "Chat 1", "is_pinned": False, "timestamp": 1000}]
     monkeypatch.setattr(
         manage_tools, "_fetch_notebook_chats",
-        AsyncMock(return_value=(items, {"has_more": True, "next_offset": 0})),
+        AsyncMock(return_value=(items, {"has_more": True, "next_offset": 0, "diagnostic": notebook_read_diagnostic(items)})),
     )
     mcp = _make_mcp()
     result = _run(_call(mcp, "gemini_scan_chat_history_sources",
@@ -358,7 +359,7 @@ def test_scan_chat_history_sources_notebook_next_offset_advances_loop(monkeypatc
     )
     monkeypatch.setattr(
         manage_tools, "_fetch_native_notebooks",
-        AsyncMock(return_value=([{"id": "n_1", "title": "Math"}], {"source_rpc": "CNgdBe"})),
+        AsyncMock(return_value=([{"id": "n_1", "title": "Math"}], {**notebook_read_diagnostic([1]), "source_rpc": "CNgdBe"})),
     )
     item1 = {"id": "c_1", "title": "Chat 1", "is_pinned": False, "timestamp": 1000}
     item2 = {"id": "c_2", "title": "Chat 2", "is_pinned": False, "timestamp": 2000}
@@ -366,8 +367,8 @@ def test_scan_chat_history_sources_notebook_next_offset_advances_loop(monkeypatc
     monkeypatch.setattr(
         manage_tools, "_fetch_notebook_chats",
         AsyncMock(side_effect=[
-            ([item1], {"has_more": True, "next_offset": 5}),
-            ([item2], {"has_more": False, "next_offset": None}),
+            ([item1], {"has_more": True, "next_offset": 5, "diagnostic": notebook_read_diagnostic([item1])}),
+            ([item2], {"has_more": False, "next_offset": None, "diagnostic": notebook_read_diagnostic([item2])}),
         ]),
     )
     mcp = _make_mcp()

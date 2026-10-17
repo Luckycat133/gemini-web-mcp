@@ -5,6 +5,8 @@ Use exact IDs provided by the user or returned by authorized reads. Every tool t
 ```json
 {"tool":"gemini_history","arguments":{"request":{"action":"list","limit":20}}}
 {"tool":"gemini_history","arguments":{"request":{"action":"read","chat_id":"<observed chat_id>"}}}
+{"tool":"gemini_history","arguments":{"request":{"action":"update","chat_id":"<observed chat_id>","title":"New title","pinned":false}}}
+{"tool":"gemini_history","arguments":{"request":{"action":"task_status","chat_id":"<observed Task chat_id>"}}}
 {"tool":"gemini_notebooks","arguments":{"request":{"action":"move","chat_id":"<observed chat_id>","notebook_id":"<observed notebook_id>"}}}
 {"tool":"gemini_scheduled","arguments":{"request":{"action":"create_daily","title":"Morning briefing","instructions":"Summarize current engineering news","hour":9,"timezone_name":"Asia/Shanghai"}}}
 {"tool":"gemini_gems","arguments":{"request":{"action":"update","gem_id":"<observed gem_id>","description":"Concise engineering critique"}}}
@@ -39,3 +41,6 @@ contents are excluded. Output files and the local Prompt library are separate
 stores. Read the connected action schema when options or coverage differ.
 
 Reproducible offline call/schema and expected-route cases live in evaluations/focused_skill_cases.json. These fixtures do not claim measured LLM trigger accuracy or live account mutations.
+
+History `update` preserves omitted fields; `pinned=false` unpins. `task_status`
+reads an existing native Task without resubmitting or deleting its source.

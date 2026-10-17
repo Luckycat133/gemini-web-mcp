@@ -43,17 +43,17 @@ mcp = MCPServer(
     instructions=f"""
 # Gemini Web MCP Server (v{__version__})
 
-## 可用模型
-- flash-lite → Web UI 3.5 Flash-Lite
-- flash / fast → Web UI 3.8 Flash
-- pro → Web UI 3.1 Pro
-- 三个 Web UI 模型都支持 thinking_level=standard/extended
-- thinking 保留为旧兼容别名
+## 模型与模式
+- flash-lite / flash / pro 保留稳定别名；也接受当前运行时目录名称（如 4 Argon）
+- 先用 gemini_list_models 核对当前账号目录；静态清单不是账号权限证明
+- thinking_level: low / medium / high；standard=low、extended=high 保持兼容
+- thinking 保留为 flash 的旧兼容模型别名
+- task_mode=true 选择网页原生任务；通过 gemini_history(action="task_status", chat_id=...) 读回状态
 
 ## 工具组（可配置）
 - model/chat: 只调用 Gemini 模型
 - history: 只读历史 list/scan/search/read/export
-- history-organize: 历史整理 + native Notebook 移动
+- history-organize: 历史重命名/固定 + native Notebook 移动
 - account-read: 账号 Web surface 只读盘点
 - scheduled-admin: 明确授权后管理定时操作
 - core: 通用内容工作流，包含聊天、媒体、文件/URL、Deep Research
