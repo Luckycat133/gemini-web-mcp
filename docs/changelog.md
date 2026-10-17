@@ -22,6 +22,7 @@ Publication still requires review and merge.
 - Added multimodal onboarding with opt-in video/music starts and explicit operation recovery, and an evidence-backed client/OS/distribution matrix.
 
 ### Fixed
+- Made the cleanup heartbeat regression use controlled time and a persisted-renewal handshake, preserving peer-claim and single-delete assertions without depending on millisecond runner scheduling.
 - Retained unfinished media sources when a recovery history turn has no matching media card, even if its text announces completion. Added SQLite restart regressions and verified a live unfinished-video restart through the same MCP handle, followed by exact owned-source cleanup.
 - Aligned focused Skill setup with a compatible checkout, included image verification dependencies in creation setup, and clarified Assist's domain-result envelope. Setup tests validate commands and installed entrypoints rather than a moving source URL.
 - Corrected creation and Research recovery annotations to cover saved files and stored-policy source-chat deletion; status/result are not read-only.

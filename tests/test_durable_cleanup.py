@@ -10,7 +10,7 @@ from unittest.mock import AsyncMock, Mock
 
 import pytest
 
-from src import client_wrapper
+from src import client_wrapper, remote_chat_cleanup_manager as cleanup_module
 from src.domain import CleanupState
 from src.infrastructure.rpc_contracts import get_contract
 from src.infrastructure.state_store import StateStore, authentication_scope
@@ -140,25 +140,62 @@ def test_expired_process_lease_recovers_absence_without_second_delete(tmp_path):
     assert client._batch_execute.await_count == 2
 
 
-def test_heartbeat_prevents_peer_reclaim_during_slow_delete(tmp_path):
-    store = StateStore(tmp_path / "state.sqlite3")
-    first = _manager(store, lease_seconds=0.06)
-    second, client = _manager(StateStore(store.path)), _client()
+def test_heartbeat_prevents_peer_reclaim_during_slow_delete(tmp_path, monkeypatch):
+    now, lease_seconds = [1000.0], 0.06
+
+    def clock():
+        return now[0]
+
+    # Replace this module's clock reference without changing process-wide time.
+    monkeypatch.setattr(cleanup_module, "time", SimpleNamespace(time=clock))
+    store = StateStore(tmp_path / "state.sqlite3", clock=clock)
+    peer_store = StateStore(store.path, clock=clock)
+    first = _manager(store, lease_seconds=lease_seconds)
+    second, client = _manager(peer_store), _client()
     first.schedule_cleanup("c_owned", delete_after_seconds=0)
     async def run():
-        entered, release = asyncio.Event(), asyncio.Event()
+        entered, release, renewed = asyncio.Event(), asyncio.Event(), asyncio.Event()
         async def delete(_cid):
             entered.set()
             await release.wait()
         client.delete_chat.side_effect = delete
         task = asyncio.create_task(first.cleanup_due_chat_results(client=client))
-        await entered.wait()
-        await asyncio.sleep(0.15)
-        assert await second.cleanup_due_chat_results(client=client) == ()
-        release.set()
-        return await task
-    assert asyncio.run(run())[0].state is CleanupState.COMPLETED
-    client.delete_chat.assert_awaited_once()
+        try:
+            async with asyncio.timeout(5):
+                await entered.wait()
+                claimed = first.list_durable_jobs()[0]
+                assert claimed.state == "running" and claimed.attempts == 1
+                assert claimed.lease_until == clock() + lease_seconds
+                renew = store.cleanup_jobs.renew
+
+                def observe_renew(*args, **kwargs):
+                    result = renew(*args, **kwargs)
+                    if result is not None:
+                        renewed.set()
+                    return result
+
+                monkeypatch.setattr(store.cleanup_jobs, "renew", observe_renew)
+                now[0] += lease_seconds / 2
+                await renewed.wait()
+                extended = peer_store.cleanup_jobs.get(claimed.scope_id, "c_owned")
+                assert extended.lease_id == claimed.lease_id
+                assert extended.lease_until > claimed.lease_until
+                now[0] = (claimed.lease_until + extended.lease_until) / 2
+                assert claimed.lease_until < clock() < extended.lease_until
+                assert await second.cleanup_due_chat_results(client=client) == ()
+                peer = await second.delete_chat_result("c_owned", client=client)
+                assert peer.state is CleanupState.PENDING and peer.idempotent
+                active = peer_store.cleanup_jobs.get(claimed.scope_id, "c_owned")
+                assert active.state == "running" and active.attempts == 1
+                assert active.lease_id == claimed.lease_id
+                release.set()
+                return await task
+        finally:
+            release.set()
+            await asyncio.gather(task, return_exceptions=True)
+    result = asyncio.run(run())[0]
+    assert result.state is CleanupState.COMPLETED and result.attempts == 1
+    client.delete_chat.assert_awaited_once_with("c_owned")
 
 
 @pytest.mark.parametrize("decision", ["retain", "cancel"])
