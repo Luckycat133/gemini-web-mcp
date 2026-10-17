@@ -22,7 +22,7 @@ from typing import Any
 from ..domain import Artifact, ArtifactKind, ArtifactState, ArtifactVerification, ArtifactVerificationStatus, DomainErrorCode, OperationState
 
 RETENTION_SECONDS = 7 * 24 * 60 * 60
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 _INITIALIZATION_TIMEOUT_SECONDS = 3.0
 _INITIALIZATION_RETRY_INTERVAL_SECONDS = 0.01
 _IDENTIFIER = re.compile(r"^[A-Za-z0-9_:\-]{1,256}$")
@@ -45,6 +45,15 @@ def _require_private_filesystem() -> None:
 def _identifier(value: str) -> str:
     if not isinstance(value, str) or not _IDENTIFIER.fullmatch(value):
         raise ValueError("Invalid state identifier.")
+    return value
+
+
+def _artifact_filename(value: str | None) -> str | None:
+    if value is not None and (
+        not value.strip() or value in {".", ".."} or Path(value).name != value
+        or any(character in "/\\\x00" or ord(character) < 32 for character in value)
+    ):
+        raise ValueError("Persistent artifact filename must be a single file name.")
     return value
 
 
@@ -106,6 +115,7 @@ class OperationRecord:
     delete_after_seconds: int | None = None
     lease_id: str | None = None
     lease_until: float | None = None
+    filename: str | None = None
 
 
 @dataclass(frozen=True)
@@ -218,6 +228,9 @@ class StateStore:
                 if version < 3:
                     connection.execute("ALTER TABLE operations ADD COLUMN lease_id TEXT")
                     connection.execute("ALTER TABLE operations ADD COLUMN lease_until REAL")
+                    connection.execute("PRAGMA user_version=3")
+                if version < 4:
+                    connection.execute("ALTER TABLE operations ADD COLUMN filename TEXT")
                     connection.execute(f"PRAGMA user_version={SCHEMA_VERSION}")
                 now = self.clock()
                 prune = self._last_prune_at is None or now - self._last_prune_at >= 3600
@@ -269,6 +282,7 @@ def _operation(row: sqlite3.Row) -> OperationRecord:
     try:
         value["state"] = OperationState(value["state"])
         value["retain_chat"] = bool(value["retain_chat"])
+        value["filename"] = _artifact_filename(value["filename"])
         value["artifacts"] = tuple(ArtifactLocator(**item) for item in json.loads(value["artifacts"]))
         for item in value["artifacts"]:
             item.artifact()
@@ -294,6 +308,7 @@ class OperationRepository:
             raise ValueError("Invalid cleanup delay.")
         if record.output_dir and not Path(record.output_dir).is_absolute():
             raise ValueError("Persistent artifact destination must be absolute.")
+        _artifact_filename(record.filename)
         values = asdict(record)
         values["state"] = record.state.value
         values["artifacts"] = json.dumps(values["artifacts"], separators=(",", ":"))

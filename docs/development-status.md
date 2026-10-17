@@ -1,6 +1,6 @@
 # Development status
 
-Updated: 2026-10-03.
+Updated: 2026-10-17.
 
 The active Python package and all five repository Skills declare `0.2.2`.
 Published `v0.2.0` and `v0.2.1` tags remain immutable. The release PR requires
@@ -80,9 +80,16 @@ an unfinished provider generation after an arbitrary hard crash.
 
 Offline regressions, real modern/legacy MCP stdio, clean-wheel installation,
 Skill validation/direct installation and realistic agent handoffs are separate
-gates. The dated full review, media repairs and latest Skill consolidation
-evidence are recorded in [review fixes](code-review-fixes.md). Implementation
-snapshot `dc2ade5` passed 2,234 offline tests on both Python 3.11 and 3.12,
+gates. The dated full review, media repairs, Skill consolidation and recovery
+repairs are recorded in [review fixes](code-review-fixes.md). The 2026-10-17
+recovery repairs passed Ruff, Mypy (80 source files), 2,246 offline tests and
+351 architecture/distribution checks locally on Python 3.13.12. All eleven
+profile catalogs and real modern/legacy stdio calls on all five surfaces passed
+under both model and core profiles. These are offline/local protocol results;
+no new Gemini account checks were performed.
+
+The earlier implementation snapshot `dc2ade5` passed 2,234 offline tests on
+both Python 3.11 and 3.12,
 345 architecture/distribution checks, static checks, real stdio, Skill
 installation and clean-wheel/uvx checks in
 [CI](https://github.com/Luckycat133/gemini-web-mcp/actions/runs/37086461479).

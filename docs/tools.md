@@ -333,7 +333,7 @@ report 本地产物；history 的 list/search/read/export/delete 也在 primary 
 - `output_dir`: str - 输出目录，默认 `generated_media/`
 - `filename`: str - 可选单个文件名，已有文件不会被覆盖
 - `retain_chat`: bool - 保留本次生成的源会话，默认 `false`
-- `delete_after_seconds`: int | None - 显式延迟清理；正值覆盖立即清理，任务仅保存在当前进程
+- `delete_after_seconds`: int | None - 显式延迟清理；正值覆盖立即清理，任务持久化到本地 SQLite
 
 **真实网页行为：**
 - `image`: Flash-Lite 使用 `Nano Banana 2 Lite`；Flash / Pro 使用 `Nano Banana 2`
@@ -344,6 +344,10 @@ report 本地产物；history 的 list/search/read/export/delete 也在 primary 
 **artifact 行为：** primary 与 compact 均默认保存到本地；响应保留远端 URI，实际写入的文件会检查存在性、
 非零大小、真实格式和解码/流证据。排队、空响应和保存失败有独立结构化状态。
 `prompt` 不可为空；`filename` 只能是单个文件名，若目标文件已存在会另取不冲突的名字。
+延迟清理会在服务重新绑定相同凭据及原 SQLite 身份密钥后恢复；所有服务停止期间不会执行删除。
+需要撤销时，使用 `gemini-mcp-account` 的 `gemini_cleanup(request={"action":"status"})`
+找到该源聊天对应的 `job_id`，再调用 `gemini_cleanup(request={"action":"cancel","job_id":"..."})`。
+取消会撤销后续尝试，不能撤回已经发出的删除请求；详见[任务恢复和清理](operations-and-cleanup.md)。
 排队、仅远端、保存失败或尚未验证的产物会保留聊天以便恢复，结构化结果中的 `source_chat_id` 只在上游实际提供时出现。
 上游已结束且所有输出都已本地保存并验证，或响应/可信读回明确没有生成产物时，默认立即清理本次新建的源聊天。
 即使部分文件已可用，上游仍明确排队时也会保留源聊天；音乐恢复读取失败不会被当成空结果。

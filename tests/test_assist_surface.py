@@ -365,9 +365,9 @@ def test_gemini_research_registration_and_annotations():
 
     assert tool.description and tool.description.strip()
     assert tool.annotations is not None
-    # gemini_research starts a remote Deep Research run: mutating, not destructive.
+    # Status/result can save a report and delete its source under the stored policy.
     assert tool.annotations.read_only_hint is False
-    assert tool.annotations.destructive_hint is False
+    assert tool.annotations.destructive_hint is True
     assert tool.annotations.idempotent_hint is False
     assert tool.annotations.open_world_hint is True
 
