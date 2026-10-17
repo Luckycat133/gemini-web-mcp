@@ -55,7 +55,7 @@ from ..services import (
     UnderstandService,
     observed_backend_from_response,
 )
-from ..tools.annotations import MUTATES_REMOTE
+from ..tools.annotations import DESTRUCTIVE_REMOTE, MUTATES_REMOTE
 from ..tools.utils import parse_response
 
 logger = logging.getLogger(__name__)
@@ -371,7 +371,7 @@ def _render_research_start(data: LongOperationData) -> list[TextContent]:
     return [TextContent(type="text", text="\n".join(sections))]
 
 
-@mcp.tool(annotations=MUTATES_REMOTE)
+@mcp.tool(annotations=DESTRUCTIVE_REMOTE)
 @domain_error_boundary("gemini_research", logger)
 async def gemini_research(
     query: str = "",
@@ -395,6 +395,8 @@ async def gemini_research(
     best effort: cancel_requested does not claim provider cancellation.
     Research chats are retained by default and unresolved reports remain
     protected even when retain_chat=false. Deep Research requires entitlement.
+    Status/result recovery can save reports and delete the source chat under
+    the stored retention policy; these actions are not read-only.
     """
     if action == "start":
         result = await _research_service.start(

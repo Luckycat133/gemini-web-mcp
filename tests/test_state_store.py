@@ -127,19 +127,42 @@ def test_schema_migrates_old_metadata_and_rejects_future_version(tmp_path):
     store = _store(tmp_path / "state.sqlite3")
     store.operations.create(_operation(output_dir=str(tmp_path), retain_chat=False, delete_after_seconds=90))
     with store.transaction() as conn:
-        # Remove the v2/v3 columns to simulate the prior metadata-only schema.
-        for column in ("output_dir", "retain_chat", "delete_after_seconds", "lease_id", "lease_until"):
+        # Remove the v2/v3/v4 columns to simulate the prior metadata-only schema.
+        for column in ("output_dir", "retain_chat", "delete_after_seconds", "lease_id", "lease_until", "filename"):
             conn.execute(f"ALTER TABLE operations DROP COLUMN {column}")
         conn.execute("PRAGMA user_version=1")
     restored = _store(store.path).operations.get("scope_a", "op_test")
     assert restored.retain_chat is True
     assert restored.output_dir is None
     assert restored.lease_id is None
+    assert restored.filename is None
     with store.transaction() as conn:
         assert conn.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
         conn.execute(f"PRAGMA user_version={SCHEMA_VERSION + 1}")
     with pytest.raises(StateStoreError, match="newer"):
         _store(store.path).operations.get("scope_a", "op_test")
+
+
+def test_schema_v3_migration_preserves_policy_and_defaults_missing_filename(tmp_path):
+    store = _store(tmp_path / "state.sqlite3")
+    store.operations.create(_operation(output_dir=str(tmp_path), retain_chat=False,
+                                       delete_after_seconds=90, filename="theme.mp3"))
+    with store.transaction() as conn:
+        conn.execute("ALTER TABLE operations DROP COLUMN filename")
+        conn.execute("PRAGMA user_version=3")
+    restored = _store(store.path).operations.get("scope_a", "op_test")
+    assert restored.filename is None
+    assert restored.output_dir == str(tmp_path)
+    assert restored.retain_chat is False
+    assert restored.delete_after_seconds == 90
+    with store.transaction() as conn:
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
+
+
+@pytest.mark.parametrize("filename", ["../outside.mp4", "nested/output.mp4", "..", "bad\\name.mp4", "bad\x00name.mp4"])
+def test_persistent_operation_rejects_unsafe_artifact_filename(tmp_path, filename):
+    with pytest.raises(ValueError, match="single file name"):
+        _store(tmp_path / "state.sqlite3").operations.create(_operation(filename=filename))
 
 
 def test_two_connections_create_one_idempotent_operation(tmp_path):

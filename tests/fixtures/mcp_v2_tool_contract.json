@@ -54,7 +54,7 @@
         "output_schema_sha256": "be68ce03fb96679d72b227c30eabbee2c0035b13c225556c9c9eb59ea03663c8"
       },
       {
-        "annotations_sha256": "99300d9e2937ba92c763822593cb3ba8ec634d1813f3ab37fad3d6d0432268f9",
+        "annotations_sha256": "bbca3f90a8f37a2e09188309470b131134c395dbc4eccad15de06d2c2f94f06a",
         "input_schema_sha256": "c0227b15b4fd9b17fb1db9d5035a9dead29d0289e74116cf3d174212bf10a9bc",
         "name": "gemini_research",
         "output_schema_sha256": "58d1366f703631472120011283d76743a595309ff03cfbfd12d651aaba0d123f"
@@ -178,13 +178,13 @@
         "output_schema_sha256": "28951b7673070bd050e06aa5a7dca7a185e587fa432fcf2c1b17ba06ad65e632"
       },
       {
-        "annotations_sha256": "139076388a98d13d07bb3df5c31e17088f4e37e0af35e2d89a7d5b112ee0e214",
+        "annotations_sha256": "bbca3f90a8f37a2e09188309470b131134c395dbc4eccad15de06d2c2f94f06a",
         "input_schema_sha256": "f8560301a00ecacb4261385bdda0f0e4cbc3d5fce9d28fd4ea2c9ebf25fe357c",
         "name": "gemini_get_operation_result",
         "output_schema_sha256": "28951b7673070bd050e06aa5a7dca7a185e587fa432fcf2c1b17ba06ad65e632"
       },
       {
-        "annotations_sha256": "139076388a98d13d07bb3df5c31e17088f4e37e0af35e2d89a7d5b112ee0e214",
+        "annotations_sha256": "bbca3f90a8f37a2e09188309470b131134c395dbc4eccad15de06d2c2f94f06a",
         "input_schema_sha256": "4a39c82afc874dc284a35d69e9adbf534b6f1654eaf6cd444b73358206abd657",
         "name": "gemini_get_operation_status",
         "output_schema_sha256": "28951b7673070bd050e06aa5a7dca7a185e587fa432fcf2c1b17ba06ad65e632"

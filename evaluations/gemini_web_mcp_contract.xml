@@ -152,6 +152,14 @@
     <answer>gemini_get_operation_result</answer>
   </qa_pair>
   <qa_pair>
+    <question>Focused creation status/result and Research recovery can save files and apply stored source-chat deletion policy. What readOnlyHint and destructiveHint values describe these recovery-capable tools? Answer with both boolean values.</question>
+    <answer>readOnlyHint=false and destructiveHint=true</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>Does a focused music/video operation preserve its requested filename across a server restart, while keeping the existing collision-avoidance behavior? Answer yes or no.</question>
+    <answer>yes</answer>
+  </qa_pair>
+  <qa_pair>
     <question>Which optional opaque argument should a focused music/video caller reuse after losing a start response, so the registered operation is returned instead of generating again? Answer with the argument name.</question>
     <answer>idempotency_key</answer>
   </qa_pair>

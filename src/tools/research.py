@@ -51,7 +51,7 @@ from ..services.research import (
     resolve_deep_research_transport_model as _resolve_deep_research_transport_model,
     wait_for_deep_research_by_chat as _wait_by_chat,
 )
-from .annotations import MUTATES_LOCAL, MUTATES_REMOTE, READS_PRIVATE_REMOTE
+from .annotations import DESTRUCTIVE_REMOTE, MUTATES_LOCAL, READS_PRIVATE_REMOTE
 
 logger = logging.getLogger(__name__)
 
@@ -160,7 +160,7 @@ def register_research_tools(mcp: MCPServer):
             "2. 该功能在您所在的区域是否可用？"
         )
 
-    @mcp.tool(annotations=MUTATES_REMOTE)
+    @mcp.tool(annotations=DESTRUCTIVE_REMOTE)
     async def gemini_deep_research(
         query: str = "",
         model: str = "flash",

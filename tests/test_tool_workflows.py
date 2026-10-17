@@ -102,6 +102,7 @@ def test_all_group_tools_have_mcp_annotations():
         assert by_name["gemini_reset_session"].annotations.destructive_hint is True
         assert by_name["gemini_upload_file"].annotations.open_world_hint is True
         assert by_name["gemini_deep_research"].annotations.read_only_hint is False
+        assert by_name["gemini_deep_research"].annotations.destructive_hint is True
         assert by_name["gemini_list_research_report_actions"].annotations.read_only_hint is True
         assert by_name["gemini_create_from_research_report"].annotations.read_only_hint is False
         assert by_name["gemini_create_from_research_report"].annotations.open_world_hint is False

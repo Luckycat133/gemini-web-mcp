@@ -15,7 +15,7 @@ from ..domain import DomainResult
 from ..domain.results import result_from_exception
 from ..services.creation import CreationRequest, get_creation_service
 from ..services.operations import OperationContext, OperationService, get_operation_service
-from ..tools.annotations import MUTATES_REMOTE, READS_PRIVATE_REMOTE
+from ..tools.annotations import DESTRUCTIVE_REMOTE, MUTATES_REMOTE
 
 logger = logging.getLogger(__name__)
 SERVER_NAME = "gemini_create_mcp"
@@ -27,6 +27,7 @@ Video and music start once asynchronously and return an opaque operation_id.
 Use operation status/result with that handle, including after a server restart;
 never repeat a generation to recover a timeout. Metadata/locators expire after
 seven days; prompts and response contents are not persisted in the state store.
+The output directory and optional requested filename survive server restarts.
 Local output is saved and verified before automatic owned-chat cleanup. Queued,
 unsaved or uncertain output retains its source; cleanup metadata is independent
 of artifact readiness. Cancellation before provider submission can be confirmed
@@ -78,6 +79,7 @@ async def _start(request: CreationRequest, idempotency_key: str | None = None) -
         result = await _operations().start(
             request.media_type, runner, recovery=creation.recover,
             output_dir=str(Path(request.output_dir or "generated_media").expanduser().absolute()),
+            filename=request.filename,
             retain_chat=request.retain_chat, delete_after_seconds=request.delete_after_seconds,
             idempotency_key=idempotency_key,
         )
@@ -175,15 +177,21 @@ async def _operation(action: str, operation_id: str) -> CallToolResult:
     return focused_result(result, "Operation state and recoverable artifacts.")
 
 
-@mcp.tool(annotations=READS_PRIVATE_REMOTE)
+@mcp.tool(annotations=DESTRUCTIVE_REMOTE)
 async def gemini_get_operation_status(operation_id: str) -> OperationToolResult:
-    """Read one owned operation's state, using its saved source without resubmission."""
+    """Recover an owned operation's state without resubmitting generation.
+
+    Recovery can save files and delete the source chat under its stored policy.
+    """
     return await _operation("status", operation_id)
 
 
-@mcp.tool(annotations=READS_PRIVATE_REMOTE)
+@mcp.tool(annotations=DESTRUCTIVE_REMOTE)
 async def gemini_get_operation_result(operation_id: str) -> OperationToolResult:
-    """Recover verified artifacts from this operation's existing source or local files."""
+    """Recover artifacts, saving files and applying the stored source-chat policy.
+
+    Verified output can trigger deletion of this operation's source chat.
+    """
     return await _operation("result", operation_id)
 
 

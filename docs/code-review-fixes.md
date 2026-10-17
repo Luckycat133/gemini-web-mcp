@@ -193,3 +193,36 @@ repository work. Its five proposed MCP requests passed actual schema
 validation without submission. The local page and exact filesystem deletion
 were executed. This verifies task guidance under fixture conditions; it does
 not claim new live Gemini results or a measured trigger-accuracy score.
+
+## Recovery review repairs — 2026-10-17
+
+Creation status/result and both Research entrypoints now declare the possible
+file writes and source-chat deletion performed by recovery. The primary
+manifest, evaluation contract and MCP annotation snapshots agree with these
+semantics; tool names and input/output schemas are unchanged.
+
+SQLite schema v4 stores the optional requested media filename. Restart recovery
+passes it back to materialization, retaining collision avoidance. Migration
+tests cover v1 and v3 databases; interrupted-worker tests rebuild the operation
+service and recover through both focused status/result tools, checking saved
+filenames, cleanup policy and the absence of another generation request.
+
+The media and cleanup documentation now describes durable delayed deletion,
+its credential-scope/identity-key recovery conditions and exact-job cancellation
+through the account facade. Stopping every server pauses execution but does
+not discard the job; cancellation cannot retract an in-flight deletion.
+
+Local verification used Python 3.13.12, MCP SDK 2.2.0 and gemini-webapi 2.1.1:
+
+| Gate | Result |
+| --- | --- |
+| Targeted recovery/annotation/migration regressions | 115 passed |
+| Ruff / Mypy | Passed; 80 source files checked by Mypy |
+| Complete offline suite | 2,246 passed |
+| Architecture/distribution checklist | 351 passed |
+| Representative profile catalogs | All eleven exact catalogs passed |
+| Real MCP stdio | Modern/legacy list/call passed on all five surfaces in model/core profiles |
+
+These results cover local recovery and protocol behavior without live Gemini
+account calls. Earlier hosted and live evidence above remains tied to its
+original revision.

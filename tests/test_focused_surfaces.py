@@ -80,6 +80,93 @@ def test_focused_image_and_edit_verify_real_local_bytes(monkeypatch, tmp_path):
     assert finalizer.await_count == 2
 
 
+@pytest.mark.parametrize("tool_name", ["gemini_get_operation_status", "gemini_get_operation_result"])
+def test_creation_recovery_annotations_allow_local_writes_and_remote_cleanup(tool_name):
+    tool = next(tool for tool in asyncio.run(create.mcp.list_tools()) if tool.name == tool_name)
+    assert tool.annotations.read_only_hint is False
+    assert tool.annotations.destructive_hint is True
+    assert tool.annotations.open_world_hint is True
+
+
+@pytest.mark.parametrize("action", ["status", "result"])
+@pytest.mark.parametrize("filename", [None, "客户主题.mp3"])
+def test_media_recovery_preserves_filename_and_applies_cleanup_policy_after_restart(monkeypatch, tmp_path, action, filename):
+    store = StateStore(tmp_path / "state.sqlite3")
+    original = OperationService(store, lambda: "scope_fixture")
+    entered = asyncio.Event()
+    starts = []
+    downloads = []
+
+    class InterruptedCreation(CreationService):
+        async def generate(self, request, on_chat_observed=None, **_kwargs):
+            starts.append(request)
+            on_chat_observed("c_filename_recovery")
+            entered.set()
+            await asyncio.Event().wait()
+
+    class Music:
+        mp3_url = "https://cdn.test/recovered.wav"
+        url = ""
+        title = "fixture"
+
+        async def save(self, *, path, filename, **_kwargs):
+            downloads.append(filename)
+            return {"audio": str(write_audio(Path(path) / filename))}
+
+    response = SimpleNamespace(metadata=["c_filename_recovery"], images=[], videos=[], media=[Music()])
+    remote = SimpleNamespace(
+        read_chat=AsyncMock(return_value=SimpleNamespace(
+            cid="c_filename_recovery", turns=[SimpleNamespace(role="model", model_output=response)],
+        )),
+        generate_content=AsyncMock(side_effect=AssertionError("Recovery cannot submit generation")),
+    )
+    finalizer = AsyncMock(side_effect=fake_finalize_generated_cleanup)
+    recovery = CreationService(client_provider=lambda: remote, initializer=AsyncMock(),
+                               cleanup_due=AsyncMock(), finalizer=finalizer)
+    monkeypatch.setattr(create, "get_creation_service", InterruptedCreation)
+    monkeypatch.setattr(create, "get_operation_service", lambda: original)
+
+    async def run():
+        arguments = {"prompt": "fixture", "output_dir": str(tmp_path / "media"), "retain_chat": False}
+        if filename is not None:
+            arguments["filename"] = filename
+        async with Client(create.mcp, cache=None) as connection:
+            started = await connection.call_tool("gemini_generate_music", arguments)
+            handle = started.structured_content["data"]["operation_id"]
+            await asyncio.wait_for(entered.wait(), 2)
+            record = store.operations.get("scope_fixture", handle)
+            assert record.filename == filename
+            assert starts[0].filename == (filename or handle)
+            worker = original._tasks[handle]
+            worker.cancel()
+            await worker
+
+        resumed = OperationService(StateStore(store.path), lambda: "scope_fixture")
+        assert resumed.store.operations.get("scope_fixture", handle).filename == filename
+        monkeypatch.setattr(operations_service, "_service", resumed)
+        monkeypatch.setattr(create, "get_operation_service", lambda: resumed)
+        monkeypatch.setattr(create, "get_creation_service", lambda: recovery)
+        async with Client(create.mcp, cache=None) as connection:
+            restored = await connection.call_tool(f"gemini_get_operation_{action}", {"operation_id": handle})
+        result = restored.structured_content
+        assert result["ok"] and result["data"]["state"] == "completed"
+        artifact = result["data"]["artifacts"][0]
+        expected_name = filename or f"{handle}.mp3"
+        assert downloads == [expected_name]
+        assert Path(artifact["local_path"]).name == expected_name
+        assert artifact["verification"]["status"] == "verified"
+        assert Path(artifact["local_path"]).is_file()
+        finalizer.assert_awaited_once()
+        assert finalizer.call_args.kwargs["owns_chat"] is True
+        assert finalizer.call_args.kwargs["retain_chat"] is False
+        assert finalizer.call_args.kwargs["preserve_for_recovery"] is False
+        assert len(starts) == 1
+        remote.generate_content.assert_not_awaited()
+        remote.read_chat.assert_awaited_once()
+
+    asyncio.run(run())
+
+
 def test_async_media_response_loss_idempotency_restart_recovery_and_no_prompt_persistence(monkeypatch, tmp_path):
     store = StateStore(tmp_path / "state.sqlite3")
     old = OperationService(store, lambda: "scope_fixture")

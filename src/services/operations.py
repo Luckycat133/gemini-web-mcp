@@ -170,12 +170,14 @@ class OperationService:
     async def start(
         self, kind: str, runner: Runner, *, recovery: Recovery | None = None,
         idempotency_key: str | None = None, output_dir: str | None = None,
+        filename: str | None = None,
         retain_chat: bool = True, delete_after_seconds: int | None = None,
     ) -> DomainResult[LongOperationData]:
         if recovery is not None:
             self.register_recovery(kind, recovery)
         result, context, created = self.reserve(kind, idempotency_key=idempotency_key,
                                                 output_dir=output_dir, retain_chat=retain_chat,
+                                                filename=filename,
                                                 delete_after_seconds=delete_after_seconds)
         if context is not None and created:
             record = self.store.operations.get(context.scope_id, context.operation_id)
@@ -187,6 +189,7 @@ class OperationService:
 
     def reserve(
         self, kind: str, *, idempotency_key: str | None = None, output_dir: str | None = None,
+        filename: str | None = None,
         retain_chat: bool = True, delete_after_seconds: int | None = None,
     ) -> tuple[DomainResult[LongOperationData], OperationContext | None, bool]:
         """Allocate the same durable handle for a synchronous compatibility call."""
@@ -203,6 +206,7 @@ class OperationService:
                 state=OperationState.ACCEPTED, created_at=now, updated_at=now,
                 expires_at=now + RETENTION_SECONDS, idempotency_key=idempotency_key,
                 output_dir=str(Path(output_dir).expanduser().absolute()) if output_dir else None,
+                filename=filename,
                 retain_chat=retain_chat, delete_after_seconds=delete_after_seconds,
             ))
         except (StateStoreError, ValueError):

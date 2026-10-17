@@ -204,9 +204,9 @@ TOOL_MANIFEST: list[dict[str, Any]] = [
     {
         "name": "gemini_deep_research",
         "group": "research",
-        "purpose": "Run the Gemini Web Deep Research planning and report workflow.",
+        "purpose": "Run or recover Deep Research, saving reports and applying the stored source-chat cleanup policy.",
         "read_only": False,
-        "destructive": False,
+        "destructive": True,
         "privacy": "sends_research_query",
         "pagination": False,
     },

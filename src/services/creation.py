@@ -266,6 +266,7 @@ class CreationService:
                     client, response, media_type=media_type, prompt=record.operation_id,
                     requested_model="recovered", request_model=None, effective_backend=None,
                     output_dir=output_dir, artifact_sink=observed,
+                    filename=getattr(record, "filename", None),
                     existing_artifacts=stored,
                 )
                 artifacts = media_artifacts(merge_artifacts(stored, materialized.artifacts), media_type)
