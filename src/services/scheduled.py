@@ -21,7 +21,7 @@ def _parse_observation(response: Any, contract_key: str, **arguments: Any) -> tu
     envelope = parse_rpc_envelope(response_text, contract.rpc_id)
     if envelope.reject_code is not None:
         parsed = RPCParseResult("rejected", reject_code=envelope.reject_code)
-    elif len(envelope.bodies) == 1:
+    elif envelope.single_body:
         parsed = parse_contract_body(contract, envelope.bodies[0], **arguments)
     else:
         parsed = RPCParseResult("changed_shape", warnings=("missing_or_ambiguous_body",))
@@ -34,15 +34,15 @@ def _parse_observation(response: Any, contract_key: str, **arguments: Any) -> tu
         "status_code": getattr(response, "status_code", None),
         "response_length": len(response_text),
         "body_present": bool(envelope.bodies),
-        "raw_body_type": type(envelope.bodies[0]).__name__ if len(envelope.bodies) == 1 else None,
+        "raw_body_type": type(envelope.bodies[0]).__name__ if envelope.single_body else None,
         "raw_top_level_count": (
-            len(envelope.bodies[0]) if len(envelope.bodies) == 1 and isinstance(envelope.bodies[0], list) else None
+            len(envelope.bodies[0]) if envelope.single_body and isinstance(envelope.bodies[0], list) else None
         ),
         "reject_code": envelope.reject_code,
         "read_back_valid": (
             getattr(response, "status_code", None) == 200
             and envelope.parsed and envelope.reject_code is None
-            and len(envelope.bodies) == 1 and parsed.ok
+            and envelope.single_body and parsed.ok
         ),
     }
     return parsed, diagnostic
@@ -67,7 +67,9 @@ async def fetch_scheduled_registry(
     response = await execute_contract(client, contract.key)
     parsed, diagnostic = _parse_observation(response, contract.key, max_chars=max_chars)
     entries = parsed.value if _valid_read_back(diagnostic) and isinstance(parsed.value, list) else []
+    entries = [{**entry, "backend": "legacy"} for entry in entries]
     diagnostic.update({
+        "backend": "legacy",
         "raw_entry_count": len(entries),
         "client_language": getattr(client, "language", None),
         "client_build_label": getattr(client, "build_label", None),
@@ -94,6 +96,7 @@ async def fetch_scheduled_task_by_id(
     entry = parsed.value if isinstance(parsed.value, dict) else None
     matched_task = bool(_valid_read_back(diagnostic) and entry and entry.get("id") == action_id)
     diagnostic.update({
+        "backend": "legacy",
         "matched_task": matched_task,
         "client_language": getattr(client, "language", None),
         "client_build_label": getattr(client, "build_label", None),
@@ -107,7 +110,39 @@ async def fetch_scheduled_task_by_id(
             "The current Gemini cookie/session did not return this scheduled action by id. "
             "Check that the id belongs to the same Gemini account/profile context."
         )
-    return (entry if matched_task else None), diagnostic
+    return ({**entry, "backend": "legacy"} if entry is not None and matched_task else None), diagnostic
+
+
+async def fetch_remy_schedule_registry(
+    client: Any,
+    max_chars: int = 500,
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """Read the current /scheduled registry without consulting legacy Tasks.
+
+    Its IDs/status enum belong to Remy schedules and are never verification
+    evidence for the legacy daily-create/delete mutations below.
+    """
+    contract = get_contract("scheduled.remy_registry")
+    response = await execute_contract(client, contract.key)
+    parsed, diagnostic = _parse_observation(response, contract.key, max_chars=max_chars)
+    entries = parsed.value if _valid_read_back(diagnostic) and isinstance(parsed.value, list) else []
+    diagnostic.update({"backend": "remy", "raw_entry_count": len(entries)})
+    return entries, diagnostic
+
+
+async def fetch_remy_schedule_by_id(
+    client: Any,
+    action_id: str,
+    max_chars: int = 500,
+) -> tuple[dict[str, Any] | None, dict[str, Any]]:
+    """Read one current schedule by exact ID; do not generate or mutate it."""
+    contract = get_contract("scheduled.remy_get")
+    response = await execute_contract(client, contract.key, action_id=action_id)
+    parsed, diagnostic = _parse_observation(response, contract.key, max_chars=max_chars, expected_id=action_id)
+    entry = parsed.value if isinstance(parsed.value, dict) else None
+    matched = bool(_valid_read_back(diagnostic) and entry is not None and entry.get("id") == action_id)
+    diagnostic.update({"backend": "remy", "matched_task": matched})
+    return (entry if matched else None), diagnostic
 
 
 def scheduled_daily_payload(
@@ -252,7 +287,7 @@ async def delete_action(
     envelope = parse_rpc_envelope(response_text, contract.rpc_id)
     acknowledged = (
         getattr(response, "status_code", None) == 200
-        and envelope.parsed and envelope.reject_code is None and len(envelope.bodies) == 1 and bool(bodies)
+        and envelope.parsed and envelope.reject_code is None and envelope.single_body and bool(bodies)
         and parse_contract_body(contract, envelope.bodies[0]).ok
     )
     visible_after_delete = None

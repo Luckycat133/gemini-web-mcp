@@ -23,12 +23,12 @@ def _parse_observation(response: Any, contract_key: str, **arguments: Any) -> tu
     envelope = parse_rpc_envelope(text, contract.rpc_id)
     if envelope.reject_code is not None:
         parsed = RPCParseResult("rejected", reject_code=envelope.reject_code)
-    elif len(envelope.bodies) == 1:
+    elif envelope.single_body:
         parsed = parse_contract_body(contract, envelope.bodies[0], **arguments)
     else:
         parsed = RPCParseResult("changed_shape", warnings=("missing_or_ambiguous_body",))
     valid = bool(getattr(response, "status_code", None) == 200 and envelope.parsed
-                 and envelope.reject_code is None and len(envelope.bodies) == 1 and parsed.ok and not parsed.warnings)
+                 and envelope.reject_code is None and envelope.single_body and parsed.ok and not parsed.warnings)
     return parsed, {"source_rpc": contract.rpc_id, "contract_key": contract.key, "observed": contract.observed,
                     "parser_status": parsed.status, "parser_warnings": list(parsed.warnings),
                     "status_code": getattr(response, "status_code", None), "body_present": bool(envelope.bodies),

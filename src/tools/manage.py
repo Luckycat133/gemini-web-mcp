@@ -3,8 +3,9 @@
 """
 
 import json
-from ..adapters import attach_domain_result, domain_text, exception_text
+from ..adapters import attach_domain_result, domain_failure_text, domain_text, exception_text
 from ..adapters.mcp_sdk import MCPServer, TextContent
+from ..domain import DomainErrorCode, DomainResult
 from collections.abc import Coroutine
 from typing import Any, Callable, Literal, Optional, TypeVar
 import logging
@@ -32,7 +33,7 @@ from ..infrastructure.rpc_parsers import (
     parse_usage_entry as parse_registered_usage,
     summarize_rpc_response as summarize_registered_rpc_response,
 )
-from ..services.account import sanitize_account_status
+from ..services.account import account_contract_result, account_probe_status, account_read_result, sanitize_account_status
 from ..services.history_mutations import update_chat_metadata_result
 from ..services.tasks import get_task_status_result
 from ..services.cleanup import (
@@ -85,6 +86,8 @@ from ..services.scheduled import (
     delete_action as delete_action_service,
     fetch_scheduled_registry as fetch_scheduled_registry_service,
     fetch_scheduled_task_by_id as fetch_scheduled_task_by_id_service,
+    fetch_remy_schedule_registry,
+    fetch_remy_schedule_by_id,
     scheduled_daily_payload as registered_scheduled_daily_payload,
 )
 from .annotations import (
@@ -1323,14 +1326,8 @@ def _register_account_probe_tools(mcp: MCPServer, enabled_tool_names: set[str], 
         results = []
         for probe in selected:
             try:
-                response = await client._batch_execute(
-                    [_RawRPCData(probe["rpcid"], probe["payload"])],
-                    source_path=probe["source_path"],
-                    close_on_error=False,
-                )
-                summary = _summarize_probe_response(response.text, probe["rpcid"])
-                reject_code = summary.get("reject_code")
-                ok = response.status_code == 200 and reject_code is None
+                response = await _execute_observed_rpc(client, probe)
+                summary = account_probe_status(response, probe)
                 results.append(
                     {
                         "surface": probe["surface"],
@@ -1338,8 +1335,6 @@ def _register_account_probe_tools(mcp: MCPServer, enabled_tool_names: set[str], 
                         "rpcid": probe["rpcid"],
                         "source_path": probe["source_path"],
                         "observed": probe["observed"],
-                        "ok": ok,
-                        "status_code": response.status_code,
                         **summary,
                     }
                 )
@@ -1508,9 +1503,10 @@ def _register_account_inventory_tools(mcp: MCPServer, enabled_tool_names: set[st
         try:
             probe = _get_probe("sharing", "public_links_index")
             response = await _execute_observed_rpc(client, probe)
-            bodies = _extract_rpc_bodies(response.text, probe["rpcid"])
-            entries = bodies[0] if bodies and isinstance(bodies[0], list) else []
-            parsed_links = [_parse_public_link_entry(item) for item in entries]
+            result = account_contract_result(response, "sharing.public_links")
+            if not result.ok or result.data is None:
+                return domain_text(result, domain_failure_text(result), use_result_data=True)
+            parsed_links = result.data["value"]
             links, page_info = paginate_items(parsed_links, limit, offset)
             payload = {
                 **page_info,
@@ -1529,7 +1525,7 @@ def _register_account_inventory_tools(mcp: MCPServer, enabled_tool_names: set[st
             ]
             for idx, link in enumerate(links, payload["offset"] + 1):
                 title = link.get("title") or "(untitled)"
-                disabled = "禁用" if link.get("disabled") else "启用"
+                disabled = "禁用" if link.get("disabled") is True else "启用" if link.get("disabled") is False else "状态未知"
                 url = link.get("url") or "(no url)"
                 lines.append(f"{idx}. {title} [{disabled}]\n   ID: {link.get('id', '')}\n   URL: {url}")
             if payload["has_more"]:
@@ -1561,12 +1557,10 @@ def _register_account_inventory_tools(mcp: MCPServer, enabled_tool_names: set[st
             for name in probe_names:
                 probe = _get_probe("usage", name)
                 response = await _execute_observed_rpc(client, probe)
-                bodies = _extract_rpc_bodies(response.text, probe["rpcid"])
-                entries: list[dict[str, Any]] = []
-                if bodies and isinstance(bodies[0], list) and bodies[0]:
-                    first = bodies[0][0]
-                    if isinstance(first, list):
-                        entries = [_parse_usage_entry(item) for item in first]
+                observation = account_contract_result(response, "usage.quota" if name == "usage_quota" else "usage.model_state")
+                if not observation.ok or observation.data is None:
+                    return domain_text(observation, domain_failure_text(observation), use_result_data=True)
+                entries = observation.data["value"]
                 results.append(
                     {
                         "name": name,
@@ -1618,12 +1612,10 @@ def _register_account_inventory_tools(mcp: MCPServer, enabled_tool_names: set[st
         try:
             probe = _get_probe("library", "library_locale_capabilities")
             response = await _execute_observed_rpc(client, probe)
-            bodies = _extract_rpc_bodies(response.text, probe["rpcid"])
-            entries = []
-            if bodies and isinstance(bodies[0], list) and bodies[0]:
-                first = bodies[0][0]
-                if isinstance(first, list):
-                    entries = [_parse_library_capability(item) for item in first]
+            result = account_contract_result(response, "library.locale_capabilities")
+            if not result.ok or result.data is None:
+                return domain_text(result, domain_failure_text(result), use_result_data=True)
+            entries = result.data["value"]
             page, page_info = paginate_items(entries, limit, offset)
             payload = {
                 **page_info,
@@ -1676,6 +1668,9 @@ def _register_notebook_tools(mcp: MCPServer, enabled_tool_names: set[str], tool_
 
         try:
             notebooks, diagnostic = await _fetch_native_notebooks(client, locale)
+            observation = account_read_result(notebooks, diagnostic)
+            if not observation.ok:
+                return domain_text(observation, domain_failure_text(observation), use_result_data=True)
             page, page_info = paginate_items(notebooks, limit, offset, max_limit=100)
             payload = {
                 "ok": True,
@@ -1723,6 +1718,9 @@ def _register_notebook_tools(mcp: MCPServer, enabled_tool_names: set[str], tool_
 
         try:
             notebooks, diagnostic = await _fetch_native_notebooks(client, locale)
+            observation = account_read_result(notebooks, diagnostic)
+            if not observation.ok:
+                return domain_text(observation, domain_failure_text(observation), use_result_data=True)
             notebook = _find_notebook(notebooks, notebook_id, notebook_title)
             if not notebook:
                 available = [item.get("title", "") for item in notebooks if item.get("title")]
@@ -1738,6 +1736,9 @@ def _register_notebook_tools(mcp: MCPServer, enabled_tool_names: set[str], tool_
                 return [TextContent(type="text", text=f"未找到匹配的 Gemini 原生笔记本。可用标题: {', '.join(available)}")]
 
             items, page_payload = await _fetch_notebook_chats(client, notebook["id"], limit, offset)
+            observation = account_read_result(items, page_payload["diagnostic"])
+            if not observation.ok:
+                return domain_text(observation, domain_failure_text(observation), use_result_data=True)
             payload = {
                 "ok": True,
                 "notebook": notebook,
@@ -1886,8 +1887,9 @@ def _register_scheduled_tools(mcp: MCPServer, enabled_tool_names: set[str], tool
         offset: int = 0,
         response_format: ResponseFormat = "markdown",
         max_chars_per_field: int = 500,
+        backend: Literal["legacy", "remy"] = "legacy",
     ) -> list[TextContent]:
-        """列出 Gemini Web 定时操作页面返回的定时任务条目。只读，不创建/修改/删除任务。"""
+        """只读列出定时任务。backend=remy 对应当前任务页；默认 legacy 保留旧版兼容行为。"""
         client = get_gemini_client()
         await initialize_client()
         if not hasattr(client, "_batch_execute"):
@@ -1895,7 +1897,11 @@ def _register_scheduled_tools(mcp: MCPServer, enabled_tool_names: set[str], tool
 
         safe_chars = min(max(max_chars_per_field, 40), 4000)
         try:
-            entries, diagnostic = await _fetch_scheduled_registry(client, safe_chars)
+            fetch_registry = fetch_remy_schedule_registry if backend == "remy" else _fetch_scheduled_registry
+            entries, diagnostic = await fetch_registry(client, safe_chars)
+            observation = account_read_result(entries, diagnostic)
+            if not observation.ok:
+                return domain_text(observation, domain_failure_text(observation), use_result_data=True)
             if scope == "active":
                 entries = [item for item in entries if item.get("enabled") is True]
             elif scope == "inactive":
@@ -1904,6 +1910,7 @@ def _register_scheduled_tools(mcp: MCPServer, enabled_tool_names: set[str], tool
             page, page_info = paginate_items(entries, limit, offset)
             result = {
                 "name": "scheduled_actions_registry",
+                "backend": backend,
                 "source_rpc": diagnostic["source_rpc"],
                 "observed": diagnostic["observed"],
                 **page_info,
@@ -1941,8 +1948,9 @@ def _register_scheduled_tools(mcp: MCPServer, enabled_tool_names: set[str], tool
         action_id: str,
         response_format: ResponseFormat = "markdown",
         max_chars_per_field: int = 500,
+        backend: Literal["legacy", "remy"] = "legacy",
     ) -> list[TextContent]:
-        """按 id 读取单个 Gemini Web 定时操作。只读，不修改任务状态。"""
+        """按 id 和原列表的 backend 只读获取任务；remy 读取新版原生任务，默认 legacy。"""
         clean_id = action_id.strip()
         if not clean_id:
             return [TextContent(type="text", text="❌ action_id 不能为空。")]
@@ -1954,9 +1962,14 @@ def _register_scheduled_tools(mcp: MCPServer, enabled_tool_names: set[str], tool
 
         safe_chars = min(max(max_chars_per_field, 40), 4000)
         try:
-            item, diagnostic = await _fetch_scheduled_task_by_id(client, clean_id, safe_chars)
+            fetch_by_id = fetch_remy_schedule_by_id if backend == "remy" else _fetch_scheduled_task_by_id
+            item, diagnostic = await fetch_by_id(client, clean_id, safe_chars)
+            observation = account_read_result(item, diagnostic)
+            if not observation.ok:
+                return domain_text(observation, domain_failure_text(observation), use_result_data=True)
             payload = {
                 "ok": item is not None,
+                "backend": backend,
                 "id": clean_id,
                 "source_rpc": diagnostic["source_rpc"],
                 "observed": diagnostic["observed"],
@@ -2078,8 +2091,12 @@ def _register_scheduled_tools(mcp: MCPServer, enabled_tool_names: set[str], tool
     async def gemini_delete_scheduled_action(
         action_id: str,
         response_format: ResponseFormat = "markdown",
+        backend: Literal["legacy", "remy"] = "legacy",
     ) -> list[TextContent]:
         """按 id 删除 Gemini Web 定时操作。不会删除由该定时操作产生的历史对话。"""
+        if backend != "legacy":
+            result: DomainResult[Any] = DomainResult.failure(DomainErrorCode.INVALID_ARGUMENT, "Native schedules support list/get only.")
+            return domain_text(result, domain_failure_text(result), use_result_data=True)
         clean_id = action_id.strip()
         if not clean_id:
             return [TextContent(type="text", text="❌ action_id 不能为空。")]
@@ -2149,14 +2166,11 @@ def _register_tool_mode_tools(mcp: MCPServer, enabled_tool_names: set[str], tool
         try:
             probe = _get_probe("tool_modes", "tool_mode_status")
             response = await _execute_observed_rpc(client, probe)
-            bodies = _extract_rpc_bodies(response.text, probe["rpcid"])
-            body = bodies[0] if bodies else []
-            entries = []
-            leading_enabled = None
-            if isinstance(body, list):
-                leading_enabled = body[0] if body and isinstance(body[0], bool) else None
-                if len(body) > 1 and isinstance(body[1], list):
-                    entries = [_parse_tool_mode_entry(item) for item in body[1]]
+            result = account_contract_result(response, "tool_modes.status")
+            if not result.ok or result.data is None:
+                return domain_text(result, domain_failure_text(result), use_result_data=True)
+            entries = result.data["value"]
+            leading_enabled = result.data["leading_enabled"]
             page, page_info = paginate_items(entries, limit, offset, max_limit=100)
 
             payload = {

@@ -287,6 +287,7 @@ def test_research_report_actions_payload_uses_report_title_when_present():
     assert payload["title"] == "My Report"
     assert payload["immersive_id"] == "im1"
     assert payload["native_web_menu_observed"] is True
+    assert payload["native_web_mutation_rpc_observed"] is False
     assert len(payload["actions"]) == 6
 
 
@@ -305,6 +306,9 @@ def test_format_research_report_actions_renders_full_markdown():
     assert "## Deep Research 报告创建动作" in md
     assert "标题: T" in md
     assert "沉浸式报告 ID: imX" in md
+    assert "菜单 UI 已观测: 是" in md
+    assert "mutation RPC 已观测: 否" in md
+    assert "RPC 已观测: 是" not in md
     assert "`webpage`:" in md
     assert "2026-06-21" in md  # native_web_menu_note
 
@@ -323,6 +327,8 @@ def test_create_research_report_artifact_writes_file_and_returns_metadata(tmp_pa
     assert artifact["title"] == "My Report"
     assert artifact["chat_id"] == "chat-1"
     assert artifact["source_count"] == 1
+    assert artifact["native_web_menu_observed"] is True
+    assert artifact["native_web_mutation_rpc_observed"] is False
     assert os.path.isfile(artifact["path"])
     assert artifact["path"].endswith(".md")
     assert artifact["bytes"] > 0
@@ -347,6 +353,7 @@ def test_format_research_report_artifact_renders_markdown():
         "path": "/tmp/x.md",
         "source_count": 3,
         "native_web_menu_observed": True,
+        "native_web_mutation_rpc_observed": False,
         "native_web_menu_note": "note text",
     }
     md = _format_research_report_artifact(artifact)
@@ -355,7 +362,9 @@ def test_format_research_report_artifact_renders_markdown():
     assert "标题: T" in md
     assert "文件: /tmp/x.md" in md
     assert "来源数: 3" in md
-    assert "RPC 已观测: 是" in md
+    assert "菜单 UI 已观测: 是" in md
+    assert "mutation RPC 已观测: 否" in md
+    assert "RPC 已观测: 是" not in md
     assert "note text" in md
 
 

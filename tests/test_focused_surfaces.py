@@ -23,6 +23,7 @@ from src.infrastructure.state_store import StateStore, StateStoreError
 from src.services.account_facade import AccountFacadeService
 from src.services.creation import CreationService
 from src.services.operations import OperationContext, OperationService
+from tests._account_rpc_fakes import scheduled_read
 from tests.media_fixtures import fake_finalize_generated_cleanup, write_audio, write_image
 from tests.test_media_generation_workflows import Image
 from tests.test_media_tools import _FakeMediaClient
@@ -272,14 +273,14 @@ def test_account_mutation_accepted_does_not_claim_verified(monkeypatch):
 
 @pytest.mark.parametrize("payload,completed", [
     ({"ok": True, "verification_status": "deleted_state_by_id", "deleted_by_id_after_delete": True,
-      "task_state_id_after_delete": 6, "get_task_diagnostic": {"read_back_valid": True}}, True),
+      "task_state_id_after_delete": 6, "get_task_diagnostic": scheduled_read({"id": "target"})[1]}, True),
     ({"ok": True, "verification_status": "not_visible_not_readable_by_id", "visible_after_delete": False,
-      "readable_by_id_after_delete": False, "registry_diagnostic": {"read_back_valid": True},
-      "get_task_diagnostic": {"read_back_valid": True, "parser_status": "empty"}}, True),
+      "readable_by_id_after_delete": False, "registry_diagnostic": scheduled_read([])[1],
+      "get_task_diagnostic": scheduled_read(None)[1]}, True),
     ({"ok": True, "verification_status": "deleted_state_by_id"}, False),
     ({"ok": True, "verification_status": "not_visible_not_readable_by_id", "visible_after_delete": False,
       "readable_by_id_after_delete": False, "registry_diagnostic": {"read_back_valid": False},
-      "get_task_diagnostic": {"read_back_valid": True, "parser_status": "empty"}}, False),
+      "get_task_diagnostic": scheduled_read(None)[1]}, False),
     ({"ok": True, "verification_status": "registry_empty_not_readable_by_id"}, False),
     ({"ok": True, "verification_status": "verified_deleted"}, True),
     ({"ok": False, "verification_status": "verified_deleted"}, False),
@@ -290,7 +291,7 @@ def test_account_mutation_only_promotes_precise_accepted_read_back_proof(payload
 
 
 def test_notebook_facade_preserves_incomplete_pagination(monkeypatch):
-    diagnostic = {"read_back_valid": True, "complete": False, "incomplete_reason": "pagination_not_progressing"}
+    diagnostic = {**scheduled_read([])[1], "complete": False, "incomplete_reason": "pagination_not_progressing"}
     monkeypatch.setattr(account_service, "fetch_notebook_chats", AsyncMock(return_value=([], {
         "diagnostic": diagnostic, "next_offset": None,
     })))

@@ -12,10 +12,9 @@ from ..client_wrapper import get_gemini_client, initialize_client
 from ..domain import DomainErrorCode, DomainResult, DomainWarning, OperationState
 from ..domain.account_requests import Request
 from ..domain.results import result_from_exception
-from ..infrastructure.rpc_contracts import WEB_FEATURE_PROBES, execute_contract, get_contract
-from ..infrastructure.rpc_parsers import parse_contract_body, parse_rpc_envelope
+from ..infrastructure.rpc_contracts import WEB_FEATURE_PROBES, execute_contract
 from . import cleanup
-from .account import execute_observed_rpc, sanitize_account_status
+from .account import account_contract_result, account_probe_status, account_read_result, execute_observed_rpc, sanitize_account_status
 from .gems import GemMutationNotVerified, create_gem, delete_gem, list_gems, update_gem
 from .history import (
     delete_chat_result, export_chat_result, list_chat_history_result,
@@ -26,39 +25,25 @@ from .history_mutations import update_chat_metadata_result
 from .tasks import get_task_status_result
 from .notebooks import fetch_native_notebooks, fetch_notebook_chats, move_chat_to_notebook
 from .prompts import PromptLibrary
-from .scheduled import create_daily_action, delete_action, fetch_scheduled_registry, fetch_scheduled_task_by_id
+from .scheduled import (
+    create_daily_action, delete_action, fetch_scheduled_registry, fetch_scheduled_task_by_id,
+    fetch_remy_schedule_registry, fetch_remy_schedule_by_id,
+)
 
 logger = logging.getLogger(__name__)
 
 
 def _unobserved(diagnostic: dict[str, Any]) -> DomainResult[Any]:
-    code = DomainErrorCode.UPSTREAM_REJECTED if diagnostic.get("reject_code") is not None else DomainErrorCode.UPSTREAM_CHANGED
-    return DomainResult.failure(
-        code, "The account response could not be verified.", retryable=False,
-        verification_status="read_back_unavailable", details=diagnostic,
-    )
+    return account_read_result(None, diagnostic)
 
 
 def _read_valid(diagnostic: dict[str, Any]) -> bool:
-    return diagnostic.get("read_back_valid") is True
+    return account_read_result(None, diagnostic).ok
 
 
 async def _read_contract(client: Any, key: str, **arguments: Any) -> DomainResult[Any]:
-    contract = get_contract(key)
     response = await execute_contract(client, key, **arguments)
-    envelope = parse_rpc_envelope(str(getattr(response, "text", "") or ""), contract.rpc_id)
-    diagnostic = {"contract_key": key, "status_code": getattr(response, "status_code", None),
-                  "reject_code": envelope.reject_code}
-    if diagnostic["status_code"] != 200 or not envelope.parsed or envelope.reject_code is not None or len(envelope.bodies) != 1:
-        return _unobserved(diagnostic)
-    parsed = parse_contract_body(contract, envelope.bodies[0])
-    diagnostic["parser_status"] = parsed.status
-    if not parsed.ok or parsed.warnings:
-        return _unobserved(diagnostic)
-    return DomainResult.success(
-        {"value": parsed.value},
-        verification_status="observed", details=diagnostic,
-    )
+    return account_contract_result(response, key, **arguments)
 
 
 def _mutation(payload: dict[str, Any]) -> DomainResult[dict[str, Any]]:
@@ -178,23 +163,28 @@ class AccountFacadeService:
         return DomainResult.success({**pagination, "items": page, "diagnostic": diagnostic}, verification_status="observed")
 
     async def _scheduled(self, client: Any, action: str, args: dict[str, Any]) -> DomainResult[Any]:
+        backend = args.pop("backend", "legacy")
+        if backend not in {"legacy", "remy"} or (backend == "remy" and action not in {"list", "get"}):
+            return DomainResult.failure(DomainErrorCode.INVALID_ARGUMENT, "Native schedules support list/get only.")
+        fetch_registry = fetch_remy_schedule_registry if backend == "remy" else fetch_scheduled_registry
+        fetch_by_id = fetch_remy_schedule_by_id if backend == "remy" else fetch_scheduled_task_by_id
         if action == "create_daily":
             return _mutation(await create_daily_action(client, **args))
         if action == "delete":
             return _mutation(await delete_action(client, **args))
         if action == "get":
-            item, diagnostic = await fetch_scheduled_task_by_id(client, args["action_id"], args["max_chars"])
+            item, diagnostic = await fetch_by_id(client, args["action_id"], args["max_chars"])
             if not _read_valid(diagnostic):
                 return _unobserved(diagnostic)
-            return DomainResult.success({"item": item, "diagnostic": diagnostic}, verification_status="observed")
-        items, diagnostic = await fetch_scheduled_registry(client, args["max_chars"])
+            return DomainResult.success({"backend": backend, "item": item, "diagnostic": diagnostic}, verification_status="observed")
+        items, diagnostic = await fetch_registry(client, args["max_chars"])
         if not _read_valid(diagnostic):
             return _unobserved(diagnostic)
         scope = args["scope"]
         if scope != "all":
             items = [item for item in items if item.get("enabled") is (scope == "active")]
         page, pagination = paginate_items(items, args["limit"], args["offset"])
-        return DomainResult.success({**pagination, "items": page, "diagnostic": diagnostic}, verification_status="observed")
+        return DomainResult.success({**pagination, "backend": backend, "items": page, "diagnostic": diagnostic}, verification_status="observed")
 
     async def _gems(self, client: Any, action: str, args: dict[str, Any]) -> DomainResult[Any]:
         if action == "list":
@@ -255,10 +245,8 @@ class AccountFacadeService:
                 if args["surface"] != "all" and probe["surface"] != args["surface"]:
                     continue
                 response = await execute_observed_rpc(client, probe)
-                envelope = parse_rpc_envelope(str(response.text), probe["rpcid"])
-                results.append({"name": probe["name"], "surface": probe["surface"], "status_code": response.status_code,
-                                "reject_code": envelope.reject_code, "body_present": bool(envelope.bodies),
-                                "reachable": response.status_code == 200 and envelope.parsed and envelope.reject_code is None and bool(envelope.bodies)})
+                results.append({"name": probe["name"], "surface": probe["surface"],
+                                **account_probe_status(response, probe)})
             return DomainResult.success({"results": results}, verification_status="rpc_observations")
         keys: dict[str, tuple[str, ...]] = {"links": ("sharing.public_links",), "library": ("library.locale_capabilities",), "modes": ("tool_modes.status",)}
         if action == "usage":

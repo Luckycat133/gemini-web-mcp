@@ -2,17 +2,100 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, TypeVar
 
-from ..infrastructure.rpc_contracts import RawRPCData, get_probe
+from ..domain import DomainErrorCode, DomainResult, new_diagnostic_id
+from ..infrastructure.rpc_contracts import WEB_FEATURE_PROBE_CONTRACTS, RawRPCData, get_contract, get_probe
 from ..infrastructure.rpc_parsers import (
+    RPCParseResult,
     extract_rpc_bodies,
+    parse_contract_body,
     parse_library_capability,
     parse_public_link_entry,
     parse_tool_mode_entry,
     parse_usage_entry,
+    parse_rpc_envelope,
     summarize_rpc_response,
 )
+
+T = TypeVar("T")
+
+
+def account_read_result(value: T, diagnostic: dict[str, Any]) -> DomainResult[T]:
+    """Accept only a complete, validated inventory observation, including empty lists."""
+    if (
+        diagnostic.get("read_back_valid") is True
+        and diagnostic.get("status_code") == 200
+        and diagnostic.get("body_present") is True
+        and diagnostic.get("reject_code") is None
+        and diagnostic.get("parser_status") in {"success", "empty"}
+        and not diagnostic.get("parser_warnings")
+    ):
+        return DomainResult.success(value, verification_status="observed", details=diagnostic)
+    code = DomainErrorCode.UPSTREAM_REJECTED if diagnostic.get("reject_code") is not None else DomainErrorCode.UPSTREAM_CHANGED
+    return DomainResult.failure(
+        code, "The account response could not be verified.", retryable=False,
+        verification_status="read_back_unavailable", details=diagnostic,
+        diagnostic_id=new_diagnostic_id(),
+    )
+
+
+def account_contract_result(response: Any, key: str, **arguments: Any) -> DomainResult[dict[str, Any]]:
+    """Validate HTTP, a unique matching envelope and its registered body parser once."""
+    contract = get_contract(key)
+    text = str(getattr(response, "text", "") or "")
+    envelope = parse_rpc_envelope(text, contract.rpc_id)
+    if envelope.reject_code is not None:
+        parsed = RPCParseResult("rejected", reject_code=envelope.reject_code)
+    elif envelope.single_body:
+        parsed = parse_contract_body(contract, envelope.bodies[0], **arguments)
+    else:
+        parsed = RPCParseResult("changed_shape", warnings=("missing_or_ambiguous_body",))
+    diagnostic = {
+        "source_rpc": contract.rpc_id, "contract_key": key,
+        "status_code": getattr(response, "status_code", None),
+        "parsed": envelope.parsed, "response_parts": envelope.response_parts,
+        "body_present": bool(envelope.bodies), "body_count": len(envelope.bodies),
+        "matching_parts": envelope.matching_parts,
+        "reject_code": envelope.reject_code, "response_length": len(text),
+        "parser_status": parsed.status, "parser_warnings": list(parsed.warnings),
+        "read_back_valid": (getattr(response, "status_code", None) == 200 and envelope.parsed
+                            and envelope.reject_code is None and envelope.single_body
+                            and parsed.ok and not parsed.warnings),
+    }
+    value = {"value": parsed.value}
+    if key == "tool_modes.status" and envelope.single_body:
+        body = envelope.bodies[0]
+        value["leading_enabled"] = body[0] if isinstance(body, list) and body and type(body[0]) is bool else None
+    return account_read_result(value, diagnostic)
+
+
+def account_probe_status(response: Any, probe: dict[str, str]) -> dict[str, Any]:
+    """Report probe reachability only after matching envelope/body validation."""
+    contract = next((item for item in WEB_FEATURE_PROBE_CONTRACTS
+                     if item.rpc_id == probe["rpcid"] and item.name == probe["name"] and item.surface == probe["surface"]), None)
+    if contract is not None:
+        result = account_contract_result(response, contract.key)
+        diagnostic = dict(result.meta.details)
+        ok = result.ok
+    else:
+        # Custom probes have no registered body schema, but still need one
+        # matching response body; an HTTP 200 or an unrelated RPC is not proof.
+        envelope = parse_rpc_envelope(str(getattr(response, "text", "") or ""), probe["rpcid"])
+        ok = (getattr(response, "status_code", None) == 200 and envelope.parsed
+              and envelope.reject_code is None and envelope.single_body)
+        diagnostic = {
+            "status_code": getattr(response, "status_code", None), "parsed": envelope.parsed,
+            "response_parts": envelope.response_parts, "body_count": len(envelope.bodies),
+            "body_present": bool(envelope.bodies), "reject_code": envelope.reject_code,
+        }
+    diagnostic.update({"ok": ok, "reachable": ok})
+    if not ok:
+        diagnostic["error_code"] = (
+            DomainErrorCode.UPSTREAM_REJECTED.value if diagnostic.get("reject_code") is not None
+            else DomainErrorCode.UPSTREAM_CHANGED.value
+        )
+    return diagnostic
 
 
 def sanitize_account_status(status: object) -> dict[str, Any]:

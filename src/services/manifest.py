@@ -467,6 +467,7 @@ def web_capabilities_payload() -> dict[str, Any]:
             "gemini_search_chats",
             "gemini_read_chat",
             "gemini_export_chat",
+            "gemini_update_chat",
             "gemini_delete_chat",
         ],
         "account": [

@@ -15,6 +15,7 @@ WEB_UI_CAPABILITIES = {
     "model_picker_observed_at": "2026-10-18",
     "history_menu_observed_at": "2026-10-18",
     "task_composer_observed_at": "2026-10-18",
+    "tools_and_settings_observed_at": "2026-10-18",
     "account_tier": "Gemini Web Pro",
     "locale": "zh-CN",
     "models": [
@@ -68,13 +69,15 @@ WEB_UI_CAPABILITIES = {
     "tool_menu": [
         {"name": "upload_file", "label": "上传文件", "coverage": "gemini_upload_file"},
         {"name": "google_drive", "label": "从云端硬盘添加", "coverage": "ui_only"},
-        {"name": "import_code", "label": "导入代码", "coverage": "gemini_upload_file"},
+        {"name": "import_code", "label": "导入代码", "coverage": "local code via gemini_upload_file; native repository import is ui_only"},
+        {"name": "google_photos", "label": "Google 相册", "coverage": "ui_only"},
+        {"name": "notebook_attachment", "label": "笔记本", "coverage": "ui_only; separate from listing notebooks and moving chats"},
         {"name": "create_image", "label": "图片", "coverage": "gemini_generate_media"},
-        {"name": "create_video", "label": "视频", "coverage": "gemini_generate_video"},
+        {"name": "create_video", "label": "视频", "coverage": "primary: gemini_generate_media(media_type=video); compact: create(type=video); focused create: gemini_generate_video"},
         {"name": "canvas", "label": "Canvas", "coverage": "library_capability"},
         {"name": "deep_research", "label": "Deep Research", "coverage": "gemini_deep_research"},
         {"name": "create_music", "label": "音乐", "coverage": "gemini_generate_music"},
-        {"name": "guided_learning", "label": "学习辅导", "coverage": "library_capability"},
+        {"name": "guided_learning", "label": "学习辅导", "coverage": "primary/compact chat learning_mode; current end-to-end verification pending"},
         {"name": "personalization_labs", "label": "个性化 / Labs", "coverage": "probe_only"},
     ],
     "settings_menu": [
@@ -88,6 +91,9 @@ WEB_UI_CAPABILITIES = {
             "coverage": "gemini_list_scheduled_actions / gemini_get_scheduled_action / gemini_create_scheduled_action / gemini_delete_scheduled_action",
         },
         {"name": "gems", "label": "Gem", "coverage": "gemini_manage_gems"},
+        {"name": "native_skills", "label": "技能", "coverage": "ui_only; separate from Gems and local Prompts"},
+        {"name": "task_settings", "label": "任务设置", "coverage": "ui_only"},
+        {"name": "media_watermark", "label": "媒体水印", "coverage": "ui_only"},
         {"name": "public_links", "label": "你的公开链接", "coverage": "gemini_list_public_links"},
         {"name": "theme", "label": "主题", "coverage": "ui_only"},
         {"name": "subscription", "label": "管理订阅", "coverage": "external_google_one"},
@@ -99,11 +105,12 @@ WEB_UI_CAPABILITIES = {
     ],
     "notes": [
         "Model picker and image/video/music entries were rechecked in a signed-in Chrome session on 2026-09-26; other menu and settings entries retain older evidence.",
-        "The model picker, Create image selection and Create video entry were rechecked on 2026-10-02. Public frontend source identifies native image/music selectors; their new MCP route still needs signed-in generation verification.",
+        "Bounded signed-in MCP runs verified native image/edit/music/video artifacts and controlled unfinished-video restart recovery on 2026-10-17; see docs/live-ui-coverage.md for evidence and limits.",
         "The four-model picker, low/medium/high thinking levels, Task composer and chat pin/rename menu were verified on 2026-10-18. Runtime model discovery remains authoritative for the current account.",
         "Drive picker, link mutation, settings mutation, and memory import mutation are not automated without a safer confirmed RPC contract.",
-        "Scheduled actions support daily create and explicit delete through observed Web RPCs; edit/toggle remain disabled until stable RPC contracts are confirmed.",
+        "Scheduled list/get accepts backend=remy for current native Tasks; the default legacy backend retains daily-create/delete compatibility. Native schedule mutations remain unsupported, and an empty legacy registry does not establish an empty native page.",
         "Native Gemini Web Notebooks are covered for list, recent-chat list, and chat move operations; this is distinct from external NotebookLM.",
+        "The 2026-10-18 tools/settings recheck observed native Skills, Task settings and media watermark entries. Native Skills administration, Drive attachment, Canvas documents and Library assets are not automated by this package.",
         "Probe tools intentionally omit raw response bodies and private account content.",
     ],
 }
@@ -433,7 +440,7 @@ TOOL_MANIFEST: list[dict[str, Any]] = [
     {
         "name": "gemini_list_scheduled_actions",
         "group": "account",
-        "purpose": "Read active/inactive scheduled-action entries.",
+        "purpose": "Read active/inactive legacy scheduled actions, or current native Task schedules with backend=remy.",
         "read_only": True,
         "destructive": False,
         "privacy": "reads_private_scheduled_action_titles",
@@ -442,7 +449,7 @@ TOOL_MANIFEST: list[dict[str, Any]] = [
     {
         "name": "gemini_get_scheduled_action",
         "group": "account",
-        "purpose": "Read one scheduled action by id using the observed Web GetTask RPC.",
+        "purpose": "Read one scheduled action by id from its observed backend; backend=remy reads current native Tasks.",
         "read_only": True,
         "destructive": False,
         "privacy": "reads_private_scheduled_action_details",
@@ -451,7 +458,7 @@ TOOL_MANIFEST: list[dict[str, Any]] = [
     {
         "name": "gemini_create_scheduled_action",
         "group": "account",
-        "purpose": "Create a daily Gemini Web scheduled action through the observed scheduled-actions RPC.",
+        "purpose": "Create a daily action on the legacy scheduled-action backend; native Remy schedule creation is unsupported.",
         "read_only": False,
         "destructive": False,
         "privacy": "creates_private_scheduled_action",
@@ -460,7 +467,7 @@ TOOL_MANIFEST: list[dict[str, Any]] = [
     {
         "name": "gemini_delete_scheduled_action",
         "group": "account",
-        "purpose": "Delete a Gemini Web scheduled action by id through the observed scheduled-actions RPC.",
+        "purpose": "Delete a legacy scheduled action by id with read-back verification; backend=remy is rejected.",
         "read_only": False,
         "destructive": True,
         "privacy": "deletes_private_scheduled_action",

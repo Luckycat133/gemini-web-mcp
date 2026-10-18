@@ -41,6 +41,7 @@ from unittest.mock import AsyncMock
 from src.adapters.mcp_sdk import MCPServer
 from src.domain import DomainResult
 from src.services import history as history_service
+from tests._account_rpc_fakes import notebook_read_diagnostic
 
 import src.tools.manage as manage_tools
 
@@ -73,7 +74,15 @@ class _FakeBatchClient:
             text = self._responses.pop(0)
         else:
             text = ""
+        if hasattr(self, "_body_parser"):
+            bodies = self._body_parser(text, raw_rpc_list[0].rpcid)
+            text = json.dumps([["wrb.fr", raw_rpc_list[0].rpcid, json.dumps(body)] for body in bodies])
         return SimpleNamespace(text=text, status_code=self._status_code)
+
+
+def _stub_account_bodies(client, extractor):
+    """Supply raw bodies through a matching HTTP/RPC response, preserving validation."""
+    client._body_parser = extractor
 
 
 class _NoBatchClient:
@@ -473,24 +482,24 @@ def test_get_tool_mode_status_no_batch_execute_short_circuits(monkeypatch):
     assert "❌ 当前客户端不支持工具模式状态 RPC" in result[0].text
 
 
-def test_get_tool_mode_status_empty_bodies_renders_empty_hint(monkeypatch):
+def test_get_tool_mode_status_empty_bodies_rejects_missing_body(monkeypatch):
     """bodies 为空 → body=[]，entries=[]，page 空 → '暂无工具模式状态条目。'"""
     client = _FakeBatchClient(responses=["resp"])
     _patch_seams(monkeypatch, client)
-    monkeypatch.setattr(manage_tools, "_extract_rpc_bodies", lambda _t, _r: [])
+    _stub_account_bodies(client, lambda _t, _r: [])
     mcp = _make_mcp()
     result = _run(_call(mcp, "gemini_get_tool_mode_status"))
-    assert "暂无工具模式状态条目" in result[0].text
+    assert result[0].meta["domain_result"]["error"]["code"] == "UPSTREAM_CHANGED"
 
 
-def test_get_tool_mode_status_body_non_list_renders_empty(monkeypatch):
+def test_get_tool_mode_status_body_non_list_rejects_changed_body(monkeypatch):
     """body 非 list → entries=[]，page 空。"""
     client = _FakeBatchClient(responses=["resp"])
     _patch_seams(monkeypatch, client)
-    monkeypatch.setattr(manage_tools, "_extract_rpc_bodies", lambda _t, _r: ["not a list"])
+    _stub_account_bodies(client, lambda _t, _r: ["not a list"])
     mcp = _make_mcp()
     result = _run(_call(mcp, "gemini_get_tool_mode_status"))
-    assert "暂无工具模式状态条目" in result[0].text
+    assert result[0].meta["domain_result"]["error"]["code"] == "UPSTREAM_CHANGED"
 
 
 def test_get_tool_mode_status_leading_enabled_true(monkeypatch):
@@ -498,8 +507,7 @@ def test_get_tool_mode_status_leading_enabled_true(monkeypatch):
     client = _FakeBatchClient(responses=["resp"])
     _patch_seams(monkeypatch, client)
     entries = [[1, True, 100, 30, None, "active"]]
-    monkeypatch.setattr(manage_tools, "_extract_rpc_bodies",
-                        lambda _t, _r: [[True, entries]])
+    _stub_account_bodies(client, lambda _t, _r: [[True, entries]])
     mcp = _make_mcp()
     result = _run(_call(mcp, "gemini_get_tool_mode_status", response_format="json"))
     payload = json.loads(result[0].text)
@@ -513,8 +521,7 @@ def test_get_tool_mode_status_leading_enabled_false(monkeypatch):
     """body[0]=False → leading_enabled=False。"""
     client = _FakeBatchClient(responses=["resp"])
     _patch_seams(monkeypatch, client)
-    monkeypatch.setattr(manage_tools, "_extract_rpc_bodies",
-                        lambda _t, _r: [[False, []]])
+    _stub_account_bodies(client, lambda _t, _r: [[False, []]])
     mcp = _make_mcp()
     result = _run(_call(mcp, "gemini_get_tool_mode_status", response_format="json"))
     payload = json.loads(result[0].text)
@@ -526,8 +533,7 @@ def test_get_tool_mode_status_leading_enabled_none_when_not_bool(monkeypatch):
     """body[0] 非 bool → leading_enabled=None。"""
     client = _FakeBatchClient(responses=["resp"])
     _patch_seams(monkeypatch, client)
-    monkeypatch.setattr(manage_tools, "_extract_rpc_bodies",
-                        lambda _t, _r: [["not_bool", [[1, True]]]])
+    _stub_account_bodies(client, lambda _t, _r: [["not_bool", [[1, True]]]])
     mcp = _make_mcp()
     result = _run(_call(mcp, "gemini_get_tool_mode_status", response_format="json"))
     payload = json.loads(result[0].text)
@@ -535,17 +541,14 @@ def test_get_tool_mode_status_leading_enabled_none_when_not_bool(monkeypatch):
     assert payload["items"][0]["mode_id"] == 1
 
 
-def test_get_tool_mode_status_body1_not_list_entries_empty(monkeypatch):
+def test_get_tool_mode_status_body1_not_list_rejects_changed_body(monkeypatch):
     """body[1] 非 list → entries=[]，但仍渲染 leading_enabled。"""
     client = _FakeBatchClient(responses=["resp"])
     _patch_seams(monkeypatch, client)
-    monkeypatch.setattr(manage_tools, "_extract_rpc_bodies",
-                        lambda _t, _r: [[True, "not_a_list"]])
+    _stub_account_bodies(client, lambda _t, _r: [[True, "not_a_list"]])
     mcp = _make_mcp()
     result = _run(_call(mcp, "gemini_get_tool_mode_status", response_format="json"))
-    payload = json.loads(result[0].text)
-    assert payload["leading_enabled"] is True
-    assert payload["items"] == []
+    assert result[0].meta["domain_result"]["error"]["code"] == "UPSTREAM_CHANGED"
 
 
 def test_get_tool_mode_status_markdown_renders_entries_and_has_more(monkeypatch):
@@ -553,8 +556,7 @@ def test_get_tool_mode_status_markdown_renders_entries_and_has_more(monkeypatch)
     client = _FakeBatchClient(responses=["resp"])
     _patch_seams(monkeypatch, client)
     entries = [[1, True, 100, 30, None, "active"], [2, False, 50, 10, None, "idle"]]
-    monkeypatch.setattr(manage_tools, "_extract_rpc_bodies",
-                        lambda _t, _r: [[True, entries]])
+    _stub_account_bodies(client, lambda _t, _r: [[True, entries]])
     mcp = _make_mcp()
     result = _run(_call(mcp, "gemini_get_tool_mode_status", limit=1))
     text = result[0].text
@@ -570,8 +572,7 @@ def test_get_tool_mode_status_top_level_exception(monkeypatch):
     """_execute_observed_rpc 抛异常 → 顶层 except 返回错误。"""
     client = _FakeBatchClient(responses=["resp"])
     _patch_seams(monkeypatch, client)
-    monkeypatch.setattr(manage_tools, "_extract_rpc_bodies",
-                        lambda _t, _r: (_ for _ in ()).throw(RuntimeError("parse fail")))
+    _stub_account_bodies(client, lambda _t, _r: (_ for _ in ()).throw(RuntimeError("parse fail")))
     mcp = _make_mcp()
     result = _run(_call(mcp, "gemini_get_tool_mode_status"))
     assert "❌ 读取工具模式状态失败" in result[0].text
@@ -647,8 +648,7 @@ def test_get_usage_limits_scope_all_calls_two_probes(monkeypatch):
     """scope=all → probe_names=[usage_quota, usage_model_state]，2 次 _batch_execute。"""
     client = _FakeBatchClient(responses=["r1", "r2"])
     _patch_seams(monkeypatch, client)
-    monkeypatch.setattr(manage_tools, "_extract_rpc_bodies",
-                        lambda _t, _r: [[[["key1", "ok", "free", None, 100, 80]]]])
+    _stub_account_bodies(client, lambda _t, _r: [[[["key1", "ok", "free", None, 100, 80]]]])
     mcp = _make_mcp()
     result = _run(_call(mcp, "gemini_get_usage_limits", scope="all", response_format="json"))
     payload = json.loads(result[0].text)
@@ -663,20 +663,20 @@ def test_get_usage_limits_scope_quota_calls_one_probe(monkeypatch):
     """scope=quota → 仅 usage_quota，1 次 _batch_execute。"""
     client = _FakeBatchClient(responses=["r1"])
     _patch_seams(monkeypatch, client)
-    monkeypatch.setattr(manage_tools, "_extract_rpc_bodies", lambda _t, _r: [])
+    _stub_account_bodies(client, lambda _t, _r: [[[]]])
     mcp = _make_mcp()
     result = _run(_call(mcp, "gemini_get_usage_limits", scope="quota", response_format="json"))
     payload = json.loads(result[0].text)
     assert payload["count"] == 1
     assert payload["results"][0]["name"] == "usage_quota"
-    assert payload["results"][0]["entries"] == []  # bodies 空
+    assert payload["results"][0]["entries"] == []  # verified empty body
 
 
 def test_get_usage_limits_scope_model_state_calls_one_probe(monkeypatch):
     """scope=model_state → 仅 usage_model_state。"""
     client = _FakeBatchClient(responses=["r1"])
     _patch_seams(monkeypatch, client)
-    monkeypatch.setattr(manage_tools, "_extract_rpc_bodies", lambda _t, _r: [])
+    _stub_account_bodies(client, lambda _t, _r: [[[]]])
     mcp = _make_mcp()
     result = _run(_call(mcp, "gemini_get_usage_limits",
                         scope="model_state", response_format="json"))
@@ -684,45 +684,41 @@ def test_get_usage_limits_scope_model_state_calls_one_probe(monkeypatch):
     assert payload["results"][0]["name"] == "usage_model_state"
 
 
-def test_get_usage_limits_bodies0_not_list_entries_empty(monkeypatch):
+def test_get_usage_limits_bodies0_not_list_rejects_changed_body(monkeypatch):
     """bodies[0] 非 list → entries=[]。"""
     client = _FakeBatchClient(responses=["r1"])
     _patch_seams(monkeypatch, client)
-    monkeypatch.setattr(manage_tools, "_extract_rpc_bodies", lambda _t, _r: ["not_a_list"])
+    _stub_account_bodies(client, lambda _t, _r: ["not_a_list"])
     mcp = _make_mcp()
     result = _run(_call(mcp, "gemini_get_usage_limits", scope="quota", response_format="json"))
-    payload = json.loads(result[0].text)
-    assert payload["results"][0]["entries"] == []
+    assert result[0].meta["domain_result"]["error"]["code"] == "UPSTREAM_CHANGED"
 
 
-def test_get_usage_limits_bodies0_empty_list_entries_empty(monkeypatch):
+def test_get_usage_limits_bodies0_empty_list_rejects_changed_body(monkeypatch):
     """bodies[0]=[] → 空列表短路，entries=[]。"""
     client = _FakeBatchClient(responses=["r1"])
     _patch_seams(monkeypatch, client)
-    monkeypatch.setattr(manage_tools, "_extract_rpc_bodies", lambda _t, _r: [[]])
+    _stub_account_bodies(client, lambda _t, _r: [[]])
     mcp = _make_mcp()
     result = _run(_call(mcp, "gemini_get_usage_limits", scope="quota", response_format="json"))
-    payload = json.loads(result[0].text)
-    assert payload["results"][0]["entries"] == []
+    assert result[0].meta["domain_result"]["error"]["code"] == "UPSTREAM_CHANGED"
 
 
-def test_get_usage_limits_first_not_list_entries_empty(monkeypatch):
+def test_get_usage_limits_first_not_list_rejects_changed_body(monkeypatch):
     """bodies[0][0] 非 list → entries=[]（first 不是 entries 列表）。"""
     client = _FakeBatchClient(responses=["r1"])
     _patch_seams(monkeypatch, client)
-    monkeypatch.setattr(manage_tools, "_extract_rpc_bodies",
-                        lambda _t, _r: [["not_a_list_of_entries"]])
+    _stub_account_bodies(client, lambda _t, _r: [["not_a_list_of_entries"]])
     mcp = _make_mcp()
     result = _run(_call(mcp, "gemini_get_usage_limits", scope="quota", response_format="json"))
-    payload = json.loads(result[0].text)
-    assert payload["results"][0]["entries"] == []
+    assert result[0].meta["domain_result"]["error"]["code"] == "UPSTREAM_CHANGED"
 
 
 def test_get_usage_limits_markdown_renders_no_entries_hint(monkeypatch):
     """markdown：entries 为空 → '- 暂无条目'。"""
     client = _FakeBatchClient(responses=["r1", "r2"])
     _patch_seams(monkeypatch, client)
-    monkeypatch.setattr(manage_tools, "_extract_rpc_bodies", lambda _t, _r: [])
+    _stub_account_bodies(client, lambda _t, _r: [[[]]])
     mcp = _make_mcp()
     result = _run(_call(mcp, "gemini_get_usage_limits", scope="all"))
     text = result[0].text
@@ -737,8 +733,7 @@ def test_get_usage_limits_markdown_renders_entries_with_reset(monkeypatch):
     client = _FakeBatchClient(responses=["r1"])
     _patch_seams(monkeypatch, client)
     entry = ["key1", "ok", "free", [1000, 0], 100, 80]
-    monkeypatch.setattr(manage_tools, "_extract_rpc_bodies",
-                        lambda _t, _r: [[[entry]]])
+    _stub_account_bodies(client, lambda _t, _r: [[[entry]]])
     mcp = _make_mcp()
     result = _run(_call(mcp, "gemini_get_usage_limits", scope="quota"))
     text = result[0].text
@@ -755,8 +750,7 @@ def test_get_usage_limits_markdown_omits_reset_when_absent(monkeypatch):
     client = _FakeBatchClient(responses=["r1"])
     _patch_seams(monkeypatch, client)
     entry = ["key1", "ok", "free", None, 100, 80]  # reset=None
-    monkeypatch.setattr(manage_tools, "_extract_rpc_bodies",
-                        lambda _t, _r: [[[entry]]])
+    _stub_account_bodies(client, lambda _t, _r: [[[entry]]])
     mcp = _make_mcp()
     result = _run(_call(mcp, "gemini_get_usage_limits", scope="quota"))
     text = result[0].text
@@ -768,8 +762,7 @@ def test_get_usage_limits_top_level_exception(monkeypatch):
     """_extract_rpc_bodies 抛异常 → 顶层 except 返回错误。"""
     client = _FakeBatchClient(responses=["r1"])
     _patch_seams(monkeypatch, client)
-    monkeypatch.setattr(manage_tools, "_extract_rpc_bodies",
-                        lambda _t, _r: (_ for _ in ()).throw(RuntimeError("parse fail")))
+    _stub_account_bodies(client, lambda _t, _r: (_ for _ in ()).throw(RuntimeError("parse fail")))
     mcp = _make_mcp()
     result = _run(_call(mcp, "gemini_get_usage_limits", scope="quota"))
     assert "❌ 读取用量限额失败" in result[0].text
@@ -834,7 +827,7 @@ def test_fetch_notebook_chats_single_page(monkeypatch):
     # body=[next_page_token, raw_entries, raw_entries_dup?] —— 实际 body[1]=token, body[2]=entries
     body = [None, None, entries]
     client._responses = [json.dumps([["wrb.fr", "MaZiqc", json.dumps(body)]])]
-    monkeypatch.setattr(manage_tools, "_extract_rpc_bodies", lambda _t, _r: [body])
+    _stub_account_bodies(client, lambda _t, _r: [body])
     items, page_payload = _run(manage_tools._fetch_notebook_chats(client, "n_1", 20, 0))
     assert client.call_count == 1
     assert len(items) == 1
@@ -857,8 +850,7 @@ def test_fetch_notebook_chats_multi_page_until_no_token(monkeypatch):
     body2 = [None, None, entries2]  # body[1]=None → 停止
     pages = [body1, body2]
     client._responses = [json.dumps([["wrb.fr", "MaZiqc", json.dumps(body)]]) for body in pages]
-    monkeypatch.setattr(manage_tools, "_extract_rpc_bodies",
-                        lambda _t, _r: [pages.pop(0)])
+    _stub_account_bodies(client, lambda _t, _r: [pages.pop(0)])
     items, page_payload = _run(manage_tools._fetch_notebook_chats(client, "n_1", 20, 0))
     assert client.call_count == 2
     assert len(items) == 2
@@ -872,7 +864,7 @@ def test_fetch_notebook_chats_breaks_on_empty_entries(monkeypatch):
     _patch_seams(monkeypatch, client)
     # body[1]=token（str），body[2]=[] 空 entries → break via `not raw_entries`
     body = [None, "tok_next", []]
-    monkeypatch.setattr(manage_tools, "_extract_rpc_bodies", lambda _t, _r: [body])
+    _stub_account_bodies(client, lambda _t, _r: [body])
     items, page_payload = _run(manage_tools._fetch_notebook_chats(client, "n_1", 20, 0))
     assert client.call_count == 1
     assert items == []
@@ -885,7 +877,7 @@ def test_fetch_notebook_chats_clamps_limit_and_offset(monkeypatch):
     _patch_seams(monkeypatch, client)
     entries = [["c_1", "Chat 1"]]
     body = [None, None, entries]
-    monkeypatch.setattr(manage_tools, "_extract_rpc_bodies", lambda _t, _r: [body])
+    _stub_account_bodies(client, lambda _t, _r: [body])
     items, page_payload = _run(manage_tools._fetch_notebook_chats(
         client, "n_1", limit=-5, offset=99999))
     # limit -5 → clamp 1；offset 99999 → clamp 10000；但 items 只有 1 条 → page 从 offset 10000 切片为空
@@ -908,7 +900,7 @@ def test_list_notebook_chats_notebook_not_found_empty(monkeypatch):
     client = _FakeBatchClient(responses=["r1"])
     _patch_seams(monkeypatch, client)
     monkeypatch.setattr(manage_tools, "_fetch_native_notebooks",
-                        AsyncMock(return_value=([], {"source_rpc": "CNgdBe"})))
+                        AsyncMock(return_value=([], {**notebook_read_diagnostic([]), "source_rpc": "CNgdBe"})))
     mcp = _make_mcp()
     result = _run(_call(mcp, "gemini_list_notebook_chats", notebook_title="Missing"))
     assert "未找到匹配的 Gemini 原生笔记本" in result[0].text
@@ -921,7 +913,7 @@ def test_list_notebook_chats_notebook_not_found_lists_available_titles(monkeypat
     _patch_seams(monkeypatch, client)
     notebooks = [{"id": "n_1", "title": "Math"}, {"id": "n_2", "title": "Science"}]
     monkeypatch.setattr(manage_tools, "_fetch_native_notebooks",
-                        AsyncMock(return_value=(notebooks, {"source_rpc": "CNgdBe"})))
+                        AsyncMock(return_value=(notebooks, {**notebook_read_diagnostic(notebooks), "source_rpc": "CNgdBe"})))
     mcp = _make_mcp()
     result = _run(_call(mcp, "gemini_list_notebook_chats", notebook_title="Missing"))
     text = result[0].text
@@ -934,7 +926,7 @@ def test_list_notebook_chats_not_found_json_payload(monkeypatch):
     client = _FakeBatchClient(responses=["r1"])
     _patch_seams(monkeypatch, client)
     monkeypatch.setattr(manage_tools, "_fetch_native_notebooks",
-                        AsyncMock(return_value=([], {"source_rpc": "CNgdBe"})))
+                        AsyncMock(return_value=([], {**notebook_read_diagnostic([]), "source_rpc": "CNgdBe"})))
     mcp = _make_mcp()
     result = _run(_call(mcp, "gemini_list_notebook_chats",
                         notebook_id="missing", response_format="json"))
@@ -951,12 +943,12 @@ def test_list_notebook_chats_found_by_id_renders_items(monkeypatch):
     _patch_seams(monkeypatch, client)
     notebooks = [{"id": "n_1", "title": "Math"}]
     monkeypatch.setattr(manage_tools, "_fetch_native_notebooks",
-                        AsyncMock(return_value=(notebooks, {"source_rpc": "CNgdBe"})))
+                        AsyncMock(return_value=(notebooks, {**notebook_read_diagnostic(notebooks), "source_rpc": "CNgdBe"})))
     items = [{"id": "c_1", "title": "Chat 1", "time": "2025-01-01"}]
     page_payload = {
         "total_count": 1, "count": 1, "offset": 0, "limit": 20,
         "has_more": False, "next_offset": None,
-        "diagnostic": {"fetched_count": 1, "page_count": 1, "has_remote_more": False},
+        "diagnostic": {**notebook_read_diagnostic([]), "fetched_count": 1, "page_count": 1, "has_remote_more": False},
     }
     monkeypatch.setattr(manage_tools, "_fetch_notebook_chats",
                         AsyncMock(return_value=(items, page_payload)))
@@ -976,12 +968,12 @@ def test_list_notebook_chats_found_by_exact_title(monkeypatch):
     _patch_seams(monkeypatch, client)
     notebooks = [{"id": "n_1", "title": "Math"}]
     monkeypatch.setattr(manage_tools, "_fetch_native_notebooks",
-                        AsyncMock(return_value=(notebooks, {})))
+                        AsyncMock(return_value=(notebooks, notebook_read_diagnostic(notebooks))))
     monkeypatch.setattr(manage_tools, "_fetch_notebook_chats",
                         AsyncMock(return_value=([], {
                             "total_count": 0, "count": 0, "offset": 0, "limit": 20,
                             "has_more": False, "next_offset": None,
-                            "diagnostic": {"fetched_count": 0, "page_count": 1, "has_remote_more": False},
+                            "diagnostic": {**notebook_read_diagnostic([]), "fetched_count": 0, "page_count": 1, "has_remote_more": False},
                         })))
     mcp = _make_mcp()
     result = _run(_call(mcp, "gemini_list_notebook_chats", notebook_title="Math"))
@@ -994,12 +986,12 @@ def test_list_notebook_chats_found_by_casefold_title(monkeypatch):
     _patch_seams(monkeypatch, client)
     notebooks = [{"id": "n_1", "title": "Math"}]
     monkeypatch.setattr(manage_tools, "_fetch_native_notebooks",
-                        AsyncMock(return_value=(notebooks, {})))
+                        AsyncMock(return_value=(notebooks, notebook_read_diagnostic(notebooks))))
     monkeypatch.setattr(manage_tools, "_fetch_notebook_chats",
                         AsyncMock(return_value=([], {
                             "total_count": 0, "count": 0, "offset": 0, "limit": 20,
                             "has_more": False, "next_offset": None,
-                            "diagnostic": {"fetched_count": 0, "page_count": 1, "has_remote_more": False},
+                            "diagnostic": {**notebook_read_diagnostic([]), "fetched_count": 0, "page_count": 1, "has_remote_more": False},
                         })))
     mcp = _make_mcp()
     result = _run(_call(mcp, "gemini_list_notebook_chats", notebook_title="math"))
@@ -1012,12 +1004,12 @@ def test_list_notebook_chats_empty_items_renders_hint(monkeypatch):
     _patch_seams(monkeypatch, client)
     notebooks = [{"id": "n_1", "title": "Math"}]
     monkeypatch.setattr(manage_tools, "_fetch_native_notebooks",
-                        AsyncMock(return_value=(notebooks, {})))
+                        AsyncMock(return_value=(notebooks, notebook_read_diagnostic(notebooks))))
     monkeypatch.setattr(manage_tools, "_fetch_notebook_chats",
                         AsyncMock(return_value=([], {
                             "total_count": 0, "count": 0, "offset": 0, "limit": 20,
                             "has_more": False, "next_offset": None,
-                            "diagnostic": {"fetched_count": 0, "page_count": 1, "has_remote_more": False},
+                            "diagnostic": {**notebook_read_diagnostic([]), "fetched_count": 0, "page_count": 1, "has_remote_more": False},
                         })))
     mcp = _make_mcp()
     result = _run(_call(mcp, "gemini_list_notebook_chats", notebook_id="n_1"))
@@ -1030,13 +1022,13 @@ def test_list_notebook_chats_has_more_renders_next_page(monkeypatch):
     _patch_seams(monkeypatch, client)
     notebooks = [{"id": "n_1", "title": "Math"}]
     monkeypatch.setattr(manage_tools, "_fetch_native_notebooks",
-                        AsyncMock(return_value=(notebooks, {})))
+                        AsyncMock(return_value=(notebooks, notebook_read_diagnostic(notebooks))))
     items = [{"id": "c_1", "title": "Chat 1", "time": ""}]
     monkeypatch.setattr(manage_tools, "_fetch_notebook_chats",
                         AsyncMock(return_value=(items, {
                             "total_count": 1, "count": 1, "offset": 0, "limit": 1,
                             "has_more": True, "next_offset": 1,
-                            "diagnostic": {"fetched_count": 1, "page_count": 1, "has_remote_more": True},
+                            "diagnostic": {**notebook_read_diagnostic([]), "fetched_count": 1, "page_count": 1, "has_remote_more": True},
                         })))
     mcp = _make_mcp()
     result = _run(_call(mcp, "gemini_list_notebook_chats", notebook_id="n_1", limit=1))
@@ -1049,13 +1041,13 @@ def test_list_notebook_chats_found_json_payload(monkeypatch):
     _patch_seams(monkeypatch, client)
     notebooks = [{"id": "n_1", "title": "Math"}]
     monkeypatch.setattr(manage_tools, "_fetch_native_notebooks",
-                        AsyncMock(return_value=(notebooks, {})))
+                        AsyncMock(return_value=(notebooks, notebook_read_diagnostic(notebooks))))
     items = [{"id": "c_1", "title": "Chat 1", "time": ""}]
     monkeypatch.setattr(manage_tools, "_fetch_notebook_chats",
                         AsyncMock(return_value=(items, {
                             "total_count": 1, "count": 1, "offset": 0, "limit": 20,
                             "has_more": False, "next_offset": None,
-                            "diagnostic": {"fetched_count": 1, "page_count": 1, "has_remote_more": False},
+                            "diagnostic": {**notebook_read_diagnostic([]), "fetched_count": 1, "page_count": 1, "has_remote_more": False},
                         })))
     mcp = _make_mcp()
     result = _run(_call(mcp, "gemini_list_notebook_chats",
@@ -1085,13 +1077,13 @@ def test_list_notebook_chats_untitled_when_title_missing(monkeypatch):
     _patch_seams(monkeypatch, client)
     notebooks = [{"id": "n_1", "title": "Math"}]
     monkeypatch.setattr(manage_tools, "_fetch_native_notebooks",
-                        AsyncMock(return_value=(notebooks, {})))
+                        AsyncMock(return_value=(notebooks, notebook_read_diagnostic(notebooks))))
     items = [{"id": "c_1", "title": "", "time": ""}]
     monkeypatch.setattr(manage_tools, "_fetch_notebook_chats",
                         AsyncMock(return_value=(items, {
                             "total_count": 1, "count": 1, "offset": 0, "limit": 20,
                             "has_more": False, "next_offset": None,
-                            "diagnostic": {"fetched_count": 1, "page_count": 1, "has_remote_more": False},
+                            "diagnostic": {**notebook_read_diagnostic([]), "fetched_count": 1, "page_count": 1, "has_remote_more": False},
                         })))
     mcp = _make_mcp()
     result = _run(_call(mcp, "gemini_list_notebook_chats", notebook_id="n_1"))

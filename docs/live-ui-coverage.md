@@ -4,6 +4,53 @@ This page records dated observations of signed-in Gemini Web and related MCP
 checks. Each section identifies the tested surface and evidence scope;
 historical observations do not establish current availability.
 
+## 2026-10-18 Broader Capability Audit
+
+An additional authorized, read-only Chrome pass inspected the upload/tools menu,
+Library, Scheduled, settings, the native Skills page and public-link management.
+The build matched the source record above. It observed Google Drive, Photos,
+repository import and Notebook attachment entries; image/video/music, Canvas,
+Deep Research and Guided Learning; and separate native Skills, Task settings
+and media-watermark controls. Opening a page or menu is UI evidence only.
+Native Skills at `/customize/skills` are distinct from Gems and this package's
+local Prompt library. No account setting, existing task, Skill or public link
+was modified during this audit, and no conversation was generated.
+
+Real focused account MCP reads succeeded for Gems, Notebooks, localized Library
+capabilities, usage and mode status. Two compatibility failures were reproduced:
+legacy `XPSWpd` returned an empty message while the current Scheduled page had
+native Remy schedules; the old `K4WWud` link index did not match the current
+shared-conversation listing. The current frontend identifies `Ey90Ac` /
+`Mfr55e` for native schedule reads and `OXxBcc` for public links. Public source
+chains and hashes are recorded in
+[the source record](../compatibility/web-request-source-20261018.json).
+
+The implementation audit also found compatibility adapters that displayed
+invalid reads as empty inventories and counted a missing RPC body as a successful
+probe. Shared strict response validation now separates a positively observed
+empty response from HTTP, envelope, rejection and shape failures. Report-action
+metadata also distinguishes an observed UI menu from a captured native mutation
+RPC; local scripts/specifications are not provider-generated audio/apps.
+
+After the fixes, **15** real read-only MCP calls passed across focused, primary
+and compact surfaces. Each returned the same public-link page and read the same
+observed native schedule ID through its matching backend. Legacy listing was
+verified separately; an empty legacy result did not hide the native schedules.
+Gems/Notebooks/Library capability reads and usage/mode status also passed.
+No new conversations or remote resources were created, so there were no
+disposable chats to delete. Temporary clients and the inspection tab were closed.
+
+Local verification passed: Ruff, Mypy (82 source files), 2,906 offline tests,
+371 architecture/distribution checks, representative profiles, and real
+modern/legacy MCP stdio checks on all five surfaces. An independent regression
+review found no additional actionable issue in backend routing, inventory
+evidence or the current public-link parser. These are separate from the
+15 account reads above and do not verify unsupported mutations.
+
+See the [coverage matrix](#primary-mcp-coverage) for supported workflows,
+remaining gaps and evidence dates. This audit does not establish complete
+Gemini Web parity or validate every account mutation.
+
 ## 2026-10-18 Models, History and Native Tasks
 
 The user authorized this bounded run on their signed-in Chrome account. Current
@@ -311,39 +358,42 @@ NotebookLM, help/feedback, and location entries.
 
 ## Primary MCP Coverage
 
-| Native UI surface | MCP coverage | Notes |
-|---|---|---|
-| Chat and streaming chat | Covered | `gemini_chat`, `gemini_chat_stream`, session tools |
-| Temporary chat | Covered | `temporary` is forwarded to `gemini-webapi` |
-| Gems | Covered in part | CRUD and chat use via `gemini_manage_gems` and `gem_id` |
-| Upload file | Covered | Local files use `gemini_upload_file` |
-| Import code | Covered in part | Local code files can be uploaded; UI import workflows are not replicated |
-| Create image/music | Verified in bounded runs | Native primary/compact image/edit/music files and focused image/edit plus completed asynchronous music files were decoded; focused completed-file restart retrieval passed on 2026-10-03 |
-| Create video | Verified in a bounded native MCP run | Mode 11 produced a decoded 1280×720, 10.005-second MP4 and completed-file restart retrieval on 2026-10-03; earlier failed requests and dedicated Chrome video remain separate evidence |
-| Deep Research | Covered | Full workflow when the installed client exposes research helpers |
-| Dynamic model discovery | Covered | `gemini_list_models` reports the account model registry after init |
-| Observed Web Pro capability manifest | Covered | `gemini_get_web_capabilities` returns observed models, thinking levels, menu entries, and MCP coverage |
-| Account feature/RPC status | Covered | `gemini_inspect_account` summarizes account probes without raw previews |
-| Chat history listing | Covered | `gemini_history(action="list")` is the recommended facade; `gemini_list_chats` remains available in `all/manage` and supports pagination/JSON |
-| Chat history deep source scan | Covered | `gemini_history(action="scan")` is the recommended facade; the granular scan merges observed `MaZiqc` history filters, native notebook chat lists, and `GS7W1` Remy goal conversation references without reading turn text |
-| Chat history search | Covered | `gemini_history(action="search")` searches titles/IDs by default and only scans turn text when `scan_turns=true` |
-| Chat history reading | Covered | `gemini_history(action="read")` reads a specific chat by ID |
-| Chat history export | Covered | `gemini_history(action="export")` exports one selected chat as Markdown or JSON |
-| Chat deletion | Covered with explicit evidence state | `gemini_delete_chat` requests deletion, then reports `verified_absent`, `not_available`, `still_present`, or `read_back_error`; only positive absence is verified deletion |
-| Native Gemini Notebooks | Covered in part | `gemini_notebooks(action="list|chats")` is the recommended read-only facade; granular tools remain available in `all/manage`, and `gemini_move_chat_to_notebook` moves existing chats with verification; notebook create/delete/source mutation remains disabled except for observed source helpers |
-| Library capability/templates | Covered in part | `gemini_list_library_capabilities` parses observed `cYRIkd` capability entries |
-| Library assets | Probe covered | `gemini_probe_web_features(surface="library")` checks observed `sJBwce` and `VxUbXb`; no stable asset list wrapper yet |
-| Add from Google Drive | UI observed | Drive picker is visible in the tools menu and opens Google Picker; no Drive attachment RPC wrapper yet |
-| Canvas | Probe covered | Listed in tools menu and Library capabilities; `gemini_get_tool_mode_status` reads observed mode-status rows, but no Canvas document RPC wrapper yet |
-| Guided Learning | Covered in part | Chat tools accept `learning_mode` for observed Input Companion modes; `gemini_get_tool_mode_status` remains the read-only mode-status probe |
-| Thinking level submenu | Covered | Generation requests accept `thinking_level=standard/extended` |
-| Personalization and settings | Probe covered in part | `gemini_probe_web_features(surface="personalization")` checks observed settings RPC reachability; no settings CRUD wrapper yet |
-| Usage limits | Covered in part | `gemini_get_usage_limits` parses observed quota/model-state structures |
-| Public links | Covered in part | `gemini_list_public_links` lists observed public-link entries; no create/delete/update wrapper yet |
-| Scheduled actions | Covered in part | `gemini_list_scheduled_actions` reads the observed registry; `gemini_get_scheduled_action` reads known IDs and task state; `gemini_create_scheduled_action` creates daily actions; `gemini_delete_scheduled_action` sends delete by id and verifies `task_state=deleted` when available; edit/toggle still disabled |
-| Memory import | Probe covered in part | `gemini_probe_web_features(surface="import")` checks observed import-entry RPC reachability; no import mutation wrapper yet |
+Source audit: **2026-10-18**. Implemented means a registered path exists with
+local contract coverage; it does not mean every current provider flow was run.
+Recent live evidence is identified explicitly. Focused servers provide the
+same shared workflows where listed in [development status](development-status.md).
+
+| Capability | Current implementation | Evidence and limits |
+| --- | --- | --- |
+| Models, thinking, chat and sessions | Dynamic registry, low/medium/high, one-shot/multi-turn/stream collection, temporary and Gem chat | Model/thinking calls verified 10-18; stream tools return collected upstream streams rather than client token streaming. |
+| Native Tasks | Primary/compact `task_mode`, exact-source `task_status`, unfinished-source retention | Matching Goal completion and restart recovery verified 10-18; provider cancellation not exposed. |
+| Image generation and local-image editing | Native selector, generated-image validation and local save | Decode/visual checks verified 10-17; UI Pro redo is not a separate first-pass API. |
+| Video and music | Native selectors, local verification; focused asynchronous handles | Verified files, controlled unfinished-video restart and completed-file retrieval on 10-17. Arbitrary hard-crash recovery is unverified. |
+| Cleanup and cancellation | Account-scoped durable jobs; operation cancellation request | Delayed restart cleanup verified 10-17/18. Cancellation does not prove the provider stopped. |
+| Image, file and URL understanding | Focused mixed inputs and primary file/URL tools | Local inputs upload; remote URI inputs are references in the prompt. An acknowledged input does not prove independent fetching. Current end-to-end recheck remains pending. |
+| Grounded search | Focused `gemini_search` with observed structured citations | Source-free answers remain `answer_only`; no new dated live acceptance in this audit. |
+| Deep Research | Primary/focused start/status/result/cancel and report save | Native-helper/fallback paths covered offline; current signed-in report recovery remains pending. |
+| Report-derived outputs | Local HTML/Markdown templates | Audio overview is a script; custom app is a specification. Neither proves native audio/app generation. |
+| Guided Learning | Primary/compact `learning_mode` companion modes | Request contract retained from 06-19; current menu seen 10-18, new end-to-end acceptance pending. |
+| History | List/scan/search/read/export/delete, rename, pin/unpin | Fresh metadata and exact-chat updates/read/export/delete verified 10-18; bounded pages do not prove full account coverage. |
+| Native Notebooks | List, recent chats, move chat with membership read-back | List rechecked 10-18; current move acceptance pending. Notebook create/update/delete and source management remain unsupported. |
+| Scheduled actions | Explicit legacy list/get/daily-create/delete; native Remy list/get via `backend=remy` | Native and legacy IDs/states remain separate. Native create/edit/pause/resume/delete and broader recurrence are unsupported; legacy mutations were last live-tested 06-20. |
+| Gems | List/create/update/delete with complete custom-registry read-back | List rechecked 10-18; current mutation acceptance pending. Gems are separate from native Skills. |
+| Local Prompts | CRUD, categories, get and variable rendering | Local atomic storage and regression coverage; does not submit to Gemini. |
+| Library | Localized capability/template list and asset probes | Capability read rechecked 10-18. Private asset list/read/update/delete remain unsupported. |
+| Public links | Current shared-conversation list | Read only; create/update/revoke remain unsupported. Missing disabled-state evidence is not inferred. |
+| Usage, model/mode status and feature probes | Sanitized read-only observations | Usage/modes rechecked 10-18; RPC reachability does not establish entitlement or named mode semantics. |
+| Canvas | Capability/status observation | Native document creation/editing/export is unsupported. |
+| Drive, Photos, repository and Notebook import | UI entries observed; local code files can upload | Native picker/attachment workflows remain unsupported. Local upload is not native repository import. |
+| Native Skills | UI list/create/upload controls observed | `/customize/skills` has no MCP administration contract. Gems and local Prompts do not substitute for it. |
+| Personalization, memory import and Task settings | Selected read-only probes/UI observations | Settings mutations and memory import remain unsupported. |
+| UI exports and preferences | Observed entries only | Native PDF/Google Docs export and media-watermark/preferences administration are unsupported. Local Markdown/JSON chat export remains available. |
 
 ## Observed RPC Evidence
+
+The following registry and cookie-context observations are historical June/July
+evidence. Current sharing and native Task-schedule contracts are recorded in
+the 2026-10-18 sections above; old registry emptiness is not current-page coverage.
 
 The 2026-06-18 browser pass captured these read-only/probe-style RPC ids from
 native Gemini Web navigation. `gemini_probe_web_features` uses these ids without
@@ -465,21 +515,13 @@ approval.
 
 ## Model Contract
 
-Chat, file, and media generation tools accept the current Web aliases
-`flash-lite`, `flash`, and `pro`; compatibility aliases such as `fast` and
-`thinking` remain accepted. They also accept a runtime model/display name from
-the installed `gemini-webapi` model registry. The Web UI thinking selector is
-separate from the model picker and maps to `thinking_level=standard` or
-`thinking_level=extended`.
+The current model aliases, dynamic discovery and low/medium/high thinking
+contract are maintained in [models.md](models.md). `standard` and `extended`
+remain compatibility aliases. Historical model-picker observations above
+apply to their stated dates; they are not a current model directory.
 
-Guided Learning is separate from both the model picker and thinking selector.
-Use `learning_mode` only when the desired output is a learning artifact or
-guided study flow; leave it unset for ordinary chat.
-
-The visible model names in Gemini Web can drift faster than the package enum.
-In the 2026-09-26 run, the runtime registry exposed generic `Flash-Lite`,
-`Flash`, and `Pro` names without the full UI version labels. Check both the
-runtime request names and the signed-in Web model picker when updating aliases.
+Guided Learning and native Task selection are independent request controls;
+use only the mode needed by the requested workflow.
 
 ## Media Routing Notes
 
@@ -492,5 +534,7 @@ runtime request names and the signed-in Web model picker when updating aliases.
 - Music generation returns `Lyria` as the family label until the response
   identifies a version. The 2026-09-26 Flash result contained usable audio and
   cover video; the old `Lyria 3`/`Lyria 3 Pro` version inference is retired.
-- Generic MCP video prompting did not enter the currently visible Gemini Omni
-  mode. Use the dedicated Web Videos page until a verified MCP route exists.
+- Prompt-only video attempts did not establish a native route in the historical
+  09-26 run. Native selector 11 subsequently produced verified video on 10-03
+  and 10-17. Use the creation tools and require a verified video Artifact; the
+  dated failed attempts remain separate observations.

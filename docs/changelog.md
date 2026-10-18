@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- Audited the remaining signed-in Web surfaces, corrected misleading capability routes/report-menu evidence, and documented explicit native Skills, Canvas, import, Library and sharing gaps.
+- Repaired current public-link reads through `ListSharedConversations` and added native Task schedule list/get with explicit `backend=remy`, preserving separate legacy daily-action mutation contracts.
+- Required a unique matching HTTP/RPC observation across account inventories and probes; failures, malformed rows and duplicate/null envelopes cannot become empty success or deletion evidence.
 - Followed the 2026-10-18 signed-in UI: dynamic Argon selection, low/medium/high thinking with synchronized body/header values, native Task execution and read-only state recovery.
 - Added exact-chat rename/pin/unpin with field masks and independent read-back. History listing/search/export/deep scans now reject failed or malformed metadata instead of reporting an empty account.
 - Preserved unfinished Task sources across stream end, timeout and local session reset/expiry; status reads never restart execution.

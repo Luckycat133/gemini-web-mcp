@@ -164,7 +164,7 @@ def _read_gem_registry(response: Any, identifier: str) -> tuple[list[dict[str, A
         "reject_code": envelope.reject_code, "body_count": len(envelope.bodies), "read_back_valid": False,
     }
     if (diagnostic["status_code"] != 200 or not envelope.parsed
-            or envelope.reject_code is not None or len(envelope.bodies) != 1):
+            or envelope.reject_code is not None or not envelope.single_body):
         return [], diagnostic
     parsed = parse_contract_body(contract, envelope.bodies[0])
     diagnostic.update(parser_status=parsed.status, parser_warnings=list(parsed.warnings))
