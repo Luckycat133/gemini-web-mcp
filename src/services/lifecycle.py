@@ -483,7 +483,7 @@ class ConversationLifecycleService:
             session_id=state.session_id,
             upstream_chat_id=(extract_remote_chat_id(state.session) or state.upstream_chat_id),
             session_state=session_state or state.lifecycle_state,
-            retain_chat=state.retain_chat or state.task_pending,
+            retain_chat=state.retain_chat or state.task_pending or state.recovery_pending,
             delete_after_seconds=state.delete_after_seconds,
             cleanup=cleanup or CleanupObservation(),
         )
@@ -498,7 +498,7 @@ class ConversationLifecycleService:
         cid = extract_remote_chat_id(state.session) or state.upstream_chat_id
         if cid is None:
             return CleanupObservation(source=source)
-        if state.retain_chat or state.task_pending:
+        if state.retain_chat or state.task_pending or state.recovery_pending:
             return self.schedule_cleanup(
                 cid,
                 retain_chat=True,
@@ -571,7 +571,7 @@ class ConversationLifecycleService:
             cid = extract_remote_chat_id(state.session) or state.upstream_chat_id
             self.schedule_cleanup(
                 cid,
-                retain_chat=state.retain_chat or state.task_pending,
+                retain_chat=state.retain_chat or state.task_pending or state.recovery_pending,
                 delete_after_seconds=state.delete_after_seconds,
                 source="session_expired",
             )
@@ -585,7 +585,7 @@ class ConversationLifecycleService:
         cid = extract_remote_chat_id(state.session) or state.upstream_chat_id
         return self.schedule_cleanup(
             cid,
-            retain_chat=state.retain_chat or state.task_pending,
+            retain_chat=state.retain_chat or state.task_pending or state.recovery_pending,
             delete_after_seconds=state.delete_after_seconds,
             source=source,
         )

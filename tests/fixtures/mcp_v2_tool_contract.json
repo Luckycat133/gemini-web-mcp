@@ -4,8 +4,8 @@
   "surfaces": {
     "account": [
       {
-        "annotations_sha256": "139076388a98d13d07bb3df5c31e17088f4e37e0af35e2d89a7d5b112ee0e214",
-        "input_schema_sha256": "43c873f7bd96b8f5083ca77e85b1678a1e00945b3f553f43a925156ec764abb0",
+        "annotations_sha256": "bbca3f90a8f37a2e09188309470b131134c395dbc4eccad15de06d2c2f94f06a",
+        "input_schema_sha256": "1c96d9fcc38e7f21654f96b3cafc1cbe84d7d4caa6ba7b296559a1244bcb46a7",
         "name": "gemini_account",
         "output_schema_sha256": "369763f047111c047fb07f3487898a056fb44a9379e411178fcf79202fcf7ed9"
       },
@@ -29,7 +29,7 @@
       },
       {
         "annotations_sha256": "bbca3f90a8f37a2e09188309470b131134c395dbc4eccad15de06d2c2f94f06a",
-        "input_schema_sha256": "3ad6be75d7362062c499553beee36b0e52910fd0ff26d763dc98de32d30f2a62",
+        "input_schema_sha256": "ec2f808fb31724ca370b53bfe826c45f0a2c7ed0915aaa02c28cb589802f9f9c",
         "name": "gemini_notebooks",
         "output_schema_sha256": "369763f047111c047fb07f3487898a056fb44a9379e411178fcf79202fcf7ed9"
       },
@@ -41,7 +41,7 @@
       },
       {
         "annotations_sha256": "bbca3f90a8f37a2e09188309470b131134c395dbc4eccad15de06d2c2f94f06a",
-        "input_schema_sha256": "60c360affabbb3ca55e183c8628df7bf2800f6f1b9950a34c049e95c4ddcc38b",
+        "input_schema_sha256": "39e91bdc59228f28bf366c4e14fb9d9ea24d7fe73b8e8626847f42bc3bb06d30",
         "name": "gemini_scheduled",
         "output_schema_sha256": "369763f047111c047fb07f3487898a056fb44a9379e411178fcf79202fcf7ed9"
       }
@@ -67,7 +67,7 @@
       },
       {
         "annotations_sha256": "99300d9e2937ba92c763822593cb3ba8ec634d1813f3ab37fad3d6d0432268f9",
-        "input_schema_sha256": "6465b18d66ad9e30e6d595dda7bb1ad98094f87370fc59caa408fba2c1806f93",
+        "input_schema_sha256": "ab2d7e92505fc3636e4b72780e7a4d5fa3814324692d840667a62eecee456013",
         "name": "gemini_understand",
         "output_schema_sha256": "37a38e5f0b607863c11947a36ab6a8cef5432a73c977b66852f6d020cad8027a"
       },
@@ -80,8 +80,8 @@
     ],
     "compact": [
       {
-        "annotations_sha256": "139076388a98d13d07bb3df5c31e17088f4e37e0af35e2d89a7d5b112ee0e214",
-        "input_schema_sha256": "4d59e27e805ae10b86ac976c88afc4a3d30da6e4cd9373e4dcf62938b13016d8",
+        "annotations_sha256": "bbca3f90a8f37a2e09188309470b131134c395dbc4eccad15de06d2c2f94f06a",
+        "input_schema_sha256": "16c4ecf380a4821ae6316253d185013de5dbb701da70f1803d2d1cb67f05b9c6",
         "name": "account",
         "output_schema_sha256": "b0307951a9a6a8a05cda5177fa611f201f6a82d36cd378c074bd2c4cf916319c"
       },
@@ -135,7 +135,7 @@
       },
       {
         "annotations_sha256": "bbca3f90a8f37a2e09188309470b131134c395dbc4eccad15de06d2c2f94f06a",
-        "input_schema_sha256": "a785e1a88fa0cf994e0a9944b024d63fd898e1ebea7043e8f85266aef830c77d",
+        "input_schema_sha256": "931e86d8b9cf0ce6a4414ef03931bc6427ce1c75e4fe271a112fb525f9dbc414",
         "name": "scheduled",
         "output_schema_sha256": "ada7cc10a130959baed69dc9de97537953d0dd054ffa3ae5744cf6ea6c1a4e8e"
       },

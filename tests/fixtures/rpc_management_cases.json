@@ -1,20 +1,454 @@
 {
+  "notebook_update_ack": {
+    "contract_key": "notebooks.update",
+    "cases": {
+      "success": {
+        "body": [
+          true
+        ]
+      },
+      "empty": {
+        "body": []
+      },
+      "rejected": {
+        "body": [
+          false
+        ]
+      },
+      "changed_shape": {
+        "body": [
+          1
+        ]
+      }
+    }
+  },
+  "notebook_get": {
+    "contract_key": "notebooks.get",
+    "cases": {
+      "success": {
+        "body": [
+          [
+            "notebooks/fixture",
+            [
+              "Fixture Notebook",
+              "Fixture description",
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              [
+                [
+                  [
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    "sources/fixture"
+                  ]
+                ],
+                [
+                  [
+                    "sources/fixture",
+                    [
+                      "sources/fixture",
+                      "Fixture source",
+                      null,
+                      null,
+                      null,
+                      [
+                        "Fixture source text",
+                        1
+                      ],
+                      2,
+                      null,
+                      "text/plain"
+                    ]
+                  ]
+                ]
+              ],
+              null,
+              [
+                2,
+                null,
+                null,
+                null,
+                1,
+                []
+              ],
+              null,
+              [
+                null,
+                null,
+                null,
+                "sources/fixture"
+              ]
+            ],
+            [
+              "Fixture instructions",
+              [],
+              []
+            ],
+            false
+          ]
+        ]
+      },
+      "empty": {
+        "body": []
+      },
+      "rejected": {
+        "body": [],
+        "reject_code": 7
+      },
+      "changed_shape": {
+        "body": [
+          [
+            "notebooks/fixture",
+            [
+              "Gem metadata"
+            ]
+          ]
+        ]
+      }
+    }
+  },
+  "notebook_created": {
+    "contract_key": "notebooks.create",
+    "cases": {
+      "success": {
+        "body": [
+          "notebooks/fixture"
+        ]
+      },
+      "empty": {
+        "body": []
+      },
+      "rejected": {
+        "body": [],
+        "reject_code": 7
+      },
+      "changed_shape": {
+        "body": [
+          false
+        ]
+      }
+    }
+  },
+  "notebook_source_created": {
+    "contract_key": "notebooks.add_source",
+    "cases": {
+      "success": {
+        "body": [
+          [
+            "notebooks/fixture",
+            [
+              "Fixture Notebook",
+              "Fixture description",
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              [
+                [
+                  [
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    "sources/fixture"
+                  ]
+                ],
+                [
+                  [
+                    "sources/fixture",
+                    [
+                      "sources/fixture",
+                      "Fixture source",
+                      null,
+                      null,
+                      null,
+                      [
+                        "Fixture source text",
+                        1
+                      ],
+                      2,
+                      null,
+                      "text/plain"
+                    ]
+                  ]
+                ]
+              ],
+              null,
+              [
+                2,
+                null,
+                null,
+                null,
+                1,
+                []
+              ],
+              null,
+              [
+                null,
+                null,
+                null,
+                "sources/fixture"
+              ]
+            ],
+            [
+              "Fixture instructions",
+              [],
+              []
+            ],
+            false
+          ]
+        ]
+      },
+      "empty": {
+        "body": []
+      },
+      "rejected": {
+        "body": [],
+        "reject_code": 7
+      },
+      "changed_shape": {
+        "body": [
+          [
+            "notebooks/fixture",
+            [
+              "changed"
+            ]
+          ]
+        ]
+      }
+    }
+  },
+  "native_void_ack": {
+    "contract_key": "notebooks.delete",
+    "cases": {
+      "success": {
+        "body": []
+      },
+      "empty": {
+        "body": null
+      },
+      "rejected": {
+        "body": null,
+        "reject_code": 7
+      },
+      "changed_shape": {
+        "body": {
+          "unexpected": true
+        }
+      }
+    }
+  },
+  "native_skill_list": {
+    "contract_key": "native_skills.list",
+    "cases": {
+      "success": {
+        "body": [
+          [
+            [
+              "skills/fixture",
+              "Fixture Skill",
+              "Fixture description",
+              "Fixture instructions",
+              true
+            ]
+          ]
+        ]
+      },
+      "empty": {
+        "body": []
+      },
+      "rejected": {
+        "body": [],
+        "reject_code": 7
+      },
+      "changed_shape": {
+        "body": [
+          [
+            [
+              "skills/fixture",
+              false
+            ]
+          ]
+        ]
+      }
+    }
+  },
+  "native_skill_get": {
+    "contract_key": "native_skills.get",
+    "cases": {
+      "success": {
+        "body": [
+          [
+            "skills/fixture",
+            "Fixture Skill",
+            "Fixture description",
+            "Fixture instructions",
+            true
+          ]
+        ]
+      },
+      "empty": {
+        "body": []
+      },
+      "rejected": {
+        "body": [],
+        "reject_code": 7
+      },
+      "changed_shape": {
+        "body": [
+          [
+            "skills/fixture",
+            false
+          ]
+        ]
+      }
+    }
+  },
+  "native_skill_save": {
+    "contract_key": "native_skills.save",
+    "cases": {
+      "success": {
+        "body": [
+          "skills/fixture",
+          [
+            "skills/fixture",
+            "Fixture Skill",
+            "Fixture description",
+            "Fixture instructions",
+            true
+          ]
+        ]
+      },
+      "empty": {
+        "body": []
+      },
+      "rejected": {
+        "body": [],
+        "reject_code": 7
+      },
+      "changed_shape": {
+        "body": [
+          "skills/fixture",
+          [
+            "other",
+            "Wrong identity"
+          ]
+        ]
+      }
+    }
+  },
+  "remy_void_ack": {
+    "contract_key": "scheduled.remy_delete",
+    "cases": {
+      "success": {
+        "body": []
+      },
+      "empty": {
+        "body": null
+      },
+      "rejected": {
+        "body": [],
+        "reject_code": 7
+      },
+      "changed_shape": {
+        "body": {
+          "unexpected": true
+        }
+      }
+    }
+  },
   "remy_schedule_registry": {
     "contract_key": "scheduled.remy_registry",
     "cases": {
-      "success": {"body": [[["schedule_fixture", "Fixture schedule", true, [[9, 30]], null, null, "Asia/Shanghai", "Fixture instructions", null, 1]], false, 1]},
-      "empty": {"body": []},
-      "rejected": {"body": [], "reject_code": 7},
-      "changed_shape": {"body": {"unexpected": true}}
+      "success": {
+        "body": [
+          [
+            [
+              "schedule_fixture",
+              "Fixture schedule",
+              true,
+              [
+                [
+                  9,
+                  30
+                ]
+              ],
+              null,
+              null,
+              "Asia/Shanghai",
+              "Fixture instructions",
+              null,
+              1
+            ]
+          ],
+          false,
+          1
+        ]
+      },
+      "empty": {
+        "body": []
+      },
+      "rejected": {
+        "body": [],
+        "reject_code": 7
+      },
+      "changed_shape": {
+        "body": {
+          "unexpected": true
+        }
+      }
     }
   },
   "remy_schedule_get": {
     "contract_key": "scheduled.remy_get",
     "cases": {
-      "success": {"body": [["schedule_fixture", "Fixture schedule", true, [[9, 30]], null, null, "Asia/Shanghai", "Fixture instructions", null, 1]]},
-      "empty": {"body": []},
-      "rejected": {"body": [], "reject_code": 7},
-      "changed_shape": {"body": {"unexpected": true}}
+      "success": {
+        "body": [
+          [
+            "schedule_fixture",
+            "Fixture schedule",
+            true,
+            [
+              [
+                9,
+                30
+              ]
+            ],
+            null,
+            null,
+            "Asia/Shanghai",
+            "Fixture instructions",
+            null,
+            1
+          ]
+        ]
+      },
+      "empty": {
+        "body": []
+      },
+      "rejected": {
+        "body": [],
+        "reject_code": 7
+      },
+      "changed_shape": {
+        "body": {
+          "unexpected": true
+        }
+      }
     }
   },
   "task_goal": {
@@ -706,5 +1140,275 @@
         ]
       ]
     ]
+  },
+  "library_page": {
+    "contract_key": "library.page",
+    "cases": {
+      "success": {
+        "body": [
+          [
+            [
+              [
+                "c_library_fixture",
+                "r_library_fixture"
+              ],
+              [
+                1700000000,
+                0
+              ],
+              5,
+              "Document one",
+              [
+                "Fixture text one"
+              ],
+              "rc_library_fixture"
+            ],
+            [
+              [
+                "c_library_fixture",
+                "r_library_fixture"
+              ],
+              [
+                1700000001,
+                0
+              ],
+              5,
+              "Document two",
+              [
+                "Fixture text two"
+              ],
+              "rc_library_fixture"
+            ]
+          ],
+          "continuation_fixture"
+        ]
+      },
+      "empty": {
+        "body": [
+          []
+        ]
+      },
+      "rejected": {
+        "body": null,
+        "reject_code": 7
+      },
+      "changed_shape": {
+        "body": {
+          "changed": "shape"
+        }
+      }
+    }
+  },
+  "library_delete": {
+    "contract_key": "library.delete",
+    "cases": {
+      "success": {
+        "body": [
+          null,
+          1,
+          []
+        ]
+      },
+      "empty": {
+        "body": []
+      },
+      "rejected": {
+        "body": null,
+        "reject_code": 7
+      },
+      "changed_shape": {
+        "body": {
+          "changed": "shape"
+        }
+      }
+    }
+  },
+  "public_link_create": {
+    "contract_key": "sharing.create",
+    "cases": {
+      "success": {
+        "body": [
+          null,
+          null,
+          "public_fixture"
+        ]
+      },
+      "empty": {
+        "body": []
+      },
+      "rejected": {
+        "body": null,
+        "reject_code": 7
+      },
+      "changed_shape": {
+        "body": {
+          "changed": "shape"
+        }
+      }
+    }
+  },
+  "sharing_void_ack": {
+    "contract_key": "sharing.delete",
+    "cases": {
+      "success": {
+        "body": [
+          null
+        ]
+      },
+      "empty": {
+        "body": []
+      },
+      "rejected": {
+        "body": null,
+        "reject_code": 7
+      },
+      "changed_shape": {
+        "body": {
+          "changed": "shape"
+        }
+      }
+    }
+  },
+  "canvas_artifact": {
+    "contract_key": "canvas.get",
+    "cases": {
+      "success": {
+        "body": [
+          "artifact_fixture",
+          null,
+          "Canvas fixture",
+          null,
+          "Fixture text",
+          null,
+          "artifact_latest_fixture",
+          null,
+          null,
+          null,
+          3
+        ]
+      },
+      "empty": {
+        "body": []
+      },
+      "rejected": {
+        "body": null,
+        "reject_code": 7
+      },
+      "changed_shape": {
+        "body": {
+          "changed": "shape"
+        }
+      }
+    }
+  },
+  "canvas_chat_artifacts": {
+    "contract_key": "canvas.chat_artifacts",
+    "cases": {
+      "success": {
+        "body": [
+          [
+            [
+              [
+                "c_fixture",
+                "r_fixture"
+              ],
+              null,
+              null,
+              [
+                [
+                  [
+                    "rc_fixture",
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    [
+                      [
+                        "artifact_fixture",
+                        null,
+                        "Title",
+                        null,
+                        "Text"
+                      ]
+                    ]
+                  ]
+                ]
+              ]
+            ]
+          ]
+        ]
+      },
+      "empty": {
+        "body": [
+          []
+        ]
+      },
+      "rejected": {
+        "body": null,
+        "reject_code": 7
+      },
+      "changed_shape": {
+        "body": {
+          "changed": "shape"
+        }
+      }
+    }
+  },
+  "canvas_versions": {
+    "contract_key": "canvas.versions",
+    "cases": {
+      "success": {
+        "body": [
+          [
+            [
+              "artifact_fixture",
+              null,
+              "Title",
+              null,
+              "Text"
+            ]
+          ]
+        ]
+      },
+      "empty": {
+        "body": [
+          []
+        ]
+      },
+      "rejected": {
+        "body": null,
+        "reject_code": 7
+      },
+      "changed_shape": {
+        "body": {
+          "changed": "shape"
+        }
+      }
+    }
   }
 }

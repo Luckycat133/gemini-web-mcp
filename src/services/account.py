@@ -32,7 +32,8 @@ def account_read_result(value: T, diagnostic: dict[str, Any]) -> DomainResult[T]
         and not diagnostic.get("parser_warnings")
     ):
         return DomainResult.success(value, verification_status="observed", details=diagnostic)
-    code = DomainErrorCode.UPSTREAM_REJECTED if diagnostic.get("reject_code") is not None else DomainErrorCode.UPSTREAM_CHANGED
+    code = (DomainErrorCode.UPSTREAM_REJECTED if diagnostic.get("reject_code") is not None
+            or diagnostic.get("parser_status") == "rejected" else DomainErrorCode.UPSTREAM_CHANGED)
     return DomainResult.failure(
         code, "The account response could not be verified.", retryable=False,
         verification_status="read_back_unavailable", details=diagnostic,
@@ -93,6 +94,7 @@ def account_probe_status(response: Any, probe: dict[str, str]) -> dict[str, Any]
     if not ok:
         diagnostic["error_code"] = (
             DomainErrorCode.UPSTREAM_REJECTED.value if diagnostic.get("reject_code") is not None
+            or diagnostic.get("parser_status") == "rejected"
             else DomainErrorCode.UPSTREAM_CHANGED.value
         )
     return diagnostic

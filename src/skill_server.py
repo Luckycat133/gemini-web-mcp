@@ -18,6 +18,8 @@ except ImportError:
     exit(1)
 
 from . import __version__
+from .domain.account_requests import AccountRequest, ScheduledRequest, NotebooksRequest
+from .services.account_facade import get_account_facade_service
 from .adapters import append_artifact_block, attach_domain_result, domain_failure_text, domain_text, exception_text
 from .client_wrapper import (
     cleanup_due_remote_chats,
@@ -72,7 +74,6 @@ from .tools.annotations import (
     MUTATES_LOCAL,
     MUTATES_REMOTE,
     READ_ONLY_LOCAL,
-    READS_PRIVATE_REMOTE,
 )
 from .infrastructure.rpc_contracts import WEB_FEATURE_PROBES
 from .infrastructure.rpc_parsers import extract_rpc_bodies as _extract_rpc_bodies
@@ -813,7 +814,7 @@ _ACCOUNT_CLIENT_ACTIONS: dict[str, Callable[[Any], Awaitable[list[TextContent]]]
 }
 
 
-@mcp.tool(annotations=READS_PRIVATE_REMOTE)
+@mcp.tool(annotations=DESTRUCTIVE_REMOTE)
 async def account(
     action: Literal[
         "status",
@@ -828,9 +829,25 @@ async def account(
         "scheduled",
         "modes",
     ] = "status",
+    request: AccountRequest | None = None,
+    notebook_request: NotebooksRequest | None = None,
 ) -> list[TextContent]:
-    """Inspect Gemini account status and available models."""
+    """Inspect account inventory; typed request manages native resources.
+
+    request follows the focused gemini_account schema; notebook_request follows
+    gemini_notebooks. Supply one typed request, keeping legacy action calls valid.
+    """
     try:
+        if request is not None or notebook_request is not None:
+            if request is not None and notebook_request is not None:
+                invalid: DomainResult[Any] = DomainResult.failure(DomainErrorCode.INVALID_ARGUMENT, "Supply one account or notebook request.")
+                return domain_text(invalid, domain_failure_text(invalid), use_result_data=True)
+            if request is not None:
+                result = await get_account_facade_service().execute("account", request)
+            else:
+                assert notebook_request is not None
+                result = await get_account_facade_service().execute("notebooks", notebook_request)
+            return domain_text(result, "Account action and observed verification.", use_result_data=True)
         auth_free_handler = _ACCOUNT_AUTH_FREE_ACTIONS.get(action)
         if auth_free_handler is not None:
             return await auth_free_handler()
@@ -949,12 +966,17 @@ async def scheduled(
     hour: int = 9,
     timezone_name: str = "Asia/Shanghai",
     backend: Literal["legacy", "remy"] = "legacy",
+    request: ScheduledRequest | None = None,
 ) -> list[TextContent]:
     """List/get backend=remy for current Tasks; default legacy also supports daily create/delete.
 
-    Preserve the backend when reusing an ID. Native schedule mutations are unavailable.
+    Typed request also supports native create/update/pause/resume/delete and
+    recurrence triggers. Preserve the backend when reusing an ID.
     """
     try:
+        if request is not None:
+            native_result = await get_account_facade_service().execute("scheduled", request)
+            return domain_text(native_result, "Scheduled action and observed verification.", use_result_data=True)
         if backend == "remy" and action not in {"list", "get"}:
             result: DomainResult[Any] = DomainResult.failure(DomainErrorCode.INVALID_ARGUMENT, "Native schedules support list/get only.")
             return domain_text(result, domain_failure_text(result), use_result_data=True)

@@ -48,6 +48,7 @@ class SessionState:
     delete_after_seconds: int | None = None
     task_mode: bool = False
     task_pending: bool = field(default=False, metadata={"domain_exclude": True})
+    recovery_pending: bool = field(default=False, metadata={"domain_exclude": True})
     lifecycle_state: SessionLifecycleState = SessionLifecycleState.ACTIVE
     _authentication_invalidated: bool = field(default=False, repr=False, metadata={"domain_exclude": True})
     _authentication_generation: int | None = field(default=None, repr=False, metadata={"domain_exclude": True})
@@ -108,7 +109,7 @@ class SessionOperationResult(DomainResult[SessionOperationData]):
                 getattr(session.session, "cid", None) or session.upstream_chat_id if session is not None else None
             ),
             session_state=observed_state,
-            retain_chat=(session.retain_chat or session.task_pending) if session is not None else False,
+            retain_chat=(session.retain_chat or session.task_pending or session.recovery_pending) if session is not None else False,
             delete_after_seconds=(session.delete_after_seconds if session is not None else None),
             cleanup=cleanup or CleanupObservation(),
         )

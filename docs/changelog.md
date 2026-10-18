@@ -9,8 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-- Audited the remaining signed-in Web surfaces, corrected misleading capability routes/report-menu evidence, and documented explicit native Skills, Canvas, import, Library and sharing gaps.
-- Repaired current public-link reads through `ListSharedConversations` and added native Task schedule list/get with explicit `backend=remy`, preserving separate legacy daily-action mutation contracts.
+- Added native Notebook title/instructions CRUD and source management, Remy schedule CRUD/pause/resume with six trigger types, and native Skill CRUD/enable/disable/ZIP import through the existing account facades. Notebook descriptions remain non-writable; native Skills, Gems and local Prompts are distinct resources.
+- Added paginated Library asset reads and exact-target media removal with identity/coverage guards (Canvas/document removal is explicitly unavailable), plus public-link create and exact-token deletion. Current public-link reads use `ListSharedConversations`; native Remy IDs retain `backend=remy` alongside separate legacy daily actions.
+- Added native Canvas creation, exact reads, chat-artifact discovery, version listing, UTF-8 export and whole plain-document text replacement. Replacement preserves unknown fields, checks all four content copies and updates the same artifact without creating a new version; attachments/citations and other document kinds are excluded.
+- Disabled hidden SDK mutation/generation replays, retained observed ordinary-chat and Canvas sources across failure/cancellation, and separated authentication deadlines from generation timeouts. Preserved source/instruction whitespace, verified complete ZIP file sets, and required unchanged schedule fields to survive updates.
+- Added typed native Drive, Photos and NotebookLM references to mixed-input understanding without guessing IDs or treating Gemini Web Notebooks as NotebookLM. Native repository import remains unsupported.
+- Audited signed-in Web surfaces and corrected misleading capability routes/report-menu evidence. Dated documentation separates bounded MCP acceptance, static public protocol evidence and failed/retried samples without claiming Research report completion.
 - Required a unique matching HTTP/RPC observation across account inventories and probes; failures, malformed rows and duplicate/null envelopes cannot become empty success or deletion evidence.
 - Followed the 2026-10-18 signed-in UI: dynamic Argon selection, low/medium/high thinking with synchronized body/header values, native Task execution and read-only state recovery.
 - Added exact-chat rename/pin/unpin with field masks and independent read-back. History listing/search/export/deep scans now reject failed or malformed metadata instead of reporting an empty account.

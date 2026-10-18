@@ -1,6 +1,6 @@
 ---
 name: gemini-assist
-description: "Use Gemini for second opinions, sourced web search, image/file/URL understanding, and Deep Research. Media generation and account management have separate focused Skills."
+description: "Use Gemini for second opinions, sourced search, image/file/URL and selected Drive/Photos/NotebookLM understanding, and Deep Research. Media creation and account work have separate Skills."
 license: MIT-0
 metadata:
   compatibility: "Requires a connected gemini-mcp-assist server (Python 3.11+); live calls use the server's private Gemini Web authentication."
@@ -38,7 +38,7 @@ needs several steps.
 | Second opinion, critique, code or design review | `gemini_ask` | answer with optional context |
 | Current-web search | `gemini_search` | answer, observed sources and grounding state |
 | One image or screenshot | `gemini_understand_image` | analysis of the supplied image |
-| Files, URLs or mixed inputs | `gemini_understand` | synthesis with per-input IDs and outcomes |
+| Files, URLs or native references | `gemini_understand` | synthesis with per-input IDs and outcomes |
 | Deep Research | `gemini_research` | operation handle, then report |
 
 Read `ok`, `data`, `error` and `meta` from `content[0]._meta.domain_result`
@@ -46,6 +46,13 @@ Read `ok`, `data`, `error` and `meta` from `content[0]._meta.domain_result`
 Use the information in the requested work. Search is `grounded` only with observed `sources`;
 `answer_only`, `unavailable` and `failed` preserve their reported meaning.
 Keep input identities and failures visible when interpreting mixed evidence.
+
+Mixed inputs carry unique `id` values and a `kind`. Use `path` for a local
+image/file, `url` for a remote source, or `text` for inline material. Native
+`drive`, `photos` and `notebook` inputs require an actual caller-selected
+`resource_id`; optional `name`/`mime_type` describe it. Here `notebook` means
+NotebookLM, not a Gemini Web Notebook. Never derive a native ID from a title or
+substitute a Web Notebook ID. Local code upload is not native repository import.
 
 ## Research
 

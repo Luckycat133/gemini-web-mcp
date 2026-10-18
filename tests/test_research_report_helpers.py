@@ -1054,8 +1054,11 @@ def test_wait_for_deep_research_by_chat_skips_followup_when_start_message(monkey
     latest_outputs = [completion, other]
 
     async def fake_fetch_latest(_cid):
-        idx = min(call_count["n"], len(latest_outputs) - 1)
+        idx = call_count["n"]
         call_count["n"] += 1
+        if idx >= len(latest_outputs):
+            # End the read after both observations, without a wall-clock race.
+            raise asyncio.TimeoutError
         return latest_outputs[idx]
 
     client = SimpleNamespace(fetch_latest_chat_response=fake_fetch_latest)
@@ -1066,17 +1069,21 @@ def test_wait_for_deep_research_by_chat_skips_followup_when_start_message(monkey
     monkeypatch.setattr(research_tools, "_fetch_deep_research_immersive_report", fake_immersive)
 
     # followup 返回 start message（不应被采纳）
+    followup_calls = []
+
     async def fake_followup(_chat):
+        followup_calls.append(_chat)
         return SimpleNamespace(text="I'm on it, still researching")
 
     monkeypatch.setattr(research_tools, "_request_completed_research_report", fake_followup)
 
     result = _run(_wait_for_deep_research_by_chat(
-        client, plan, chat, start_output, poll_interval=.001, timeout=.02,
+        client, plan, chat, start_output, poll_interval=0, timeout=10,
     ))
     assert result.done is False
     assert result.final_output is None
-    assert call_count["n"] > 1
+    assert call_count["n"] == 3
+    assert followup_calls == [chat]
 
 
 def test_wait_for_deep_research_by_chat_does_not_complete_on_changed_text(monkeypatch):

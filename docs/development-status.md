@@ -20,10 +20,11 @@ supported compatibility surfaces over the same services.
 | Compatibility routing | `gemini-web-mcp` | primary / compact | profile-based / 11 tools |
 
 Shared services own creation, typed results, Artifact verification, mixed-input
-understanding, grounded search, Research, history, Notebook, Scheduled, Gems,
-Prompts and cleanup. Account facades use action-specific schemas and expose
-read/mutation semantics. Notebook membership, Scheduled identity/fields and
-complete custom Gem read-back must be observed before mutation success.
+understanding, grounded search, Research, history, Notebooks/sources, Scheduled,
+native Skills, Library assets, public sharing, Canvas, Gems, Prompts and cleanup.
+Account facades use action-specific schemas. Mutations require independently
+observed fields or absence; acknowledgement and partial coverage do not prove
+completion.
 
 Video/music start asynchronously. Research keeps its five-tool assistance
 catalog through explicit start/status/result/cancel actions. SQLite provides
@@ -49,14 +50,42 @@ Scheduled actions. Public-link reads use the current shared-conversation
 contract; inventory adapters reject invalid responses instead of reporting
 empty success.
 
-Canvas documents, native Drive/Photos/repository/Notebook attachments, Library
-asset administration, native Skills, sharing mutations, Notebook CRUD/source
-management, native schedule mutations and Task cancellation remain unsupported.
-Gems, local Prompts and native Skills are separate capabilities. Current live
-mutation acceptance for Gems/Notebook moves and signed-in Research report
-recovery also remains pending.
+The subsequent native-workflow pass implemented Notebook title/instructions CRUD
+and sources, six native Remy trigger types with update/pause/resume/delete,
+native Skill CRUD/toggle/ZIP import, paginated Library asset reads/exact deletion,
+public-link create/exact deletion, and Canvas create/get/versions/plain text
+replacement/export. Native Skills, Gems and local Prompts remain separate
+resources. Canvas replacement updates the same artifact and discards formatting;
+it does not generate a new version and excludes attached/cited documents.
+Notebook description writes, Library rename/update and bulk sharing deletion
+are not supported.
+
+Authorized MCP checks verified Notebook CRUD/source readiness and Remy workflows,
+native Skill CRUD/toggle/ZIP import/replacement, public-link creation/deletion,
+Library listing/get/supported-image deletion and Canvas create/read/versions/edit/export.
+The dated acceptance and cleanup evidence is recorded in the
+[dated workflow record](live-ui-coverage.md#2026-10-18-native-capability-workflows).
+Mixed text/local-file/URL understanding and native Guided Learning completed
+on bounded retests after initial timeouts. The original Research handle survived
+restart, but its result was failed/completion_not_observed, without a report or
+resubmission. Metadata changes to a Notebook-moved chat remain unverified when
+the exact target is absent from history read-back.
+
+Typed mixed inputs can encode selected Drive/Photos/NotebookLM references;
+NotebookLM IDs are not Gemini Web Notebook IDs, and native attachment live
+acceptance remains unverified. Native repository import, Task cancellation,
+settings/memory mutations and native PDF/Google Docs export remain unsupported.
+Gem create/update/invocation/delete and moving an owned chat into a Notebook
+passed on 10-18. Signed-in Research report completion remains unverified; its
+existing operation returned a failed result after restart.
 
 ## Native media
+
+The 2026-10-18 native Flash-Lite image and edit controls produced visually
+checked, decoded 2048×2048 JPEG files. An edit cleanup job with a two-second
+delay completed with verified absence through MCP. A separate Flash image
+request returned a content-access refusal and no image; it was retained for
+inspection and explicitly discarded. No automatic fallback/replay was added.
 
 Image/edit, video and music select observed native Web modes 14, 11 and 21 at
 StreamGenerate index 49. Selection does not prove Google accepted generation
@@ -110,11 +139,18 @@ MCP cleanup status. The earlier failed video remains a failed sample.
 
 ## Verification
 
-The 2026-10-18 broader capability audit passed Ruff, Mypy (82 source files),
+Before the native-workflow extension, the 2026-10-18 broader audit passed Ruff, Mypy (82 source files),
 2,906 offline tests, 371 contract checks, representative profiles and both
 modern/legacy MCP stdio checks on all five surfaces. Fifteen authorized
 read-only account calls passed separately; see the dated coverage record for
-scope and remaining functionality gaps.
+scope and remaining functionality gaps. The native extension passed Ruff,
+Mypy (90 source files), 3,461 offline tests, 438 architecture/distribution
+checks, representative profiles and modern/legacy stdio on all five surfaces
+under model and core profiles. All 22 disposable source IDs and the seven
+owned account resources were cleared through MCP with independent evidence;
+image editing's delayed cleanup also completed. Library's supported image
+deletion passed; Canvas/document single-asset deletion is explicitly unavailable.
+Local protocol/fixture results do not substitute for account acceptance.
 
 Offline regressions, real modern/legacy MCP stdio, clean-wheel installation,
 Skill validation/direct installation and realistic agent handoffs are separate
@@ -147,13 +183,14 @@ configuration examples do not prove those desktop applications were run.
 
 - Live recovery after an arbitrary hard process crash; controlled unfinished-video
   restart and completed-file retrieval are already verified.
-- Current signed-in Research report recovery, and broader account mutations,
-  in a dedicated disposable-account environment.
+- Current signed-in Research report recovery, native account-resource
+  understanding and the remaining native-workflow acceptance noted above.
 - The opt-in dedicated-account full canary; everyday-account manual tests do
   not satisfy that environment gate.
 - Additional desktop client/OS combinations after actual installation and
   protocol checks, and model-backed trigger/evaluator runs when their provider
   is configured.
 
-Selected Drive/Canvas/sharing parity remains deferred. Runtime surfaces do not
-claim unsupported mutations merely because a Web entry is visible.
+Additional picker discovery, Canvas kinds/format-preserving edits and native
+exports remain outside the implemented scope. A visible Web entry alone does
+not establish an MCP mutation contract.

@@ -80,7 +80,8 @@ no history, Cookie, Scheduled, Gem, Prompt, or cleanup tools.
 - **gemini_understand_image**: understand one image from a local path or
   image URI, with the input image keeping a stable artifact identity
 - **gemini_understand**: typed mixed-input understanding over text, image
-  path/URI, file path/URI, and URL inputs (max 16); each input keeps its id
+  path/URI, file path/URI, URL, and caller-selected Drive/Photos/NotebookLM
+  references (max 16 inputs; max 10 combined file/native attachments); each input keeps its id
   and a per-input outcome (accepted, analyzed, skipped, or failed), where
   analyzed means the completed analysis acknowledged that input
 - **gemini_research**: start one Deep Research run asynchronously and return
@@ -325,12 +326,18 @@ async def gemini_understand(
     model: str = "flash",
     thinking_level: str = "standard",
 ) -> list[TextContent]:
-    """Understand mixed text, image, file, and URL inputs in one request.
+    """Understand text, images, files, URLs, and selected Drive/Photos/NotebookLM inputs.
 
     Each input is one typed object — ``{"id", "kind", ...}`` — instead of one
     overloaded string: ``kind=text`` carries ``text``, ``kind=image`` accepts a
     local ``path`` or an http(s) URI, ``kind=file`` accepts a local ``path`` or
-    an http(s) URI, and ``kind=url`` carries an absolute ``url``. Requests
+    an http(s) URI, and ``kind=url`` carries an absolute ``url``. ``kind=drive``
+    and ``kind=photos`` carry an exact caller-selected ``resource_id``; optional
+    ``name`` and ``mime_type`` describe that resource. ``kind=notebook`` carries
+    a NotebookLM ``resource_id``, distinct from a native Gemini Web Notebook ID.
+    Existing account access is required; this tool does not open a picker, grant
+    permissions, or guess IDs from URLs. Local files and native references share
+    a 10-attachment limit. Requests
     with more than 16 inputs are rejected outright by the input schema; an
     input the service cannot use is recorded as ``skipped`` with its reason.
     Every input keeps its ``id``; the structured result records a per-input

@@ -1,6 +1,6 @@
 # Operation recovery and automatic cleanup
 
-Updated: 2026-10-17.
+Updated: 2026-10-18.
 
 `gemini-mcp-create` starts video/music asynchronously. `gemini-mcp-assist`
 uses the same service for Deep Research. Preserve the returned opaque
@@ -15,6 +15,13 @@ the stored source-chat deletion policy. Their MCP annotations therefore report
 `readOnlyHint=false` and `destructiveHint=true`; polling can perform this work.
 
 ## Start once
+
+Ordinary chat, sessions and mixed-input understanding also submit generation
+once. A timeout or parse failure keeps any observed source and returns
+`retryable=false`; inspect that exact chat before deciding on a new request.
+Authentication has a separate 30-second attempt deadline. It no longer reduces
+the SDK's 450-second generation request budget to 30 seconds; bounded media,
+Canvas and Research workflows retain their own scoped deadlines.
 
 Supply a random `idempotency_key` when starting asynchronous work. Reusing
 that key with the same operation kind retrieves the existing handle if the
@@ -105,6 +112,11 @@ multi-account selection is not inferred from the foreground Gemini page. Do
 not merge scopes or scan unrelated history to recover an inaccessible job.
 
 ## Cleanup policy
+
+Canvas creation registers durable retention as soon as its new source is
+observed. An accepted Canvas response is not a local export; use its exact
+artifact ID to read or export, then explicitly delete a disposable source when
+authorized. The returned cleanup/lifecycle state reflects persisted authority.
 
 Only a newly created source chat observed in the request qualifies for
 automatic cleanup. All requested outputs must be saved and verified, or the

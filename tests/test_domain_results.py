@@ -372,7 +372,7 @@ def test_auth_failure_is_typed_at_primary_chat_boundary(monkeypatch):
     assert payload["meta"]["diagnostic_id"].startswith("diag_")
 
 
-def test_timeout_has_identical_retryable_state_across_chat_adapters(monkeypatch):
+def test_timeout_preserves_identical_non_retryable_state_across_chat_adapters(monkeypatch):
     class TimeoutClient:
         async def generate_content(self, **_kwargs):
             raise TimeoutError("upstream took too long")
@@ -402,7 +402,8 @@ def test_timeout_has_identical_retryable_state_across_chat_adapters(monkeypatch)
 
     for payload in (primary_payload, compact_payload):
         assert payload["error"]["code"] == "TIMED_OUT"
-        assert payload["error"]["retryable"] is True
+        assert payload["error"]["retryable"] is False
+        assert payload["warnings"][0]["code"] == "SOURCE_UNOBSERVED"
         assert payload["meta"]["operation_state"] == "timed_out"
 
 

@@ -24,6 +24,7 @@ from ..domain import (
     result_from_exception,
 )
 from ..session_manager import SessionData, SessionOperationResult
+from ..domain.inputs import NativeAttachment
 from ..thinking_client import client_generation_once
 from .streams import StreamTextAccumulator
 from .tasks import get_task_status_result, unknown_task_status
@@ -69,6 +70,7 @@ class ChatRequest:
     include_gem_argument: bool = True
     include_temporary_argument: bool = True
     task_mode: bool = False
+    native_attachments: tuple[NativeAttachment, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -151,7 +153,8 @@ class ChatService:
         client = await self._prepare_client()
         if request.task_mode and not callable(getattr(client, "start_owned_chat", None)):
             return self._task_capability_failure()
-        owner = self._start_task_owner(client, effective_model, request.gem_id, request.cleanup_source) if request.task_mode else None
+        owner = (self._start_owned_chat(client, effective_model, request.gem_id, request.cleanup_source)
+                 if callable(getattr(client, "start_owned_chat", None)) else None)
         request_kwargs = self._one_shot_kwargs(
             request,
             effective_model=effective_model,
@@ -159,16 +162,15 @@ class ChatService:
         if owner is not None:
             request_kwargs["chat"] = owner
         try:
-            with client_generation_once(client) if request.task_mode else nullcontext():
+            with client_generation_once(client):
                 response = await client.generate_content(**request_kwargs)
         except asyncio.CancelledError:
-            if request.task_mode:
-                self._retain_task_source(self._owner_chat_id(owner), request.cleanup_source)
+            self._retain_source(self._owner_chat_id(owner), request.cleanup_source)
             raise
         except Exception as error:
-            if not request.task_mode:
-                raise
-            return self._task_failure(error, request, normalized_model, effective_model, owner)
+            if request.task_mode:
+                return self._task_failure(error, request, normalized_model, effective_model, owner)
+            return self._generation_failure(error, request, normalized_model, effective_model, owner)
         return await self._generation_success(
             request, client, normalized_model, effective_model, response=response, owner=owner,
         )
@@ -185,7 +187,8 @@ class ChatService:
         client = await self._prepare_client()
         if request.task_mode and not callable(getattr(client, "start_owned_chat", None)):
             return self._task_capability_failure()
-        owner = self._start_task_owner(client, effective_model, request.gem_id, request.cleanup_source) if request.task_mode else None
+        owner = (self._start_owned_chat(client, effective_model, request.gem_id, request.cleanup_source)
+                 if callable(getattr(client, "start_owned_chat", None)) else None)
         request_kwargs = self._one_shot_kwargs(
             request,
             effective_model=effective_model,
@@ -195,18 +198,20 @@ class ChatService:
         if owner is not None:
             request_kwargs["chat"] = owner
         try:
-            with client_generation_once(client) if request.task_mode else nullcontext():
+            with client_generation_once(client):
                 async for response in client.generate_content_stream(**request_kwargs):
                     responses.append(response)
                     collector.consume(response)
         except asyncio.CancelledError:
-            if request.task_mode:
-                self._retain_task_source(self._owner_chat_id(owner) or self._responses_chat_id(responses), request.cleanup_source)
+            self._retain_source(self._owner_chat_id(owner) or self._responses_chat_id(responses), request.cleanup_source)
             raise
         except Exception as error:
-            if not request.task_mode:
-                raise
-            return self._task_failure(error, request, normalized_model, effective_model, owner, responses=responses)
+            if request.task_mode:
+                return self._task_failure(error, request, normalized_model, effective_model, owner, responses=responses)
+            return self._generation_failure(
+                error, request, normalized_model, effective_model, owner,
+                responses=responses, stream=collector.metadata,
+            )
 
         final_response = responses[-1] if responses else None
         return await self._generation_success(
@@ -229,7 +234,7 @@ class ChatService:
         start_kwargs: dict[str, Any] = {"model": effective_model}
         if request.include_gem_argument:
             start_kwargs["gem"] = request.gem_id
-        session = (self._start_task_owner(client, effective_model, request.gem_id, "task_session")
+        session = (self._start_owned_chat(client, effective_model, request.gem_id, "task_session")
                    if request.task_mode else client.start_chat(**start_kwargs))
         created = self._dependencies.create_session(
             session,
@@ -299,42 +304,53 @@ class ChatService:
         if invalid is not None:
             return invalid
         monitor_task = task_mode or state.task_pending
-        client: Any = None
+        client: Any = getattr(state.session, "geminiclient", None) or getattr(state.session, "client", None)
         if monitor_task:
             client = self._dependencies.client_provider()
+        if request.prepare_client:
+            client = await self._prepare_client()
+        if monitor_task:
             if task_mode and not callable(getattr(client, "task_scope", None)):
                 return self._task_capability_failure()
             if task_mode and self._session_chat_id(state) is None and not hasattr(state.session, "observed_chat_id"):
                 if state._send_lock.locked() or not callable(getattr(client, "start_owned_chat", None)):
                     return self._task_capability_failure()
-                state.session = self._start_task_owner(
+                state.session = self._start_owned_chat(
                     client, self._dependencies.resolve_model(self._dependencies.normalize_model(state.model)),
                     getattr(state.session, "gem", None), request.cleanup_source,
                 )
             state.task_pending = True
-            self._retain_task_source(self._session_chat_id(state), request.cleanup_source)
+        elif self._session_chat_id(state) is None and not hasattr(state.session, "observed_chat_id"):
+            if callable(getattr(client, "start_owned_chat", None)) and not state._send_lock.locked():
+                state.session = self._start_owned_chat(
+                    client, self._dependencies.resolve_model(self._dependencies.normalize_model(state.model)),
+                    getattr(state.session, "gem", None), request.cleanup_source,
+                )
+        if not monitor_task:
+            state.recovery_pending = True
+        if monitor_task or callable(getattr(client, "start_owned_chat", None)):
+            self._retain_source(self._session_chat_id(state), request.cleanup_source)
         state.task_mode = task_mode
-        if request.prepare_client:
-            client = await self._prepare_client()
 
         request_kwargs = self._session_request_kwargs(request, state)
+        generation_client = getattr(state.session, "geminiclient", None) or getattr(state.session, "client", None) or client
         try:
             with client.task_scope() if task_mode else nullcontext():
-                with client_generation_once(client) if task_mode else nullcontext():
+                with client_generation_once(generation_client):
                     sender = self._dependencies.send_session_message_stream if streaming else self._dependencies.send_session_message
                     sent = await sender(request.session_id, **request_kwargs)
         except asyncio.CancelledError:
-            if monitor_task:
-                state.upstream_chat_id = self._session_chat_id(state)
-                self._retain_task_source(state.upstream_chat_id, request.cleanup_source)
+            state.upstream_chat_id = self._session_chat_id(state)
+            self._retain_source(state.upstream_chat_id, request.cleanup_source)
             raise
         except Exception as error:
-            if not monitor_task:
-                raise
-            return self._task_session_failure(error, request, state)
+            if monitor_task:
+                return self._task_session_failure(error, request, state)
+            return self._session_failure(error, request, state)
         if not sent.ok or sent.session is None:
             return self._copy_failure(sent)
         state = sent.session
+        state.recovery_pending = False
         responses = tuple(sent.response or ()) if streaming else ()
         response = (responses[-1] if responses else None) if streaming else sent.response
         collector = StreamTextAccumulator()
@@ -376,13 +392,13 @@ class ChatService:
         stream: StreamCollectionMetadata | None = None, stream_text: str = "",
     ) -> DomainResult[ChatOperationData]:
         remote_chat_id = (self._owner_chat_id(owner) or self._response_chat_id(response)
-                          or (self._responses_chat_id(responses) if request.task_mode else None))
+                          or self._responses_chat_id(responses))
         task = await self._read_task(client, remote_chat_id) if request.task_mode else None
         retain_chat = request.retain_chat or bool(task is not None and task.pending)
         cleanup = CleanupObservation()
         scheduled: CleanupObservation | str | None
         if request.task_mode or response is not None:
-            if request.task_mode:
+            if request.task_mode or owner is not None:
                 scheduled = self._dependencies.schedule_chat_cleanup(
                     remote_chat_id, retain_chat=retain_chat,
                     delete_after_seconds=request.delete_after_seconds, source=request.cleanup_source,
@@ -420,12 +436,12 @@ class ChatService:
         return DomainResult.failure(DomainErrorCode.CAPABILITY_UNAVAILABLE,
                                     "The current client cannot safely track a native Task source.")
 
-    def _start_task_owner(self, client: Any, model: str, gem: str | None, source: str) -> Any:
+    def _start_owned_chat(self, client: Any, model: str, gem: str | None, source: str) -> Any:
         return client.start_owned_chat(
-            model=model, gem=gem, on_chat_observed=lambda cid: self._retain_task_source(cid, source),
+            model=model, gem=gem, on_chat_observed=lambda cid: self._retain_source(cid, source),
         )
 
-    def _retain_task_source(self, chat_id: str | None, source: str) -> CleanupObservation:
+    def _retain_source(self, chat_id: str | None, source: str) -> CleanupObservation:
         if not is_valid_remote_chat_id(chat_id):
             return CleanupObservation()
         scheduled = self._dependencies.schedule_chat_cleanup(
@@ -462,7 +478,7 @@ class ChatService:
         owner: Any, *, responses: Sequence[Any] = (),
     ) -> DomainResult[ChatOperationData]:
         cid = self._owner_chat_id(owner) or self._responses_chat_id(responses)
-        cleanup = self._retain_task_source(cid, request.cleanup_source)
+        cleanup = self._retain_source(cid, request.cleanup_source)
         data = ChatOperationData(
             requested_model=request.model, normalized_model=normalized_model, effective_model=effective_model,
             lifecycle=ConversationLifecycleMetadata.stateless(
@@ -476,7 +492,7 @@ class ChatService:
     ) -> DomainResult[ChatOperationData]:
         cid = self._session_chat_id(state)
         state.upstream_chat_id, state.task_pending = cid, True
-        cleanup = self._retain_task_source(cid, request.cleanup_source)
+        cleanup = self._retain_source(cid, request.cleanup_source)
         normalized_model = self._dependencies.normalize_model(state.model)
         data = ChatOperationData(
             requested_model=state.model, normalized_model=normalized_model,
@@ -486,6 +502,48 @@ class ChatService:
             task_mode=state.task_mode, task_status=unknown_task_status(cid),
         )
         return self._failed_task(error, data)
+
+    def _generation_failure(
+        self, error: Exception, request: ChatRequest, normalized_model: str, effective_model: str,
+        owner: Any, *, responses: Sequence[Any] = (), stream: StreamCollectionMetadata | None = None,
+    ) -> DomainResult[ChatOperationData]:
+        cid = self._owner_chat_id(owner) or self._responses_chat_id(responses)
+        cleanup = self._retain_source(cid, request.cleanup_source)
+        return self._failed_submission(error, ChatOperationData(
+            requested_model=request.model, normalized_model=normalized_model, effective_model=effective_model,
+            lifecycle=ConversationLifecycleMetadata.stateless(
+                upstream_chat_id=cid, retain_chat=True, delete_after_seconds=request.delete_after_seconds, cleanup=cleanup,
+            ), temporary=request.temporary, remote_chat_id=cid, stream=stream,
+        ))
+
+    def _session_failure(
+        self, error: Exception, request: SessionMessageRequest, state: SessionData,
+    ) -> DomainResult[ChatOperationData]:
+        cid = self._session_chat_id(state)
+        state.upstream_chat_id, state.recovery_pending = cid, True
+        cleanup = self._retain_source(cid, request.cleanup_source)
+        normalized_model = self._dependencies.normalize_model(state.model)
+        return self._failed_submission(error, ChatOperationData(
+            requested_model=state.model, normalized_model=normalized_model,
+            effective_model=self._dependencies.resolve_model(normalized_model),
+            lifecycle=self._session_lifecycle(state, retain_chat=True, cleanup=cleanup),
+            session_id=state.session_id, session_state=state, remote_chat_id=cid,
+            temporary=state.temporary if request.temporary is None else request.temporary,
+        ))
+
+    @staticmethod
+    def _failed_submission(error: Exception, data: ChatOperationData) -> DomainResult[ChatOperationData]:
+        result = result_from_exception(error, logger=logger, operation="chat.generate")
+        assert result.error is not None
+        action = ("Read the existing chat using the upstream chat_id before another submission; do not resubmit the original prompt."
+                  if data.remote_chat_id else "Inspect history metadata for a possible source before submitting another request.")
+        return replace(
+            result, data=data, error=replace(result.error, retryable=False, suggested_action=action),
+            warnings=(DomainWarning("SOURCE_RETAINED" if data.remote_chat_id else "SOURCE_UNOBSERVED",
+                                    "The submission did not finish; its completion is unverified.", action),),
+            meta=replace(result.meta, requested_backend=data.requested_model, effective_backend=data.effective_model,
+                         details={"service": "chat", "lifecycle": data.lifecycle}),
+        )
 
     @staticmethod
     def _failed_task(error: Exception, data: ChatOperationData) -> DomainResult[ChatOperationData]:
@@ -519,6 +577,8 @@ class ChatService:
             request_kwargs["temporary"] = request.temporary
         if request.learning_mode:
             request_kwargs["learning_mode"] = request.learning_mode
+        if request.native_attachments:
+            request_kwargs["native_attachments"] = request.native_attachments
         if request.task_mode:
             request_kwargs["task_mode"] = True
         return request_kwargs
@@ -616,7 +676,7 @@ class ChatService:
                 effective_model=effective_model,
                 lifecycle=self._session_lifecycle(
                     state,
-                    retain_chat=(state.task_pending or (state.retain_chat if request.retain_chat is None else request.retain_chat)),
+                    retain_chat=(state.task_pending or state.recovery_pending or (state.retain_chat if request.retain_chat is None else request.retain_chat)),
                     delete_after_seconds=(
                         state.delete_after_seconds
                         if request.delete_after_seconds is None
@@ -691,7 +751,7 @@ class ChatService:
             session_id=state.session_id,
             upstream_chat_id=ChatService._session_chat_id(state),
             session_state=SessionLifecycleState.ACTIVE,
-            retain_chat=state.retain_chat if retain_chat is None else retain_chat,
+            retain_chat=(state.retain_chat or state.task_pending or state.recovery_pending) if retain_chat is None else retain_chat,
             delete_after_seconds=(state.delete_after_seconds if delete_after_seconds is None else delete_after_seconds),
             cleanup=cleanup or CleanupObservation(),
         )

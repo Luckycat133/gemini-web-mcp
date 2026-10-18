@@ -618,7 +618,7 @@ def test_chat_session_path_no_learning_mode_anywhere_omits_kwarg(monkeypatch):
 
 
 def test_chat_top_level_exception_returns_error_text(monkeypatch):
-    """client.generate_content 抛异常 → _error_text(e, 'Chat')。"""
+    """A bare client's uncertain failure keeps typed, safe recovery metadata."""
     client = SimpleNamespace(generate_content=AsyncMock(side_effect=RuntimeError("network down")))
     _patch_client_seams(monkeypatch, client)
     monkeypatch.setattr(skill_server, "validate_optional_image_path",
@@ -626,7 +626,13 @@ def test_chat_top_level_exception_returns_error_text(monkeypatch):
     monkeypatch.setattr(skill_server, "schedule_remote_chat_cleanup_from_response",
                         lambda _r, source: None)
     result = _run(skill_server.chat(message="hi"))
-    assert result[0].text == "Error: network down"
+    payload = result[0].meta["domain_result"]
+    assert "NETWORK_ERROR" in result[0].text and "network down" not in result[0].text
+    assert payload["ok"] is False and payload["error"]["retryable"] is False
+    assert payload["data"]["remote_chat_id"] is None
+    assert payload["data"]["lifecycle"]["upstream_chat_id"] is None
+    assert payload["warnings"][0]["code"] == "SOURCE_UNOBSERVED"
+    client.generate_content.assert_awaited_once()
 
 
 # ---------------------------------------------------------------------------

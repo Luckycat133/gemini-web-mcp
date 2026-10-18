@@ -93,6 +93,7 @@ PRIMARY_PROFILE_TOOLS = {
     ),
     "scheduled-admin": frozenset(
         {
+            "gemini_scheduled",
             "gemini_create_scheduled_action",
             "gemini_delete_scheduled_action",
             "gemini_doctor",
@@ -107,6 +108,8 @@ PRIMARY_PROFILE_TOOLS = {
     ),
     "all": frozenset(
         {
+            "gemini_account",
+            "gemini_scheduled",
             "gemini_account_inventory",
             "gemini_analyze_url",
             "gemini_chat",

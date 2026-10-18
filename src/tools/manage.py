@@ -6,6 +6,8 @@ import json
 from ..adapters import attach_domain_result, domain_failure_text, domain_text, exception_text
 from ..adapters.mcp_sdk import MCPServer, TextContent
 from ..domain import DomainErrorCode, DomainResult
+from ..domain.account_requests import AccountRequest, ScheduledRequest, NotebooksRequest
+from ..services.account_facade import get_account_facade_service
 from collections.abc import Coroutine
 from typing import Any, Callable, Literal, Optional, TypeVar
 import logging
@@ -1766,7 +1768,7 @@ def _register_notebook_tools(mcp: MCPServer, enabled_tool_names: set[str], tool_
             logger.error(f"Gemini Notebook 对话读取失败: {e}")
             return [TextContent(type="text", text=f"❌ 读取 Gemini Notebook 对话失败: {str(e)}")]
 
-    @_tool("gemini_notebooks", READS_PRIVATE_REMOTE)
+    @_tool("gemini_notebooks", DESTRUCTIVE_REMOTE)
     async def gemini_notebooks(
         action: NotebookAction = "list",
         notebook_id: str = "",
@@ -1775,12 +1777,15 @@ def _register_notebook_tools(mcp: MCPServer, enabled_tool_names: set[str], tool_
         offset: int = 0,
         locale: str = "zh-CN",
         response_format: ResponseFormat = "markdown",
+        request: NotebooksRequest | None = None,
     ) -> list[TextContent]:
         """
-        List native Gemini Web Notebooks or recent chats inside one notebook.
-
-        This read-only entrypoint does not move, create, or delete notebooks/chats.
+        Read notebooks/chats with legacy arguments, or manage native notebooks
+        and their sources using the focused typed request contract.
         """
+        if request is not None:
+            result = await get_account_facade_service().execute("notebooks", request)
+            return domain_text(result, "Notebook action and observed verification.", use_result_data=True)
         if action == "list":
             return await tool_functions["gemini_list_notebooks"](
                 limit=limit,
@@ -2344,6 +2349,30 @@ def _register_gem_tools(mcp: MCPServer, enabled_tool_names: set[str]) -> None:
             return [TextContent(type="text", text=f"❌ 失败: {str(e)}")]
 
 
+def _register_typed_account_tools(mcp: MCPServer, enabled_tool_names: set[str]) -> None:
+    _tool = _conditional_tool_decorator(mcp, enabled_tool_names)
+
+    @_tool("gemini_account", DESTRUCTIVE_REMOTE)
+    async def gemini_account(request: AccountRequest) -> list[TextContent]:
+        """Typed native Skills, public sharing, Library and Canvas workflows.
+
+        Reuses the focused account request contract. Mutations need user intent
+        and fresh read-back; public sharing publishes the selected source.
+        """
+        result = await get_account_facade_service().execute("account", request)
+        return domain_text(result, "Account action and observed verification.", use_result_data=True)
+
+    @_tool("gemini_scheduled", DESTRUCTIVE_REMOTE)
+    async def gemini_scheduled(request: ScheduledRequest) -> list[TextContent]:
+        """Read/manage legacy actions or native Remy schedules and recurrence.
+
+        Preserve backend with observed IDs. Native create/update/pause/resume/
+        delete use independent read-back; create_daily preserves legacy behavior.
+        """
+        result = await get_account_facade_service().execute("scheduled", request)
+        return domain_text(result, "Scheduled action and observed verification.", use_result_data=True)
+
+
 def register_manage_tools(mcp: MCPServer, layers: list[str] | set[str] | tuple[str, ...] | None = None):
     enabled_tool_names = resolve_manage_tool_names(layers)
     tool_functions: dict[str, Callable[..., Coroutine[Any, Any, list["TextContent"]]]] = {}
@@ -2360,3 +2389,4 @@ def register_manage_tools(mcp: MCPServer, layers: list[str] | set[str] | tuple[s
     _register_tool_mode_tools(mcp, enabled_tool_names, tool_functions)
     _register_model_tools(mcp, enabled_tool_names, tool_functions)
     _register_gem_tools(mcp, enabled_tool_names)
+    _register_typed_account_tools(mcp, enabled_tool_names)

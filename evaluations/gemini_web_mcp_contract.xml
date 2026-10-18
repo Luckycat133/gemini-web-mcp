@@ -207,4 +207,56 @@
     <question>Do Gems or the local Prompt library administer native Skills from the current customize/skills page? Answer yes or no.</question>
     <answer>no</answer>
   </qa_pair>
+  <qa_pair>
+    <question>Which typed account facade exposes native Skills, public sharing, private Library assets and Canvas through action-specific nested requests? Answer with the tool name.</question>
+    <answer>gemini_account</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>Which nested native Skills action imports a complete ZIP from file_path, optionally replacing one exact skill_id, without executing bundle files locally? Answer with the action.</question>
+    <answer>upload</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>Which six nested Canvas actions does gemini_account expose? Answer in the order get, versions, chat lookup, creation, editing, export.</question>
+    <answer>get, versions, chat_artifacts, create, edit, export</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>When the Canvas edit action receives artifact_id and text for a supported plain document, what content does it replace? Answer with the replacement scope.</question>
+    <answer>entire text and formatting</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>Does an acknowledged Canvas update establish completion before an independent exact-artifact read-back matches all four native content slots? Answer yes or no.</question>
+    <answer>no</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>The typed account facade can replace Canvas content, revoke links, delete assets and export local files. What readOnlyHint and destructiveHint values must that mixed-action facade retain? Answer with both values.</question>
+    <answer>readOnlyHint=false and destructiveHint=true</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>Which three nested library_assets actions read assets or remove supported media? Canvas/document removal is unavailable. Answer with the actions in list, exact read, removal order.</question>
+    <answer>list, get, delete</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>What provider method does the compatibility probe named library.index actually call, without establishing private Library asset coverage? Answer with the method name.</question>
+    <answer>GetG1Interventions</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>What provider method does the compatibility probe named library.assets actually call, without establishing private Library asset coverage? Answer with the method name.</question>
+    <answer>CheckModeFeatureQuota</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>Which exact resource field does the sharing delete action require to revoke one selected public link? Answer with the field name.</question>
+    <answer>token</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>For gemini_understand kind=notebook, which product supplies the exact caller-selected resource_id, distinct from Gemini Web bot-based Notebooks? Answer with the product name.</question>
+    <answer>NotebookLM</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>How many combined local-file and native Drive, Photos or NotebookLM attachments may one understanding generation request include? Answer with the maximum number.</question>
+    <answer>10</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>Does accepting an explicit native attachment resource_id open an account picker, grant missing permissions, or translate a Gemini Web Notebook ID into a NotebookLM ID? Answer yes or no.</question>
+    <answer>no</answer>
+  </qa_pair>
 </evaluation>

@@ -6,7 +6,7 @@ import asyncio
 import logging
 from dataclasses import replace
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Awaitable, Callable
 
 from ..client_wrapper import get_gemini_client, initialize_client
 from ..domain import DomainErrorCode, DomainResult, DomainWarning, OperationState
@@ -23,11 +23,24 @@ from .history import (
 from .manifest import web_capabilities_payload
 from .history_mutations import update_chat_metadata_result
 from .tasks import get_task_status_result
-from .notebooks import fetch_native_notebooks, fetch_notebook_chats, move_chat_to_notebook
+from .notebooks import (
+    fetch_native_notebooks, fetch_notebook_chats, move_chat_to_notebook,
+    get_notebook, create_notebook, update_notebook, delete_notebook,
+    list_notebook_sources, add_notebook_source, remove_notebook_source,
+)
+from .native_skills import (
+    list_native_skills, get_native_skill, create_native_skill, update_native_skill,
+    set_native_skill_enabled, delete_native_skill,
+    import_native_skill_archive,
+)
+from .library import list_library_assets_result, get_library_asset_result, delete_library_asset_result
+from .sharing import list_public_links_result, create_public_link_result, delete_public_link_result
+from .canvas import get_canvas_artifact_result, list_canvas_chat_artifacts_result, list_canvas_versions_result, generate_canvas_result, export_canvas_result
 from .prompts import PromptLibrary
 from .scheduled import (
     create_daily_action, delete_action, fetch_scheduled_registry, fetch_scheduled_task_by_id,
     fetch_remy_schedule_registry, fetch_remy_schedule_by_id,
+    create_remy_schedule_result, update_remy_schedule_result, delete_remy_schedule_result,
 )
 
 logger = logging.getLogger(__name__)
@@ -92,12 +105,16 @@ class AccountFacadeService:
     async def execute(self, facade: str, request: Request) -> DomainResult[dict[str, Any]]:
         arguments = request.model_dump(exclude_none=True)
         action = arguments.pop("action")
-        mutations = {"history": {"delete", "update"}, "notebooks": {"move"}, "scheduled": {"create_daily", "delete"},
+        mutations = {"history": {"delete", "update"}, "notebooks": {"move", "create", "update", "delete", "add_source", "remove_source"},
+                     "scheduled": {"create_daily", "create", "update", "pause", "resume", "delete"},
                      "gems": {"create", "update", "delete"}, "prompts": {"create", "update", "delete"},
                      "cleanup": {"run", "cancel"}}
         effect = "mutation" if action in mutations.get(facade, set()) or (
             facade == "cleanup" and action == "test_artifacts" and not arguments.get("dry_run", True)
         ) else "read"
+        if facade == "account" and action in {"skills", "sharing", "library_assets", "canvas"}:
+            nested_action = arguments["request"]["action"]
+            effect = "read" if nested_action in {"list", "get", "chat_artifacts", "versions"} else "mutation"
         try:
             if facade == "prompts":
                 result = await asyncio.to_thread(self._prompts, action, arguments)
@@ -117,6 +134,15 @@ class AccountFacadeService:
             )
         except Exception as error:
             result = result_from_exception(error, logger=logger, operation=f"account.{facade}.{action}")
+            if effect == "mutation" and result.error is not None:
+                targets = arguments.get("request", arguments)
+                identifiers = {key: value for key, value in targets.items() if key in {
+                    "chat_id", "notebook_id", "skill_id", "action_id", "artifact_id", "asset_id", "token", "source_name",
+                }}
+                result = replace(result, data=identifiers, error=replace(
+                    result.error, retryable=False,
+                    suggested_action="Read the selected resource to verify its current state before another mutation; do not repeat creation.",
+                ), warnings=(*result.warnings, DomainWarning("MUTATION_UNVERIFIED", "The mutation did not finish; its effect is unverified.")))
         return replace(result, meta=replace(result.meta, details={
             **result.meta.details, "facade": facade, "action": action, "effect": effect,
         }))
@@ -142,6 +168,13 @@ class AccountFacadeService:
         return await list_chat_history_result(client, args["limit"], args["offset"], max_limit=100)
 
     async def _notebooks(self, client: Any, action: str, args: dict[str, Any]) -> DomainResult[Any]:
+        handlers: dict[str, Callable[..., Awaitable[DomainResult[Any]]]] = {
+            "get": get_notebook, "create": create_notebook, "update": update_notebook,
+            "delete": delete_notebook, "sources": list_notebook_sources,
+            "add_source": add_notebook_source, "remove_source": remove_notebook_source,
+        }
+        if action in handlers:
+            return await handlers[action](client, **args)
         if action == "move":
             return _mutation(await move_chat_to_notebook(client, **args))
         if action == "chats":
@@ -164,8 +197,18 @@ class AccountFacadeService:
 
     async def _scheduled(self, client: Any, action: str, args: dict[str, Any]) -> DomainResult[Any]:
         backend = args.pop("backend", "legacy")
-        if backend not in {"legacy", "remy"} or (backend == "remy" and action not in {"list", "get"}):
-            return DomainResult.failure(DomainErrorCode.INVALID_ARGUMENT, "Native schedules support list/get only.")
+        if backend not in {"legacy", "remy"}:
+            return DomainResult.failure(DomainErrorCode.INVALID_ARGUMENT, "Unknown schedule backend.")
+        if backend == "remy" and action not in {"list", "get"}:
+            if action == "create":
+                return await create_remy_schedule_result(client, **args)
+            if action == "update":
+                return await update_remy_schedule_result(client, **args)
+            if action in {"pause", "resume"}:
+                return await update_remy_schedule_result(client, action_id=args["action_id"], enabled=action == "resume")
+            if action == "delete":
+                return await delete_remy_schedule_result(client, args["action_id"])
+            return DomainResult.failure(DomainErrorCode.INVALID_ARGUMENT, "Unsupported native schedule action.")
         fetch_registry = fetch_remy_schedule_registry if backend == "remy" else fetch_scheduled_registry
         fetch_by_id = fetch_remy_schedule_by_id if backend == "remy" else fetch_scheduled_task_by_id
         if action == "create_daily":
@@ -229,6 +272,8 @@ class AccountFacadeService:
         return DomainResult.success({"prompt_id": prompt_id, "deleted": library.get(prompt_id) is None}, verification_status="verified_absent")
 
     async def _account(self, client: Any, action: str, args: dict[str, Any]) -> DomainResult[Any]:
+        if action in {"skills", "sharing", "library_assets", "canvas"}:
+            return await self._resource(client, action, args["request"])
         if action == "status":
             if not hasattr(client, "inspect_account_status"):
                 return DomainResult.failure(DomainErrorCode.CAPABILITY_UNAVAILABLE, "Account status is unavailable in this client.")
@@ -263,6 +308,49 @@ class AccountFacadeService:
             return DomainResult.success({"results": results}, verification_status="observed")
         page, pagination = paginate_items(results[0]["items"], args["limit"], args["offset"])
         return DomainResult.success({**pagination, "items": page}, verification_status="observed")
+
+    async def _resource(self, client: Any, resource: str, args: dict[str, Any]) -> DomainResult[Any]:
+        action = args.pop("action")
+        if resource == "skills":
+            if action == "list":
+                result = await list_native_skills(client)
+                if not result.ok or result.data is None:
+                    return result
+                page, pagination = paginate_items(result.data["items"], args["limit"], args["offset"])
+                return replace(result, data={**result.data, **pagination, "items": page})
+            if action in {"enable", "disable"}:
+                return await set_native_skill_enabled(client, args["skill_id"], action == "enable")
+            if action == "upload":
+                return await import_native_skill_archive(client, **args)
+            skill_handlers: dict[str, Callable[..., Awaitable[DomainResult[Any]]]] = {"get": get_native_skill, "create": create_native_skill,
+                              "update": update_native_skill, "delete": delete_native_skill}
+            return await skill_handlers[action](client, **args)
+        if resource == "sharing":
+            if action == "list":
+                listed: DomainResult[Any] = await list_public_links_result(client)
+                if not listed.ok or listed.data is None:
+                    return listed
+                page, pagination = paginate_items(listed.data, args["limit"], args["offset"])
+                return replace(listed, data={**pagination, "items": page})
+            if action == "create":
+                return await create_public_link_result(client, **args)
+            return await delete_public_link_result(client, args["token"])
+        if resource == "library_assets":
+            library_handlers: dict[str, Callable[..., Awaitable[DomainResult[Any]]]] = {"list": list_library_assets_result, "get": get_library_asset_result,
+                                "delete": delete_library_asset_result}
+            return await library_handlers[action](client, **args)
+        if action == "chat_artifacts":
+            return await list_canvas_chat_artifacts_result(client, **args)
+        if action == "versions":
+            return await list_canvas_versions_result(client, args["artifact_id"])
+        if action == "create":
+            return await generate_canvas_result(client, **args)
+        if action == "edit":
+            from .canvas_edits import replace_canvas_text_result
+            return await replace_canvas_text_result(client, **args)
+        if action == "export":
+            return await export_canvas_result(client, **args)
+        return await get_canvas_artifact_result(client, args["artifact_id"])
 
     async def _cleanup(self, client: Any, action: str, args: dict[str, Any]) -> DomainResult[Any]:
         if action == "status":
