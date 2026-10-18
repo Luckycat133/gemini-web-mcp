@@ -79,6 +79,7 @@ def test_package_data_and_all_console_entrypoints_are_explicit():
     assert "recursive-include scripts *.py" in manifest
     assert "recursive-include compatibility *.json" in manifest
     assert "recursive-include examples *.json *.toml" in manifest
+    assert "recursive-include evaluations *.xml *.json" in manifest
     assert (PROJECT_ROOT / "src" / "onboarding.py").is_file()
 
 

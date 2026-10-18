@@ -7,7 +7,7 @@ keeping a second copy of request construction, parsing, or persistence.
 """
 
 import logging
-from typing import Optional
+from typing import Literal, Optional
 
 from pydantic import Field
 
@@ -55,7 +55,7 @@ from ..services import (
     UnderstandService,
     observed_backend_from_response,
 )
-from ..tools.annotations import MUTATES_REMOTE
+from ..tools.annotations import DESTRUCTIVE_REMOTE, MUTATES_REMOTE
 from ..tools.utils import parse_response
 
 logger = logging.getLogger(__name__)
@@ -80,7 +80,8 @@ no history, Cookie, Scheduled, Gem, Prompt, or cleanup tools.
 - **gemini_understand_image**: understand one image from a local path or
   image URI, with the input image keeping a stable artifact identity
 - **gemini_understand**: typed mixed-input understanding over text, image
-  path/URI, file path/URI, and URL inputs (max 16); each input keeps its id
+  path/URI, file path/URI, URL, and caller-selected Drive/Photos/NotebookLM
+  references (max 16 inputs; max 10 combined file/native attachments); each input keeps its id
   and a per-input outcome (accepted, analyzed, skipped, or failed), where
   analyzed means the completed analysis acknowledged that input
 - **gemini_research**: start one Deep Research run asynchronously and return
@@ -88,8 +89,9 @@ no history, Cookie, Scheduled, Gem, Prompt, or cleanup tools.
   the research chat is retained by default so the report stays recoverable
 
 ## Models
-- flash-lite, flash (default), thinking, pro
-- thinking_level: standard or extended (gemini_ask, gemini_research)
+- flash-lite, flash (default), pro, or a current runtime model name
+- thinking is a legacy flash alias; thinking_level is an independent parameter
+- thinking_level: low / medium / high; standard=low and extended=high remain compatible
 """,
 )
 
@@ -324,12 +326,18 @@ async def gemini_understand(
     model: str = "flash",
     thinking_level: str = "standard",
 ) -> list[TextContent]:
-    """Understand mixed text, image, file, and URL inputs in one request.
+    """Understand text, images, files, URLs, and selected Drive/Photos/NotebookLM inputs.
 
     Each input is one typed object — ``{"id", "kind", ...}`` — instead of one
     overloaded string: ``kind=text`` carries ``text``, ``kind=image`` accepts a
     local ``path`` or an http(s) URI, ``kind=file`` accepts a local ``path`` or
-    an http(s) URI, and ``kind=url`` carries an absolute ``url``. Requests
+    an http(s) URI, and ``kind=url`` carries an absolute ``url``. ``kind=drive``
+    and ``kind=photos`` carry an exact caller-selected ``resource_id``; optional
+    ``name`` and ``mime_type`` describe that resource. ``kind=notebook`` carries
+    a NotebookLM ``resource_id``, distinct from a native Gemini Web Notebook ID.
+    Existing account access is required; this tool does not open a picker, grant
+    permissions, or guess IDs from URLs. Local files and native references share
+    a 10-attachment limit. Requests
     with more than 16 inputs are rejected outright by the input schema; an
     input the service cannot use is recorded as ``skipped`` with its reason.
     Every input keeps its ``id``; the structured result records a per-input
@@ -361,52 +369,60 @@ def _render_research_start(data: LongOperationData) -> list[TextContent]:
         sections.append(f"Upstream research ID: {data.upstream_operation_id}")
     if data.upstream_chat_id:
         sections.append(f"Upstream chat ID: {data.upstream_chat_id}")
-    if data.state in {OperationState.QUEUED, OperationState.RUNNING}:
+    for artifact in data.artifacts:
+        if artifact.local_path:
+            sections.append(f"Report artifact: {artifact.local_path}")
+    if data.state in {OperationState.ACCEPTED, OperationState.QUEUED, OperationState.RUNNING}:
         sections.append("This call returned immediately and did not wait for the final report.")
     elif data.state is OperationState.COMPLETED and not data.report_available:
         sections.append("The upstream run completed, but this start call did not return a report.")
     return [TextContent(type="text", text="\n".join(sections))]
 
 
-@mcp.tool(annotations=MUTATES_REMOTE)
+@mcp.tool(annotations=DESTRUCTIVE_REMOTE)
 @domain_error_boundary("gemini_research", logger)
 async def gemini_research(
-    query: str,
+    query: str = "",
     model: str = "flash",
     thinking_level: str = "extended",
     timeout_seconds: int = DEFAULT_RESEARCH_TIMEOUT_SECONDS,
     retain_chat: bool = True,
     delete_after_seconds: Optional[int] = None,
+    action: Literal["start", "status", "result", "cancel"] = "start",
+    operation_id: Optional[str] = None,
+    idempotency_key: Optional[str] = None,
 ) -> list[TextContent]:
-    """Start one Deep Research run asynchronously and return its operation handle.
+    """Start, inspect, retrieve, or request cancellation of Deep Research.
 
-    Use this for multi-source investigation that produces a durable report.
-    The run starts on Gemini Web and this call returns immediately after the
-    upstream research has started, with an opaque high-entropy
-    ``operation_id`` — it never waits for the final report.
-    ``timeout_seconds`` (default 600) bounds only the plan and start phases
-    of that startup: it is clamped to a 30-second floor, and the start phase
-    is additionally capped at 120 seconds. It does not bound the report
-    itself, which can take several minutes after the call has returned. The
-    structured result preserves the upstream operation and chat identifiers
-    (``upstream_operation_id``, ``upstream_chat_id``) with a typed ``state``
-    (``queued`` or ``running``) so the report stays recoverable later; the
-    research chat is retained by default (``retain_chat`` is ``true``)
-    precisely so it is not cleaned up before the report is read. The server
-    keeps no connection-local operation state: the returned identifiers are
-    the only continuation handles. Deep Research requires an AI Plus
-    subscription.
+    ``action=start`` requires query and immediately returns an opaque
+    operation_id. Use ``status``, ``result``, or ``cancel`` with that ID on
+    this or another client. Metadata survives restarts for seven days; report
+    text is saved as a local Artifact, outside the metadata database. Result
+    recovery only reads the existing research chat and never repeats the
+    original query. Missing report evidence stays recoverable. Cancel is
+    best effort: cancel_requested does not claim provider cancellation.
+    Research chats are retained by default and unresolved reports remain
+    protected even when retain_chat=false. Deep Research requires entitlement.
+    Status/result recovery can save reports and delete the source chat under
+    the stored retention policy; these actions are not read-only.
     """
-    result = await _research_service.start(
-        ResearchRequest(
-            query=query,
-            model=model,
-            thinking_level=thinking_level,
-            timeout_seconds=timeout_seconds,
-            retain_chat=retain_chat,
-            delete_after_seconds=delete_after_seconds,
+    if action == "start":
+        result = await _research_service.start(
+            ResearchRequest(
+                query=query,
+                model=model,
+                thinking_level=thinking_level,
+                timeout_seconds=timeout_seconds,
+                retain_chat=retain_chat,
+                delete_after_seconds=delete_after_seconds,
+                idempotency_key=idempotency_key,
+            )
         )
-    )
+    elif not operation_id or not operation_id.strip():
+        return domain_text(_invalid_argument("operation_id is required for this action."),
+                           "operation_id is required for this action.", use_result_data=True)
+    else:
+        result = await getattr(_research_service, action)(operation_id)
     if not result.ok or result.data is None:
         return domain_text(result, domain_failure_text(result), use_result_data=True)
     return attach_domain_result(

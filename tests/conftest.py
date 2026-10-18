@@ -6,3 +6,11 @@ fastmcp release was built against mcp 1.x and cannot be imported under mcp 2.x.
 The shim exercises the real ``register_manage_tools`` registration and the real
 tool handlers, so no compatibility shimming is required here.
 """
+
+import pytest
+
+
+@pytest.fixture(autouse=True)
+def isolated_local_state(tmp_path, monkeypatch):
+    """Offline tests never read or modify the user's durable operation state."""
+    monkeypatch.setenv("GEMINI_STATE_DB_PATH", str(tmp_path / "state.sqlite3"))

@@ -55,12 +55,16 @@ def _patch_adapter_environment(monkeypatch):
         deleted_cids.append(cid)
         return True
 
+    def current_client():
+        client_wrapper._request_authentication_generation.set(client_wrapper._cleanup_context())
+        return client
+
     for module in (chat_tools, skill_server):
-        monkeypatch.setattr(module, "get_gemini_client", lambda: client)
+        monkeypatch.setattr(module, "get_gemini_client", current_client)
         monkeypatch.setattr(module, "initialize_client", noop_initialize)
         monkeypatch.setattr(module, "cleanup_due_remote_chats", noop_cleanup)
 
-    monkeypatch.setattr(client_wrapper, "delete_remote_chat", fake_delete)
+    monkeypatch.setattr(client_wrapper, "delete_remote_chat_result", fake_delete)
     monkeypatch.setattr(chat_tools, "schedule_remote_chat_cleanup", lambda *args, **kwargs: None)
     monkeypatch.setattr(
         skill_server,

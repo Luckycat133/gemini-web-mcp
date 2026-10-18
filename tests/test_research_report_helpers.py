@@ -287,6 +287,7 @@ def test_research_report_actions_payload_uses_report_title_when_present():
     assert payload["title"] == "My Report"
     assert payload["immersive_id"] == "im1"
     assert payload["native_web_menu_observed"] is True
+    assert payload["native_web_mutation_rpc_observed"] is False
     assert len(payload["actions"]) == 6
 
 
@@ -305,6 +306,9 @@ def test_format_research_report_actions_renders_full_markdown():
     assert "## Deep Research 报告创建动作" in md
     assert "标题: T" in md
     assert "沉浸式报告 ID: imX" in md
+    assert "菜单 UI 已观测: 是" in md
+    assert "mutation RPC 已观测: 否" in md
+    assert "RPC 已观测: 是" not in md
     assert "`webpage`:" in md
     assert "2026-06-21" in md  # native_web_menu_note
 
@@ -323,6 +327,8 @@ def test_create_research_report_artifact_writes_file_and_returns_metadata(tmp_pa
     assert artifact["title"] == "My Report"
     assert artifact["chat_id"] == "chat-1"
     assert artifact["source_count"] == 1
+    assert artifact["native_web_menu_observed"] is True
+    assert artifact["native_web_mutation_rpc_observed"] is False
     assert os.path.isfile(artifact["path"])
     assert artifact["path"].endswith(".md")
     assert artifact["bytes"] > 0
@@ -347,6 +353,7 @@ def test_format_research_report_artifact_renders_markdown():
         "path": "/tmp/x.md",
         "source_count": 3,
         "native_web_menu_observed": True,
+        "native_web_mutation_rpc_observed": False,
         "native_web_menu_note": "note text",
     }
     md = _format_research_report_artifact(artifact)
@@ -355,7 +362,9 @@ def test_format_research_report_artifact_renders_markdown():
     assert "标题: T" in md
     assert "文件: /tmp/x.md" in md
     assert "来源数: 3" in md
-    assert "RPC 已观测: 是" in md
+    assert "菜单 UI 已观测: 是" in md
+    assert "mutation RPC 已观测: 否" in md
+    assert "RPC 已观测: 是" not in md
     assert "note text" in md
 
 
@@ -1019,7 +1028,7 @@ def test_wait_for_deep_research_by_chat_returns_followup_when_immersive_empty(mo
         AsyncMock(return_value=None),
     )
     # followup 返回有文本
-    followup = SimpleNamespace(text="followup report body")
+    followup = SimpleNamespace(text="followup report body", report_id="report_test")
     monkeypatch.setattr(
         research_tools, "_request_completed_research_report",
         AsyncMock(return_value=followup),
@@ -1038,15 +1047,18 @@ def test_wait_for_deep_research_by_chat_skips_followup_when_start_message(monkey
     plan = SimpleNamespace()
     chat = SimpleNamespace(cid="c1")
     start_output = SimpleNamespace(text="I'm on it, researching now")
-    # 第一次返回 completion message，第二次返回与 start 不同的非 start/completion 文本
+    # 完成提示后拿不到报告；后续变化文字仍不能证明报告完成。
     call_count = {"n": 0}
     completion = SimpleNamespace(text="I've finished the research")
     other = SimpleNamespace(text="Here is the actual content")
     latest_outputs = [completion, other]
 
     async def fake_fetch_latest(_cid):
-        idx = min(call_count["n"], len(latest_outputs) - 1)
+        idx = call_count["n"]
         call_count["n"] += 1
+        if idx >= len(latest_outputs):
+            # End the read after both observations, without a wall-clock race.
+            raise asyncio.TimeoutError
         return latest_outputs[idx]
 
     client = SimpleNamespace(fetch_latest_chat_response=fake_fetch_latest)
@@ -1057,22 +1069,25 @@ def test_wait_for_deep_research_by_chat_skips_followup_when_start_message(monkey
     monkeypatch.setattr(research_tools, "_fetch_deep_research_immersive_report", fake_immersive)
 
     # followup 返回 start message（不应被采纳）
+    followup_calls = []
+
     async def fake_followup(_chat):
+        followup_calls.append(_chat)
         return SimpleNamespace(text="I'm on it, still researching")
 
     monkeypatch.setattr(research_tools, "_request_completed_research_report", fake_followup)
 
     result = _run(_wait_for_deep_research_by_chat(
-        client, plan, chat, start_output, poll_interval=1, timeout=10,
+        client, plan, chat, start_output, poll_interval=0, timeout=10,
     ))
-    # 第二次轮询：latest_text="Here is the actual content" 与 start_text 不同 + 非 start message → 返回
-    assert result.done is True
-    assert result.final_output is other
-    assert "chat history produced final output" in result.statuses[0].notes[0]
+    assert result.done is False
+    assert result.final_output is None
+    assert call_count["n"] == 3
+    assert followup_calls == [chat]
 
 
-def test_wait_for_deep_research_by_chat_returns_latest_when_text_differs_from_start(monkeypatch):
-    """latest_text 与 start_text 不同 + 非 start message → 返回 latest_output（lines 438-451）。"""
+def test_wait_for_deep_research_by_chat_does_not_complete_on_changed_text(monkeypatch):
+    """Changed ordinary chat text is not report evidence."""
     plan = SimpleNamespace()
     chat = SimpleNamespace(cid="c1")
     start_output = SimpleNamespace(text="I'm on it, researching now")
@@ -1082,11 +1097,11 @@ def test_wait_for_deep_research_by_chat_returns_latest_when_text_differs_from_st
     )
 
     result = _run(_wait_for_deep_research_by_chat(
-        client, plan, chat, start_output, poll_interval=1, timeout=10,
+        client, plan, chat, start_output, poll_interval=.001, timeout=.02,
     ))
-    assert result.done is True
-    assert result.final_output is latest_output
-    assert "chat history produced final output" in result.statuses[0].notes[0]
+    assert result.done is False
+    assert result.final_output is None
+    assert "report not observed" in result.statuses[0].notes[0]
 
 
 def test_wait_for_deep_research_by_chat_returns_running_status_on_timeout(monkeypatch):
@@ -1447,65 +1462,47 @@ class _NativeClientWithoutResearchId:
         raise AssertionError("wait_for_deep_research should not be called when research_id is empty")
 
 
-def test_deep_research_uses_wait_for_deep_research_by_chat_when_plan_lacks_research_id(monkeypatch):
-    """plan.research_id 为空 → 走 _wait_for_deep_research_by_chat 分支（line 90）。"""
-    client = _NativeClientWithoutResearchId(plan_cid="c-plan-xyz")
+def test_deep_research_uses_wait_for_deep_research_by_chat_when_plan_lacks_research_id(monkeypatch, tmp_path):
+    """A no-provider-ID plan completes through one existing chat read."""
+    import src.client_wrapper as client_wrapper
+    from src.services.research import ResearchService
+    from tests.media_fixtures import fake_finalize_generated_cleanup
 
-    # patch 外部接缝
+    client = _NativeClientWithoutResearchId(plan_cid="c_plan_xyz")
     monkeypatch.setattr(research_tools, "get_gemini_client", lambda: client)
+    monkeypatch.setattr(client_wrapper, "get_authentication_scope", lambda: "scope_research_offline")
+    monkeypatch.setattr(client_wrapper, "finalize_generated_chat_cleanup", fake_finalize_generated_cleanup)
+    monkeypatch.setattr(ResearchService, "_destination", staticmethod(lambda _request: str(tmp_path / "reports")))
 
     async def fake_init():
         return None
-    monkeypatch.setattr(research_tools, "initialize_client", fake_init)
-
     async def fake_cleanup(_client):
-        return None
+        return 0
+    monkeypatch.setattr(research_tools, "initialize_client", fake_init)
     monkeypatch.setattr(research_tools, "cleanup_due_remote_chats", fake_cleanup)
+    scheduled, reads, report_reads = [], [], []
+    monkeypatch.setattr(research_tools, "schedule_remote_chat_cleanup",
+                        lambda cid, **kwargs: scheduled.append((cid, kwargs)))
 
-    schedule_calls = []
-    monkeypatch.setattr(
-        research_tools, "schedule_remote_chat_cleanup",
-        lambda cid, *, retain_chat, delete_after_seconds, source: schedule_calls.append({
-            "cid": cid, "retain_chat": retain_chat,
-            "delete_after_seconds": delete_after_seconds, "source": source,
-        }),
-    )
+    async def read_existing_chat(cid):
+        reads.append(cid)
+        return SimpleNamespace(text="I've finished the research", state="completed")
+    client.fetch_latest_chat_response = read_existing_chat
 
-    # 替身 _wait_for_deep_research_by_chat 验证它被调用且返回值被采用
-    expected_result = SimpleNamespace(
-        plan=SimpleNamespace(cid="c-plan-xyz"),
-        final_output=SimpleNamespace(text="chat-history report"),
-        start_output=SimpleNamespace(text="started"),
-        statuses=[SimpleNamespace(state="completed", done=True, notes=["ok"])],
-        done=True,
-    )
-    wait_by_chat_calls = []
+    async def read_report(actual_client, cid):
+        assert actual_client is client
+        report_reads.append(cid)
+        return SimpleNamespace(text="chat-history report", report_id="report_owned")
+    monkeypatch.setattr(research_tools, "_fetch_deep_research_immersive_report", read_report)
 
-    async def fake_wait_by_chat(*, client, plan, chat, start_output, poll_interval, timeout):
-        wait_by_chat_calls.append({
-            "client": client, "plan": plan, "chat": chat,
-            "start_output": start_output, "poll_interval": poll_interval,
-            "timeout": timeout,
-        })
-        return expected_result
-
-    monkeypatch.setattr(research_tools, "_wait_for_deep_research_by_chat", fake_wait_by_chat)
-
-    mcp = _make_mcp()
-    result = asyncio.run(_call_tool(
-        mcp, "gemini_deep_research",
-        query="q", timeout_seconds=30, poll_interval_seconds=5,
-    ))
-
-    # _wait_for_deep_research_by_chat 被调用
-    assert len(wait_by_chat_calls) == 1
-    assert wait_by_chat_calls[0]["client"] is client
-    assert wait_by_chat_calls[0]["poll_interval"] == 5
-    assert wait_by_chat_calls[0]["timeout"] == 30
-    # wait_for_deep_research 未被调用
+    result = asyncio.run(_call_tool(_make_mcp(), "gemini_deep_research",
+                                   query="q", timeout_seconds=30, poll_interval_seconds=5))
+    assert reads == report_reads == ["c_plan_xyz"]
     assert client.wait_for_deep_research_called is False
-    # 返回文本含 _format_deep_research_result 处理后的内容
     assert "chat-history report" in result[0].text
-    # schedule cleanup 用 plan.cid（chat.cid 被 _start_fresh_research_chat 清空为 ''）
-    assert schedule_calls[0]["cid"] == "c-plan-xyz"
-    assert schedule_calls[0]["source"] == "gemini_deep_research"
+    domain = result[0].meta["domain_result"]
+    assert domain["data"]["state"] == "completed"
+    assert domain["data"]["operation_id"].startswith("op_")
+    assert domain["data"]["artifacts"][0]["verification"]["status"] == "verified"
+    assert scheduled == [("c_plan_xyz", {"retain_chat": True, "delete_after_seconds": None,
+                                         "source": "gemini_deep_research"})]

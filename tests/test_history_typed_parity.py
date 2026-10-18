@@ -43,7 +43,7 @@ async def _primary_content(mcp: MCPServer, name: str, arguments: dict):
 
 def _history_page_response(items: list[object], next_page_token: str | None = None) -> SimpleNamespace:
     body = [None, next_page_token, items]
-    return SimpleNamespace(text=json.dumps([["wrb.fr", "MaZiqc", json.dumps(body), None, None, None, "generic"]]))
+    return SimpleNamespace(status_code=200, text=json.dumps([["wrb.fr", "MaZiqc", json.dumps(body), None, None, None, "generic"]]))
 
 
 def test_history_list_has_identical_typed_data_on_primary_and_compact(monkeypatch) -> None:

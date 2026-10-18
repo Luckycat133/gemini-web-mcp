@@ -5,6 +5,8 @@ Gemini 常量配置
 from enum import Enum
 from typing import TypedDict
 
+from .infrastructure.web_request_contracts import THINKING_LEVEL_VALUES
+
 
 class RPC(str, Enum):
     """Gemini Web RPC identifiers used by compatible tooling."""
@@ -62,7 +64,7 @@ MODEL_CONFIG: dict[str, ModelConfig] = {
         "thinking_mode_id": 1,
     },
     "thinking": {
-        "name": "gemini-3-flash-thinking",
+        "name": "gemini-3-flash",
         "hex_id": "5bf011840784117a",
         "capacity_tail": 1,
         "advanced_only": False,
@@ -78,8 +80,12 @@ MODEL_CONFIG: dict[str, ModelConfig] = {
 }
 
 THINKING_LEVEL_IDS = {
-    "standard": 1,
-    "extended": 2,
+    **THINKING_LEVEL_VALUES,
+    "low": 1,
+    "high": 2,
+    "低点": 1,
+    "中等": 4,
+    "高点": 2,
     "标准": 1,
     "扩展": 2,
 }
@@ -114,9 +120,12 @@ class LearningModeConfig(TypedDict, total=False):
     x9b_field: str
     x9b_value: int
     prompt_prefix: str
+    feature_mode_id: int
 
 
 LEARNING_MODE_CONFIG: dict[str, LearningModeConfig] = {
+    "guided_learning": {"feature_mode_id": 24},
+    "guided": {"alias_for": "guided_learning"},
     "interactive_quiz": {
         "id": 18,
         "x9b_field": "h5d",
@@ -158,6 +167,7 @@ def resolve_model_name(model: str | None) -> str:
         "3.5 flash-lite": "flash-lite",
         "3.8 flash": "flash",
         "3.1 pro": "pro",
+        "gemini-3-flash-thinking": "thinking",
     }
     alias = current_web_names.get(model.strip().lower(), model)
     config = MODEL_CONFIG.get(alias)
@@ -226,8 +236,8 @@ def resolve_media_request(
             "requested_alias": alias,
             "effective_alias": alias,
             "request_model": resolve_model_name(alias),
-            "backend_label": "Gemini Web generic chat",
-            "note": "当前通用聊天请求未证实进入 Gemini Omni 视频模式；需验证视频产物。",
+            "backend_label": "Gemini Web video feature",
+            "note": "请求已选择网页视频模式；实际后端版本和完成状态仍须响应与视频产物验证。",
         }
 
     return {
@@ -247,6 +257,9 @@ def describe_model_name(model: str) -> str:
 
 def resolve_thinking_mode_id(model: object) -> int | None:
     """Resolve the current Web UI thinking-level mode bucket for a model."""
+    model_number = getattr(model, "model_number", None)
+    if type(model_number) is int and model_number > 0:
+        return model_number
     if isinstance(model, str):
         keys = [model, resolve_model_name(model)]
     else:
@@ -265,7 +278,7 @@ def resolve_thinking_mode_id(model: object) -> int | None:
 
 
 def resolve_thinking_level_id(thinking_level: str | None) -> int | None:
-    """Resolve the Web UI standard/extended thinking-level selector."""
+    """Resolve observed protocol levels, retaining the standard/extended API."""
     if thinking_level is None:
         return None
     return THINKING_LEVEL_IDS.get(thinking_level.strip().lower())
@@ -288,4 +301,4 @@ def resolve_learning_mode_config(learning_mode: str | None) -> dict[str, object]
 
 def supported_learning_modes() -> str:
     """Return user-facing learning mode names."""
-    return "interactive_quiz/quiz, flashcards, practice_test, study_guide/exam_prep"
+    return "guided_learning/guided, interactive_quiz/quiz, flashcards, practice_test, study_guide/exam_prep"

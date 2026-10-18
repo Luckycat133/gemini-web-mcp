@@ -33,7 +33,7 @@ OPTIONAL_IMPORTS = {
 }
 
 EXPECTED_REQUIREMENTS = {
-    "gemini-webapi": "gemini-webapi>=2.0.0,<3",
+    "gemini-webapi": "gemini-webapi>=2.1.1,<3",
     "mcp": "mcp>=2.0.0,<3",
     "mcp-types": "mcp-types>=2.0.0,<3",
     "orjson": "orjson>=3.11.7,<4",

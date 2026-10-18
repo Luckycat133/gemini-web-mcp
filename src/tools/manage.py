@@ -3,8 +3,11 @@
 """
 
 import json
-from ..adapters import attach_domain_result, domain_text, exception_text
+from ..adapters import attach_domain_result, domain_failure_text, domain_text, exception_text
 from ..adapters.mcp_sdk import MCPServer, TextContent
+from ..domain import DomainErrorCode, DomainResult
+from ..domain.account_requests import AccountRequest, ScheduledRequest, NotebooksRequest
+from ..services.account_facade import get_account_facade_service
 from collections.abc import Coroutine
 from typing import Any, Callable, Literal, Optional, TypeVar
 import logging
@@ -32,7 +35,9 @@ from ..infrastructure.rpc_parsers import (
     parse_usage_entry as parse_registered_usage,
     summarize_rpc_response as summarize_registered_rpc_response,
 )
-from ..services.account import sanitize_account_status
+from ..services.account import account_contract_result, account_probe_status, account_read_result, sanitize_account_status
+from ..services.history_mutations import update_chat_metadata_result
+from ..services.tasks import get_task_status_result
 from ..services.cleanup import (
     cleanup_test_artifacts_payload as cleanup_test_artifacts_payload_service,
     format_cleanup_markdown,
@@ -46,19 +51,22 @@ from ..services.gems import (
     create_gem as create_gem_service,
     delete_gem as delete_gem_service,
     iter_gem_values as registered_iter_gems,
+    list_gems as list_gems_service,
     update_gem as update_gem_service,
 )
 from ..services.history import (
-    chat_to_dict,
+    HistoryMetadataReadError,
     clamp_int,
     conversation_history_payload as registered_conversation_history_payload,
     delete_chat_result,
     export_chat_result,
     format_chat_export_markdown,
-    list_chats_result,
+    history_metadata_failure,
+    list_chat_history_result,
     paginate_items,
     read_chat_result,
-    search_chats_result,
+    read_history_metadata_page,
+    search_chat_history_result,
 )
 from ..services.manifest import (
     format_tool_manifest_markdown as format_registered_tool_manifest,
@@ -68,6 +76,8 @@ from ..services.manifest import (
     web_capabilities_payload as registered_web_capabilities_payload,
 )
 from ..services.notebooks import (
+    fetch_native_notebooks as fetch_native_notebooks_service,
+    fetch_notebook_chats as fetch_notebook_chats_service,
     move_chat_to_notebook as move_chat_to_notebook_service,
     move_chat_to_notebook_payload as registered_move_chat_payload,
     native_notebooks_payload as registered_notebooks_payload,
@@ -76,6 +86,10 @@ from ..services.notebooks import (
 from ..services.scheduled import (
     create_daily_action as create_daily_action_service,
     delete_action as delete_action_service,
+    fetch_scheduled_registry as fetch_scheduled_registry_service,
+    fetch_scheduled_task_by_id as fetch_scheduled_task_by_id_service,
+    fetch_remy_schedule_registry,
+    fetch_remy_schedule_by_id,
     scheduled_daily_payload as registered_scheduled_daily_payload,
 )
 from .annotations import (
@@ -110,7 +124,7 @@ FeatureSurface = Literal[
 ]
 UsageScope = Literal["quota", "model_state", "all"]
 ScheduledScope = Literal["active", "inactive", "all"]
-HistoryAction = Literal["list", "scan", "search", "read", "export"]
+HistoryAction = Literal["list", "scan", "search", "read", "export", "task_status"]
 NotebookAction = Literal["list", "chats"]
 AccountInventorySurface = Literal[
     "capabilities",
@@ -210,31 +224,7 @@ async def _execute_observed_rpc(client, probe: dict[str, str]):
 
 
 async def _fetch_scheduled_registry(client, max_chars: int) -> tuple[list[dict[str, Any]], dict[str, Any]]:
-    probe = _get_probe("scheduled", "scheduled_actions_registry")
-    response = await _execute_observed_rpc(client, probe)
-    bodies = _extract_rpc_bodies(response.text, probe["rpcid"])
-    body = bodies[0] if bodies else []
-    raw_entries = body[0] if isinstance(body, list) and body and isinstance(body[0], list) else []
-    entries = [_parse_scheduled_action_task_entry(item, max_chars) for item in raw_entries]
-    diagnostic = {
-        "source_rpc": probe["rpcid"],
-        "observed": probe["observed"],
-        "status_code": getattr(response, "status_code", None),
-        "response_length": len(getattr(response, "text", "") or ""),
-        "body_present": bool(bodies),
-        "raw_entry_count": len(raw_entries),
-        "client_language": getattr(client, "language", None),
-        "client_build_label": getattr(client, "build_label", None),
-        "has_session_id": bool(getattr(client, "session_id", None)),
-        "account_status": str(getattr(client, "account_status", "")),
-    }
-    if not entries:
-        diagnostic["empty_hint"] = (
-            "The current Gemini cookie/session returned an empty scheduled-actions registry. "
-            "If the Gemini Web UI shows scheduled actions, refresh cookies from the same signed-in "
-            "Chrome profile or check Google multi-account context."
-        )
-    return entries, diagnostic
+    return await fetch_scheduled_registry_service(client, max_chars)
 
 
 def _get_scheduled_task_entry_from_body(body: Any) -> Any:
@@ -253,73 +243,14 @@ async def _fetch_scheduled_task_by_id(
     action_id: str,
     max_chars: int,
 ) -> tuple[dict[str, Any] | None, dict[str, Any]]:
-    contract = get_contract("scheduled.get")
-    response = await client._batch_execute(
-        [_RawRPCData(contract.rpc_id, contract.build_payload(action_id=action_id))],
-        source_path=contract.source_path,
-        close_on_error=False,
-    )
-    bodies = _extract_rpc_bodies(response.text, contract.rpc_id)
-    body = bodies[0] if bodies else []
-    raw_entry = _get_scheduled_task_entry_from_body(body)
-    entry = _parse_scheduled_action_task_entry(raw_entry, max_chars) if raw_entry is not None else None
-    matched_task = bool(entry and entry.get("id") == action_id)
-    diagnostic = {
-        "source_rpc": contract.rpc_id,
-        "contract_key": contract.key,
-        "observed": contract.observed,
-        "status_code": getattr(response, "status_code", None),
-        "response_length": len(getattr(response, "text", "") or ""),
-        "body_present": bool(bodies),
-        "raw_body_type": type(body).__name__,
-        "raw_top_level_count": len(body) if isinstance(body, list) else None,
-        "matched_task": matched_task,
-        "client_language": getattr(client, "language", None),
-        "client_build_label": getattr(client, "build_label", None),
-        "has_session_id": bool(getattr(client, "session_id", None)),
-        "account_status": str(getattr(client, "account_status", "")),
-    }
-    if entry and not matched_task:
-        diagnostic["returned_id"] = entry.get("id", "")
-    if not matched_task:
-        diagnostic["empty_hint"] = (
-            "The current Gemini cookie/session did not return this scheduled action by id. "
-            "Check that the id belongs to the same Gemini account/profile context."
-        )
-    return (entry if matched_task else None), diagnostic
+    return await fetch_scheduled_task_by_id_service(client, action_id, max_chars)
 
 
 
 
 
 async def _fetch_native_notebooks(client, locale: str = "zh-CN") -> tuple[list[dict[str, Any]], dict[str, Any]]:
-    contract = get_contract("notebooks.list")
-    response = await client._batch_execute(
-        [_RawRPCData(contract.rpc_id, _native_notebooks_payload(locale))],
-        source_path=contract.source_path,
-        close_on_error=False,
-    )
-    bodies = _extract_rpc_bodies(response.text, contract.rpc_id)
-    body = bodies[0] if bodies else []
-    raw_entries = body[2] if isinstance(body, list) and len(body) > 2 and isinstance(body[2], list) else []
-    raw_categories = body[3] if isinstance(body, list) and len(body) > 3 and isinstance(body[3], list) else []
-    notebooks = [_parse_native_notebook(item) for item in raw_entries]
-    diagnostic = {
-        "source_rpc": contract.rpc_id,
-        "contract_key": contract.key,
-        "observed": contract.observed,
-        "status_code": getattr(response, "status_code", None),
-        "response_length": len(getattr(response, "text", "") or ""),
-        "body_present": bool(bodies),
-        "raw_entry_count": len(raw_entries),
-        "categories": [_parse_notebook_category(item) for item in raw_categories],
-        "client_language": getattr(client, "language", None),
-        "client_build_label": getattr(client, "build_label", None),
-    }
-    return notebooks, diagnostic
-
-
-
+    return await fetch_native_notebooks_service(client, locale)
 
 
 async def _fetch_conversation_metadata_source(
@@ -342,17 +273,15 @@ async def _fetch_conversation_metadata_source(
     stopped_reason = "max_pages"
 
     for page_index in range(safe_max_pages):
-        response = await client._batch_execute(
-            [_RawRPCData(contract.rpc_id, _conversation_history_payload(filter_payload, safe_page_size, next_page_token))],
-            source_path=contract.source_path,
-            close_on_error=False,
+        result = await read_history_metadata_page(
+            client, filter_payload=filter_payload, page_size=safe_page_size, next_page_token=next_page_token,
         )
-        response_text = getattr(response, "text", "") or ""
-        response_length += len(response_text)
-        bodies = _extract_rpc_bodies(response_text, contract.rpc_id)
-        body = bodies[0] if bodies else []
-        raw_entries = body[2] if isinstance(body, list) and len(body) > 2 and isinstance(body[2], list) else []
-        parsed_entries = [_parse_conversation_metadata(item) for item in raw_entries]
+        if not result.ok:
+            raise HistoryMetadataReadError(result)
+        assert result.data is not None
+        response_size = int(result.meta.details["response_length"])
+        response_length += response_size
+        parsed_entries = [dict(item) for item in result.data["items"]]
         new_unique_count = 0
         for item in parsed_entries:
             item_id = item.get("id")
@@ -365,15 +294,15 @@ async def _fetch_conversation_metadata_source(
             if len(items) >= safe_max_items:
                 break
 
-        next_page_token = body[1] if isinstance(body, list) and len(body) > 1 and isinstance(body[1], str) else None
+        next_page_token = result.data["continuation"]
         pages.append(
             {
                 "page": page_index + 1,
-                "raw_count": len(raw_entries),
+                "raw_count": len(parsed_entries),
                 "new_unique_count": new_unique_count,
                 "unique_so_far": len(items),
                 "next_page_token_present": bool(next_page_token),
-                "response_length": len(response_text),
+                "response_length": response_size,
                 "first_id": parsed_entries[0].get("id") if parsed_entries else "",
                 "last_id": parsed_entries[-1].get("id") if parsed_entries else "",
                 "last_title": parsed_entries[-1].get("title") if parsed_entries else "",
@@ -383,7 +312,7 @@ async def _fetch_conversation_metadata_source(
         if len(items) >= safe_max_items:
             stopped_reason = "max_items"
             break
-        if not raw_entries:
+        if not parsed_entries:
             stopped_reason = "empty_page"
             break
         if not next_page_token:
@@ -426,6 +355,8 @@ async def _collect_notebook_chat_sources(
     diagnostic: dict[str, Any] | None = None
     source_blocks: list[dict[str, Any]] = []
     notebooks, diagnostic = await _fetch_native_notebooks(client)
+    if diagnostic.get("read_back_valid") is not True:
+        raise HistoryMetadataReadError(history_metadata_failure(diagnostic))
     for notebook in notebooks:
         notebook_id = notebook.get("id", "")
         if not notebook_id:
@@ -436,6 +367,9 @@ async def _collect_notebook_chat_sources(
         while len(notebook_items) < safe_max_items:
             batch_limit = min(100, safe_max_items - len(notebook_items))
             page_items, page_payload = await _fetch_notebook_chats(client, notebook_id, batch_limit, next_offset)
+            page_diagnostic = page_payload.get("diagnostic", {})
+            if page_diagnostic.get("read_back_valid") is not True:
+                raise HistoryMetadataReadError(history_metadata_failure(page_diagnostic))
             source_name = f"notebook:{notebook.get('title') or notebook_id}"
             for item in page_items:
                 item["history_source"] = source_name
@@ -614,17 +548,15 @@ async def _fetch_remy_goal_conversation_refs(
     stopped_reason = "max_pages"
 
     for page_index in range(safe_max_pages):
-        response = await client._batch_execute(
-            [_RawRPCData(contract.rpc_id, contract.build_payload(page_size=safe_page_size, next_page_token=next_page_token))],
-            source_path=contract.source_path,
-            close_on_error=False,
+        result = await read_history_metadata_page(
+            client, contract_key=contract.key, page_size=safe_page_size, next_page_token=next_page_token,
         )
-        response_text = getattr(response, "text", "") or ""
-        response_length += len(response_text)
-        bodies = _extract_rpc_bodies(response_text, contract.rpc_id)
-        body = bodies[0] if bodies else []
-        raw_entries = body[0] if isinstance(body, list) and body and isinstance(body[0], list) else []
-        parsed_entries = [_parse_remy_goal_entry(item) for item in raw_entries]
+        if not result.ok:
+            raise HistoryMetadataReadError(result)
+        assert result.data is not None
+        response_size = int(result.meta.details["response_length"])
+        response_length += response_size
+        parsed_entries = [dict(item) for item in result.data["items"]]
         new_unique_count = 0
         for item in parsed_entries:
             item_id = item.get("id")
@@ -637,21 +569,21 @@ async def _fetch_remy_goal_conversation_refs(
             if len(items) >= safe_max_items:
                 break
 
-        next_page_token = body[1] if isinstance(body, list) and len(body) > 1 and isinstance(body[1], str) else None
+        next_page_token = result.data["continuation"]
         pages.append(
             {
                 "page": page_index + 1,
-                "raw_count": len(raw_entries),
+                "raw_count": len(parsed_entries),
                 "new_unique_count": new_unique_count,
                 "unique_so_far": len(items),
                 "next_page_token_present": bool(next_page_token),
-                "response_length": len(response_text),
+                "response_length": response_size,
             }
         )
         if len(items) >= safe_max_items:
             stopped_reason = "max_items"
             break
-        if not raw_entries:
+        if not parsed_entries:
             stopped_reason = "empty_page"
             break
         if not next_page_token:
@@ -691,52 +623,7 @@ async def _fetch_notebook_chats(
     limit: int,
     offset: int,
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
-    contract = get_contract("notebooks.chats")
-    safe_limit = clamp_int(limit, default=20, minimum=1, maximum=100)
-    safe_offset = clamp_int(offset, default=0, minimum=0, maximum=10000)
-    target_count = safe_offset + safe_limit
-    page_size = min(max(target_count, 10), 100)
-    items: list[dict[str, Any]] = []
-    next_page_token: str | None = None
-    response_length = 0
-    page_count = 0
-
-    while len(items) < target_count:
-        response = await client._batch_execute(
-            [_RawRPCData(contract.rpc_id, _notebook_chats_payload(notebook_id, page_size, next_page_token))],
-            source_path=contract.source_path.format(notebook_slug=notebook_id.rsplit("/", 1)[-1]),
-            close_on_error=False,
-        )
-        response_length += len(getattr(response, "text", "") or "")
-        page_count += 1
-        bodies = _extract_rpc_bodies(response.text, contract.rpc_id)
-        body = bodies[0] if bodies else []
-        raw_entries = body[2] if isinstance(body, list) and len(body) > 2 and isinstance(body[2], list) else []
-        items.extend(_parse_conversation_metadata(item) for item in raw_entries)
-        next_page_token = body[1] if isinstance(body, list) and len(body) > 1 and isinstance(body[1], str) else None
-        if not next_page_token or not raw_entries:
-            break
-
-    page = items[safe_offset : safe_offset + safe_limit]
-    diagnostic = {
-        "source_rpc": contract.rpc_id,
-        "contract_key": contract.key,
-        "observed": contract.observed,
-        "response_length": response_length,
-        "page_count": page_count,
-        "fetched_count": len(items),
-        "has_remote_more": bool(next_page_token),
-        "next_page_token_present": bool(next_page_token),
-    }
-    page_info = {
-        "total_count": len(items),
-        "count": len(page),
-        "offset": safe_offset,
-        "limit": safe_limit,
-        "has_more": bool(next_page_token) or safe_offset + len(page) < len(items),
-        "next_offset": safe_offset + len(page) if bool(next_page_token) or safe_offset + len(page) < len(items) else None,
-    }
-    return page, {**page_info, "diagnostic": diagnostic}
+    return await fetch_notebook_chats_service(client, notebook_id, limit, offset)
 
 
 def _find_notebook(
@@ -819,6 +706,7 @@ async def _fetch_recent_conversation_metadata(
         "contract_key": contract.key,
         "observed": contract.observed,
         "target_count_per_bucket": safe_target,
+        "max_offset": 5000,
         "pinned": pinned_diag,
         "recent": recent_diag,
         "has_remote_more": bool(
@@ -957,24 +845,21 @@ def _register_history_scan_tools(mcp: MCPServer, enabled_tool_names: set[str], t
         await initialize_client()
 
         try:
-            if hasattr(client, "_batch_execute"):
-                target_count = clamp_int(limit, default=10, minimum=1, maximum=50) + clamp_int(
-                    offset, default=0, minimum=0, maximum=5000
-                )
-                items, diagnostic = await _fetch_recent_conversation_metadata(client, target_count)
-            else:
-                chats = client.list_chats() or []
-                items = list(chats)
-                diagnostic = {"source": "client_cache", "fetched_count": len(items), "has_remote_more": False}
-            result = list_chats_result(items, limit, offset, diagnostic=diagnostic, max_limit=50)
+            result = await list_chat_history_result(client, limit, offset, max_limit=50)
+            if not result.ok:
+                return domain_text(result, "❌ 无法验证历史对话元数据。")
             assert result.data is not None
             payload = result.data
             page = payload["items"]
-            if not page:
-                return domain_text(result, "暂无历史对话。", use_result_data=True)
-
             if response_format == "json":
                 return attach_domain_result(_json_response(payload), result, use_result_data=True)
+
+            if not page:
+                message = (
+                    "历史扫描达到当前来源上限，覆盖不完整；请使用深度扫描提高上限。"
+                    if result.warnings else "暂无历史对话。"
+                )
+                return domain_text(result, message, use_result_data=True)
 
             chat_list = [
                 "## 📜 历史对话",
@@ -1081,6 +966,8 @@ def _register_history_scan_tools(mcp: MCPServer, enabled_tool_names: set[str], t
                 return _json_response(payload)
 
             return [TextContent(type="text", text=_format_scan_history_markdown(payload, page))]
+        except HistoryMetadataReadError as error:
+            return domain_text(error.result, "❌ 历史深度扫描的来源未获验证。")
         except Exception as e:
             logger.error(f"深度扫描聊天历史失败: {e}")
             return [TextContent(type="text", text=f"❌ 深度扫描失败: {str(e)}")]
@@ -1149,46 +1036,19 @@ def _register_history_read_tools(mcp: MCPServer, enabled_tool_names: set[str], t
         await initialize_client()
 
         needle = (query or "").strip()
-        if not needle or (scan_turns and not hasattr(client, "read_chat")):
-            result = await search_chats_result(
-                client,
-                [],
-                needle,
-                limit,
-                offset,
-                scan_turns=scan_turns,
-                turns_per_chat=turns_per_chat,
-                max_chars_per_turn=max_chars_per_turn,
-            )
-            fallback = (
-                "❌ 搜索聊天需要提供 query。"
-                if not needle
-                else "❌ 当前 gemini-webapi 不支持正文搜索需要的 read_chat。"
-            )
-            return domain_text(result, fallback)
-
         try:
-            safe_limit = clamp_int(limit, default=10, minimum=1, maximum=50)
-            safe_offset = clamp_int(offset, default=0, minimum=0, maximum=5000)
-            if hasattr(client, "_batch_execute"):
-                chats, diagnostic = await _fetch_recent_conversation_metadata(client, safe_limit + safe_offset)
-            else:
-                chats = [chat_to_dict(chat) for chat in client.list_chats() or []]
-                diagnostic = {"source": "client_cache", "fetched_count": len(chats), "has_remote_more": False}
-            safe_turn_limit = clamp_int(turns_per_chat, default=20, minimum=1, maximum=50)
-            safe_chars = clamp_int(max_chars_per_turn, default=1000, minimum=100, maximum=4000)
-            result = await search_chats_result(
-                client,
-                chats,
-                needle,
-                safe_limit,
-                safe_offset,
-                scan_turns=scan_turns,
-                turns_per_chat=safe_turn_limit,
-                max_chars_per_turn=safe_chars,
-                diagnostic=diagnostic,
-                max_limit=50,
+            result = await search_chat_history_result(
+                client, needle, limit, offset, scan_turns=scan_turns,
+                turns_per_chat=turns_per_chat, max_chars_per_turn=max_chars_per_turn, max_limit=50,
             )
+            if result.data is None:
+                if not needle:
+                    fallback = "❌ 搜索聊天需要提供 query。"
+                elif scan_turns and not hasattr(client, "read_chat"):
+                    fallback = "❌ 当前 gemini-webapi 不支持正文搜索需要的 read_chat。"
+                else:
+                    fallback = "❌ 无法验证历史对话元数据。"
+                return domain_text(result, fallback)
             assert result.data is not None
             payload = result.data
             matches = payload["matches"]
@@ -1202,7 +1062,9 @@ def _register_history_read_tools(mcp: MCPServer, enabled_tool_names: set[str], t
                 f"Scanned: {payload['scanned_count']}/{payload['total_count']} · Matches: {payload['match_count']}",
             ]
             if not matches:
-                lines.append("未在当前页找到匹配项。")
+                lines.append("正文读取失败，无法确认是否存在匹配项。" if not result.ok else "未在当前页找到匹配项。")
+            for warning in result.warnings:
+                lines.append(f"⚠️ {warning.message}")
             for idx, match in enumerate(matches, 1):
                 fields_str = ", ".join(match["matched_fields"])
                 time_text = f" · {match['time']}" if match.get("time") else ""
@@ -1296,10 +1158,18 @@ def _register_history_facade_tools(mcp: MCPServer, enabled_tool_names: set[str],
         response_format: ResponseFormat = "markdown",
     ) -> list[TextContent]:
         """
-        Read, scan, search, or export Gemini Web chat history through action=list/scan/search/read/export.
+        Read/scan/search/export chat history, or read one native Task's task_status.
 
         This read-only entrypoint never deletes or moves chats. Use it for narrow history agents.
         """
+        if action == "task_status":
+            try:
+                client = get_gemini_client()
+                await initialize_client()
+                result = await get_task_status_result(client, chat_id)
+                return domain_text(result, "Native Task status read-back.", use_result_data=True)
+            except Exception as error:
+                return exception_text(error, logger=logger, operation="gemini_history.task_status")
         if action == "list":
             return await tool_functions["gemini_list_chats"](limit=limit, offset=offset, response_format=response_format)
         if action == "scan":
@@ -1339,6 +1209,23 @@ def _register_history_facade_tools(mcp: MCPServer, enabled_tool_names: set[str],
                 include_metadata=include_metadata,
             )
         return [TextContent(type="text", text=f"❌ 不支持的 history action: {action}")]
+
+    @_tool("gemini_update_chat", MUTATES_REMOTE)
+    async def gemini_update_chat(
+        chat_id: str, title: Optional[str] = None, pinned: Optional[bool] = None,
+    ) -> list[TextContent]:
+        """Rename/pin one exact chat; pinned=false unpins. Omitted fields are preserved.
+
+        verified_updated requires independent fresh metadata read-back.
+        """
+        try:
+            client = get_gemini_client()
+            await initialize_client()
+            result = await update_chat_metadata_result(client, chat_id, title=title, pinned=pinned)
+            text = "聊天元数据已更新并回读确认。" if result.meta.verification_status == "verified_updated" else "聊天元数据更新尚未验证。"
+            return domain_text(result, text, use_result_data=True)
+        except Exception as error:
+            return exception_text(error, logger=logger, operation="gemini_update_chat", prefix="❌ 更新失败")
 
     @_tool("gemini_delete_chat", DESTRUCTIVE_REMOTE)
     async def gemini_delete_chat(chat_id: str) -> list[TextContent]:
@@ -1441,14 +1328,8 @@ def _register_account_probe_tools(mcp: MCPServer, enabled_tool_names: set[str], 
         results = []
         for probe in selected:
             try:
-                response = await client._batch_execute(
-                    [_RawRPCData(probe["rpcid"], probe["payload"])],
-                    source_path=probe["source_path"],
-                    close_on_error=False,
-                )
-                summary = _summarize_probe_response(response.text, probe["rpcid"])
-                reject_code = summary.get("reject_code")
-                ok = response.status_code == 200 and reject_code is None
+                response = await _execute_observed_rpc(client, probe)
+                summary = account_probe_status(response, probe)
                 results.append(
                     {
                         "surface": probe["surface"],
@@ -1456,8 +1337,6 @@ def _register_account_probe_tools(mcp: MCPServer, enabled_tool_names: set[str], 
                         "rpcid": probe["rpcid"],
                         "source_path": probe["source_path"],
                         "observed": probe["observed"],
-                        "ok": ok,
-                        "status_code": response.status_code,
                         **summary,
                     }
                 )
@@ -1626,9 +1505,10 @@ def _register_account_inventory_tools(mcp: MCPServer, enabled_tool_names: set[st
         try:
             probe = _get_probe("sharing", "public_links_index")
             response = await _execute_observed_rpc(client, probe)
-            bodies = _extract_rpc_bodies(response.text, probe["rpcid"])
-            entries = bodies[0] if bodies and isinstance(bodies[0], list) else []
-            parsed_links = [_parse_public_link_entry(item) for item in entries]
+            result = account_contract_result(response, "sharing.public_links")
+            if not result.ok or result.data is None:
+                return domain_text(result, domain_failure_text(result), use_result_data=True)
+            parsed_links = result.data["value"]
             links, page_info = paginate_items(parsed_links, limit, offset)
             payload = {
                 **page_info,
@@ -1647,7 +1527,7 @@ def _register_account_inventory_tools(mcp: MCPServer, enabled_tool_names: set[st
             ]
             for idx, link in enumerate(links, payload["offset"] + 1):
                 title = link.get("title") or "(untitled)"
-                disabled = "禁用" if link.get("disabled") else "启用"
+                disabled = "禁用" if link.get("disabled") is True else "启用" if link.get("disabled") is False else "状态未知"
                 url = link.get("url") or "(no url)"
                 lines.append(f"{idx}. {title} [{disabled}]\n   ID: {link.get('id', '')}\n   URL: {url}")
             if payload["has_more"]:
@@ -1679,12 +1559,10 @@ def _register_account_inventory_tools(mcp: MCPServer, enabled_tool_names: set[st
             for name in probe_names:
                 probe = _get_probe("usage", name)
                 response = await _execute_observed_rpc(client, probe)
-                bodies = _extract_rpc_bodies(response.text, probe["rpcid"])
-                entries: list[dict[str, Any]] = []
-                if bodies and isinstance(bodies[0], list) and bodies[0]:
-                    first = bodies[0][0]
-                    if isinstance(first, list):
-                        entries = [_parse_usage_entry(item) for item in first]
+                observation = account_contract_result(response, "usage.quota" if name == "usage_quota" else "usage.model_state")
+                if not observation.ok or observation.data is None:
+                    return domain_text(observation, domain_failure_text(observation), use_result_data=True)
+                entries = observation.data["value"]
                 results.append(
                     {
                         "name": name,
@@ -1736,12 +1614,10 @@ def _register_account_inventory_tools(mcp: MCPServer, enabled_tool_names: set[st
         try:
             probe = _get_probe("library", "library_locale_capabilities")
             response = await _execute_observed_rpc(client, probe)
-            bodies = _extract_rpc_bodies(response.text, probe["rpcid"])
-            entries = []
-            if bodies and isinstance(bodies[0], list) and bodies[0]:
-                first = bodies[0][0]
-                if isinstance(first, list):
-                    entries = [_parse_library_capability(item) for item in first]
+            result = account_contract_result(response, "library.locale_capabilities")
+            if not result.ok or result.data is None:
+                return domain_text(result, domain_failure_text(result), use_result_data=True)
+            entries = result.data["value"]
             page, page_info = paginate_items(entries, limit, offset)
             payload = {
                 **page_info,
@@ -1794,6 +1670,9 @@ def _register_notebook_tools(mcp: MCPServer, enabled_tool_names: set[str], tool_
 
         try:
             notebooks, diagnostic = await _fetch_native_notebooks(client, locale)
+            observation = account_read_result(notebooks, diagnostic)
+            if not observation.ok:
+                return domain_text(observation, domain_failure_text(observation), use_result_data=True)
             page, page_info = paginate_items(notebooks, limit, offset, max_limit=100)
             payload = {
                 "ok": True,
@@ -1841,6 +1720,9 @@ def _register_notebook_tools(mcp: MCPServer, enabled_tool_names: set[str], tool_
 
         try:
             notebooks, diagnostic = await _fetch_native_notebooks(client, locale)
+            observation = account_read_result(notebooks, diagnostic)
+            if not observation.ok:
+                return domain_text(observation, domain_failure_text(observation), use_result_data=True)
             notebook = _find_notebook(notebooks, notebook_id, notebook_title)
             if not notebook:
                 available = [item.get("title", "") for item in notebooks if item.get("title")]
@@ -1856,6 +1738,9 @@ def _register_notebook_tools(mcp: MCPServer, enabled_tool_names: set[str], tool_
                 return [TextContent(type="text", text=f"未找到匹配的 Gemini 原生笔记本。可用标题: {', '.join(available)}")]
 
             items, page_payload = await _fetch_notebook_chats(client, notebook["id"], limit, offset)
+            observation = account_read_result(items, page_payload["diagnostic"])
+            if not observation.ok:
+                return domain_text(observation, domain_failure_text(observation), use_result_data=True)
             payload = {
                 "ok": True,
                 "notebook": notebook,
@@ -1883,7 +1768,7 @@ def _register_notebook_tools(mcp: MCPServer, enabled_tool_names: set[str], tool_
             logger.error(f"Gemini Notebook 对话读取失败: {e}")
             return [TextContent(type="text", text=f"❌ 读取 Gemini Notebook 对话失败: {str(e)}")]
 
-    @_tool("gemini_notebooks", READS_PRIVATE_REMOTE)
+    @_tool("gemini_notebooks", DESTRUCTIVE_REMOTE)
     async def gemini_notebooks(
         action: NotebookAction = "list",
         notebook_id: str = "",
@@ -1892,12 +1777,15 @@ def _register_notebook_tools(mcp: MCPServer, enabled_tool_names: set[str], tool_
         offset: int = 0,
         locale: str = "zh-CN",
         response_format: ResponseFormat = "markdown",
+        request: NotebooksRequest | None = None,
     ) -> list[TextContent]:
         """
-        List native Gemini Web Notebooks or recent chats inside one notebook.
-
-        This read-only entrypoint does not move, create, or delete notebooks/chats.
+        Read notebooks/chats with legacy arguments, or manage native notebooks
+        and their sources using the focused typed request contract.
         """
+        if request is not None:
+            result = await get_account_facade_service().execute("notebooks", request)
+            return domain_text(result, "Notebook action and observed verification.", use_result_data=True)
         if action == "list":
             return await tool_functions["gemini_list_notebooks"](
                 limit=limit,
@@ -2004,8 +1892,9 @@ def _register_scheduled_tools(mcp: MCPServer, enabled_tool_names: set[str], tool
         offset: int = 0,
         response_format: ResponseFormat = "markdown",
         max_chars_per_field: int = 500,
+        backend: Literal["legacy", "remy"] = "legacy",
     ) -> list[TextContent]:
-        """列出 Gemini Web 定时操作页面返回的定时任务条目。只读，不创建/修改/删除任务。"""
+        """只读列出定时任务。backend=remy 对应当前任务页；默认 legacy 保留旧版兼容行为。"""
         client = get_gemini_client()
         await initialize_client()
         if not hasattr(client, "_batch_execute"):
@@ -2013,7 +1902,11 @@ def _register_scheduled_tools(mcp: MCPServer, enabled_tool_names: set[str], tool
 
         safe_chars = min(max(max_chars_per_field, 40), 4000)
         try:
-            entries, diagnostic = await _fetch_scheduled_registry(client, safe_chars)
+            fetch_registry = fetch_remy_schedule_registry if backend == "remy" else _fetch_scheduled_registry
+            entries, diagnostic = await fetch_registry(client, safe_chars)
+            observation = account_read_result(entries, diagnostic)
+            if not observation.ok:
+                return domain_text(observation, domain_failure_text(observation), use_result_data=True)
             if scope == "active":
                 entries = [item for item in entries if item.get("enabled") is True]
             elif scope == "inactive":
@@ -2022,6 +1915,7 @@ def _register_scheduled_tools(mcp: MCPServer, enabled_tool_names: set[str], tool
             page, page_info = paginate_items(entries, limit, offset)
             result = {
                 "name": "scheduled_actions_registry",
+                "backend": backend,
                 "source_rpc": diagnostic["source_rpc"],
                 "observed": diagnostic["observed"],
                 **page_info,
@@ -2059,8 +1953,9 @@ def _register_scheduled_tools(mcp: MCPServer, enabled_tool_names: set[str], tool
         action_id: str,
         response_format: ResponseFormat = "markdown",
         max_chars_per_field: int = 500,
+        backend: Literal["legacy", "remy"] = "legacy",
     ) -> list[TextContent]:
-        """按 id 读取单个 Gemini Web 定时操作。只读，不修改任务状态。"""
+        """按 id 和原列表的 backend 只读获取任务；remy 读取新版原生任务，默认 legacy。"""
         clean_id = action_id.strip()
         if not clean_id:
             return [TextContent(type="text", text="❌ action_id 不能为空。")]
@@ -2072,9 +1967,14 @@ def _register_scheduled_tools(mcp: MCPServer, enabled_tool_names: set[str], tool
 
         safe_chars = min(max(max_chars_per_field, 40), 4000)
         try:
-            item, diagnostic = await _fetch_scheduled_task_by_id(client, clean_id, safe_chars)
+            fetch_by_id = fetch_remy_schedule_by_id if backend == "remy" else _fetch_scheduled_task_by_id
+            item, diagnostic = await fetch_by_id(client, clean_id, safe_chars)
+            observation = account_read_result(item, diagnostic)
+            if not observation.ok:
+                return domain_text(observation, domain_failure_text(observation), use_result_data=True)
             payload = {
                 "ok": item is not None,
+                "backend": backend,
                 "id": clean_id,
                 "source_rpc": diagnostic["source_rpc"],
                 "observed": diagnostic["observed"],
@@ -2196,8 +2096,12 @@ def _register_scheduled_tools(mcp: MCPServer, enabled_tool_names: set[str], tool
     async def gemini_delete_scheduled_action(
         action_id: str,
         response_format: ResponseFormat = "markdown",
+        backend: Literal["legacy", "remy"] = "legacy",
     ) -> list[TextContent]:
         """按 id 删除 Gemini Web 定时操作。不会删除由该定时操作产生的历史对话。"""
+        if backend != "legacy":
+            result: DomainResult[Any] = DomainResult.failure(DomainErrorCode.INVALID_ARGUMENT, "Native schedules support list/get only.")
+            return domain_text(result, domain_failure_text(result), use_result_data=True)
         clean_id = action_id.strip()
         if not clean_id:
             return [TextContent(type="text", text="❌ action_id 不能为空。")]
@@ -2267,14 +2171,11 @@ def _register_tool_mode_tools(mcp: MCPServer, enabled_tool_names: set[str], tool
         try:
             probe = _get_probe("tool_modes", "tool_mode_status")
             response = await _execute_observed_rpc(client, probe)
-            bodies = _extract_rpc_bodies(response.text, probe["rpcid"])
-            body = bodies[0] if bodies else []
-            entries = []
-            leading_enabled = None
-            if isinstance(body, list):
-                leading_enabled = body[0] if body and isinstance(body[0], bool) else None
-                if len(body) > 1 and isinstance(body[1], list):
-                    entries = [_parse_tool_mode_entry(item) for item in body[1]]
+            result = account_contract_result(response, "tool_modes.status")
+            if not result.ok or result.data is None:
+                return domain_text(result, domain_failure_text(result), use_result_data=True)
+            entries = result.data["value"]
+            leading_enabled = result.data["leading_enabled"]
             page, page_info = paginate_items(entries, limit, offset, max_limit=100)
 
             payload = {
@@ -2320,28 +2221,11 @@ def _register_model_tools(mcp: MCPServer, enabled_tool_names: set[str], tool_fun
     @_tool("gemini_list_models", READS_PRIVATE_REMOTE)
     async def gemini_list_models() -> list[TextContent]:
         """列出所有可用模型及其说明"""
-        aliases = """🤖 MCP 模型别名:
-
-1. flash-lite / lite → Web UI 3.5 Flash-Lite (request name: Flash-Lite)
-   - 网页端极速模型
-
-2. flash / fast → gemini-3-flash
-   - 2026-09-26 网页端 3.8 Flash；fast 保留为兼容别名
-
-3. pro → gemini-3-pro
-   - 网页端 3.1 Pro，是否可用取决于当前账户
-
-4. thinking → gemini-3-flash-thinking
-   - 旧兼容别名；新网页思考等级请用 thinking_level=standard/extended
-
-媒体规则:
-- 图像: Flash-Lite → Nano Banana 2 Lite；Flash / Pro → Nano Banana 2
-- 音乐: Lyria；网页公告为 3.5，MCP 结果未必标明实际版本
-- 视频: 当前普通聊天请求不等于 Gemini Omni 视频模式；需要验证实际视频产物
-
----
-
-运行时模型:
+        aliases = """🤖 MCP 模型别名与选择:
+- flash-lite / lite、flash / fast、pro 保持稳定别名；thinking 兼容映射为 flash。
+- 也接受下方运行时目录的 model_name、display_name 或 model_id（例如目录存在时的 4 Argon）。
+- thinking_level=low / medium / high；standard=low、extended=high 保持兼容。
+- 当前账号目录如下；静态网页观察不代表其他账号权限。
 """
         try:
             client = get_gemini_client()
@@ -2396,18 +2280,22 @@ def _register_gem_tools(mcp: MCPServer, enabled_tool_names: set[str]) -> None:
 
         try:
             if action == "list":
-                gems = await client.fetch_gems()
-                if not gems:
-                    return [TextContent(type="text", text="暂无保存的 Gems。")]
-
+                result = await list_gems_service(client)
+                items = (result.data or {}).get("items", [])
+                if not result.ok:
+                    return domain_text(result, "无法核实 Gems 列表。", use_result_data=True)
+                if not items and not result.warnings:
+                    return domain_text(result, "暂无保存的 Gems。", use_result_data=True)
                 gem_list = ["## 💎 Gems 列表"]
-                for i, gem in enumerate(_iter_gem_values(gems), 1):
-                    gem_name = getattr(gem, "name", "Untitled")
-                    gem_id_val = getattr(gem, "id", "")
-                    gem_desc = getattr(gem, "description", "")[:30]
+                if not items:
+                    gem_list.append("已观察的集合中暂无 Gems。")
+                for i, gem in enumerate(items, 1):
+                    gem_name = gem.get("name") or "Untitled"
+                    gem_id_val = gem.get("id", "")
+                    gem_desc = gem.get("description", "")[:30]
                     gem_list.append(f"{i}. {gem_name} (ID: {gem_id_val})\n   {gem_desc}")
-                
-                return [TextContent(type="text", text="\n".join(gem_list))]
+                gem_list.extend(f"⚠️ {warning.message}" for warning in result.warnings)
+                return domain_text(result, "\n".join(gem_list), use_result_data=True)
 
             elif action == "create":
                 if not name:
@@ -2461,6 +2349,30 @@ def _register_gem_tools(mcp: MCPServer, enabled_tool_names: set[str]) -> None:
             return [TextContent(type="text", text=f"❌ 失败: {str(e)}")]
 
 
+def _register_typed_account_tools(mcp: MCPServer, enabled_tool_names: set[str]) -> None:
+    _tool = _conditional_tool_decorator(mcp, enabled_tool_names)
+
+    @_tool("gemini_account", DESTRUCTIVE_REMOTE)
+    async def gemini_account(request: AccountRequest) -> list[TextContent]:
+        """Typed native Skills, public sharing, Library and Canvas workflows.
+
+        Reuses the focused account request contract. Mutations need user intent
+        and fresh read-back; public sharing publishes the selected source.
+        """
+        result = await get_account_facade_service().execute("account", request)
+        return domain_text(result, "Account action and observed verification.", use_result_data=True)
+
+    @_tool("gemini_scheduled", DESTRUCTIVE_REMOTE)
+    async def gemini_scheduled(request: ScheduledRequest) -> list[TextContent]:
+        """Read/manage legacy actions or native Remy schedules and recurrence.
+
+        Preserve backend with observed IDs. Native create/update/pause/resume/
+        delete use independent read-back; create_daily preserves legacy behavior.
+        """
+        result = await get_account_facade_service().execute("scheduled", request)
+        return domain_text(result, "Scheduled action and observed verification.", use_result_data=True)
+
+
 def register_manage_tools(mcp: MCPServer, layers: list[str] | set[str] | tuple[str, ...] | None = None):
     enabled_tool_names = resolve_manage_tool_names(layers)
     tool_functions: dict[str, Callable[..., Coroutine[Any, Any, list["TextContent"]]]] = {}
@@ -2477,3 +2389,4 @@ def register_manage_tools(mcp: MCPServer, layers: list[str] | set[str] | tuple[s
     _register_tool_mode_tools(mcp, enabled_tool_names, tool_functions)
     _register_model_tools(mcp, enabled_tool_names, tool_functions)
     _register_gem_tools(mcp, enabled_tool_names)
+    _register_typed_account_tools(mcp, enabled_tool_names)

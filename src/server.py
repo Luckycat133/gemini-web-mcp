@@ -27,7 +27,7 @@ from .services.manifest import (
     tool_manifest_payload as _tool_manifest_payload,
 )
 from .tools import groups_enable_manage, register_tools
-from .tools.annotations import MUTATES_LOCAL, READ_ONLY_LOCAL
+from .tools.annotations import DESTRUCTIVE_REMOTE, MUTATES_LOCAL, READ_ONLY_LOCAL
 
 ResponseFormat = Literal["markdown", "json"]
 
@@ -43,17 +43,17 @@ mcp = MCPServer(
     instructions=f"""
 # Gemini Web MCP Server (v{__version__})
 
-## 可用模型
-- flash-lite → Web UI 3.5 Flash-Lite
-- flash / fast → Web UI 3.8 Flash
-- pro → Web UI 3.1 Pro
-- 三个 Web UI 模型都支持 thinking_level=standard/extended
-- thinking 保留为旧兼容别名
+## 模型与模式
+- flash-lite / flash / pro 保留稳定别名；也接受当前运行时目录名称（如 4 Argon）
+- 先用 gemini_list_models 核对当前账号目录；静态清单不是账号权限证明
+- thinking_level: low / medium / high；standard=low、extended=high 保持兼容
+- thinking 保留为 flash 的旧兼容模型别名
+- task_mode=true 选择网页原生任务；通过 gemini_history(action="task_status", chat_id=...) 读回状态
 
 ## 工具组（可配置）
 - model/chat: 只调用 Gemini 模型
 - history: 只读历史 list/scan/search/read/export
-- history-organize: 历史整理 + native Notebook 移动
+- history-organize: 历史重命名/固定 + native Notebook 移动
 - account-read: 账号 Web surface 只读盘点
 - scheduled-admin: 明确授权后管理定时操作
 - core: 通用内容工作流，包含聊天、媒体、文件/URL、Deep Research
@@ -102,11 +102,21 @@ if not _tool_groups_include_manage():
         return [TextContent(type="text", text=_format_tool_manifest_markdown(payload))]
 
 
-@mcp.tool(annotations=MUTATES_LOCAL)
+@mcp.tool(annotations=DESTRUCTIVE_REMOTE)
 @domain_error_boundary("gemini_reset", logger)
 async def gemini_reset() -> list[TextContent]:
-    """重置客户端"""
-    await reset_client_async()
+    """重置客户端和全部本地会话，并立即删除未设置 retain_chat 的远端聊天。
+
+    已保留聊天不会删除；远端清理失败会返回 partial 和可重试诊断。
+    """
+    reset_result = await reset_client_async()
+    if reset_result is not None:
+        data = reset_result.to_dict()["data"]
+        data["client_state"] = "reset"
+        text = "✅ 客户端已重置"
+        if reset_result.warnings:
+            text += "\n⚠️ 远端聊天清理未完成：" + "；".join(warning.message for warning in reset_result.warnings)
+        return domain_text(reset_result, text, data=data)
     return domain_text(
         DomainResult.success(
             {"client_state": "reset"},

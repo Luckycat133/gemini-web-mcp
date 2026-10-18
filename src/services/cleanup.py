@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Awaitable, Callable, Literal
 
+from ..domain import CleanupObservation, CleanupState, DomainErrorCode, DomainResult, OperationState
+from ..infrastructure.state_store import CleanupJobRecord
 from ..infrastructure.rpc_parsers import extract_rpc_bodies
 from .history import chat_to_dict, clamp_int, delete_chat_result, read_chat_turns
 from .scheduled import delete_action, fetch_scheduled_registry, fetch_scheduled_task_by_id
@@ -13,6 +15,112 @@ CleanupTarget = Literal["all", "chats", "scheduled"]
 FetchRegistry = Callable[[Any, int], Awaitable[tuple[list[dict[str, Any]], dict[str, Any]]]]
 FetchByID = Callable[[Any, str, int], Awaitable[tuple[dict[str, Any] | None, dict[str, Any]]]]
 ExtractBodies = Callable[[str, str], list[Any]]
+
+
+def _job_payload(record: CleanupJobRecord) -> dict[str, Any]:
+    """Scoped diagnostics omit the authentication digest and lease authority."""
+    return {
+        "job_id": record.job_id, "upstream_chat_id": record.resource_id, "state": record.state,
+        "due_at": record.due_at, "attempts": record.attempts, "source": record.source,
+        "diagnostic_id": record.diagnostic_id, "error_code": record.error_code,
+        "verification_status": record.verification_status,
+        "created_at": record.created_at, "updated_at": record.updated_at,
+    }
+
+
+def _cleanup_owner(client: Any = None) -> Any:
+    # Keep this import below the lifecycle owner to avoid service/wrapper cycles.
+    from ..client_wrapper import get_remote_chat_cleanup_manager
+
+    return get_remote_chat_cleanup_manager(client)
+
+
+def _authentication_failure() -> DomainResult[dict[str, Any]]:
+    return DomainResult.failure(DomainErrorCode.AUTH_REQUIRED,
+                                "Cleanup recovery requires the original credential scope.",
+                                verification_status="authentication_context_unavailable")
+
+
+async def list_cleanup_jobs(
+    client: Any = None, *, limit: int = 50, offset: int = 0, states: tuple[str, ...] = (),
+) -> DomainResult[dict[str, Any]]:
+    """Read registered local jobs for the current credentials; never scan chats."""
+    if not 1 <= limit <= 100 or offset < 0 or any(
+        state not in {"pending", "running", "failed", "completed", "retained", "cancelled"} for state in states
+    ):
+        return DomainResult.failure(DomainErrorCode.INVALID_ARGUMENT, "Invalid cleanup pagination or state.")
+    owner = _cleanup_owner(client)
+    if not owner.durable_scope_available():
+        return _authentication_failure()
+    rows = owner.list_durable_jobs(limit=limit, offset=offset, states=states)
+    more = owner.list_durable_jobs(limit=1, offset=offset + len(rows), states=states) if len(rows) == limit else ()
+    return DomainResult.success({
+        "jobs": [_job_payload(row) for row in rows], "count": len(rows),
+        "offset": offset, "limit": limit, "has_more": bool(more),
+        "next_offset": offset + len(rows) if more else None,
+    }, verification_status="local_metadata_observed")
+
+
+def _cleanup_result(observation: CleanupObservation, record: CleanupJobRecord) -> DomainResult[dict[str, Any]]:
+    data = {"job": _job_payload(record), "cleanup_state": observation.state.value}
+    if observation.state in {CleanupState.COMPLETED, CleanupState.ALREADY_COMPLETED}:
+        return DomainResult.success(data, verification_status="verified_absent")
+    if observation.state is CleanupState.PENDING:
+        return DomainResult.success(data, operation_state=OperationState.QUEUED,
+                                    verification_status="cleanup_pending")
+    return DomainResult.failure(DomainErrorCode.VERIFICATION_FAILED,
+                                "Cleanup did not observe verified absence.", data=data,
+                                retryable=observation.state is CleanupState.FAILED,
+                                diagnostic_id=observation.diagnostic_id,
+                                verification_status=record.verification_status)
+
+
+async def retry_cleanup_job(job_id: str, client: Any = None) -> DomainResult[dict[str, Any]]:
+    """Retry one authorized job; retained/cancelled work stays withdrawn."""
+    owner = _cleanup_owner(client)
+    if not owner.durable_scope_available():
+        return _authentication_failure()
+    observation = await owner.retry_durable_job(job_id, client=client)
+    record = owner.get_durable_job(job_id)
+    if observation is None or record is None:
+        return DomainResult.failure(DomainErrorCode.INVALID_ARGUMENT, "Cleanup job was not found in this scope.")
+    return _cleanup_result(observation, record)
+
+
+async def cancel_cleanup_job(job_id: str, client: Any = None) -> DomainResult[dict[str, Any]]:
+    """Cancel future attempts; an already sent upstream request is irreversible."""
+    owner = _cleanup_owner(client)
+    if not owner.durable_scope_available():
+        return _authentication_failure()
+    previous = owner.get_durable_job(job_id)
+    record = owner.cancel_durable_job(job_id)
+    if record is None:
+        return DomainResult.failure(DomainErrorCode.INVALID_ARGUMENT, "Cleanup job was not found in this scope.")
+    return DomainResult.success({
+        "job": _job_payload(record), "cancelled": record.state == "cancelled",
+        "already_completed": record.state == "completed",
+        "upstream_cancellation_verified": False,
+        "inflight_at_request": previous is not None and previous.state == "running",
+    }, verification_status="local_cleanup_authority_withdrawn" if record.state == "cancelled" else record.verification_status)
+
+
+async def cleanup_due_jobs(client: Any = None, *, limit: int = 50) -> DomainResult[dict[str, Any]]:
+    """Run a bounded batch of registered due jobs without discovering remote IDs."""
+    if not 1 <= limit <= 100:
+        return DomainResult.failure(DomainErrorCode.INVALID_ARGUMENT, "Cleanup limit must be between 1 and 100.")
+    owner = _cleanup_owner(client)
+    if not owner.durable_scope_available():
+        return _authentication_failure()
+    observations = await owner.cleanup_due_chat_results(client=client, limit=limit)
+    failed = sum(item.state is CleanupState.FAILED for item in observations)
+    completed = sum(item.state in {CleanupState.COMPLETED, CleanupState.ALREADY_COMPLETED} for item in observations)
+    return DomainResult.success({
+        "attempted_count": len(observations), "verified_deleted_count": completed,
+        "failed_count": failed, "pending_count": len(owner.list_pending_cleanup()),
+        "jobs": [{"upstream_chat_id": item.upstream_chat_id, "state": item.state.value,
+                  "diagnostic_id": item.diagnostic_id} for item in observations],
+    }, operation_state=OperationState.PARTIAL if failed else OperationState.COMPLETED,
+       verification_status="bounded_cleanup_batch_observed")
 
 
 def split_cleanup_markers(markers: str) -> list[str]:

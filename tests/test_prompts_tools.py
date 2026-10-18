@@ -172,7 +172,7 @@ def test_failed_serialization_preserves_existing_prompt_file(tmp_path, monkeypat
         raise AssertionError("A partial serialization must fail")
 
     assert target.read_text(encoding="utf-8") == saved
-    assert sorted(path.name for path in tmp_path.iterdir()) == ["p.json"]
+    assert sorted(path.name for path in tmp_path.iterdir()) == [".p.json.lock", "p.json"]
 
 
 def test_tool_create_reports_storage_failure_and_keeps_memory_empty(tmp_path):

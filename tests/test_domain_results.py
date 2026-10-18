@@ -73,6 +73,26 @@ class _CodedError(RuntimeError):
         self.code = code
 
 
+@pytest.mark.parametrize("exception_name,code", [("SSLError", "NETWORK_ERROR"), ("ConnectionError", "NETWORK_ERROR"), ("Timeout", "TIMED_OUT")])
+def test_curl_transport_errors_use_type_without_exposing_or_misreading_private_message(exception_name, code):
+    from curl_cffi.requests import exceptions
+
+    result = result_from_exception(
+        getattr(exceptions, exception_name)("cookie expired in synthetic private details"),
+        logger=logging.getLogger("tests.domain.transport"), operation="test.transport",
+    )
+    assert result.error.code.value == code
+    assert "synthetic private" not in result.error.message
+
+
+def test_matching_transport_class_name_from_unrelated_module_is_not_a_network_error():
+    class SSLError(RuntimeError):
+        pass
+
+    result = result_from_exception(SSLError("unknown failure"), logger=logging.getLogger("tests.domain.transport"), operation="test.transport")
+    assert result.error.code == DomainErrorCode.INTERNAL_ERROR
+
+
 @pytest.mark.parametrize(
     ("error", "expected_code", "retryable", "state"),
     [
@@ -165,7 +185,9 @@ def test_operation_state_taxonomy_matches_long_running_workflow_contract():
         "completed",
         "partial",
         "timed_out",
+        "cancel_requested",
         "cancelled",
+        "expired",
         "failed",
         "unavailable",
     }
@@ -350,7 +372,7 @@ def test_auth_failure_is_typed_at_primary_chat_boundary(monkeypatch):
     assert payload["meta"]["diagnostic_id"].startswith("diag_")
 
 
-def test_timeout_has_identical_retryable_state_across_chat_adapters(monkeypatch):
+def test_timeout_preserves_identical_non_retryable_state_across_chat_adapters(monkeypatch):
     class TimeoutClient:
         async def generate_content(self, **_kwargs):
             raise TimeoutError("upstream took too long")
@@ -380,7 +402,8 @@ def test_timeout_has_identical_retryable_state_across_chat_adapters(monkeypatch)
 
     for payload in (primary_payload, compact_payload):
         assert payload["error"]["code"] == "TIMED_OUT"
-        assert payload["error"]["retryable"] is True
+        assert payload["error"]["retryable"] is False
+        assert payload["warnings"][0]["code"] == "SOURCE_UNOBSERVED"
         assert payload["meta"]["operation_state"] == "timed_out"
 
 

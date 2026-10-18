@@ -11,7 +11,7 @@ TOOL_GROUPS = {
     "invoke": ["chat"],
     "history": ["manage:history-read"],
     "history-read": ["manage:history-read"],
-    "history-organize": ["manage:history-read", "manage:notebooks-read", "manage:notebooks-write"],
+    "history-organize": ["manage:history-read", "manage:history-update", "manage:notebooks-read", "manage:notebooks-write"],
     "account-read": ["manage:account-read"],
     "scheduled-read": ["manage:scheduled-read"],
     "scheduled-admin": ["manage:scheduled-read", "manage:scheduled-write"],

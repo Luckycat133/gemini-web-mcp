@@ -329,6 +329,44 @@ def test_client_manager_initialize_calls_init_when_not_initialized(monkeypatch):
     assert mgr._initialized is True
 
 
+def test_authentication_deadline_does_not_shorten_later_generation(monkeypatch):
+    """SDK init's timeout persists as the generation request budget."""
+    from gemini_webapi import GeminiClient
+    from src.thinking_client import ThinkingLevelGeminiClient
+
+    client = ThinkingLevelGeminiClient("fixture-psid")
+    sdk_default = client.timeout
+
+    async def initialize_without_network(self, *, timeout, **kwargs):
+        # This assignment is the SDK's real init contract; no HTTP is needed.
+        self.timeout = timeout
+
+    monkeypatch.setattr(GeminiClient, "init", initialize_without_network)
+    manager = ClientManager()
+    manager._client = client
+    assert asyncio.run(manager.initialize()) is client
+    assert client.timeout == sdk_default
+    assert client.timeout > client_manager.INITIALIZATION_TIMEOUT_SECONDS
+
+
+def test_stalled_authentication_is_still_bounded_and_not_published(monkeypatch):
+    monkeypatch.setattr(client_manager, "INITIALIZATION_TIMEOUT_SECONDS", 0.005)
+    monkeypatch.setattr(client_manager, "INITIALIZATION_RETRY_DELAY_SECONDS", 0)
+    manager = ClientManager()
+    attempts = []
+
+    async def stalled_init(**kwargs):
+        attempts.append(kwargs["timeout"])
+        await asyncio.Event().wait()
+
+    manager._client = MagicMock(init=stalled_init)
+    with pytest.raises(TimeoutError):
+        asyncio.run(manager.initialize())
+    assert len(attempts) == client_manager.INITIALIZATION_ATTEMPTS
+    assert not manager._initialized
+    assert manager._init_task is None
+
+
 def test_client_manager_initialize_concurrent_safe(monkeypatch):
     """真实挂起期间的并发 initialize 共享同一个初始化任务。"""
     mgr = ClientManager()
@@ -384,6 +422,88 @@ def test_client_manager_initialize_failure_can_retry(monkeypatch):
 
     asyncio.run(run())
     assert attempts == 2
+    assert mgr._initialized is True
+
+
+@pytest.mark.parametrize("error_type", [ConnectionError, TimeoutError])
+def test_initialization_transport_retry_is_shared_by_concurrent_callers(monkeypatch, error_type):
+    monkeypatch.setattr(client_manager, "INITIALIZATION_RETRY_DELAY_SECONDS", 0)
+    mgr = ClientManager()
+    fake_client = MagicMock()
+    calls = 0
+
+    async def init(**kwargs):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise error_type("private transport detail")
+
+    fake_client.init = init
+    mgr._client = fake_client
+
+    async def run():
+        assert await asyncio.gather(*(mgr.initialize() for _ in range(4))) == [fake_client] * 4
+
+    asyncio.run(run())
+    assert calls == 2
+    assert mgr._initialized is True
+
+
+def test_initialization_curl_tls_retry_is_bounded(monkeypatch):
+    from curl_cffi.requests.exceptions import SSLError
+
+    monkeypatch.setattr(client_manager, "INITIALIZATION_RETRY_DELAY_SECONDS", 0)
+    mgr = ClientManager()
+    client = MagicMock()
+    client.init = AsyncMock(side_effect=SSLError("private connection detail"))
+    mgr._client = client
+    with pytest.raises(SSLError):
+        asyncio.run(mgr.initialize())
+    assert client.init.await_count == 3
+    assert mgr._initialized is False
+    assert mgr._init_task is None
+
+
+@pytest.mark.parametrize("error", [PermissionError("timeout in private cookie text"), ValueError("network detail")])
+def test_initialization_does_not_retry_authentication_or_argument_failures(monkeypatch, error):
+    mgr = ClientManager()
+    client = MagicMock()
+    client.init = AsyncMock(side_effect=error)
+    mgr._client = client
+    with pytest.raises(type(error)):
+        asyncio.run(mgr.initialize())
+    assert client.init.await_count == 1
+
+
+def test_reset_withdraws_initialization_retry_before_another_attempt(monkeypatch):
+    monkeypatch.setattr(client_manager, "INITIALIZATION_RETRY_DELAY_SECONDS", 10)
+    mgr = ClientManager()
+    old = MagicMock()
+    old.close = AsyncMock()
+    replacement = MagicMock()
+    replacement.init = AsyncMock()
+    started = asyncio.Event()
+
+    async def init(**kwargs):
+        started.set()
+        raise ConnectionError("private detail")
+
+    old.init = AsyncMock(side_effect=init)
+    mgr._client = old
+
+    async def run():
+        pending = asyncio.create_task(mgr.initialize())
+        await started.wait()
+        await mgr.reset_async()
+        mgr._client = replacement
+        assert await mgr.initialize() is replacement
+        with pytest.raises(ClientInitializationResetError):
+            await pending
+
+    asyncio.run(run())
+    old.init.assert_awaited_once()
+    old.close.assert_awaited_once()
+    assert mgr._client is replacement
     assert mgr._initialized is True
 
 
@@ -500,6 +620,7 @@ def test_get_extra_cookies_returns_empty_when_no_cookie_data(monkeypatch):
 def test_get_extra_cookies_returns_extra_cookies(monkeypatch):
     """cookie_data 存在时返回 extra_cookies（line 76 直接覆盖）。"""
     monkeypatch.setattr(client_manager, "COOKIE_MANAGER_AVAILABLE", True)
+    monkeypatch.setenv("GEMINI_PSID", "x")
     cookie_data = _make_cookie_data(source="manual")
     cookie_data.extra_cookies = {"__Secure-1PSID": "x", "__Secure-1PSIDTS": "y"}
     monkeypatch.setattr(

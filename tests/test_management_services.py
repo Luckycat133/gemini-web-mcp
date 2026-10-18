@@ -7,6 +7,7 @@ from types import SimpleNamespace
 
 from src.services.gems import create_gem, delete_gem, update_gem
 from src.services.notebooks import move_chat_to_notebook
+from tests._account_rpc_fakes import notebook_move_response, notebook_read_diagnostic
 
 
 def test_gem_mutations_report_verified_read_back():
@@ -65,13 +66,13 @@ def test_notebook_move_reports_verified_read_back():
             assert payloads[0].rpcid
             assert source_path == "/app"
             assert close_on_error is False
-            return SimpleNamespace(status_code=200, text="response")
+            return notebook_move_response([None, ["chat-1", "Chat"]])
 
     async def fetch_notebooks(_client, _locale):
-        return ([{"id": "notebook-1", "title": "Work", "project_type": 2}], {})
+        return ([{"id": "notebook-1", "title": "Work", "project_type": 2}], notebook_read_diagnostic([1]))
 
     async def fetch_chats(_client, _notebook_id, _limit, _offset):
-        return ([{"id": "chat-1", "title": "Chat"}], {"count": 1})
+        return ([{"id": "chat-1", "title": "Chat"}], {"count": 1, "diagnostic": notebook_read_diagnostic([1])})
 
     async def run():
         result = await move_chat_to_notebook(
@@ -92,13 +93,13 @@ def test_notebook_move_reports_verified_read_back():
 def test_notebook_move_changed_rpc_shape_without_read_back_is_not_accepted():
     class Client:
         async def _batch_execute(self, payloads, *, source_path, close_on_error):
-            return SimpleNamespace(status_code=200, text="response")
+            return notebook_move_response([None, "unexpected"])
 
     async def fetch_notebooks(_client, _locale):
-        return ([{"id": "notebook-1", "title": "Work", "project_type": 2}], {})
+        return ([{"id": "notebook-1", "title": "Work", "project_type": 2}], notebook_read_diagnostic([1]))
 
     async def fetch_chats(_client, _notebook_id, _limit, _offset):
-        return ([], {"count": 0})
+        return ([], {"count": 0, "diagnostic": notebook_read_diagnostic([])})
 
     result = asyncio.run(move_chat_to_notebook(
         Client(),
@@ -117,13 +118,13 @@ def test_notebook_move_changed_rpc_shape_without_read_back_is_not_accepted():
 def test_notebook_move_acceptance_without_read_back_is_not_success():
     class Client:
         async def _batch_execute(self, payloads, *, source_path, close_on_error):
-            return SimpleNamespace(status_code=200, text="response")
+            return notebook_move_response([None, ["chat-1", "Chat"]])
 
     async def fetch_notebooks(_client, _locale):
-        return ([{"id": "notebook-1", "title": "Work", "project_type": 2}], {})
+        return ([{"id": "notebook-1", "title": "Work", "project_type": 2}], notebook_read_diagnostic([1]))
 
     async def fetch_chats(_client, _notebook_id, _limit, _offset):
-        return ([], {"count": 0})
+        return ([], {"count": 0, "diagnostic": notebook_read_diagnostic([])})
 
     result = asyncio.run(move_chat_to_notebook(
         Client(),

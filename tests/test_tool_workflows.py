@@ -2,14 +2,27 @@ import asyncio
 import json
 import os
 import sys
+from pathlib import Path
 from types import SimpleNamespace
 
 from src.adapters.mcp_sdk import MCPServer
+from src.infrastructure.rpc_contracts import get_contract
 from src.services import history as history_service
+from tests.media_fixtures import fake_finalize_generated_cleanup
 
 
 def _tool_text(result):
     return result.content[0].text
+
+
+def _isolate_research_operation_owner(monkeypatch):
+    """Research fakes authenticate only the private test metadata repository."""
+    import src.client_wrapper as client_wrapper
+    from src.services.research import ResearchService
+    monkeypatch.setattr(client_wrapper, "get_authentication_scope", lambda: "scope_research_offline")
+    monkeypatch.setattr(client_wrapper, "finalize_generated_chat_cleanup", fake_finalize_generated_cleanup)
+    monkeypatch.setattr(ResearchService, "_destination",
+                        staticmethod(lambda _request: str(Path(os.environ["GEMINI_STATE_DB_PATH"]).parent / "reports")))
 
 
 def test_parse_response_exposes_remote_chat_id_for_cleanup():
@@ -90,12 +103,14 @@ def test_all_group_tools_have_mcp_annotations():
         assert by_name["gemini_reset_session"].annotations.destructive_hint is True
         assert by_name["gemini_upload_file"].annotations.open_world_hint is True
         assert by_name["gemini_deep_research"].annotations.read_only_hint is False
+        assert by_name["gemini_deep_research"].annotations.destructive_hint is True
         assert by_name["gemini_list_research_report_actions"].annotations.read_only_hint is True
         assert by_name["gemini_create_from_research_report"].annotations.read_only_hint is False
         assert by_name["gemini_create_from_research_report"].annotations.open_world_hint is False
         assert by_name["gemini_history"].annotations.read_only_hint is True
         assert by_name["gemini_account_inventory"].annotations.read_only_hint is True
-        assert by_name["gemini_notebooks"].annotations.read_only_hint is True
+        assert by_name["gemini_notebooks"].annotations.read_only_hint is False
+        assert by_name["gemini_notebooks"].annotations.destructive_hint is True
         assert by_name["gemini_delete_chat"].annotations.destructive_hint is True
         assert by_name["gemini_cleanup_test_artifacts"].annotations.destructive_hint is True
         assert by_name["gemini_create_scheduled_action"].annotations.read_only_hint is False
@@ -174,6 +189,7 @@ def test_intent_profiles_expose_focused_tool_surfaces():
 
 
 def test_deep_research_uses_default_transport_for_model_aliases(monkeypatch):
+    _isolate_research_operation_owner(monkeypatch)
     import src.tools.research as research_tools
     from src.services.research import null_scope
 
@@ -211,7 +227,10 @@ def test_deep_research_uses_default_transport_for_model_aliases(monkeypatch):
 
         async def fetch_latest_chat_response(self, cid):
             calls.append(("fetch_latest", cid))
-            return SimpleNamespace(text="final report with sources")
+            return SimpleNamespace(text="I've finished the research.", state="completed")
+
+    async def fetch_report(client, cid):
+        return SimpleNamespace(text="final report with sources")
 
     async def noop_initialize():
         return None
@@ -223,6 +242,7 @@ def test_deep_research_uses_default_transport_for_model_aliases(monkeypatch):
     monkeypatch.setattr(research_tools, "initialize_client", noop_initialize)
     monkeypatch.setattr(research_tools, "cleanup_due_remote_chats", noop_cleanup)
     monkeypatch.setattr(research_tools, "schedule_remote_chat_cleanup", lambda *args, **kwargs: None)
+    monkeypatch.setattr(research_tools, "_fetch_deep_research_immersive_report", fetch_report)
 
     async def run():
         mcp = MCPServer("test")
@@ -476,7 +496,8 @@ def test_server_utility_tools_have_annotations():
         assert by_name["gemini_doctor"].annotations.read_only_hint is True
         assert by_name["gemini_doctor"].annotations.open_world_hint is False
         assert by_name["gemini_reset"].annotations.read_only_hint is False
-        assert by_name["gemini_reset"].annotations.open_world_hint is False
+        assert by_name["gemini_reset"].annotations.open_world_hint is True
+        assert by_name["gemini_reset"].annotations.destructive_hint is True
         assert by_name["gemini_get_cookie_status"].annotations.read_only_hint is True
         assert by_name["gemini_list_browser_cookie_profiles"].annotations.read_only_hint is True
         assert by_name["gemini_list_browser_cookie_profiles"].annotations.open_world_hint is False
@@ -500,7 +521,8 @@ def test_skill_server_tools_have_mcp_annotations():
         assert by_name["history"].annotations.open_world_hint is True
         assert by_name["cleanup"].annotations.destructive_hint is True
         assert by_name["cleanup"].annotations.open_world_hint is True
-        assert by_name["account"].annotations.read_only_hint is True
+        assert by_name["account"].annotations.read_only_hint is False
+        assert by_name["account"].annotations.destructive_hint is True
         assert by_name["account"].annotations.open_world_hint is True
         assert by_name["session"].annotations.destructive_hint is True
         assert by_name["prompts"].annotations.destructive_hint is True
@@ -845,7 +867,7 @@ def test_chat_tools_forward_gem_and_temporary_chat_settings(monkeypatch):
 
     assert calls == [
         ("chat", "Use the gem.", None, "gemini-3-flash", "gem-writer", True, "standard"),
-        ("start", "gemini-3-flash-thinking", "gem-research"),
+        ("start", "gemini-3-flash", "gem-research"),
         ("send", "Keep this temporary.", None, True, "standard"),
     ]
 
@@ -1018,11 +1040,12 @@ def test_current_web_models_resolve_thinking_mode_buckets():
 
 def test_skill_server_uses_v2_file_attachment_contract(monkeypatch, tmp_path):
     import src.skill_server as skill_server
+    from tests.media_fixtures import write_image
 
     calls = []
     scheduled = []
     reference_path = tmp_path / "reference.png"
-    reference_path.write_bytes(b"fake image bytes")
+    write_image(reference_path)
 
     class FakeResponse:
         text = "ok"
@@ -1032,7 +1055,8 @@ def test_skill_server_uses_v2_file_attachment_contract(monkeypatch, tmp_path):
         metadata = []
 
     class FakeClient:
-        async def generate_content(self, prompt, files=None, model=None, thinking_level=None):
+        async def generate_content(self, prompt, files=None, model=None, thinking_level=None, timeout=None, media_mode=None):
+            assert timeout == 180
             calls.append((prompt, files, model))
             return FakeResponse()
 
@@ -1042,14 +1066,14 @@ def test_skill_server_uses_v2_file_attachment_contract(monkeypatch, tmp_path):
     async def noop_cleanup(client=None):
         return 0
 
-    def fake_schedule(response, **kwargs):
+    async def fake_schedule(response, **kwargs):
         scheduled.append(kwargs.get("source"))
-        return "c_skill_edit"
+        return await fake_finalize_generated_cleanup(response, **kwargs)
 
     monkeypatch.setattr(skill_server, "get_gemini_client", lambda: FakeClient())
     monkeypatch.setattr(skill_server, "initialize_client", noop_initialize)
     monkeypatch.setattr(skill_server, "cleanup_due_remote_chats", noop_cleanup)
-    monkeypatch.setattr(skill_server, "schedule_remote_chat_cleanup_from_response", fake_schedule)
+    monkeypatch.setattr(skill_server, "finalize_generated_chat_cleanup", fake_schedule)
     monkeypatch.setattr(
         skill_server,
         "_doctor_payload",
@@ -1078,11 +1102,13 @@ def test_skill_server_uses_v2_file_attachment_contract(monkeypatch, tmp_path):
             prompt="make it brighter",
             model="pro",
         )
-        assert result[0].text.endswith("ok")
+        assert "ok" in result[0].text
+        assert "Artifact state: empty" in result[0].text
         assert "Backend: Nano Banana 2" in result[0].text
         data = result[0].meta["domain_result"]["data"]
         assert data["request_model"] == "gemini-3-flash"
         assert data["effective_backend"] == "Nano Banana 2"
+        assert data["input_artifacts"][0]["verification"]["status"] == "verified"
 
     asyncio.run(run())
 
@@ -1093,7 +1119,7 @@ def test_skill_server_uses_v2_file_attachment_contract(monkeypatch, tmp_path):
             "gemini-3-flash",
         )
     ]
-    assert scheduled == ["skill_edit"]
+    assert scheduled == ["skill_create:image_edit"]
 
 
 def test_skill_server_chat_schedules_remote_cleanup(monkeypatch):
@@ -1138,6 +1164,7 @@ def test_skill_server_chat_schedules_remote_cleanup(monkeypatch):
 
 def test_skill_server_create_routes_current_media_backends(monkeypatch):
     import src.skill_server as skill_server
+    from src.infrastructure.rpc_contracts import get_contract
 
     calls = []
 
@@ -1145,17 +1172,26 @@ def test_skill_server_create_routes_current_media_backends(monkeypatch):
         text = "ok"
         images = []
         videos = []
+        metadata = ["c_offline_fixture"]
 
     class FakeClient:
-        async def generate_content(self, prompt, files=None, model=None, thinking_level=None):
+        async def generate_content(self, prompt, files=None, model=None, thinking_level=None, timeout=None, media_mode=None):
+            assert timeout == (180 if prompt.startswith("Generate an image") else 600)
             calls.append((prompt, files, model, thinking_level))
             return FakeResponse()
+
+        async def _batch_execute(self, requests, **kwargs):
+            assert requests[0].rpcid == get_contract("media.music_chat").rpc_id
+            return SimpleNamespace(status_code=200, text=json.dumps([
+                ["wrb.fr", requests[0].rpcid, json.dumps([[]])],
+            ]))
 
     async def noop_initialize():
         return None
 
     monkeypatch.setattr(skill_server, "get_gemini_client", lambda: FakeClient())
     monkeypatch.setattr(skill_server, "initialize_client", noop_initialize)
+    monkeypatch.setattr(skill_server, "finalize_generated_chat_cleanup", fake_finalize_generated_cleanup)
 
     async def run():
         image_result = await skill_server.create(
@@ -1175,8 +1211,8 @@ def test_skill_server_create_routes_current_media_backends(monkeypatch):
     asyncio.run(run())
 
     assert calls == [
-        ("Generate image: studio portrait", None, "gemini-3-flash", "standard"),
-        ("Create music: cinematic trailer", None, "gemini-3-pro", "extended"),
+        ("Generate an image. Prompt: studio portrait", None, "gemini-3-flash", "standard"),
+        ("Create music/audio using Gemini's music generation capability. Prompt: cinematic trailer", None, "gemini-3-pro", "extended"),
     ]
 
 
@@ -1218,8 +1254,8 @@ def test_skill_server_account_and_history_tools(monkeypatch):
 
         async def _batch_execute(self, payloads, source_path="/app", close_on_error=True):
             rpcid = payloads[0].serialize()[0]
-            if rpcid == "K4WWud":
-                body = [["p1", "Shared chat", False, None, "https://gemini.google.com/share/abc"]]
+            if rpcid == get_contract("sharing.public_links").rpc_id:
+                body = [[[None, None, [False, "Shared chat"], "abc"]]]
             elif rpcid == "qpEbW":
                 body = [[[[None, 11], 2, 3, [1781794431, 0], 100, 80]], ""]
             elif rpcid == "cYRIkd":
@@ -1232,7 +1268,10 @@ def test_skill_server_account_and_history_tools(monkeypatch):
                 metadata[14] = ["📐"]
                 body = [None, None, [["notebooks/math", metadata, ["Math notebook summary"]]]]
             elif rpcid == "MaZiqc":
-                body = [None, None, [["task-1", "Morning brief", True, None, None, [1781794431, 0], None, "Daily", None, 2]]]
+                rows = [["task-1", "Morning brief", True, None, None, [1781794431, 0], None, "Daily", None, 2]]
+                if "c_1" not in deleted:
+                    rows.append(["c_1", "Chat one", False])
+                body = [None, None, rows]
             elif rpcid == "XPSWpd":
                 body = [[
                     [
@@ -1874,10 +1913,11 @@ def test_web_capabilities_manifest_describes_observed_pro_surface():
         )
         payload = json.loads(_tool_text(json_result))
         assert payload["account_tier"] == "Gemini Web Pro"
-        assert [item["alias"] for item in payload["models"]] == ["flash-lite", "flash", "pro"]
-        assert payload["thinking_levels"][1]["id"] == "extended"
+        assert [item["alias"] for item in payload["models"]] == ["flash-lite", "flash", "pro", "argon"]
+        assert [(level["id"], level["level_id"]) for level in payload["thinking_levels"]] == [("low", 1), ("medium", 4), ("high", 2)]
+        assert payload["thinking_aliases"] == {"standard": "low", "extended": "high"}
         assert any(item["name"] == "scheduled_actions" for item in payload["settings_menu"])
-        assert any(probe["rpcid"] == "K4WWud" for probe in payload["feature_probes"])
+        assert any(probe["rpcid"] == get_contract("sharing.public_links").rpc_id for probe in payload["feature_probes"])
         assert any(probe["rpcid"] == "MaZiqc" for probe in payload["feature_probes"])
         assert any(probe["name"] == "native_notebooks_list" and probe["rpcid"] == "CNgdBe" for probe in payload["feature_probes"])
         assert any(probe["rpcid"] == "XPSWpd" for probe in payload["feature_probes"])
@@ -1919,7 +1959,7 @@ def test_tool_manifest_and_annotations_expose_agent_safety_metadata():
         )
         payload = json.loads(_tool_text(json_result))
         assert payload["scope"] == "history"
-        assert payload["groups"] == {"history": 8}
+        assert payload["groups"] == {"history": 9}
         history_entry = next(item for item in payload["tools"] if item["name"] == "gemini_history")
         assert history_entry["read_only"] is True
         assert history_entry["availability"] == ["history", "history-organize", "manage", "all"]
@@ -1980,7 +2020,7 @@ def test_tool_manifest_marks_currently_enabled_tools(monkeypatch):
     all_tools = {item["name"]: item for item in all_payload["tools"]}
     assert all_tools["gemini_get_tool_manifest"]["current_enabled"] is True
     assert all_tools["gemini_manage_prompts"]["current_enabled"] is False
-    assert all_payload["current_enabled_count"] == 46
+    assert all_payload["current_enabled_count"] == 49
 
     monkeypatch.setenv("GEMINI_TOOLS", "model")
     model_payload = manage_tools._tool_manifest_payload("all")
@@ -2041,11 +2081,11 @@ def test_parsed_web_surface_tools_return_structured_data(monkeypatch):
             serialized = payloads[0].serialize()
             calls.append((serialized, source_path, close_on_error))
             rpcid = serialized[0]
-            if rpcid == "K4WWud":
-                body = [
-                    ["p1", "Shared chat", False, None, "https://gemini.google.com/share/abc"],
-                    ["p2", "Second share", True, None, "https://gemini.google.com/share/def"],
-                ]
+            if rpcid == get_contract("sharing.public_links").rpc_id:
+                body = [[
+                    [None, None, [False, "Shared chat"], "abc"],
+                    [None, None, [True, "Second share"], "p2"],
+                ]]
             elif rpcid == "qpEbW":
                 body = [[[[None, 11], 2, 3, [1781794431, 0], 100, 80]], ""]
             elif rpcid == "cYRIkd":
@@ -2475,6 +2515,7 @@ def test_url_analysis_preserves_url_and_timeout(monkeypatch):
 
 
 def test_deep_research_uses_library_flag_and_timeout(monkeypatch):
+    _isolate_research_operation_owner(monkeypatch)
     import src.tools.research as research_tools
 
     calls = []
@@ -2515,6 +2556,7 @@ def test_deep_research_uses_library_flag_and_timeout(monkeypatch):
 
 
 def test_deep_research_runs_full_library_workflow(monkeypatch):
+    _isolate_research_operation_owner(monkeypatch)
     import src.tools.research as research_tools
 
     calls = []
@@ -2590,6 +2632,7 @@ def test_deep_research_runs_full_library_workflow(monkeypatch):
 
 
 def test_deep_research_falls_back_to_chat_polling_without_research_id(monkeypatch):
+    _isolate_research_operation_owner(monkeypatch)
     import src.tools.research as research_tools
 
     class FakePlan:
@@ -2618,15 +2661,19 @@ def test_deep_research_falls_back_to_chat_polling_without_research_id(monkeypatc
             self.polls += 1
             if self.polls == 1:
                 return SimpleNamespace(text="Great, I'm on it. I'll let you know when the research is finished.")
-            return SimpleNamespace(text="final report")
+            return SimpleNamespace(text="I've finished the research.", state="completed")
 
     fake_client = FakeClient()
 
     async def noop_initialize():
         return None
 
+    async def fetch_report(client, cid):
+        return SimpleNamespace(text="final report")
+
     monkeypatch.setattr(research_tools, "get_gemini_client", lambda: fake_client)
     monkeypatch.setattr(research_tools, "initialize_client", noop_initialize)
+    monkeypatch.setattr(research_tools, "_fetch_deep_research_immersive_report", fetch_report)
 
     async def run():
         mcp = MCPServer("test")
@@ -2648,6 +2695,7 @@ def test_deep_research_falls_back_to_chat_polling_without_research_id(monkeypatc
 
 
 def test_deep_research_timeout_does_not_present_start_message_as_report(monkeypatch):
+    _isolate_research_operation_owner(monkeypatch)
     import src.tools.research as research_tools
 
     start_message = "Great. While I'm researching, feel free to leave this chat."
@@ -2704,7 +2752,7 @@ def test_media_tool_returns_clear_upstream_failure(monkeypatch):
     import src.tools.media as media_tools
 
     class FakeClient:
-        async def generate_content(self, prompt, files=None, model=None, thinking_level=None, timeout=None):
+        async def generate_content(self, prompt, files=None, model=None, thinking_level=None, timeout=None, media_mode=None):
             raise RuntimeError("The original request may have been silently aborted by Google.")
 
     async def noop_initialize():
@@ -2727,23 +2775,32 @@ def test_media_tool_returns_clear_upstream_failure(monkeypatch):
         )
         text = _tool_text(result)
         assert "video 生成失败" in text
-        assert "通用 generate_content" in text
+        assert "请求已显式选择 Gemini Web 原生工具模式" in text
+        assert "silently aborted by Google" not in text
 
     asyncio.run(run())
 
 
 def test_media_tool_reports_empty_media_response(monkeypatch):
     import src.tools.media as media_tools
+    from src.infrastructure.rpc_contracts import get_contract
 
     class FakeClient:
-        async def generate_content(self, prompt, files=None, model=None, thinking_level=None, timeout=None):
-            return SimpleNamespace(text="", images=[], videos=[], media=[])
+        async def generate_content(self, prompt, files=None, model=None, thinking_level=None, timeout=None, media_mode=None):
+            return SimpleNamespace(text="", images=[], videos=[], media=[], metadata=["c_offline_empty"])
+
+        async def _batch_execute(self, requests, **kwargs):
+            assert requests[0].rpcid == get_contract("media.music_chat").rpc_id
+            return SimpleNamespace(status_code=200, text=json.dumps([
+                ["wrb.fr", requests[0].rpcid, json.dumps([[]])],
+            ]))
 
     async def noop_initialize():
         return None
 
     monkeypatch.setattr(media_tools, "get_gemini_client", lambda: FakeClient())
     monkeypatch.setattr(media_tools, "initialize_client", noop_initialize)
+    monkeypatch.setattr(media_tools, "finalize_generated_chat_cleanup", fake_finalize_generated_cleanup)
 
     async def run():
         mcp = MCPServer("test")
@@ -2758,13 +2815,14 @@ def test_media_tool_reports_empty_media_response(monkeypatch):
         )
         text = _tool_text(result)
         assert "后端: Lyria" in text
-        assert "没有返回文本、图片、视频或音乐资源" in text
+        assert "没有返回可用的 music 产物" in text
 
     asyncio.run(run())
 
 
 def test_media_tool_saves_generated_music_files(monkeypatch, tmp_path):
     import src.tools.media as media_tools
+    from tests.media_fixtures import write_audio
 
     class FakeMedia:
         title = "theme"
@@ -2773,14 +2831,14 @@ def test_media_tool_saves_generated_music_files(monkeypatch, tmp_path):
 
         async def save(self, **kwargs):
             assert kwargs["path"] == str(tmp_path)
-            assert kwargs["filename"] == "theme"
-            assert kwargs["download_type"] == "both"
+            assert kwargs["filename"] == "theme.mp3"
+            assert kwargs["download_type"] == "audio"
             output = tmp_path / "theme.mp3"
-            output.write_bytes(b"fake mp3")
+            write_audio(output, duration=91.25)
             return {"audio": str(output)}
 
     class FakeClient:
-        async def generate_content(self, prompt, files=None, model=None, thinking_level=None, timeout=None):
+        async def generate_content(self, prompt, files=None, model=None, thinking_level=None, timeout=None, media_mode=None):
             return SimpleNamespace(text="done", images=[], videos=[], media=[FakeMedia()])
 
     async def noop_initialize():
@@ -2792,8 +2850,7 @@ def test_media_tool_saves_generated_music_files(monkeypatch, tmp_path):
     monkeypatch.setattr(media_tools, "get_gemini_client", lambda: FakeClient())
     monkeypatch.setattr(media_tools, "initialize_client", noop_initialize)
     monkeypatch.setattr(media_tools, "cleanup_due_remote_chats", noop_cleanup)
-    monkeypatch.setattr(media_tools, "schedule_remote_chat_cleanup_from_response", lambda *args, **kwargs: None)
-    monkeypatch.setattr(media_tools, "_probe_duration", lambda path: 91.25)
+    monkeypatch.setattr(media_tools, "finalize_generated_chat_cleanup", fake_finalize_generated_cleanup)
 
     async def run():
         mcp = MCPServer("test")
@@ -2844,6 +2901,7 @@ def test_media_tool_recovers_music_urls_from_raw_chat_card():
     raw = [["wrb.fr", rpc_id, orjson.dumps(body).decode("utf-8")]]
 
     class FakeResponse:
+        status_code = 200
         text = orjson.dumps(raw).decode("utf-8")
 
     class FakeClient:
@@ -2871,7 +2929,7 @@ def test_media_tool_routes_music_and_image_to_current_web_backends(monkeypatch):
     calls = []
 
     class FakeClient:
-        async def generate_content(self, prompt, files=None, model=None, thinking_level=None, timeout=None):
+        async def generate_content(self, prompt, files=None, model=None, thinking_level=None, timeout=None, media_mode=None):
             calls.append((prompt, model, thinking_level))
             return SimpleNamespace(text="ok", images=[], videos=[], media=[])
 
@@ -2884,7 +2942,7 @@ def test_media_tool_routes_music_and_image_to_current_web_backends(monkeypatch):
     monkeypatch.setattr(media_tools, "get_gemini_client", lambda: FakeClient())
     monkeypatch.setattr(media_tools, "initialize_client", noop_initialize)
     monkeypatch.setattr(media_tools, "cleanup_due_remote_chats", noop_cleanup)
-    monkeypatch.setattr(media_tools, "schedule_remote_chat_cleanup_from_response", lambda *args, **kwargs: None)
+    monkeypatch.setattr(media_tools, "finalize_generated_chat_cleanup", fake_finalize_generated_cleanup)
 
     async def run():
         mcp = MCPServer("test")
@@ -2935,6 +2993,7 @@ def test_client_wrapper_applies_extra_cookies(monkeypatch):
 
     fake_cookie_manager = SimpleNamespace(
         get_cookie=lambda: SimpleNamespace(
+            psid="psid",
             extra_cookies={
                 "__Secure-1PSID": "psid",
                 "__Secure-1PSIDTS": "psidts",
@@ -2977,6 +3036,7 @@ def test_client_wrapper_isolates_browser_cookie_cache(monkeypatch, tmp_path):
 
     fake_cookie_manager = SimpleNamespace(
         get_cookie=lambda: SimpleNamespace(
+            psid="psid",
             source="browser_chrome",
             extra_cookies={
                 "__Secure-1PSID": "psid",
@@ -3103,24 +3163,46 @@ def test_client_wrapper_ignores_stale_local_proxy(monkeypatch):
 
 def test_remote_chat_cleanup_deletes_expired_chat(monkeypatch):
     import src.client_wrapper as client_wrapper
+    from src.infrastructure.rpc_contracts import get_contract
 
     deleted = []
 
     class FakeClient:
+        cookies = {"__Secure-1PSID": "fake-cleanup-workflow"}
+
         async def delete_chat(self, cid):
             deleted.append(cid)
 
+        async def _batch_execute(self, calls, **_kwargs):
+            assert calls[0].rpcid == get_contract("history.page").rpc_id
+            return SimpleNamespace(
+                status_code=200,
+                text=json.dumps([["wrb.fr", get_contract("history.page").rpc_id, json.dumps([None, None, []])]]),
+            )
+
     async def run():
-        client_wrapper._cleanup_manager._pending_cleanup.clear()
+        from src.remote_chat_cleanup_manager import RemoteChatCleanupManager
+
+        monkeypatch.setattr(client_wrapper, "_cleanup_manager", RemoteChatCleanupManager(
+            client_provider=client_wrapper._initialize_cleanup_client,
+            retention_provider=client_wrapper.get_default_chat_retention_seconds,
+        ))
         monkeypatch.setattr(client_wrapper._client_manager, "_client", FakeClient())
         monkeypatch.setattr(client_wrapper._client_manager, "_initialized", True)
         monkeypatch.setenv("GEMINI_CHAT_RETENTION_SECONDS", "0")
-
+        client_wrapper.get_gemini_client()
         client_wrapper.schedule_remote_chat_cleanup("c_test_cleanup")
-        await asyncio.sleep(0.01)
+        async with asyncio.timeout(2):
+            while True:
+                observed = client_wrapper._cleanup_manager.get_cleanup_observation("c_test_cleanup")
+                if observed is not None and observed.state.value == "completed":
+                    break
+                await asyncio.sleep(0)
 
         assert deleted == ["c_test_cleanup"]
         assert "c_test_cleanup" not in client_wrapper.list_pending_remote_chat_cleanup()
+        observation = client_wrapper._cleanup_manager.get_cleanup_observation("c_test_cleanup")
+        assert observation is not None and observation.state.value == "completed"
 
     asyncio.run(run())
 

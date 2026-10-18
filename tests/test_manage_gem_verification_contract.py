@@ -8,6 +8,7 @@ from types import SimpleNamespace
 from tests._fastmcp_shim import FastMCP
 
 import src.tools.manage as manage_tools
+from src.domain import DomainResult, DomainWarning, OperationState
 from src.services.gems import GemMutationNotVerified, create_gem, delete_gem, update_gem
 
 
@@ -53,6 +54,20 @@ def test_mapping_backed_gems_render_name_id_and_description(monkeypatch):
     assert "Mapping Gem (ID: g-map)" in text
     assert "mapping-backed" in text
     assert "Untitled" not in text
+
+
+def test_partial_gem_listing_preserves_warning_and_structured_state(monkeypatch):
+    from unittest.mock import AsyncMock
+
+    _patch_manage(monkeypatch, SimpleNamespace())
+    result = DomainResult.success({"items": [], "diagnostic": {"complete": False}},
+                                  operation_state=OperationState.PARTIAL, verification_status="observed_partial",
+                                  warnings=(DomainWarning("GEM_REGISTRY_INCOMPLETE", "Incomplete Gem registry."),))
+    monkeypatch.setattr(manage_tools, "list_gems_service", AsyncMock(return_value=result))
+    content, _structured = _run(_make_mcp().call_tool("gemini_manage_gems", {"action": "list"}))
+    assert "Incomplete Gem registry." in content[0].text
+    assert "暂无保存的 Gems" not in content[0].text
+    assert content[0].meta["domain_result"]["meta"]["operation_state"] == "partial"
 
 
 def test_create_rejects_whitespace_only_name_before_remote_call(monkeypatch):

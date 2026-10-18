@@ -20,10 +20,12 @@
 """
 
 import asyncio
+import json
 import time
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
+from src.infrastructure.rpc_contracts import get_contract
 from src.remote_chat_cleanup_manager import (
     CleanupTask,
     RemoteChatCleanupManager,
@@ -36,9 +38,15 @@ def _run(coro):
 
 
 def _async_delete_client(*, side_effect=None):
-    """构造带 async delete_chat 的假 client。"""
+    """Construct a client with confirmed-empty history metadata read-back."""
     client = SimpleNamespace()
     client.delete_chat = AsyncMock(side_effect=side_effect)
+    client._batch_execute = AsyncMock(
+        return_value=SimpleNamespace(
+            status_code=200,
+            text=json.dumps([["wrb.fr", get_contract("history.page").rpc_id, json.dumps([None, None, []])]]),
+        ),
+    )
     return client
 
 
@@ -284,7 +292,7 @@ def test_cleanup_due_chats_counts_only_successful_deletes():
         if cid == "c_fail":
             raise RuntimeError("nope")
 
-    selective_client = SimpleNamespace(delete_chat=selective_delete)
+    selective_client = _async_delete_client(side_effect=selective_delete)
     deleted = _run(manager.cleanup_due_chats(client=selective_client))
     assert deleted == 1  # 仅 c_ok 成功
 
