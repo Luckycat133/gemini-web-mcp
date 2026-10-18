@@ -20,17 +20,15 @@ Python 3.11+, MCP Python SDK v2. `src/server.py` owns the main surface; `src/ski
 - Static gates: `python -m ruff check src tests scripts` and `python -m mypy src scripts`.
 - Offline suite: `python -m pytest -q`; architecture/distribution gate: `python scripts/run_contract_checklist.py`.
 
-<<<<<<< Updated upstream
-## Privacy and contribution
-=======
+## Verification and contribution
+
 Write pytest tests as `tests/test_*.py`, with test names that describe the behavior under contract. For tool-surface changes, assert both registration and MCP annotations, and update `evaluations/gemini_web_mcp_contract.xml` when user-visible capabilities or safety metadata change. Artifact-producing changes must cover stable identity, remote/local/queued/empty/failed state, save verification, backend evidence, and primary/compact parity where both surfaces expose the workflow. Public-onboarding changes must parse every checked-in client config, call a real auth-free text tool over stdio, and verify local image artifacts independently from response prose. Reverse-engineered RPC changes belong in `src/infrastructure/rpc_contracts.py`; every registered parser needs fixture cases for success, empty, rejection, and changed shape, and every mutation service must return read-back verification status. Run focused checks for the affected behavior first. For broad runtime changes or release readiness, run Ruff, Mypy, the complete offline suite, and the targeted contract checklist; retain profile/protocol and clean-wheel smokes when entrypoint, tool-surface, package, or release contracts are affected. Documentation-only changes need relevant content/link checks rather than the runtime suite. Live compatibility probes are never part of PR CI: keep their report within `compatibility/live-canary-report.schema.json`, omit raw responses/account content/credentials/session identifiers, and use only the `gemini-live-canary` environment backed by a dedicated account.
->>>>>>> Stashed changes
+
+## Privacy and contribution
 
 Private chat reads and account deletion require explicit user intent. Public onboarding live examples require `--allow-live-account`; live canaries require their flag, both opt-in variables and dedicated account/environment, never PR CI. Reports follow `compatibility/live-canary-report.schema.json` and omit raw responses, account contents, credentials and session identifiers.
 
-<<<<<<< Updated upstream
 Do not commit `.env`, cookies, `prompts.json`, generated media/artifacts or logs. `.env.example` contains variable names only. Follow the Ruff/Mypy settings in `pyproject.toml`, 4-space indentation and existing Python naming. PRs describe actual behavior/evidence and relevant configuration, protocol and privacy effects.
-=======
 Recent history uses concise imperative commits and conventional prefixes where useful, such as `refactor: ...`, `chore(deps): ...`, and `add ...`. Keep commits scoped to one logical change. PRs should include a short summary, tests run, configuration or environment changes, and any tool-surface, privacy, or destructive-operation implications. Link issues when available.
 
 ## Security & Configuration Tips
@@ -49,4 +47,3 @@ Never commit `.env`, `cookies.json`, `prompts.json`, generated media, or logs. U
 
 维护：只同步此标记块；各工具专用正文保留，不强求整份入口相同。项目若明确规定完整镜像，仍保持完整镜像。仅在规则更新或交付涉及规则时检查入口/副本一致性。
 <!-- agent-workflow:v1:end -->
->>>>>>> Stashed changes
