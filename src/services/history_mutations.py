@@ -32,7 +32,7 @@ async def update_chat_metadata_result(
     diagnostic: dict[str, Any] = {"contract_key": contract.key,
                                   "status_code": getattr(response, "status_code", None),
                                   "reject_code": envelope.reject_code}
-    if diagnostic["status_code"] != 200 or not envelope.parsed or envelope.reject_code is not None or len(envelope.bodies) != 1:
+    if diagnostic["status_code"] != 200 or not envelope.parsed or envelope.reject_code is not None or not envelope.single_body:
         code = DomainErrorCode.UPSTREAM_REJECTED if envelope.reject_code is not None else DomainErrorCode.UPSTREAM_CHANGED
         return DomainResult.failure(code, "The history update acknowledgement could not be verified.", details=diagnostic)
     parsed = parse_contract_body(contract, envelope.bodies[0], expected_id=chat_id)

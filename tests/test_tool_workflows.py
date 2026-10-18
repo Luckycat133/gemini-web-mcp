@@ -6,6 +6,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from src.adapters.mcp_sdk import MCPServer
+from src.infrastructure.rpc_contracts import get_contract
 from src.services import history as history_service
 from tests.media_fixtures import fake_finalize_generated_cleanup
 
@@ -1251,8 +1252,8 @@ def test_skill_server_account_and_history_tools(monkeypatch):
 
         async def _batch_execute(self, payloads, source_path="/app", close_on_error=True):
             rpcid = payloads[0].serialize()[0]
-            if rpcid == "K4WWud":
-                body = [["p1", "Shared chat", False, None, "https://gemini.google.com/share/abc"]]
+            if rpcid == get_contract("sharing.public_links").rpc_id:
+                body = [[[None, None, [False, "Shared chat"], "abc"]]]
             elif rpcid == "qpEbW":
                 body = [[[[None, 11], 2, 3, [1781794431, 0], 100, 80]], ""]
             elif rpcid == "cYRIkd":
@@ -1914,7 +1915,7 @@ def test_web_capabilities_manifest_describes_observed_pro_surface():
         assert [(level["id"], level["level_id"]) for level in payload["thinking_levels"]] == [("low", 1), ("medium", 4), ("high", 2)]
         assert payload["thinking_aliases"] == {"standard": "low", "extended": "high"}
         assert any(item["name"] == "scheduled_actions" for item in payload["settings_menu"])
-        assert any(probe["rpcid"] == "K4WWud" for probe in payload["feature_probes"])
+        assert any(probe["rpcid"] == get_contract("sharing.public_links").rpc_id for probe in payload["feature_probes"])
         assert any(probe["rpcid"] == "MaZiqc" for probe in payload["feature_probes"])
         assert any(probe["name"] == "native_notebooks_list" and probe["rpcid"] == "CNgdBe" for probe in payload["feature_probes"])
         assert any(probe["rpcid"] == "XPSWpd" for probe in payload["feature_probes"])
@@ -2078,11 +2079,11 @@ def test_parsed_web_surface_tools_return_structured_data(monkeypatch):
             serialized = payloads[0].serialize()
             calls.append((serialized, source_path, close_on_error))
             rpcid = serialized[0]
-            if rpcid == "K4WWud":
-                body = [
-                    ["p1", "Shared chat", False, None, "https://gemini.google.com/share/abc"],
-                    ["p2", "Second share", True, None, "https://gemini.google.com/share/def"],
-                ]
+            if rpcid == get_contract("sharing.public_links").rpc_id:
+                body = [[
+                    [None, None, [False, "Shared chat"], "abc"],
+                    [None, None, [True, "Second share"], "p2"],
+                ]]
             elif rpcid == "qpEbW":
                 body = [[[[None, 11], 2, 3, [1781794431, 0], 100, 80]], ""]
             elif rpcid == "cYRIkd":

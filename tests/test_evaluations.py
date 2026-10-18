@@ -14,13 +14,16 @@ def _qa_pairs():
 def test_gemini_web_mcp_contract_evaluation_shape():
     pairs = _qa_pairs()
 
-    assert len(pairs) == 48
+    assert pairs
+    questions = []
     for pair in pairs:
         question = pair.findtext("question")
         answer = pair.findtext("answer")
         assert question and question.strip()
         assert answer and answer.strip()
         assert "\n" not in answer.strip()
+        questions.append(question.strip())
+    assert len(set(questions)) == len(questions)
 
 
 def test_gemini_web_mcp_contract_answers_match_static_manifest():

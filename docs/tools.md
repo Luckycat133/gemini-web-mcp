@@ -655,18 +655,20 @@ JSON 输出中的 `accepted=true` 仅表示 RPC 返回了可解析的确认；�
 
 ### gemini_list_scheduled_actions
 
-只读列出 Gemini Web “定时操作”页面返回的任务条目。
+只读列出选定后端的定时任务。`backend="remy"` 对应当前网页的任务；
+默认 `legacy` 保留原有每日定时操作的兼容行为。
 
 **参数：**
 - `scope`: "active" | "inactive" | "all"
+- `backend`: "legacy" | "remy"，默认 "legacy"
 - `limit`: int - 每类最多返回数量，最大 100
 - `offset`: int - 每类分页偏移
 - `response_format`: "markdown" | "json"
 - `max_chars_per_field`: int - 单个文本字段截断长度
 
 定时任务标题和时间可能属于账号私人内容，应只在用户需要查看定时任务时调用。
-JSON 输出包含 `diagnostic`，当当前 cookie/session 返回空 registry 时会给出
-账号上下文提示，方便区分“确实没有任务”和“浏览器多账号上下文不一致”。
+JSON 输出包含 `diagnostic` 和选定后端；旧 registry 为空不能证明当前任务页为空。
+Remy 的已启用／已暂停／已完成状态与旧 Task 枚举分开报告，不用于旧删除操作的回读验证。
 从 Chrome 刷新 Cookie 时，服务器会隔离 gemini_webapi 的本地 cookie cache，并在
 可用时优先选择能读到 scheduled registry 的 Chrome profile。
 
@@ -677,15 +679,18 @@ JSON 输出包含 `diagnostic`，当当前 cookie/session 返回空 registry 时
 
 **参数：**
 - `action_id`: str - 定时操作 ID
+- `backend`: "legacy" | "remy"，保持与列表返回的后端一致，默认 "legacy"
 - `response_format`: "markdown" | "json"
 - `max_chars_per_field`: int - 单个文本字段截断长度
 
 JSON 输出包含 `diagnostic.matched_task`、`item.task_state` 和 `item.is_deleted`。如果当前
 cookie/session 无法按 ID 读取任务，工具会返回 `ok=false` 和账号/profile 上下文提示。
+`remy` 只支持列表和按 ID 读取；创建、编辑、暂停、恢复和删除尚未开放。
 
 ### gemini_create_scheduled_action
 
-创建 Gemini Web “定时操作”。当前只开放已实测稳定的每日计划：每天在指定小时触发。
+创建旧版每日定时操作：每天在指定小时触发。该接口最近的真实创建／删除证据为
+2026-06-20；不创建新版原生 Task schedule。
 
 **参数：**
 - `title`: str - 定时操作名称
@@ -703,7 +708,8 @@ JSON 输出包含 `visible_in_registry`、`readable_by_id_after_create` 和
 
 ### gemini_delete_scheduled_action
 
-按 ID 删除 Gemini Web “定时操作”。删除定时操作不会删除它已经产生的历史对话。
+按 ID 删除旧版每日定时操作。它不支持新版 Remy schedule；列表和读取时应保留后端信息。
+删除定时操作不会删除它已经产生的历史对话。
 
 **参数：**
 - `action_id`: str - `gemini_list_scheduled_actions` 或创建结果返回的定时操作 ID
@@ -767,6 +773,8 @@ JSON 输出包含 `verification_status`、`visible_after_delete`、`readable_by_
 ### gemini_list_public_links
 
 列出 Gemini Web “你的公开链接”页面返回的公开链接条目。
+使用当前 `ListSharedConversations` 只读契约，从观测到的 share token 构造链接；
+响应没有提供的禁用状态保持未知。创建或撤销公开链接尚未开放。
 
 **参数：**
 - `limit`: int - 最大返回数量

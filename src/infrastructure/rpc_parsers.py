@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 import json
 import logging
 from typing import Any, Callable, Literal, Mapping
+from urllib.parse import quote
 
 from .rpc_contracts import RPCContract, get_contract
 
@@ -44,6 +45,11 @@ class RPCEnvelope:
     response_parts: int
     bodies: tuple[Any, ...]
     reject_code: int | None = None
+    matching_parts: int = 0
+
+    @property
+    def single_body(self) -> bool:
+        return self.matching_parts == 1 and len(self.bodies) == 1
 
 
 def _nested(value: Any, path: list[int]) -> Any:
@@ -78,11 +84,13 @@ def parse_rpc_envelope(response_text: str, rpc_id: str, *, expected_identifier: 
 
     bodies: list[Any] = []
     reject_code: int | None = None
+    matching_parts = 0
     for part in parts:
         if _nested(part, [0]) != "wrb.fr" or _nested(part, [1]) != rpc_id:
             continue
         if expected_identifier is not None and _nested(part, [-1]) != expected_identifier:
             continue
+        matching_parts += 1
         code = _nested(part, [5, 0])
         if isinstance(code, int):
             reject_code = code
@@ -99,6 +107,7 @@ def parse_rpc_envelope(response_text: str, rpc_id: str, *, expected_identifier: 
         response_parts=len(parts),
         bodies=tuple(bodies),
         reject_code=reject_code,
+        matching_parts=matching_parts,
     )
 
 
@@ -479,10 +488,132 @@ def parse_conversation_update(body: Any, *, expected_id: str | None = None, **_:
 
 
 def parse_scheduled_registry(body: Any, *, max_chars: int = 500, **_: Any) -> RPCParseResult:
+    # A matching XPSWpd response can serialize an empty protobuf as []. This
+    # says nothing about the separate current Remy schedule registry.
+    if body == []:
+        return RPCParseResult("empty", value=[])
     return _result_for_items(
         body, 0, lambda item: parse_scheduled_action_task_entry(item, max_chars),
         require_id=True, item_validator=_valid_scheduled_entry,
     )
+
+
+def _remy_schedule_trigger(row: list[Any], max_chars: int) -> dict[str, Any]:
+    fields = ((3, "daily"), (4, "weekly"), (5, "event"), (15, "gmail"),
+              (17, "hourly"), (18, "monthly"), (19, "yearly"), (20, "one_off"))
+    populated = [(index, name) for index, name in fields if len(row) > index and row[index] is not None]
+    if not populated:
+        return {"type": "unspecified"}
+    if len(populated) != 1:
+        raise ValueError("Multiple schedule triggers")
+    index, name = populated[0]
+    message = row[index]
+    if not isinstance(message, list):
+        raise ValueError("Invalid schedule trigger")
+    trigger: dict[str, Any] = {"type": name}
+
+    def integer(value: Any, default: int = 0) -> int:
+        if value is None:
+            return default
+        if type(value) is not int:
+            raise ValueError("Invalid schedule integer")
+        return value
+
+    if name in {"daily", "weekly", "monthly", "yearly"}:
+        time_index = 0 if name == "daily" else 1
+        value = message[time_index] if len(message) > time_index else None
+        if value is not None:
+            if not isinstance(value, list):
+                raise ValueError("Invalid schedule time")
+            hour = integer(value[0] if value else None)
+            minute = integer(value[1] if len(value) > 1 else None)
+            if not 0 <= hour <= 23 or not 0 <= minute <= 59:
+                raise ValueError("Invalid schedule time")
+            trigger.update(hour=hour, minute=minute)
+    if name in {"weekly", "monthly"}:
+        days = message[0] if message else None
+        if days is not None and (not isinstance(days, list) or any(type(day) is not int for day in days)):
+            raise ValueError("Invalid schedule days")
+        trigger["days_of_week" if name == "weekly" else "days_of_month"] = days or []
+    elif name == "hourly":
+        trigger["interval"] = integer(message[0] if message else None)
+    elif name == "yearly":
+        date = message[0] if message else None
+        if date is not None:
+            if not isinstance(date, list):
+                raise ValueError("Invalid schedule date")
+            trigger.update(month=integer(date[1] if len(date) > 1 else None),
+                           day=integer(date[2] if len(date) > 2 else None))
+    elif name == "one_off":
+        timestamp = message[0] if message else None
+        if timestamp is not None:
+            if not isinstance(timestamp, list) or not timestamp:
+                raise ValueError("Invalid schedule timestamp")
+            seconds = timestamp[0]
+            if isinstance(seconds, str) and seconds.lstrip("-").isdigit():
+                seconds = int(seconds)
+            trigger["unix_seconds"] = integer(seconds)
+    elif name in {"event", "gmail"}:
+        condition_index = 1 if name == "gmail" else 0
+        condition = message[condition_index] if len(message) > condition_index else None
+        if condition is not None and not isinstance(condition, str):
+            raise ValueError("Invalid schedule condition")
+        trigger["condition"] = _truncate(condition, max_chars)
+    return trigger
+
+
+def _remy_schedule_entry(row: Any, max_chars: int) -> dict[str, Any]:
+    if not isinstance(row, list) or len(row) < 10 or not isinstance(row[0], str) or not row[0].strip():
+        raise ValueError("Invalid Remy schedule")
+    for index in (1, 6, 7, 8, 11, 26):
+        if len(row) > index and row[index] is not None and not isinstance(row[index], str):
+            raise ValueError("Invalid Remy schedule text")
+    status = row[9] if row[9] is not None else 0
+    if type(status) is not int or status not in range(4):
+        raise ValueError("Invalid Remy schedule status")
+    trigger = _remy_schedule_trigger(row, max_chars)
+    state = ("unspecified", "active", "paused", "completed")[status]
+    return {
+        "backend": "remy", "id": row[0], "title": _truncate(row[1], max_chars),
+        "instructions": _truncate(row[7], max_chars), "timezone_name": row[6] or "",
+        "enabled": True if status == 1 else False if status in {2, 3} else None,
+        # Remy 3 means completed, while legacy Task 3 means running. Keep the
+        # native enum separate from legacy task_state_id/deleted-state evidence.
+        "schedule_status_id": status, "task_state_id": None, "task_state": state,
+        "trigger": trigger, "schedule_label": trigger["type"],
+        "hour": trigger.get("hour"), "minute": trigger.get("minute"),
+        "source_chat_id": row[11] or "" if len(row) > 11 else "",
+        "project_id": row[26] or "" if len(row) > 26 else "",
+        "field_count": len(row),
+    }
+
+
+def parse_remy_schedule_registry(body: Any, *, max_chars: int = 500, **_: Any) -> RPCParseResult:
+    if body == []:
+        return RPCParseResult("empty", value=[])
+    if not isinstance(body, list) or not body:
+        return RPCParseResult("changed_shape", raw_type=type(body).__name__)
+    if ((len(body) > 1 and body[1] is not None and type(body[1]) is not bool)
+            or (len(body) > 2 and body[2] is not None and (type(body[2]) is not int or body[2] not in range(3)))):
+        return RPCParseResult("changed_shape", warnings=("invalid_registry_metadata",))
+    rows = body[0] if body[0] is not None else []
+    return _result_for_items([rows], 0, lambda row: _remy_schedule_entry(row, max_chars), require_id=True)
+
+
+def parse_remy_schedule_get(
+    body: Any, *, expected_id: str | None = None, max_chars: int = 500, **_: Any,
+) -> RPCParseResult:
+    if body == [] or body == [None]:
+        return RPCParseResult("empty", value=None)
+    if not isinstance(body, list) or not body:
+        return RPCParseResult("changed_shape", raw_type=type(body).__name__)
+    try:
+        item = _remy_schedule_entry(body[0], max_chars)
+    except (TypeError, ValueError, IndexError):
+        return RPCParseResult("changed_shape", warnings=("invalid_schedule",))
+    if expected_id is not None and item["id"] != expected_id:
+        return RPCParseResult("changed_shape", warnings=("returned_id_mismatch",))
+    return RPCParseResult("success", value=item)
 
 
 def parse_task_goal(body: Any, *, expected_id: str | None = None, **_: Any) -> RPCParseResult:
@@ -552,7 +683,29 @@ def parse_scheduled_create(body: Any, **_: Any) -> RPCParseResult:
 
 
 def parse_public_links(body: Any, **_: Any) -> RPCParseResult:
-    return _result_for_items(body, 0, parse_public_link_entry)
+    """ListSharedConversations field 1 contains rows, not the legacy link index."""
+    if body == []:
+        return RPCParseResult("empty", value=[])
+
+    def valid_row(row: Any) -> bool:
+        if (not isinstance(row, list) or len(row) < 4 or not isinstance(row[2], list)
+                or not isinstance(row[3], str) or not row[3].strip()):
+            return False
+        metadata = row[2]
+        return ((not metadata or metadata[0] is None or isinstance(metadata[0], bool))
+                and (len(metadata) < 2 or metadata[1] is None or isinstance(metadata[1], str)))
+
+    def parse_row(row: list[Any]) -> dict[str, Any]:
+        token, metadata = row[3], row[2]
+        return {
+            "id": token,
+            "title": metadata[1] if len(metadata) > 1 and isinstance(metadata[1], str) else "",
+            "disabled": None,  # The native listing does not expose this legacy property.
+            "url": "https://gemini.google.com/share/" + quote(token, safe=""),
+            "field_count": len(row),
+        }
+
+    return _result_for_items(body, 0, parse_row, require_id=True, item_validator=valid_row)
 
 
 def parse_usage_entries(body: Any, **_: Any) -> RPCParseResult:
@@ -635,6 +788,8 @@ PARSER_FUNCTIONS: Mapping[str, Callable[..., RPCParseResult]] = {
     "conversation_update": parse_conversation_update,
     "custom_gems": parse_custom_gems,
     "scheduled_registry": parse_scheduled_registry,
+    "remy_schedule_registry": parse_remy_schedule_registry,
+    "remy_schedule_get": parse_remy_schedule_get,
     "scheduled_get": parse_scheduled_get,
     "scheduled_create": parse_scheduled_create,
     "public_links": parse_public_links,

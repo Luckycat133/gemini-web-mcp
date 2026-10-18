@@ -1,11 +1,72 @@
 {
+  "remy_schedule_registry": {
+    "contract_key": "scheduled.remy_registry",
+    "cases": {
+      "success": {"body": [[["schedule_fixture", "Fixture schedule", true, [[9, 30]], null, null, "Asia/Shanghai", "Fixture instructions", null, 1]], false, 1]},
+      "empty": {"body": []},
+      "rejected": {"body": [], "reject_code": 7},
+      "changed_shape": {"body": {"unexpected": true}}
+    }
+  },
+  "remy_schedule_get": {
+    "contract_key": "scheduled.remy_get",
+    "cases": {
+      "success": {"body": [["schedule_fixture", "Fixture schedule", true, [[9, 30]], null, null, "Asia/Shanghai", "Fixture instructions", null, 1]]},
+      "empty": {"body": []},
+      "rejected": {"body": [], "reject_code": 7},
+      "changed_shape": {"body": {"unexpected": true}}
+    }
+  },
   "task_goal": {
     "contract_key": "tasks.get",
     "cases": {
-      "success": {"body": [["goal_fixture", "Private fixture description", 2, null, null, null, null, null, null, null, null, null, null, "c_task_fixture"]]},
-      "empty": {"body": []},
-      "rejected": {"body": [], "reject_code": 7},
-      "changed_shape": {"body": [["goal_fixture", null, "DONE", null, null, null, null, null, null, null, null, null, null, "c_task_fixture"]]}
+      "success": {
+        "body": [
+          [
+            "goal_fixture",
+            "Private fixture description",
+            2,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            "c_task_fixture"
+          ]
+        ]
+      },
+      "empty": {
+        "body": []
+      },
+      "rejected": {
+        "body": [],
+        "reject_code": 7
+      },
+      "changed_shape": {
+        "body": [
+          [
+            "goal_fixture",
+            null,
+            "DONE",
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            "c_task_fixture"
+          ]
+        ]
+      }
     }
   },
   "music_chat": {
@@ -345,12 +406,16 @@
         "body": [
           [
             [
+              null,
+              null,
               [
-                "link-1",
-                "Title",
-                false,
-                null,
-                "https://example.com"
+                true,
+                "Title"
+              ],
+              "link-1",
+              [
+                1700000000,
+                0
               ]
             ]
           ]
@@ -375,6 +440,29 @@
       [
         [
           null
+        ]
+      ],
+      [
+        [
+          [
+            null,
+            null,
+            {},
+            "link-1"
+          ]
+        ]
+      ],
+      [
+        [
+          [
+            null,
+            null,
+            [
+              false,
+              "Title"
+            ],
+            ""
+          ]
         ]
       ]
     ]

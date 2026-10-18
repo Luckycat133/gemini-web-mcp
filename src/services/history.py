@@ -128,7 +128,7 @@ async def read_history_metadata_page(
     envelope = parse_rpc_envelope(response_text, contract.rpc_id)
     diagnostic = {"contract_key": contract.key, "status_code": getattr(response, "status_code", None),
                   "reject_code": envelope.reject_code, "response_length": len(response_text)}
-    if diagnostic["status_code"] == 200 and envelope.parsed and envelope.reject_code is None and len(envelope.bodies) == 1:
+    if diagnostic["status_code"] == 200 and envelope.parsed and envelope.reject_code is None and envelope.single_body:
         body = envelope.bodies[0]
         parsed = parse_contract_body(contract, body)
         diagnostic["parser_status"] = parsed.status
@@ -668,7 +668,7 @@ async def observe_chat_absence(
             if getattr(response, "status_code", None) != 200:
                 raise RuntimeError("History metadata read-back did not return HTTP 200.")
             envelope = parse_rpc_envelope(response_text, contract.rpc_id)
-            if not envelope.parsed or envelope.reject_code is not None or len(envelope.bodies) != 1:
+            if not envelope.parsed or envelope.reject_code is not None or not envelope.single_body:
                 raise RuntimeError("History metadata read-back did not return a usable RPC envelope.")
 
             body = envelope.bodies[0]

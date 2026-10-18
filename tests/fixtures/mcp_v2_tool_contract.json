@@ -41,7 +41,7 @@
       },
       {
         "annotations_sha256": "bbca3f90a8f37a2e09188309470b131134c395dbc4eccad15de06d2c2f94f06a",
-        "input_schema_sha256": "45d9134928e9d858a0f7ab4cf5805d53e08f6b54c310c041268f191deeb0df05",
+        "input_schema_sha256": "60c360affabbb3ca55e183c8628df7bf2800f6f1b9950a34c049e95c4ddcc38b",
         "name": "gemini_scheduled",
         "output_schema_sha256": "369763f047111c047fb07f3487898a056fb44a9379e411178fcf79202fcf7ed9"
       }
@@ -135,7 +135,7 @@
       },
       {
         "annotations_sha256": "bbca3f90a8f37a2e09188309470b131134c395dbc4eccad15de06d2c2f94f06a",
-        "input_schema_sha256": "be79aacc2c14e7b9fe793e79be42c30508355083d268db377ba2aa5c38e86c4e",
+        "input_schema_sha256": "a785e1a88fa0cf994e0a9944b024d63fd898e1ebea7043e8f85266aef830c77d",
         "name": "scheduled",
         "output_schema_sha256": "ada7cc10a130959baed69dc9de97537953d0dd054ffa3ae5744cf6ea6c1a4e8e"
       },

@@ -8,6 +8,8 @@ Use exact IDs provided by the user or returned by authorized reads. Every tool t
 {"tool":"gemini_history","arguments":{"request":{"action":"update","chat_id":"<observed chat_id>","title":"New title","pinned":false}}}
 {"tool":"gemini_history","arguments":{"request":{"action":"task_status","chat_id":"<observed Task chat_id>"}}}
 {"tool":"gemini_notebooks","arguments":{"request":{"action":"move","chat_id":"<observed chat_id>","notebook_id":"<observed notebook_id>"}}}
+{"tool":"gemini_scheduled","arguments":{"request":{"action":"list","backend":"remy"}}}
+{"tool":"gemini_scheduled","arguments":{"request":{"action":"get","backend":"remy","action_id":"<observed native schedule id>"}}}
 {"tool":"gemini_scheduled","arguments":{"request":{"action":"create_daily","title":"Morning briefing","instructions":"Summarize current engineering news","hour":9,"timezone_name":"Asia/Shanghai"}}}
 {"tool":"gemini_gems","arguments":{"request":{"action":"update","gem_id":"<observed gem_id>","description":"Concise engineering critique"}}}
 {"tool":"gemini_prompts","arguments":{"request":{"action":"create","name":"Review","content":"Review {code}"}}}
@@ -26,6 +28,9 @@ A cancellation request never establishes that an already submitted deletion was 
 
 `create_daily` requires title, instructions and hour (0–23). Supply the intended
 IANA `timezone_name`; omission uses the server's `Asia/Shanghai` default.
+Scheduled `list/get` with `backend=remy` reads the current Task schedules;
+omission selects the legacy daily-action backend. Preserve the backend when
+reusing an ID. Native schedule mutations are unavailable.
 Gem/Prompt updates leave omitted fields unchanged. Prompt rendering substitutes
 variables in the local library and does not generate content remotely.
 

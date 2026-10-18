@@ -260,7 +260,8 @@ def register_research_tools(mcp: MCPServer):
 
         目前 Gemini Web 的 READ_CHAT 原始响应可稳定读取报告、来源和沉浸式报告 ID，
         但没有观测到网页下拉菜单的稳定私有 mutation RPC。因此这里返回 MCP 侧
-        支持的等价创建动作，并标明 native_web_menu_observed=false。
+        支持的本地创建动作；native_web_menu_observed 仅表示菜单 UI 已观测，
+        native_web_mutation_rpc_observed=false 表示未捕获原生创建调用契约。
         """
         client = get_gemini_client()
         await initialize_client()
@@ -610,6 +611,7 @@ def _research_report_actions_payload(report_output, chat_id: str = "") -> dict[s
         "title": getattr(report_output, "title", "") or _title_from_markdown(getattr(report_output, "report", "")),
         "immersive_id": getattr(report_output, "immersive_id", ""),
         "native_web_menu_observed": True,
+        "native_web_mutation_rpc_observed": False,
         "native_web_menu_note": (
             "Observed in Gemini Web on 2026-06-21: 创建 -> 网页, 信息图, 测验, 抽认卡, 音频概览, "
             "plus a custom app description field. READ_CHAT still does not expose a stable private "
@@ -624,7 +626,8 @@ def _format_research_report_actions(payload: dict[str, Any]) -> str:
         "## Deep Research 报告创建动作",
         f"- 标题: {payload.get('title') or '(unknown)'}",
         f"- 沉浸式报告 ID: {payload.get('immersive_id') or '(unknown)'}",
-        f"- 原生网页下拉菜单 RPC 已观测: {'是' if payload.get('native_web_menu_observed') else '否'}",
+        f"- 原生网页创建菜单 UI 已观测: {'是' if payload.get('native_web_menu_observed') else '否'}",
+        f"- 原生网页创建 mutation RPC 已观测: {'是' if payload.get('native_web_mutation_rpc_observed') else '否'}",
         "",
         "### MCP 可用动作",
     ]
@@ -663,6 +666,7 @@ def _create_research_report_artifact(
         "bytes": len(content.encode("utf-8")),
         "source_count": len(sources),
         "native_web_menu_observed": True,
+        "native_web_mutation_rpc_observed": False,
         "native_web_menu_note": (
             "Created by the MCP-side report action matching the observed Gemini Web create menu. "
             "No stable native Gemini private mutation RPC was present in the captured READ_CHAT payload."
@@ -699,7 +703,8 @@ def _format_research_report_artifact(artifact: dict[str, Any]) -> str:
         f"- 标题: {artifact['title']}\n"
         f"- 文件: {artifact['path']}\n"
         f"- 来源数: {artifact['source_count']}\n"
-        f"- 原生网页下拉菜单 RPC 已观测: {'是' if artifact['native_web_menu_observed'] else '否'}\n\n"
+        f"- 原生网页创建菜单 UI 已观测: {'是' if artifact['native_web_menu_observed'] else '否'}\n"
+        f"- 原生网页创建 mutation RPC 已观测: {'是' if artifact.get('native_web_mutation_rpc_observed') else '否'}\n\n"
         f"{artifact['native_web_menu_note']}"
     )
 

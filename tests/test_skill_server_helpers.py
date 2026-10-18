@@ -39,7 +39,7 @@ import pytest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
-from tests._account_rpc_fakes import scheduled_ack_response, scheduled_read
+from tests._account_rpc_fakes import notebook_read_diagnostic, scheduled_ack_response, scheduled_read
 from tests.media_fixtures import fake_finalize_generated_cleanup, write_image
 from src.infrastructure.rpc_contracts import get_contract
 
@@ -75,6 +75,13 @@ from src.skill_server import (
 
 def _run(coro):
     return asyncio.run(coro)
+
+
+def _patch_account_response(monkeypatch, body):
+    """Feed raw rows through a real matching HTTP/RPC envelope."""
+    async def execute(_client, probe):
+        return SimpleNamespace(status_code=200, text=json.dumps([["wrb.fr", probe["rpcid"], json.dumps(body)]]))
+    monkeypatch.setattr(skill_server, "_execute_observed_rpc", execute)
 
 
 def _patch_shared_sessions(monkeypatch, entries=None):
@@ -841,14 +848,14 @@ def test_account_features_returns_unavailable_when_no_batch_execute(monkeypatch)
 
 
 def test_account_features_probes_concurrently(monkeypatch):
-    """WEB_FEATURE_PROBES 各 probe 并发执行，正常返回 ok 状态。"""
-    fake_response = SimpleNamespace(text="resp", status_code=200)
-    client = SimpleNamespace(
-        _batch_execute=AsyncMock(return_value=fake_response),
-    )
-    monkeypatch.setattr(skill_server, "_summarize_probe_response", lambda _t, _r: {"reject_code": None})
+    probes = [get_contract(key).as_probe() for key in ("usage.quota", "library.locale_capabilities")]
+    monkeypatch.setattr(skill_server, "WEB_FEATURE_PROBES", probes)
+    async def execute(requests, **_kwargs):
+        return SimpleNamespace(status_code=200, text=json.dumps([["wrb.fr", requests[0].rpcid, "[[]]"]]))
+    client = SimpleNamespace(_batch_execute=AsyncMock(side_effect=execute))
     result = _run(_account_features(client))
-    assert "ok" in result[0].text
+    assert result[0].text.count(": ok") == 2
+    assert client._batch_execute.await_count == 2
 
 
 def test_account_features_probe_exception_returns_type_name(monkeypatch):
@@ -861,58 +868,41 @@ def test_account_features_probe_exception_returns_type_name(monkeypatch):
 
 
 def test_account_features_probe_reject_code(monkeypatch):
-    """summary 有 reject_code 时返回 reject=... 状态。"""
-    fake_response = SimpleNamespace(text="resp", status_code=200)
-    client = SimpleNamespace(_batch_execute=AsyncMock(return_value=fake_response))
-    monkeypatch.setattr(skill_server, "_summarize_probe_response",
-                        lambda _t, _r: {"reject_code": 42})
+    probe = get_contract("library.locale_capabilities").as_probe()
+    monkeypatch.setattr(skill_server, "WEB_FEATURE_PROBES", (probe,))
+    response = SimpleNamespace(status_code=200, text=json.dumps([["wrb.fr", probe["rpcid"], "[[]]", None, None, [42]]]))
+    client = SimpleNamespace(_batch_execute=AsyncMock(return_value=response))
     result = _run(_account_features(client))
-    assert "reject=42" in result[0].text
+    assert "UPSTREAM_REJECTED reject=42" in result[0].text
 
 
 def test_account_links_returns_no_links_when_empty(monkeypatch):
-    client = SimpleNamespace()
-    monkeypatch.setattr(skill_server, "_get_probe", lambda s, n: {"rpcid": "x", "payload": "[]", "source_path": "/"})
-    monkeypatch.setattr(skill_server, "_execute_observed_rpc", AsyncMock(return_value=_ns(text="t")))
-    monkeypatch.setattr(skill_server, "_extract_rpc_bodies", lambda _t, _r: [[]])
-    result = _run(_account_links(client))
+    _patch_account_response(monkeypatch, [[]])
+    result = _run(_account_links(SimpleNamespace()))
     assert result[0].text == "No public links"
 
 
 def test_account_links_renders_links(monkeypatch):
-    client = SimpleNamespace()
-    monkeypatch.setattr(skill_server, "_get_probe", lambda s, n: {"rpcid": "x", "payload": "[]", "source_path": "/"})
-    monkeypatch.setattr(skill_server, "_execute_observed_rpc", AsyncMock(return_value=_ns(text="t")))
-    monkeypatch.setattr(skill_server, "_extract_rpc_bodies",
-                        lambda _t, _r: [[{"title": "Link 1", "id": "l1", "url": "http://l1"}]])
-    monkeypatch.setattr(skill_server, "_parse_public_link_entry", lambda item: item)
-    result = _run(_account_links(client))
-    assert "Link 1 (l1) http://l1" in result[0].text
+    _patch_account_response(monkeypatch, [[ [None, None, [True, "Link 1"], "aaaaaaaaaaaa"] ]])
+    result = _run(_account_links(SimpleNamespace()))
+    assert "Link 1 (aaaaaaaaaaaa) https://gemini.google.com/share/aaaaaaaaaaaa" in result[0].text
 
 
 def test_account_library_returns_no_capabilities_when_empty(monkeypatch):
-    client = SimpleNamespace()
-    monkeypatch.setattr(skill_server, "_get_probe", lambda s, n: {"rpcid": "x", "payload": "[]", "source_path": "/"})
-    monkeypatch.setattr(skill_server, "_execute_observed_rpc", AsyncMock(return_value=_ns(text="t")))
-    monkeypatch.setattr(skill_server, "_extract_rpc_bodies", lambda _t, _r: [[]])
-    result = _run(_account_library(client))
+    _patch_account_response(monkeypatch, [[]])
+    result = _run(_account_library(SimpleNamespace()))
     assert result[0].text == "No library capabilities"
 
 
 def test_account_library_renders_capabilities(monkeypatch):
-    client = SimpleNamespace()
-    monkeypatch.setattr(skill_server, "_get_probe", lambda s, n: {"rpcid": "x", "payload": "[]", "source_path": "/"})
-    monkeypatch.setattr(skill_server, "_execute_observed_rpc", AsyncMock(return_value=_ns(text="t")))
-    monkeypatch.setattr(skill_server, "_extract_rpc_bodies",
-                        lambda _t, _r: [[[{"name": "Cap1", "description": "desc"}]]])
-    monkeypatch.setattr(skill_server, "_parse_library_capability", lambda item: item)
-    result = _run(_account_library(client))
+    _patch_account_response(monkeypatch, [[[[], "Cap1", "desc"]]])
+    result = _run(_account_library(SimpleNamespace()))
     assert "Cap1: desc" in result[0].text
 
 
 def test_account_notebooks_returns_empty_message(monkeypatch):
     client = SimpleNamespace()
-    monkeypatch.setattr(skill_server, "_fetch_native_notebooks", AsyncMock(return_value=([], {})))
+    monkeypatch.setattr(skill_server, "_fetch_native_notebooks", AsyncMock(return_value=([], notebook_read_diagnostic([]))))
     result = _run(_account_notebooks(client))
     assert result[0].text == "No native Gemini notebooks"
 
@@ -921,31 +911,21 @@ def test_account_notebooks_renders_list(monkeypatch):
     client = SimpleNamespace()
     notebooks = [{"title": "Notebook 1", "id": "n1", "source_count": 3}]
     monkeypatch.setattr(skill_server, "_fetch_native_notebooks",
-                        AsyncMock(return_value=(notebooks, {})))
+                        AsyncMock(return_value=(notebooks, notebook_read_diagnostic(notebooks))))
     result = _run(_account_notebooks(client))
     assert "Notebook 1 (n1) sources=3" in result[0].text
 
 
 def test_account_modes_returns_empty_message(monkeypatch):
-    client = SimpleNamespace()
-    monkeypatch.setattr(skill_server, "_get_probe", lambda s, n: {"rpcid": "x", "payload": "[]", "source_path": "/"})
-    monkeypatch.setattr(skill_server, "_execute_observed_rpc", AsyncMock(return_value=_ns(text="t")))
-    monkeypatch.setattr(skill_server, "_extract_rpc_bodies", lambda _t, _r: [[]])
-    result = _run(_account_modes(client))
+    _patch_account_response(monkeypatch, [True, []])
+    result = _run(_account_modes(SimpleNamespace()))
     assert result[0].text == "No mode status entries"
 
 
 def test_account_modes_renders_entries(monkeypatch):
-    """body 需为 len>1 的 list 且 body[1] 是 list → entries 来自 body[1]。"""
-    client = SimpleNamespace()
-    monkeypatch.setattr(skill_server, "_get_probe", lambda s, n: {"rpcid": "x", "payload": "[]", "source_path": "/"})
-    monkeypatch.setattr(skill_server, "_execute_observed_rpc", AsyncMock(return_value=_ns(text="t")))
-    # bodies[0] = [[], [{...}]] → len 2, body[1] = [{...}]
-    monkeypatch.setattr(skill_server, "_extract_rpc_bodies",
-                        lambda _t, _r: [[[], [{"mode_id": "m1", "available": True, "quota_value": 5, "state": "ok"}]]])
-    monkeypatch.setattr(skill_server, "_parse_tool_mode_entry", lambda item: item)
-    result = _run(_account_modes(client))
-    assert "mode_id=m1 available=True quota=5 state=ok" in result[0].text
+    _patch_account_response(monkeypatch, [True, [[1, True, 5, None, None, "ok"]]])
+    result = _run(_account_modes(SimpleNamespace()))
+    assert "mode_id=1 available=True quota=5 state=ok" in result[0].text
 
 
 def test_account_status_returns_unavailable_without_inspect(monkeypatch):
@@ -996,7 +976,7 @@ def test_scheduled_list_empty_with_hint(monkeypatch):
     """entries 空但 diagnostic 有 empty_hint → 追加 Diagnostic 行。"""
     client = SimpleNamespace(_batch_execute=AsyncMock())
     monkeypatch.setattr(skill_server, "_fetch_scheduled_registry",
-                        AsyncMock(return_value=([], {"empty_hint": "no actions found"})))
+                        AsyncMock(return_value=([], {**scheduled_read([])[1], "empty_hint": "no actions found"})))
     result = _run(_scheduled_list(client))
     assert "No scheduled actions" in result[0].text
     assert "Diagnostic: no actions found" in result[0].text
@@ -1006,7 +986,7 @@ def test_scheduled_list_renders_entries(monkeypatch):
     client = SimpleNamespace(_batch_execute=AsyncMock())
     entries = [{"title": "Daily Task", "id": "s1", "schedule_label": "9:00"}]
     monkeypatch.setattr(skill_server, "_fetch_scheduled_registry",
-                        AsyncMock(return_value=(entries, {})))
+                        AsyncMock(return_value=scheduled_read(entries)))
     result = _run(_scheduled_list(client))
     assert "Daily Task (s1) 9:00" in result[0].text
 
@@ -1021,7 +1001,7 @@ def test_scheduled_get_not_found_with_matched_task_false(monkeypatch):
     """item 为空且 diagnostic.matched_task is False → status=not_readable_by_id。"""
     client = SimpleNamespace(_batch_execute=AsyncMock())
     monkeypatch.setattr(skill_server, "_fetch_scheduled_task_by_id",
-                        AsyncMock(return_value=(None, {"matched_task": False})))
+                        AsyncMock(return_value=(None, {**scheduled_read(None)[1], "matched_task": False})))
     result = _run(_scheduled_get(client, "s1"))
     assert "not_readable_by_id" in result[0].text
 
@@ -1030,7 +1010,7 @@ def test_scheduled_get_not_found_default_status(monkeypatch):
     """item 为空且 diagnostic 无 matched_task → status=not_found_or_wrong_account。"""
     client = SimpleNamespace(_batch_execute=AsyncMock())
     monkeypatch.setattr(skill_server, "_fetch_scheduled_task_by_id",
-                        AsyncMock(return_value=(None, {})))
+                        AsyncMock(return_value=scheduled_read(None)))
     result = _run(_scheduled_get(client, "s1"))
     assert "not_found_or_wrong_account" in result[0].text
 
@@ -1040,7 +1020,7 @@ def test_scheduled_get_renders_found_item(monkeypatch):
     item = {"id": "s1", "title": "My Task", "enabled": True, "task_state": "running",
             "schedule_label": "daily"}
     monkeypatch.setattr(skill_server, "_fetch_scheduled_task_by_id",
-                        AsyncMock(return_value=(item, {})))
+                        AsyncMock(return_value=scheduled_read(item)))
     result = _run(_scheduled_get(client, "s1"))
     text = result[0].text
     assert "My Task" in text
@@ -1054,7 +1034,7 @@ def test_scheduled_get_disabled_state(monkeypatch):
     client = SimpleNamespace(_batch_execute=AsyncMock())
     item = {"id": "s1", "title": "T", "enabled": False}
     monkeypatch.setattr(skill_server, "_fetch_scheduled_task_by_id",
-                        AsyncMock(return_value=(item, {})))
+                        AsyncMock(return_value=scheduled_read(item)))
     result = _run(_scheduled_get(client, "s1"))
     assert "[disabled]" in result[0].text
     assert "state=" not in result[0].text
@@ -1500,52 +1480,28 @@ def test_cookie_top_level_exception(monkeypatch):
 
 
 def test_account_usage_renders_entries(monkeypatch):
-    """_account_usage 并发 probe usage_quota + usage_model_state。
-
-    结构：bodies[0] = [[{...}]] → bodies[0][0]=first=[{...}] 是 list，
-    entries 从 first 的每个 item 解析。
-    """
-    client = SimpleNamespace()
-    monkeypatch.setattr(skill_server, "_get_probe", lambda s, n: {"rpcid": "x", "payload": "[]", "source_path": "/"})
-    monkeypatch.setattr(skill_server, "_execute_observed_rpc", AsyncMock(return_value=_ns(text="t")))
-    monkeypatch.setattr(skill_server, "_extract_rpc_bodies",
-                        lambda _t, _r: [[[{"key": "k1", "limit_value": 100, "remaining_value": 50}]]])
-    monkeypatch.setattr(skill_server, "_parse_usage_entry", lambda item: item)
-    result = _run(_account_usage(client))
+    _patch_account_response(monkeypatch, [[["k1", "ok", "tier", None, 100, 50]]])
+    result = _run(_account_usage(SimpleNamespace()))
     assert "usage_quota" in result[0].text
     assert "key=k1 limit=100 remaining=50" in result[0].text
 
 
 def test_account_usage_no_entries(monkeypatch):
-    """bodies 空或结构不匹配 → 'No usage entries'。"""
-    client = SimpleNamespace()
-    monkeypatch.setattr(skill_server, "_get_probe", lambda s, n: {"rpcid": "x", "payload": "[]", "source_path": "/"})
-    monkeypatch.setattr(skill_server, "_execute_observed_rpc", AsyncMock(return_value=_ns(text="t")))
-    monkeypatch.setattr(skill_server, "_extract_rpc_bodies", lambda _t, _r: [])
-    result = _run(_account_usage(client))
+    _patch_account_response(monkeypatch, [[]])
+    result = _run(_account_usage(SimpleNamespace()))
     assert result[0].text == "No usage entries"
 
 
 def test_account_scheduled_renders_entries(monkeypatch):
-    """_account_scheduled 从 scheduled_actions_registry probe 解析条目。"""
-    client = SimpleNamespace()
-    monkeypatch.setattr(skill_server, "_get_probe", lambda s, n: {"rpcid": "x", "payload": "[]", "source_path": "/"})
-    monkeypatch.setattr(skill_server, "_execute_observed_rpc", AsyncMock(return_value=_ns(text="t")))
-    # bodies[0] = [[{...}]] → raw_entries from body[0]
-    monkeypatch.setattr(skill_server, "_extract_rpc_bodies",
-                        lambda _t, _r: [[[{"title": "Daily", "id": "s1"}]]])
-    monkeypatch.setattr(skill_server, "_parse_scheduled_action_task_entry",
-                        lambda item, max_chars: {"title": "Daily", "id": "s1", "schedule_label": "9:00"})
-    result = _run(_account_scheduled(client))
+    entries = [{"title": "Daily", "id": "s1", "schedule_label": "9:00"}]
+    monkeypatch.setattr(skill_server, "_fetch_scheduled_registry", AsyncMock(return_value=scheduled_read(entries)))
+    result = _run(_account_scheduled(SimpleNamespace()))
     assert "Daily (s1) 9:00" in result[0].text
 
 
 def test_account_scheduled_empty(monkeypatch):
-    client = SimpleNamespace()
-    monkeypatch.setattr(skill_server, "_get_probe", lambda s, n: {"rpcid": "x", "payload": "[]", "source_path": "/"})
-    monkeypatch.setattr(skill_server, "_execute_observed_rpc", AsyncMock(return_value=_ns(text="t")))
-    monkeypatch.setattr(skill_server, "_extract_rpc_bodies", lambda _t, _r: [])
-    result = _run(_account_scheduled(client))
+    monkeypatch.setattr(skill_server, "_fetch_scheduled_registry", AsyncMock(return_value=scheduled_read([])))
+    result = _run(_account_scheduled(SimpleNamespace()))
     assert result[0].text == "No scheduled actions"
 
 
@@ -1850,7 +1806,7 @@ def test_scheduled_main_dispatches_list(monkeypatch):
     client = SimpleNamespace(_batch_execute=AsyncMock())
     _patch_client_seams(monkeypatch, client)
     monkeypatch.setattr(skill_server, "_fetch_scheduled_registry",
-                        AsyncMock(return_value=([{"title": "T", "id": "s1"}], {})))
+                        AsyncMock(return_value=scheduled_read([{"title": "T", "id": "s1"}])))
     result = _run(skill_server.scheduled(action="list"))
     assert "T (s1)" in result[0].text
 
@@ -1860,7 +1816,7 @@ def test_scheduled_main_dispatches_get(monkeypatch):
     client = SimpleNamespace(_batch_execute=AsyncMock())
     _patch_client_seams(monkeypatch, client)
     monkeypatch.setattr(skill_server, "_fetch_scheduled_task_by_id",
-                        AsyncMock(return_value=({"id": "s1", "title": "T", "enabled": True}, {})))
+                        AsyncMock(return_value=scheduled_read({"id": "s1", "title": "T", "enabled": True})))
     result = _run(skill_server.scheduled(action="get", action_id="s1"))
     assert "T" in result[0].text
 

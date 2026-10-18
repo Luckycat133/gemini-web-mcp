@@ -20,6 +20,18 @@
       "url": "https://gemini.gstatic.com/_/mss/boq-gemini-web-uiserver/_/js/k=boq-gemini-web-uiserver.BardChatUi.zh_CN.D3Wg_SjWYeA.2018.O/ck=boq-gemini-web-uiserver.BardChatUi.vdtO_D010b4.L.B1.O/am=8QsB2PAPMPv2QQu_CB0MKMAIdEEAPQAAAABC/d=1/exm=ABELSd,AdpaDf,BenWQc,C0Qatc,HbEaCf,HwBxOc,LVUOyb,MGIlxc,No94jc,OpU7Tc,QuxHpf,UE0P2d,XuiMae,Z1MNA,Z8wCif,ZQlXXb,_b,fSXoCf,o2mxrc,pwgmXb,q6pD8e,uEAQfd,v9r4Te,xqG9Nd,zSgmx/excm=_b/ed=1/br=1/wt=2/ujg=1/rs=AKrAJMoCJAvHKm2rBUnhCaAGw5CO3yIbUA/ee=DGWCxb:CgYiQ;EmZ2Bf:zr1jrb;NJ1rfe:yGfSdd;Pjplud:PoEs9b;QGR0gd:Mlhmy;ScI3Yc:e7Hzgb;UYRIEb:HzTAQc;YIZmRd:A1yn5d;cEt90b:ws9Tlc;dIoSBb:SpsfSb;dowIGb:ebZ3mb;eBAeSb:zbML3c;iFQyKf:vfuNJf;oGtAuc:sOXFj;qQEoOc:KUM7Z;qddgKe:xQtZb;wR5FRb:siKnQd;yxTchf:KUM7Z/dti=1/m=GzXWE?wli=BardChatUi.t6Zy63jb7qM.libheifWasm.O%3A%3BBardChatUi.spde9pvPkaw.mediaIntentWasm.O%3A%3B",
       "bytes": 17640,
       "sha256": "fee6b731366d6363e09de16e3a3c1fa57871611d6053096740968ee983c33eed"
+    },
+    {
+      "file": "public-sharing.js",
+      "url": "https://gemini.gstatic.com/_/mss/boq-gemini-web-uiserver/_/js/k=boq-gemini-web-uiserver.BardChatUi.zh_CN.D3Wg_SjWYeA.2018.O/ck=boq-gemini-web-uiserver.BardChatUi.vdtO_D010b4.L.B1.O/am=8QsB2PAPMPv2QQu_CB0MKMAIdEEAPQAAAABC/d=1/exm=_b/excm=_b/ed=1/br=1/wt=2/ujg=1/rs=AKrAJMoCJAvHKm2rBUnhCaAGw5CO3yIbUA/ee=DGWCxb:CgYiQ;EmZ2Bf:zr1jrb;NJ1rfe:yGfSdd;Pjplud:PoEs9b;QGR0gd:Mlhmy;ScI3Yc:e7Hzgb;UYRIEb:HzTAQc;YIZmRd:A1yn5d;cEt90b:ws9Tlc;dIoSBb:SpsfSb;dowIGb:ebZ3mb;eBAeSb:zbML3c;iFQyKf:vfuNJf;oGtAuc:sOXFj;qQEoOc:KUM7Z;qddgKe:xQtZb;wR5FRb:siKnQd;yxTchf:KUM7Z/dti=1/m=xaI2P?wli=BardChatUi.t6Zy63jb7qM.libheifWasm.O%3A%3BBardChatUi.spde9pvPkaw.mediaIntentWasm.O%3A%3B",
+      "bytes": 2619522,
+      "sha256": "a2265803f90756eeeae0644fd97909c25b071165b601ba1de50816e1244bf0d6"
+    },
+    {
+      "file": "x9QgSe.js",
+      "url": "https://gemini.gstatic.com/_/mss/boq-gemini-web-uiserver/_/js/k=boq-gemini-web-uiserver.BardChatUi.zh_CN.D3Wg_SjWYeA.2018.O/ck=boq-gemini-web-uiserver.BardChatUi.vdtO_D010b4.L.B1.O/am=8QsB2PAPMPv2QQu_CB0MKMAIdEEAPQAAAABC/d=1/exm=_b/excm=_b/ed=1/br=1/wt=2/ujg=1/rs=AKrAJMoCJAvHKm2rBUnhCaAGw5CO3yIbUA/ee=DGWCxb:CgYiQ;EmZ2Bf:zr1jrb;NJ1rfe:yGfSdd;Pjplud:PoEs9b;QGR0gd:Mlhmy;ScI3Yc:e7Hzgb;UYRIEb:HzTAQc;YIZmRd:A1yn5d;cEt90b:ws9Tlc;dIoSBb:SpsfSb;dowIGb:ebZ3mb;eBAeSb:zbML3c;iFQyKf:vfuNJf;oGtAuc:sOXFj;qQEoOc:KUM7Z;qddgKe:xQtZb;wR5FRb:siKnQd;yxTchf:KUM7Z/dti=1/m=x9QgSe?wli=BardChatUi.t6Zy63jb7qM.libheifWasm.O%3A%3BBardChatUi.spde9pvPkaw.mediaIntentWasm.O%3A%3B",
+      "bytes": 4360945,
+      "sha256": "9c39107399fbb5d51a69c095b3635bc0b8b4421d661d1e37771847f1fddd253d"
     }
   ],
   "thinking": {
@@ -91,5 +103,77 @@
     "request_flag_index": 83,
     "request_flag_value": true
   },
-  "privacy": "Public JavaScript fetched without browser authentication. No account contents, credentials, chat IDs or session identifiers included."
+  "privacy": "Public JavaScript fetched without browser authentication. No account contents, credentials, chat IDs or session identifiers included.",
+  "sharing": {
+    "rpc_id": "OXxBcc",
+    "method": "BardFrontendService.ListSharedConversations",
+    "request": [],
+    "source_path": "/sharing",
+    "response_items_field": 1,
+    "item_fields": {
+      "metadata": 3,
+      "share_token": 4
+    },
+    "metadata_title_field": 2,
+    "url_prefix": "https://gemini.google.com/share/",
+    "chain": [
+      "main.js:6654 sharing fallback loads xaI2P",
+      "public-sharing.js:5431 S3d descriptor, R3d empty request",
+      "public-sharing.js:5620 vHb fetches response field1 and maps CAf",
+      "public-sharing.js:5571 CAf maps metadata field3/title field2 and token field4",
+      "public-sharing.js:5557 sP formats the share-token URL"
+    ],
+    "mutations_exposed": false
+  },
+  "ui_only": {
+    "native_skills": {
+      "path": "/customize/skills",
+      "observed_controls": [
+        "create_with_gemini",
+        "create_manually",
+        "upload"
+      ],
+      "rpc_contract_captured": false
+    },
+    "other_observed_entries": [
+      "google_drive",
+      "google_photos",
+      "repository_import",
+      "notebook_attachment",
+      "canvas",
+      "task_settings",
+      "media_watermark"
+    ]
+  },
+  "native_schedules": {
+    "registry": {
+      "rpc_id": "Ey90Ac",
+      "method": "BardFrontendService.ListRemySchedules",
+      "request": []
+    },
+    "get": {
+      "rpc_id": "Mfr55e",
+      "method": "BardFrontendService.ReadRemySchedule",
+      "request": [
+        "<observed schedule_id>"
+      ]
+    },
+    "source_path": "/scheduled",
+    "public_backend_selector": "remy",
+    "default_backend": "legacy",
+    "mutations_exposed": false,
+    "states": {
+      "0": "unspecified",
+      "1": "active",
+      "2": "paused",
+      "3": "completed"
+    },
+    "chain": [
+      "main.js:1883 TZe/VZe descriptors",
+      "main.js:1941,1948,1960 Load schedules dispatches empty SZe to ListRemySchedules",
+      "main.js:1918-1938 schedule fields and trigger conversion",
+      "x9QgSe.js:8453-8461 scheduled-tasks-tab, state filters and ngOnInit Load schedules",
+      "x9QgSe.js:6199 ReadRemySchedule sets field1 exact schedule ID and requires response field1"
+    ]
+  }
 }

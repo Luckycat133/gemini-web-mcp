@@ -87,6 +87,7 @@ NotebooksRequest: TypeAlias = Annotated[
 
 class ScheduledList(Page):
     action: Literal["list"]
+    backend: Literal["legacy", "remy"] = "legacy"
     scope: Literal["active", "inactive", "all"] = "all"
     max_chars: Annotated[int, Field(ge=200, le=20000)] = 1000
 
@@ -94,7 +95,14 @@ class ScheduledList(Page):
 class ScheduledGet(Request):
     action: Literal["get", "delete"]
     action_id: NonBlank
+    backend: Literal["legacy", "remy"] = "legacy"
     max_chars: Annotated[int, Field(ge=200, le=20000)] = 1000
+
+    @model_validator(mode="after")
+    def require_supported_mutation_backend(self) -> "ScheduledGet":
+        if self.action == "delete" and self.backend != "legacy":
+            raise ValueError("Remy schedules currently support list/get only.")
+        return self
 
 
 class ScheduledCreate(Request):

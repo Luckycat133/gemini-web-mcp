@@ -203,7 +203,7 @@ MODEL_CONFIG = {
 - `services/history.py`：历史 list/search/read/export/delete 的共享规范化、分页、typed result，以及基于完整 fresh recent/pinned 元数据分页的删除回读验证；`read_chat(None)` 不被当作缺失证据
 - `services/account.py`：账号 inventory parser 与只读 feature probe
 - `services/notebooks.py`：原生 Notebook 读取及带读回校验的 chat move
-- `services/scheduled.py`：定时操作读取、创建、删除与 registry/GetTask 双读回
+- `services/scheduled.py`：legacy 每日定时操作及 registry/GetTask 双读回；`backend=remy` 只读新版 Task schedule，ID/状态和 mutation 验证保持分离
 - `services/gems.py`：Gem CRUD 与 mutation 后读回比较
 - `services/manifest.py` / `services/doctor.py`：工具清单、Web 能力和本地预检
 - `tools/manage.py`：保留既有 primary 工具名、参数和展示文本的注册/兼容层

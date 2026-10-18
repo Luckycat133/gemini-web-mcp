@@ -74,17 +74,15 @@ from .tools.annotations import (
     READ_ONLY_LOCAL,
     READS_PRIVATE_REMOTE,
 )
-from .infrastructure.rpc_contracts import WEB_FEATURE_PROBES, RawRPCData as _RawRPCData
+from .infrastructure.rpc_contracts import WEB_FEATURE_PROBES
 from .infrastructure.rpc_parsers import extract_rpc_bodies as _extract_rpc_bodies
 from .resources import default_prompts_resource
 from .services.account import (
+    account_contract_result,
+    account_probe_status,
+    account_read_result,
     execute_observed_rpc as _execute_observed_rpc,
     get_probe as _get_probe,
-    parse_library_capability as _parse_library_capability,
-    parse_public_link_entry as _parse_public_link_entry,
-    parse_tool_mode_entry as _parse_tool_mode_entry,
-    parse_usage_entry as _parse_usage_entry,
-    summarize_rpc_response as _summarize_probe_response,
 )
 from .services.cleanup import (
     cleanup_test_artifacts_payload as _cleanup_test_artifacts_payload,
@@ -122,8 +120,9 @@ from .services.scheduled import (
     delete_action as _delete_scheduled_action_service,
     fetch_scheduled_registry as _fetch_scheduled_registry,
     fetch_scheduled_task_by_id as _fetch_scheduled_task_by_id,
+    fetch_remy_schedule_registry as _fetch_remy_schedule_registry,
+    fetch_remy_schedule_by_id as _fetch_remy_schedule_by_id,
     parse_scheduled_action_create_body as _parse_scheduled_action_create_body,
-    parse_scheduled_action_task_entry as _parse_scheduled_action_task_entry,
     scheduled_daily_payload as _scheduled_daily_payload,
 )
 from .tools.utils import extract_remote_chat_id, validate_optional_image_path
@@ -668,14 +667,11 @@ async def _account_features(client: Any) -> list[TextContent]:
 
     async def _probe_one(probe: dict[str, str]) -> str:
         try:
-            response = await client._batch_execute(
-                [_RawRPCData(probe["rpcid"], probe["payload"])],
-                source_path=probe["source_path"],
-                close_on_error=False,
-            )
-            summary = _summarize_probe_response(response.text, probe["rpcid"])
-            ok = response.status_code == 200 and summary.get("reject_code") is None
-            status = "ok" if ok else f"reject={summary.get('reject_code')}"
+            response = await _execute_observed_rpc(client, probe)
+            summary = account_probe_status(response, probe)
+            status = "ok" if summary["ok"] else str(summary["error_code"])
+            if summary.get("reject_code") is not None:
+                status += f" reject={summary['reject_code']}"
             return f"{probe['surface']}.{probe['name']}: {status}"
         except Exception as e:
             return f"{probe['surface']}.{probe['name']}: {type(e).__name__}"
@@ -688,9 +684,10 @@ async def _account_features(client: Any) -> list[TextContent]:
 async def _account_links(client: Any) -> list[TextContent]:
     probe = _get_probe("sharing", "public_links_index")
     response = await _execute_observed_rpc(client, probe)
-    bodies = _extract_rpc_bodies(response.text, probe["rpcid"])
-    entries = bodies[0] if bodies and isinstance(bodies[0], list) else []
-    links = [_parse_public_link_entry(item) for item in entries[:20]]
+    result = account_contract_result(response, "sharing.public_links")
+    if not result.ok or result.data is None:
+        return domain_text(result, domain_failure_text(result), use_result_data=True)
+    links = result.data["value"][:20]
     if not links:
         return [TextContent(type="text", text="No public links")]
     lines = [
@@ -701,27 +698,27 @@ async def _account_links(client: Any) -> list[TextContent]:
 
 
 async def _account_usage(client: Any) -> list[TextContent]:
-    async def _probe_one(probe_name: str) -> list[str]:
+    async def _probe_one(probe_name: str) -> tuple[list[str], DomainResult[dict[str, Any]]]:
         probe = _get_probe("usage", probe_name)
         response = await _execute_observed_rpc(client, probe)
-        bodies = _extract_rpc_bodies(response.text, probe["rpcid"])
-        entries: list[dict[str, Any]] = []
-        if bodies and isinstance(bodies[0], list) and bodies[0]:
-            first = bodies[0][0]
-            if isinstance(first, list):
-                entries = [_parse_usage_entry(item) for item in first]
+        result = account_contract_result(response, "usage.quota" if probe_name == "usage_quota" else "usage.model_state")
+        if not result.ok or result.data is None:
+            return [], result
+        entries = result.data["value"]
         return [
             f"{probe_name}: key={item.get('key')} limit={item.get('limit_value')} "
             f"remaining={item.get('remaining_value')}"
             for item in entries
-        ]
+        ], result
 
     # Probe concurrently; gather preserves the ("usage_quota", "usage_model_state") order.
     per_probe_lines = await asyncio.gather(
         *(_probe_one(name) for name in ("usage_quota", "usage_model_state"))
     )
     lines: list[str] = []
-    for chunk in per_probe_lines:
+    for chunk, result in per_probe_lines:
+        if not result.ok:
+            return domain_text(result, domain_failure_text(result), use_result_data=True)
         lines.extend(chunk)
     return [TextContent(type="text", text="\n".join(lines) or "No usage entries")]
 
@@ -729,12 +726,10 @@ async def _account_usage(client: Any) -> list[TextContent]:
 async def _account_library(client: Any) -> list[TextContent]:
     probe = _get_probe("library", "library_locale_capabilities")
     response = await _execute_observed_rpc(client, probe)
-    bodies = _extract_rpc_bodies(response.text, probe["rpcid"])
-    entries = []
-    if bodies and isinstance(bodies[0], list) and bodies[0]:
-        first = bodies[0][0]
-        if isinstance(first, list):
-            entries = [_parse_library_capability(item) for item in first]
+    result = account_contract_result(response, "library.locale_capabilities")
+    if not result.ok or result.data is None:
+        return domain_text(result, domain_failure_text(result), use_result_data=True)
+    entries = result.data["value"]
     if not entries:
         return [TextContent(type="text", text="No library capabilities")]
     lines = [
@@ -745,7 +740,10 @@ async def _account_library(client: Any) -> list[TextContent]:
 
 
 async def _account_notebooks(client: Any) -> list[TextContent]:
-    notebooks, _diagnostic = await _fetch_native_notebooks(client)
+    notebooks, diagnostic = await _fetch_native_notebooks(client)
+    result = account_read_result(notebooks, diagnostic)
+    if not result.ok:
+        return domain_text(result, domain_failure_text(result), use_result_data=True)
     if not notebooks:
         return [TextContent(type="text", text="No native Gemini notebooks")]
     lines = [
@@ -756,14 +754,12 @@ async def _account_notebooks(client: Any) -> list[TextContent]:
 
 
 async def _account_scheduled(client: Any) -> list[TextContent]:
-    probe = _get_probe("scheduled", "scheduled_actions_registry")
-    response = await _execute_observed_rpc(client, probe)
-    bodies = _extract_rpc_bodies(response.text, probe["rpcid"])
-    body = bodies[0] if bodies else []
-    raw_entries = body[0] if isinstance(body, list) and body and isinstance(body[0], list) else []
-    entries = [_parse_scheduled_action_task_entry(item, 500) for item in raw_entries[:20]]
+    entries, diagnostic = await _fetch_scheduled_registry(client, 500)
+    result = account_read_result(entries, diagnostic)
+    if not result.ok:
+        return domain_text(result, domain_failure_text(result), use_result_data=True)
     lines = []
-    for item in entries:
+    for item in entries[:20]:
         label = f" {item.get('schedule_label')}" if item.get("schedule_label") else ""
         lines.append(f"{item.get('title') or '(untitled)'} ({item.get('id', '')}){label}".strip())
     return [TextContent(type="text", text="\n".join(lines) or "No scheduled actions")]
@@ -772,11 +768,10 @@ async def _account_scheduled(client: Any) -> list[TextContent]:
 async def _account_modes(client: Any) -> list[TextContent]:
     probe = _get_probe("tool_modes", "tool_mode_status")
     response = await _execute_observed_rpc(client, probe)
-    bodies = _extract_rpc_bodies(response.text, probe["rpcid"])
-    body = bodies[0] if bodies else []
-    entries = []
-    if isinstance(body, list) and len(body) > 1 and isinstance(body[1], list):
-        entries = [_parse_tool_mode_entry(item) for item in body[1]]
+    result = account_contract_result(response, "tool_modes.status")
+    if not result.ok or result.data is None:
+        return domain_text(result, domain_failure_text(result), use_result_data=True)
+    entries = result.data["value"]
     if not entries:
         return [TextContent(type="text", text="No mode status entries")]
     lines = [
@@ -848,8 +843,12 @@ async def account(
         return _error_text(e, "Account")
 
 
-async def _scheduled_list(client: Any) -> list[TextContent]:
-    entries, diagnostic = await _fetch_scheduled_registry(client, 500)
+async def _scheduled_list(client: Any, backend: str = "legacy") -> list[TextContent]:
+    fetch_registry = _fetch_remy_schedule_registry if backend == "remy" else _fetch_scheduled_registry
+    entries, diagnostic = await fetch_registry(client, 500)
+    result = account_read_result(entries, diagnostic)
+    if not result.ok:
+        return domain_text(result, domain_failure_text(result), use_result_data=True)
     lines: list[str] = []
     for item in entries[:20]:
         label = f" {item.get('schedule_label')}" if item.get("schedule_label") else ""
@@ -857,25 +856,31 @@ async def _scheduled_list(client: Any) -> list[TextContent]:
     if not lines and diagnostic.get("empty_hint"):
         lines.append("No scheduled actions")
         lines.append(f"Diagnostic: {diagnostic['empty_hint']}")
-    return [TextContent(type="text", text="\n".join(lines) or "No scheduled actions")]
+    return domain_text(result, "\n".join(lines) or "No scheduled actions",
+                       data={"backend": backend, "items": entries[:20], "diagnostic": diagnostic})
 
 
-async def _scheduled_get(client: Any, action_id: str) -> list[TextContent]:
+async def _scheduled_get(client: Any, action_id: str, backend: str = "legacy") -> list[TextContent]:
     clean_id = action_id.strip()
     if not clean_id:
         return [TextContent(type="text", text="action_id required")]
-    item, diagnostic = await _fetch_scheduled_task_by_id(client, clean_id, 500)
+    fetch_by_id = _fetch_remy_schedule_by_id if backend == "remy" else _fetch_scheduled_task_by_id
+    item, diagnostic = await fetch_by_id(client, clean_id, 500)
+    result = account_read_result(item, diagnostic)
+    if not result.ok:
+        return domain_text(result, domain_failure_text(result), use_result_data=True)
     if not item:
         status = "not_found_or_wrong_account"
         if diagnostic.get("matched_task") is False:
             status = "not_readable_by_id"
-        return [TextContent(type="text", text=f"Get: {clean_id} ({status})")]
+        return domain_text(result, f"Get: {clean_id} ({status})", data={"backend": backend, "item": None, "diagnostic": diagnostic})
     enabled = item.get("enabled")
     enabled_text = "enabled" if enabled is True else "disabled" if enabled is False else "unknown"
     state = f" state={item.get('task_state')}" if item.get("task_state") else ""
     title = item.get("title") or "(untitled)"
     label = f" {item.get('schedule_label')}" if item.get("schedule_label") else ""
-    return [TextContent(type="text", text=f"Get: {title} ({item.get('id', clean_id)}) [{enabled_text}{state}]{label}")]
+    return domain_text(result, f"Get: {title} ({item.get('id', clean_id)}) [{enabled_text}{state}]{label}",
+                       data={"backend": backend, "item": item, "diagnostic": diagnostic})
 
 
 async def _scheduled_create(
@@ -943,18 +948,25 @@ async def scheduled(
     action_id: str = "",
     hour: int = 9,
     timezone_name: str = "Asia/Shanghai",
+    backend: Literal["legacy", "remy"] = "legacy",
 ) -> list[TextContent]:
-    """List, get by id, create daily, or delete Gemini Web scheduled actions."""
+    """List/get backend=remy for current Tasks; default legacy also supports daily create/delete.
+
+    Preserve the backend when reusing an ID. Native schedule mutations are unavailable.
+    """
     try:
+        if backend == "remy" and action not in {"list", "get"}:
+            result: DomainResult[Any] = DomainResult.failure(DomainErrorCode.INVALID_ARGUMENT, "Native schedules support list/get only.")
+            return domain_text(result, domain_failure_text(result), use_result_data=True)
         client = get_gemini_client()
         await initialize_client()
         if not hasattr(client, "_batch_execute"):
             return [TextContent(type="text", text="scheduled actions unavailable")]
 
         if action == "list":
-            return await _scheduled_list(client)
+            return await _scheduled_list(client, backend)
         if action == "get":
-            return await _scheduled_get(client, action_id)
+            return await _scheduled_get(client, action_id, backend)
         if action == "create":
             return await _scheduled_create(client, title, instructions, hour, timezone_name)
         if action == "delete":

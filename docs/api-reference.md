@@ -174,8 +174,8 @@ Adds these management tools to `core`:
 | `gemini_list_notebooks` | List native Gemini Web Notebooks with ids and metadata |
 | `gemini_list_notebook_chats` | List recent chats assigned to a native Gemini Web Notebook |
 | `gemini_move_chat_to_notebook` | Move an existing Gemini Web chat into a native Gemini Web Notebook |
-| `gemini_list_scheduled_actions` | Read scheduled-action entries returned by Gemini Web scheduled actions surface |
-| `gemini_get_scheduled_action` | Read one scheduled action by id using the observed Web GetTask RPC |
+| `gemini_list_scheduled_actions` | Read legacy actions, or current native Task schedules with `backend=remy` |
+| `gemini_get_scheduled_action` | Read one action by id from the explicitly selected schedule backend |
 | `gemini_create_scheduled_action` | Create a daily Gemini Web scheduled action |
 | `gemini_delete_scheduled_action` | Delete a Gemini Web scheduled action by id |
 | `gemini_get_tool_mode_status` | Read Web-internal tool/mode status rows observed around Canvas and Guided Learning toggles |
@@ -185,6 +185,12 @@ Adds these management tools to `core`:
 List-style tools in this group return pagination metadata in JSON mode
 (`total_count`, `count`, `offset`, `limit`, `has_more`, and `next_offset`) when
 the underlying Web surface can be represented as a bounded list.
+Scheduled list/get defaults to `backend=legacy` for compatibility. Use
+`backend=remy` for the current `/scheduled` page and preserve that backend with
+the returned ID. Native schedule mutations are unsupported; the existing daily
+create/delete tools operate on the legacy backend only. A legacy empty registry
+does not establish that the current page has no tasks.
+
 Primary server tools expose native MCP `ToolAnnotations` for read-only,
 destructive, idempotent, and open-world hints. `gemini_get_tool_manifest`
 provides a client-readable safety map for planning multi-step workflows, with

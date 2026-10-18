@@ -43,7 +43,7 @@ async def get_task_status_result(client: Any, chat_id: str) -> DomainResult[dict
     envelope = parse_rpc_envelope(str(getattr(response, "text", "") or ""), contract.rpc_id)
     diagnostic = {"contract_key": contract.key, "status_code": getattr(response, "status_code", None),
                   "reject_code": envelope.reject_code, "body_count": len(envelope.bodies)}
-    if diagnostic["status_code"] == 200 and envelope.parsed and envelope.reject_code is None and len(envelope.bodies) == 1:
+    if diagnostic["status_code"] == 200 and envelope.parsed and envelope.reject_code is None and envelope.single_body:
         parsed = parse_contract_body(contract, envelope.bodies[0], expected_id=chat_id)
         diagnostic["parser_status"] = parsed.status
         if parsed.status == "success" and not parsed.warnings:

@@ -63,6 +63,9 @@ async def gemini_scheduled(request: ScheduledRequest) -> AccountToolResult:
     """List/get scheduled actions or explicitly create_daily/delete one action.
 
     Hour/timezone/instructions belong to create_daily. Delete requires action_id.
+    list/get backend=remy reads current native Task schedules. The default
+    legacy backend preserves daily-action compatibility; native mutations
+    are unsupported. Preserve the backend when reusing an observed ID.
     RPC acknowledgement alone is accepted; inspect observed verification state.
     """
     return focused_result(await get_account_facade_service().execute("scheduled", request), "Scheduled action result and verification.")

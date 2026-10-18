@@ -191,4 +191,20 @@
     <question>Does the end of a native Task response stream alone prove the Task is terminal or authorize deletion of an unfinished source? Answer yes or no.</question>
     <answer>no</answer>
   </qa_pair>
+  <qa_pair>
+    <question>Which scheduled list/get backend reads the current native Task schedules while keeping their IDs separate from legacy daily-action mutations? Answer with the backend value.</question>
+    <answer>remy</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>Does an HTTP 200 account probe with no matching RPC response body establish a successful inventory read or feature reachability? Answer yes or no.</question>
+    <answer>no</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>Does an observed Deep Research report-action UI menu prove that a native creation mutation RPC has been captured? Answer yes or no.</question>
+    <answer>no</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>Do Gems or the local Prompt library administer native Skills from the current customize/skills page? Answer yes or no.</question>
+    <answer>no</answer>
+  </qa_pair>
 </evaluation>
