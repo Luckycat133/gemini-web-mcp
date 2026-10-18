@@ -120,9 +120,12 @@ class LearningModeConfig(TypedDict, total=False):
     x9b_field: str
     x9b_value: int
     prompt_prefix: str
+    feature_mode_id: int
 
 
 LEARNING_MODE_CONFIG: dict[str, LearningModeConfig] = {
+    "guided_learning": {"feature_mode_id": 24},
+    "guided": {"alias_for": "guided_learning"},
     "interactive_quiz": {
         "id": 18,
         "x9b_field": "h5d",
@@ -298,4 +301,4 @@ def resolve_learning_mode_config(learning_mode: str | None) -> dict[str, object]
 
 def supported_learning_modes() -> str:
     """Return user-facing learning mode names."""
-    return "interactive_quiz/quiz, flashcards, practice_test, study_guide/exam_prep"
+    return "guided_learning/guided, interactive_quiz/quiz, flashcards, practice_test, study_guide/exam_prep"

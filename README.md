@@ -166,7 +166,7 @@ uses explicit actions within its five-tool catalog. See
 | `history-organize` | The agent can move chats into native Gemini notebooks | History facade, rename/pin/unpin, notebook facade, explicit move tool |
 | `account-read` | The agent needs read-only account inventory | `gemini_account_inventory` facade |
 | `scheduled-read` | The agent only needs to inspect scheduled actions | Read-only scheduled actions |
-| `scheduled-admin` | The user explicitly authorized scheduled-action create/delete | Scheduled mutation tools |
+| `scheduled-admin` | The user authorized scheduled-action management | Typed native Remy schedules and legacy scheduled tools |
 | `core` | General content workflows | Chat, media, files, research, manifest/cookie helpers |
 | `all` | Maintainers are verifying the full surface | Full maintenance surface |
 
@@ -180,8 +180,9 @@ Use `model` as the primary starting profile for text-only work, `core` for multi
 | Chat | One-shot chat, normalized collection of Gemini upstream streams, local sessions, temporary chat, saved Gem usage |
 | Media | Explicit native image/edit/video/music selection; bounded 2026-10-03 focused MCP tests returned independently decoded local artifacts for all four workflows |
 | History | List, scan, search, read, export, delete, and cleanup test artifacts |
-| Notebooks | List native Gemini notebooks, inspect notebook chats, move chats into notebooks |
-| Account Inventory | Public links, usage limits, library capabilities, modes, models, scheduled actions |
+| Notebooks | Create/update/delete Gemini Web notebooks, manage sources, inspect and move chats |
+| Account | Native Skills and ZIP import, public-link management, paginated Library assets with media removal, schedules and read-only inventory |
+| Canvas | Create, read, list versions, replace plain-document text, export verified local files |
 | Safety Metadata | MCP annotations, tool manifest, privacy/destructive-operation guidance |
 | Distribution | Standalone Codex skill zip, wheel, source distribution, launch kit |
 

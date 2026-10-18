@@ -14,7 +14,7 @@ Calls below use the seven registered tools. Paths/operation handles must come fr
 
 Positive triggers: “做张海报”; “Turn this local picture into a watercolor”; “Make a short video”; “Write and generate an instrumental soundtrack”; “The music request timed out, recover its operation”.
 
-Near misses: “What is wrong in this screenshot?” -> gemini-assist understanding; “Write a prompt for a music generator” -> assistance/text; “Delete old generated Gemini chats” -> explicit gemini-account; “Implement the music tool” -> development.
+Near misses: “What is wrong in this screenshot?” -> gemini-assist understanding; “Write a prompt for a music generator” -> assistance/text; “Create or replace this Canvas document” and “Delete old generated Gemini chats” -> gemini-account; “Implement the music tool” -> development.
 
 ## Output and continuation
 

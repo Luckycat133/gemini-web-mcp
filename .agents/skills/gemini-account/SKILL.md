@@ -1,6 +1,6 @@
 ---
 name: gemini-account
-description: "Manage Gemini history, Notebooks, Scheduled actions, Gems, local Prompts, account inventory, and registered cleanup jobs when the user requests account work."
+description: "Manage requested Gemini history, Web Notebooks and sources, schedules, native Skills, Canvas, Library and sharing, plus Gems, local Prompts and cleanup jobs."
 license: MIT-0
 metadata:
   compatibility: "Requires a connected gemini-mcp-account server (Python 3.11+); live calls use the server's private Gemini Web authentication."
@@ -39,11 +39,11 @@ requested account task. All seven tools take a typed `request` object whose
 | Task | Tool | Available actions |
 | --- | --- | --- |
 | History | `gemini_history` | list, search, read, export, update, delete, task_status |
-| Notebooks | `gemini_notebooks` | list, chats, move |
-| Scheduled actions | `gemini_scheduled` | list, get, create_daily, delete |
+| Notebooks | `gemini_notebooks` | list, get, create, update, delete, sources, add_source, remove_source, chats, move |
+| Scheduled actions | `gemini_scheduled` | list, get, create, update, pause, resume, delete; legacy create_daily |
 | Gems | `gemini_gems` | list, create, update, delete |
 | Local Prompts | `gemini_prompts` | list, categories, get, render, create, update, delete |
-| Account inventory | `gemini_account` | capabilities, status, models, features, links, usage, library, modes |
+| Account resources | `gemini_account` | capabilities, status, models, features, links, usage, library, modes; nested skills, sharing, library_assets, canvas |
 | Cleanup jobs | `gemini_cleanup` | status, run, cancel, test_artifacts |
 
 ## Select and verify the target
@@ -58,9 +58,30 @@ Perform the action through its MCP facade and inspect structured `ok`, `data`,
 accepted, unavailable, rejected or mismatched results retain their reported
 state. Features and usage report observations, not inferred entitlements.
 
-Prompts live in the server's local `prompts.json` library. Rendering a Prompt
-substitutes variables and does not submit it to Gemini. Partial Gem/Prompt
-updates preserve omitted fields.
+## Resource workflows
+
+Notebook writes support title and instructions; description is not writable.
+Source ingestion can remain processing after acceptance. These Gemini Web
+Notebooks have separate IDs from NotebookLM attachments used by assistance.
+
+Use `backend="remy"` for native schedules and preserve it with the returned ID.
+Native create/update supports hourly, daily, weekly, monthly, yearly and one-off
+triggers; pause/resume changes the existing schedule. Legacy daily actions keep
+their separate backend.
+
+Native Skills use the nested `gemini_account` request with `action="skills"`,
+including ZIP upload. Gems are reusable personas; Prompts live in the server's local library
+and render variables without submitting to Gemini. Updates preserve omitted fields.
+
+For Library assets, follow page tokens and use returned identities. A snapshot
+ID is not a native ID; deletion requires an unambiguous supported media target.
+Canvas/document removal from Library is unavailable. Sharing
+creates a public link or deletes one exact token within the requested scope.
+
+Canvas uses a nested account request to create, get, list versions, edit or
+export. Edit replaces a plain document's entire text and formatting on the same
+artifact; it does not create a new version. Attachments and citations are outside
+this edit scope. Export writes UTF-8 text to a new absolute output path.
 
 ## Cleanup and setup
 

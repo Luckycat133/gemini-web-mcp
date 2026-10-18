@@ -80,5 +80,6 @@ uvx --from '/absolute/path/to/gemini-web-mcp[image]' gemini-mcp-create
 
 Use the server's private authentication setup. Load [examples.md](references/examples.md)
 for call examples, recovery, cancellation and source-retention details.
-For understanding or research use `$gemini-assist`; requested account
-management uses `$gemini-account`; repository work uses `$gemini-web-mcp-development`.
+For understanding or research use `$gemini-assist`; Canvas documents and
+requested account management use `$gemini-account`; repository work uses
+`$gemini-web-mcp-development`.

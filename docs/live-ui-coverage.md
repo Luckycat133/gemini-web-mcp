@@ -4,11 +4,76 @@ This page records dated observations of signed-in Gemini Web and related MCP
 checks. Each section identifies the tested surface and evidence scope;
 historical observations do not establish current availability.
 
+## 2026-10-18 Native Capability Workflows
+
+The follow-up implementation uses the same observed public Web build
+`BardChatUi.zh_CN.D3Wg_SjWYeA.2018.O`. Official JavaScript request builders,
+response readers, URLs and SHA-256 hashes are recorded in
+[the public source record](../compatibility/web-request-source-20261018.json).
+Static source evidence establishes the protocol shape; it does not establish
+account entitlement or successful execution. Offline fixtures cover successful,
+empty, rejected and changed responses, with independent mutation read-back.
+
+The focused account surface exposes these workflows through its existing
+seven typed facades. Primary and compact adapters delegate to the same services.
+The current authorized MCP acceptance run has verified Notebook CRUD and an
+added source reaching ready state, native Remy schedule CRUD/pause/resume,
+native Skill CRUD/enable/disable/ZIP import/replacement, public-link creation
+and exact deletion, Canvas creation/get/version listing/plain text edit/export,
+and Library asset listing/get/supported-image deletion. These are bounded disposable-resource observations, not a
+dedicated-account full canary or evidence that every recurrence/source variant
+has been exercised.
+
+| Workflow | Implemented scope | Current acceptance boundary |
+| --- | --- | --- |
+| Gemini Web Notebooks | Title/instructions CRUD; text, URL and uploaded sources; source removal; existing chats/move | Description writes are not supported. Create followed by instructions update is independently read back. Text/file sources reached indexed state and were removed. Get omits their original content, so full content verification remains accepted/source_content_unobserved; URL ingestion was not live-tested. |
+| Native Remy schedules | Hourly, daily, weekly, monthly, yearly and one-off triggers; exact-ID update/pause/resume/delete | Native IDs use `backend=remy`; legacy daily actions remain separate. CRUD/toggle checks do not prove execution of every trigger. Deletion was confirmed by the complete fresh registry; deleted-ID reads returned an unavailable server error, not an absence value. |
+| Native Skills | Manual fields, enable/disable, delete and ZIP import/replacement | CRUD/toggle/ZIP import/replacement verified. A same-name ZIP conflict was rejected; unique-fixture import passed. Separate from Gems and local Prompts. |
+| Library assets | Filtered pages with continuation, exact get/delete, unique-source protection | List/get and exact image deletion verified. Current Web rejects Canvas/document deletion from Library; the MCP rejects those kinds before mutation. Snapshot IDs change after edits; grouped/identity-free targets cannot be safely removed. |
+| Public sharing | Current list, explicit public-link creation and exact-token deletion | Creation and exact deletion independently verified. No delete-all or inferred disabled flag. |
+| Canvas documents | Native create, get, chat-artifact discovery, versions, plain text replacement and UTF-8 export | Create/read/versions/edit/export verified, including all four content copies and preserved leading/trailing whitespace. Edit updates the same artifact and replaces formatting without creating a new version. Other kinds, attachments and citations are outside edit scope. |
+| Native understanding references | Caller-selected Drive, Photos and NotebookLM IDs in typed mixed inputs | No resource ID is guessed or obtained from a Gemini Web Notebook. Native attachment acceptance has no current live pass. |
+
+A separate native image control produced a decoded and visually checked
+2048×2048 JPEG through Flash-Lite/Nano Banana 2 Lite. Editing changed its blue
+circle to green and produced another verified 2048×2048 JPEG. The edit's
+2-second cleanup job completed in one attempt with `verified_absent`, observed
+through MCP cleanup status. The Flash control returned a content-access refusal
+and no image; its retained source was inspected without retrying that request.
+This does not establish that every image model/account route works.
+
+Initial mixed-input understanding and Guided Learning checks timed out; bounded
+MCP retests subsequently completed with upstream responses. The mixed retest
+covered text, a local file and a URL, not native account-resource references.
+The original Research operation was recovered by the same handle after restart
+and returned `failed/completion_not_observed`; no report acceptance or restart
+by resubmission is claimed. Ordinary exact-chat metadata updates passed; an
+update to a Notebook-moved chat remained accepted because the history target
+was not independently observed. Native repository import, Task
+cancellation, settings/memory mutations, native PDF/Google Docs export and
+Library rename/update remain unsupported.
+
+**Run closeout:** all 22 recorded disposable source IDs were individually
+verified absent through real MCP stdio calls. The owned Gem, two Notebooks,
+two native Skills, schedule and public link were removed; all three added
+Notebook sources were removed with read-back. Supported Library image deletion
+passed, and a completed fresh Library scan found no remaining test entries
+after source-chat cleanup. Cleanup used exact owned IDs from this run; no
+marker-based bulk deletion was used. No private IDs, bodies, credentials or
+generated media are included in the repository.
+
+Final local gates passed Ruff, Mypy (90 source files), **3,461 offline tests**,
+**438 contract checks**, representative profiles, and modern/legacy stdio on
+all five surfaces under model and core profiles. Wheel/sdist and the four
+standalone Skill packages built; isolated installed-wheel/onboarding checks
+are separate from live-account acceptance. Earlier dated audits below retain
+their original scope.
+
 ## 2026-10-18 Broader Capability Audit
 
 An additional authorized, read-only Chrome pass inspected the upload/tools menu,
 Library, Scheduled, settings, the native Skills page and public-link management.
-The build matched the source record above. It observed Google Drive, Photos,
+The build matched the source record. It observed Google Drive, Photos,
 repository import and Notebook attachment entries; image/video/music, Canvas,
 Deep Research and Guided Learning; and separate native Skills, Task settings
 and media-watermark controls. Opening a page or menu is UI evidence only.
@@ -367,32 +432,33 @@ same shared workflows where listed in [development status](development-status.md
 | --- | --- | --- |
 | Models, thinking, chat and sessions | Dynamic registry, low/medium/high, one-shot/multi-turn/stream collection, temporary and Gem chat | Model/thinking calls verified 10-18; stream tools return collected upstream streams rather than client token streaming. |
 | Native Tasks | Primary/compact `task_mode`, exact-source `task_status`, unfinished-source retention | Matching Goal completion and restart recovery verified 10-18; provider cancellation not exposed. |
-| Image generation and local-image editing | Native selector, generated-image validation and local save | Decode/visual checks verified 10-17; UI Pro redo is not a separate first-pass API. |
+| Image generation and local-image editing | Native selector, generated-image validation and local save | Flash-Lite native image/edit decode and visual checks verified 10-18; Flash control returned a content-access refusal. UI Pro redo is not a separate first-pass API. |
 | Video and music | Native selectors, local verification; focused asynchronous handles | Verified files, controlled unfinished-video restart and completed-file retrieval on 10-17. Arbitrary hard-crash recovery is unverified. |
 | Cleanup and cancellation | Account-scoped durable jobs; operation cancellation request | Delayed restart cleanup verified 10-17/18. Cancellation does not prove the provider stopped. |
-| Image, file and URL understanding | Focused mixed inputs and primary file/URL tools | Local inputs upload; remote URI inputs are references in the prompt. An acknowledged input does not prove independent fetching. Current end-to-end recheck remains pending. |
+| Image, file and URL understanding | Focused mixed inputs and primary file/URL tools | A 10-18 text/local-file/URL retest completed after an initial timeout. Remote URI inputs are prompt references; acknowledgement does not prove independent fetching. |
 | Grounded search | Focused `gemini_search` with observed structured citations | Source-free answers remain `answer_only`; no new dated live acceptance in this audit. |
-| Deep Research | Primary/focused start/status/result/cancel and report save | Native-helper/fallback paths covered offline; current signed-in report recovery remains pending. |
+| Deep Research | Primary/focused start/status/result/cancel and report save | The current same-handle restart/result check returned failed/completion_not_observed; no new run was submitted and no current report pass is claimed. |
 | Report-derived outputs | Local HTML/Markdown templates | Audio overview is a script; custom app is a specification. Neither proves native audio/app generation. |
-| Guided Learning | Primary/compact `learning_mode` companion modes | Request contract retained from 06-19; current menu seen 10-18, new end-to-end acceptance pending. |
+| Guided Learning | Primary/compact native `learning_mode=guided_learning` plus companion modes | Native request retest completed with an upstream response on 10-18 after an initial timeout. |
 | History | List/scan/search/read/export/delete, rename, pin/unpin | Fresh metadata and exact-chat updates/read/export/delete verified 10-18; bounded pages do not prove full account coverage. |
-| Native Notebooks | List, recent chats, move chat with membership read-back | List rechecked 10-18; current move acceptance pending. Notebook create/update/delete and source management remain unsupported. |
-| Scheduled actions | Explicit legacy list/get/daily-create/delete; native Remy list/get via `backend=remy` | Native and legacy IDs/states remain separate. Native create/edit/pause/resume/delete and broader recurrence are unsupported; legacy mutations were last live-tested 06-20. |
-| Gems | List/create/update/delete with complete custom-registry read-back | List rechecked 10-18; current mutation acceptance pending. Gems are separate from native Skills. |
+| Native Notebooks | CRUD for title/instructions, source list/add/remove, recent chats and move with read-back | CRUD and an added source's ready state verified 10-18; all source variants/current move acceptance are separate. Description writes unavailable; acceptance can precede ingestion readiness. |
+| Scheduled actions | Legacy list/get/daily-create/delete; native Remy CRUD/pause/resume and six trigger types | Native CRUD/toggle checked 10-18; every trigger's future execution is unverified. Preserve `backend=remy` with native IDs; legacy mutations were last live-tested 06-20. |
+| Gems | List/create/update/delete with complete custom-registry read-back | Create, partial update, invocation and exact deletion verified 10-18. Gems are separate from native Skills. |
 | Local Prompts | CRUD, categories, get and variable rendering | Local atomic storage and regression coverage; does not submit to Gemini. |
-| Library | Localized capability/template list and asset probes | Capability read rechecked 10-18. Private asset list/read/update/delete remain unsupported. |
-| Public links | Current shared-conversation list | Read only; create/update/revoke remain unsupported. Missing disabled-state evidence is not inferred. |
+| Library | Localized capabilities plus native asset list/get/delete with pagination and identity guards | List/get and exact image deletion verified 10-18. Current Web rejects Canvas/document single-asset deletion. No rename/update; partial pages do not prove absence. |
+| Public links | Current list, create and exact-token delete | Creation/deletion verified 10-18. No delete-all or inferred disabled state. |
 | Usage, model/mode status and feature probes | Sanitized read-only observations | Usage/modes rechecked 10-18; RPC reachability does not establish entitlement or named mode semantics. |
-| Canvas | Capability/status observation | Native document creation/editing/export is unsupported. |
-| Drive, Photos, repository and Notebook import | UI entries observed; local code files can upload | Native picker/attachment workflows remain unsupported. Local upload is not native repository import. |
-| Native Skills | UI list/create/upload controls observed | `/customize/skills` has no MCP administration contract. Gems and local Prompts do not substitute for it. |
+| Canvas | Native document create/get/chat-artifacts/versions, plain text edit and UTF-8 export | Create/read/versions/edit/export verified 10-18, including source whitespace and four content slots. Edit replaces formatting on the same artifact, without a new version; attached/cited/other-kind documents are excluded. |
+| Drive, Photos and NotebookLM references | Native encoding for exact caller-selected resource IDs in mixed understanding | Current live acceptance unverified. NotebookLM is distinct from Gemini Web Notebooks; this is not automatic picker discovery. |
+| Repository import | UI entry observed; local code files can upload | Native repository import is unsupported. |
+| Native Skills | List/get/manual CRUD/enable/disable and ZIP import/replacement | CRUD/toggle/ZIP import/replacement verified 10-18. Separate from Gems and local Prompts. |
 | Personalization, memory import and Task settings | Selected read-only probes/UI observations | Settings mutations and memory import remain unsupported. |
 | UI exports and preferences | Observed entries only | Native PDF/Google Docs export and media-watermark/preferences administration are unsupported. Local Markdown/JSON chat export remains available. |
 
 ## Observed RPC Evidence
 
 The following registry and cookie-context observations are historical June/July
-evidence. Current sharing and native Task-schedule contracts are recorded in
+evidence. Current native account, attachment and Canvas contracts are recorded in
 the 2026-10-18 sections above; old registry emptiness is not current-page coverage.
 
 The 2026-06-18 browser pass captured these read-only/probe-style RPC ids from

@@ -109,7 +109,8 @@ def test_all_group_tools_have_mcp_annotations():
         assert by_name["gemini_create_from_research_report"].annotations.open_world_hint is False
         assert by_name["gemini_history"].annotations.read_only_hint is True
         assert by_name["gemini_account_inventory"].annotations.read_only_hint is True
-        assert by_name["gemini_notebooks"].annotations.read_only_hint is True
+        assert by_name["gemini_notebooks"].annotations.read_only_hint is False
+        assert by_name["gemini_notebooks"].annotations.destructive_hint is True
         assert by_name["gemini_delete_chat"].annotations.destructive_hint is True
         assert by_name["gemini_cleanup_test_artifacts"].annotations.destructive_hint is True
         assert by_name["gemini_create_scheduled_action"].annotations.read_only_hint is False
@@ -520,7 +521,8 @@ def test_skill_server_tools_have_mcp_annotations():
         assert by_name["history"].annotations.open_world_hint is True
         assert by_name["cleanup"].annotations.destructive_hint is True
         assert by_name["cleanup"].annotations.open_world_hint is True
-        assert by_name["account"].annotations.read_only_hint is True
+        assert by_name["account"].annotations.read_only_hint is False
+        assert by_name["account"].annotations.destructive_hint is True
         assert by_name["account"].annotations.open_world_hint is True
         assert by_name["session"].annotations.destructive_hint is True
         assert by_name["prompts"].annotations.destructive_hint is True
@@ -2018,7 +2020,7 @@ def test_tool_manifest_marks_currently_enabled_tools(monkeypatch):
     all_tools = {item["name"]: item for item in all_payload["tools"]}
     assert all_tools["gemini_get_tool_manifest"]["current_enabled"] is True
     assert all_tools["gemini_manage_prompts"]["current_enabled"] is False
-    assert all_payload["current_enabled_count"] == 47
+    assert all_payload["current_enabled_count"] == 49
 
     monkeypatch.setenv("GEMINI_TOOLS", "model")
     model_payload = manage_tools._tool_manifest_payload("all")

@@ -187,6 +187,17 @@ gemini-mcp-skill-server
 
 ---
 
+## 原生账号与 Canvas 功能
+
+`gemini-mcp-account` 和主服务 `all`/`manage` 的 typed facade 支持 Notebook
+及来源管理、原生 Skills 与 ZIP 导入、公开分享链接、Library 资产分页和支持的媒体类型精确删除，
+以及 Canvas 创建、读取、版本列表、全文编辑和本地导出。
+Canvas 全文编辑会替换富文本格式，保留空白，不创建新版本。
+Notebook 与 NotebookLM 是不同产品；理解输入的 `kind="notebook"` 指 NotebookLM。
+原生 Remy 计划任务支持六类时间触发、修改、暂停、恢复与删除。
+详情和参数见 [API 参考](docs/api-reference.md#typed-account-workflows)，
+实际账号验证范围见 [最新验收记录](docs/live-ui-coverage.md)。
+
 ## 📦 环境变量
 
 | 变量名 | 必填 | 说明 | 默认值 |
@@ -209,7 +220,7 @@ gemini-mcp-skill-server
 | `history` | `gemini_history` 聚合 list/scan/search/read/export + manifest | 只整理或导出对话历史，不暴露删除/账号写操作 | 低 |
 | `history-organize` | `gemini_history` + 重命名/固定 + `gemini_notebooks` + Notebook move | 重命名、固定选定对话或整理进 Gemini 原生 Notebook | 中 |
 | `account-read` | `gemini_account_inventory` 聚合账号只读盘点 | 账号能力和 Web surface 审计 | 低 |
-| `scheduled-admin` | scheduled list/get/create/delete | 明确授权后管理定时操作 | 中 |
+| `scheduled-admin` | 原生 Remy 计划任务读写、暂停、恢复和旧版 scheduled 工具 | 明确授权后管理定时操作 | 中 |
 | `core` | 对话 + 媒体 + 文件/URL + Deep Research | 通用内容工作流 | 中 |
 | `manage` | 聚合入口 + 历史、账号、scheduled、Gems 颗粒工具 | 兼容旧配置；普通 agent 不建议默认使用 | 高 |
 | `prompts` | 本地提示词库存取 | 可选附加能力 | 低 |
@@ -287,7 +298,7 @@ gemini-mcp-skill-server
 - `GEMINI_TOOLS=history`: 暴露 `gemini_history`，只读整理历史，不暴露删除、scheduled 写操作或 Gems
 - `GEMINI_TOOLS=history-organize`: 在 `history` 基础上增加 `gemini_notebooks` 和 move 到 native Notebook
 - `GEMINI_TOOLS=account-read`: 暴露 `gemini_account_inventory`，只读盘点账号 Web surface
-- `GEMINI_TOOLS=scheduled-admin`: 只暴露定时操作 list/get/create/delete
+- `GEMINI_TOOLS=scheduled-admin`: 提供原生 Remy 的 create/update/pause/resume/delete 及旧版定时操作
 
 `GEMINI_TOOLS=prompts` 会额外提供：
 
@@ -329,7 +340,7 @@ Gemini Web `学习辅导` 输入模式。
 ### 账户和内容管理
 - `gemini_history`: 历史对话只读聚合入口，支持 `action=list|scan|search|read|export`
 - `gemini_account_inventory`: 账号 Web surface 只读聚合入口，支持 capabilities/status/features/links/usage/library/notebooks/scheduled/modes/models
-- `gemini_notebooks`: Gemini Web 原生笔记本只读聚合入口，支持 `action=list|chats`
+- `gemini_notebooks`: Gemini Web 原生笔记本聚合入口，支持列表、读写、来源管理和移动对话；按 `request.action` 校验参数
 - `gemini_inspect_account`: 检查当前账号 Web RPC/能力状态
 - `gemini_get_tool_manifest`: 返回工具安全/隐私/分页/推荐工作流清单，供 agent 规划调用
 - `gemini_get_web_capabilities`: 返回实测 Pro 网页模型、思考等级、工具菜单、设置入口和 MCP 覆盖清单

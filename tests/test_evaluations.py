@@ -95,7 +95,8 @@ def test_gemini_web_mcp_contract_answers_match_static_manifest():
     assert account_tools["gemini_list_library_capabilities"]["pagination"] is True
     assert pairs["gemini_list_library_capabilities"]
     assert account_tools["gemini_account_inventory"]["read_only"] is True
-    assert account_tools["gemini_notebooks"]["read_only"] is True
+    assert account_tools["gemini_notebooks"]["read_only"] is False
+    assert account_tools["gemini_notebooks"]["destructive"] is True
     notebooks = _tool_manifest_payload("notebooks")
     assert "gemini_notebooks" in {tool["name"] for tool in notebooks["tools"]}
     assert pairs["gemini_notebooks"]
@@ -146,3 +147,71 @@ def test_focused_evaluation_answers_match_installed_catalog_and_operation_contra
     assert pairs["accepted"]
     assert account_tools["gemini_cleanup"].annotations.destructive_hint is True
     assert pairs["gemini_cleanup"]
+
+
+def test_native_account_manifest_and_safety_match_actual_typed_catalog():
+    import asyncio
+
+    from src.surfaces import account
+    from src.tools.manage import _tool_manifest_payload, _web_capabilities_payload
+
+    tools = {item.name: item for item in asyncio.run(account.mcp.list_tools())}
+    capabilities = _web_capabilities_payload()
+    resources = {item["name"]: item for item in capabilities["account_resources"]}
+    tool = tools["gemini_account"]
+    annotations = tool.annotations
+    assert annotations.read_only_hint is False
+    assert annotations.destructive_hint is True
+    assert annotations.idempotent_hint is False
+    assert annotations.open_world_hint is True
+    manifest = {item["name"]: item for item in _tool_manifest_payload("account")["tools"]}
+    assert manifest["gemini_account"]["read_only"] is False
+    assert manifest["gemini_account"]["destructive"] is True
+    assert {"gemini_account", "gemini_scheduled"} <= set(capabilities["mcp_tools"]["account"])
+
+    # Cross-check the discoverable capability map and action semantics against
+    # the registered MCP schema, so a new write cannot be omitted as read-only.
+    mapping = {"skills": "AccountSkills", "sharing": "AccountSharing", "library_assets": "AccountLibrary", "canvas": "AccountCanvas"}
+    semantics = tool.meta["actionSemantics"]
+    for name, definition in mapping.items():
+        resource = resources[name]
+        definition = tool.input_schema["$defs"][definition]
+        supported = set(definition["properties"]["request"]["discriminator"]["mapping"])
+        read = set(resource["read_actions"])
+        mutation = set(resource["mutation_actions"])
+        assert read.isdisjoint(mutation)
+        assert read | mutation == supported
+        for key, expected in (("read", read), ("mutation", mutation)):
+            entry = next(value for value in semantics[key] if value.startswith(f"{name}("))
+            assert set(entry.removeprefix(f"{name}(").removesuffix(")").split("/")) == expected
+    assert "upload" in tool.description
+    assert all(action in tool.description.lower() for action in resources["canvas"]["read_actions"] + resources["canvas"]["mutation_actions"])
+    assert "entire text and formatting" in tool.description
+
+
+def test_library_compatibility_probes_do_not_claim_private_asset_coverage():
+    from src.infrastructure.rpc_contracts import get_contract
+    from src.tools.manage import _web_capabilities_payload
+
+    capabilities = _web_capabilities_payload()
+    probes = {item["name"]: item for item in capabilities["feature_probes"]}
+    for key, method in (("library.index", "GetG1Interventions"), ("library.assets", "CheckModeFeatureQuota")):
+        contract = get_contract(key)
+        assert method in contract.observed
+        assert probes[contract.name]["rpcid"] == contract.rpc_id
+        assert probes[contract.name]["observed"] == contract.observed
+    assert "action=library_assets" in " ".join(capabilities["notes"])
+    assert "action=library only for localized" in " ".join(capabilities["notes"])
+    menu = {item["name"]: item for item in capabilities["tool_menu"]}
+    assert "NotebookLM resource_id" in menu["notebook_attachment"]["coverage"]
+    assert "gemini_understand kind=drive" in menu["google_drive"]["coverage"]
+    assert "gemini_understand kind=photos" in menu["google_photos"]["coverage"]
+
+
+def test_current_capability_evaluations_cover_resource_actions_and_input_semantics():
+    answers = {pair.findtext("answer") for pair in _qa_pairs()}
+    assert {
+        "gemini_account", "upload", "get, versions, chat_artifacts, create, edit, export",
+        "entire text and formatting", "list, get, delete", "GetG1Interventions", "CheckModeFeatureQuota",
+        "token", "NotebookLM", "10",
+    } <= answers

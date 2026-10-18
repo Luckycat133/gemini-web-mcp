@@ -12,7 +12,7 @@ dated Gemini Web observations are documented separately in
 | Group | Tools | Intended use |
 |-------|-------|--------------|
 | `core` | Chat, media, file/URL, Deep Research | Recommended default |
-| `manage` | Chat history, model listing, Gems | Account content management |
+| `manage` | History, notebooks, schedules, Skills, sharing, Library, Canvas, Gems | Account content management |
 | `prompts` | Local prompt library | Optional local helper |
 | `all` | `core` + `manage` | Complete Gemini workflow without local prompt library |
 
@@ -28,10 +28,10 @@ Use narrow `GEMINI_TOOLS` profiles for agent-facing deployments:
 |---------|----------|
 | `model` / `chat` | Call Gemini models only; no history, media, file, research, or account tools |
 | `history` | One read-only `gemini_history` facade for list/scan/search/read/export/task_status, without delete, scheduled actions, or Gems |
-| `history-organize` | `gemini_history`, `gemini_update_chat` for rename/pin/unpin, read-only `gemini_notebooks`, and the explicit Notebook move operation |
+| `history-organize` | `gemini_history`, `gemini_update_chat` for rename/pin/unpin, typed `gemini_notebooks`, and the explicit Notebook move operation |
 | `account-read` | One read-only `gemini_account_inventory` facade for links, usage, library, notebooks, scheduled entries, modes, and models |
 | `scheduled-read` | Scheduled-action list/get only |
-| `scheduled-admin` | Scheduled-action list/get/create/delete after explicit authorization |
+| `scheduled-admin` | Typed native Remy create/update/pause/resume/delete and legacy scheduled tools after authorization |
 | `core` | Broad content work: chat, media, file/URL analysis, and Deep Research |
 | `all` | Full maintenance/verification surface; avoid as a default for general agents |
 
@@ -43,6 +43,46 @@ For focused agent deployments, `gemini-mcp-assist` exposes five assistance tools
 `gemini-mcp-account` exposes seven account facades. Their catalogs and task-first
 Skills are documented in [tools](tools.md) and [client examples](client-examples.md).
 The tables below document the primary surface.
+
+---
+
+## Typed account workflows
+
+The focused account server and primary `all`/`manage` surfaces accept the same
+`request` objects. Compact compatibility uses `account(request=...)` and
+`scheduled(request=...)`. Action-specific schemas reject unrelated arguments.
+
+| Tool / resource | Actions |
+| --- | --- |
+| `gemini_notebooks` | `list`, `chats`, `move`, `get`, `create`, `update`, `delete`, `sources`, `add_source`, `remove_source` |
+| `gemini_scheduled` | `list`, `get`, `create`, `update`, `pause`, `resume`, `delete` with `backend="remy"`; legacy actions remain available |
+| `gemini_account`, `action="skills"` | Nested `list`, `get`, `create`, `update`, `upload` ZIP, `enable`, `disable`, `delete` |
+| `gemini_account`, `action="sharing"` | Nested `list`, `create` from an exact chat, `delete` exact token |
+| `gemini_account`, `action="library_assets"` | Nested paginated `list`, exact `get`, guarded media `delete` |
+| `gemini_account`, `action="canvas"` | Nested `chat_artifacts`, `get`, `versions`, `create`, `edit`, `export` |
+
+For example, `gemini_account` accepts:
+
+```json
+{"request":{"action":"canvas","request":{"action":"edit","artifact_id":"<observed ID>","text":"Replacement document text\n"}}}
+```
+
+Canvas edit replaces the whole plain document, including formatting; it
+preserves whitespace and does not create a version. Unsupported attachment,
+citation and non-document shapes are rejected. Export requires a new absolute
+local path. Native Skills differ from Gems and the local Prompt library. Library deletion
+supports the current media kinds; Canvas/document single-asset deletion is
+unavailable, matching the current Web caller.
+Notebook creation/update supports title and instructions; description writes
+are unavailable. Source indexing can remain `accepted` until independently
+observed ready with matching content. Notebook deletion keeps chats unless
+`delete_chats=true` is explicitly supplied.
+
+Drive, Photos and **NotebookLM** references in focused `gemini_understand`
+use `kind`, a real `resource_id`, `name`, and optional `mime_type`/`url`.
+`kind="notebook"` identifies NotebookLM, not a Gemini Web Notebook. These
+references require existing account access; the tool does not grant access or
+operate the picker. At most ten native/local attachments can be combined.
 
 ---
 
@@ -72,16 +112,16 @@ Common chat parameters:
 | `model` | `str` | Stable aliases or a current runtime directory name, including `4 Argon` when available |
 | `thinking_level` | `str` | `low`, `medium`, `high`; `standard=low`, `extended=high` remain compatible |
 | `task_mode` | `bool` | Native Task execution; omitted session values inherit. Read status by exact chat ID; unfinished sources are retained |
-| `learning_mode` | `str` | Optional guided-learning companion: `interactive_quiz`/`quiz`, `flashcards`, `practice_test`, `study_guide`/`exam_prep` |
+| `learning_mode` | `str` | `guided_learning`/`guided` selects native Guided Learning; existing `interactive_quiz`/`quiz`, `flashcards`, `practice_test`, `study_guide`/`exam_prep` remain companion modes |
 | `image_paths` | `list[str]` | Optional local image attachments |
 | `gem_id` | `str` | Optional Gem ID for one-shot or session creation |
 | `temporary` | `bool` | Use Gemini Web temporary chat behavior |
 | `retain_chat` | `bool` | Keep the remote Gemini chat instead of scheduling cleanup |
 | `delete_after_seconds` | `int` | Override remote chat cleanup delay |
 
-`learning_mode` is implemented as a Web-compatible request injection for the
-observed 2026-06-19 Guided Learning companion. It is available on one-shot and
-session chat tools, including streaming variants.
+Native Guided Learning uses the observed 2026-10-18 Web selector. The older
+companion modes retain their separate request fields. Both are available on
+one-shot and session tools, including streaming variants.
 
 The compatibility names ending in `_stream` describe the Gemini Web transport,
 not MCP incremental delivery. These tools collect the upstream chunks, normalize

@@ -60,6 +60,7 @@ MANIFEST_TOOL_NAMES = {"gemini_get_tool_manifest"}
 HISTORY_FACADE_TOOL_NAMES = {"gemini_history"}
 NOTEBOOKS_FACADE_TOOL_NAMES = {"gemini_notebooks"}
 ACCOUNT_INVENTORY_TOOL_NAMES = {"gemini_account_inventory"}
+ACCOUNT_ADMIN_TOOL_NAMES = {"gemini_account"}
 CHAT_TOOL_NAMES = {
     "gemini_chat",
     "gemini_chat_stream",
@@ -91,7 +92,7 @@ ACCOUNT_READ_TOOL_NAMES = {
     *NOTEBOOKS_READ_TOOL_NAMES,
 }
 SCHEDULED_READ_TOOL_NAMES = {"gemini_list_scheduled_actions", "gemini_get_scheduled_action"}
-SCHEDULED_WRITE_TOOL_NAMES = {"gemini_create_scheduled_action", "gemini_delete_scheduled_action"}
+SCHEDULED_WRITE_TOOL_NAMES = {"gemini_create_scheduled_action", "gemini_delete_scheduled_action", "gemini_scheduled"}
 GEMS_TOOL_NAMES = {"gemini_manage_gems"}
 MANAGE_TOOL_LAYER_NAMES = {
     "history-read": HISTORY_FACADE_TOOL_NAMES,
@@ -102,6 +103,7 @@ MANAGE_TOOL_LAYER_NAMES = {
     "notebooks-write": NOTEBOOKS_WRITE_TOOL_NAMES,
     "notebooks-granular": NOTEBOOKS_READ_TOOL_NAMES,
     "account-read": ACCOUNT_INVENTORY_TOOL_NAMES,
+    "account-write": ACCOUNT_ADMIN_TOOL_NAMES,
     "account-granular": ACCOUNT_READ_TOOL_NAMES | SCHEDULED_READ_TOOL_NAMES,
     "scheduled-read": SCHEDULED_READ_TOOL_NAMES,
     "scheduled-write": SCHEDULED_WRITE_TOOL_NAMES,
@@ -113,6 +115,7 @@ ALL_MANAGE_TOOL_NAMES = (
     | HISTORY_READ_TOOL_NAMES
     | HISTORY_WRITE_TOOL_NAMES
     | ACCOUNT_INVENTORY_TOOL_NAMES
+    | ACCOUNT_ADMIN_TOOL_NAMES
     | ACCOUNT_READ_TOOL_NAMES
     | NOTEBOOKS_FACADE_TOOL_NAMES
     | SCHEDULED_READ_TOOL_NAMES
@@ -326,6 +329,8 @@ def _tool_availability(tool: dict[str, Any]) -> list[str]:
         return ["history-organize", "manage", "all"]
     if name in ACCOUNT_INVENTORY_TOOL_NAMES:
         return ["account-read", "manage", "all"]
+    if name in ACCOUNT_ADMIN_TOOL_NAMES:
+        return ["admin", "manage", "all"]
     if name in HISTORY_READ_TOOL_NAMES:
         return ["manage", "all"]
     if name == "gemini_update_chat":
@@ -471,6 +476,8 @@ def web_capabilities_payload() -> dict[str, Any]:
             "gemini_delete_chat",
         ],
         "account": [
+            "gemini_account",
+            "gemini_scheduled",
             "gemini_account_inventory",
             "gemini_inspect_account",
             "gemini_get_tool_manifest",

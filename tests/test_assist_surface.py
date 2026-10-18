@@ -352,11 +352,13 @@ def test_gemini_understand_input_schema_is_typed_and_deterministic():
     # Mixed inputs are one typed list, not one overloaded string.
     input_schema = schema["$defs"]["UnderstandInput"]
     assert input_schema["required"] == ["id", "kind"]
-    assert set(input_schema["properties"]) == {"id", "kind", "path", "url", "text"}
-    assert schema["$defs"]["UnderstandInputKind"]["enum"] == ["text", "image", "file", "url"]
+    assert set(input_schema["properties"]) == {"id", "kind", "path", "url", "text", "resource_id", "name", "mime_type"}
+    assert schema["$defs"]["UnderstandInputKind"]["enum"] == ["text", "image", "file", "url", "drive", "photos", "notebook"]
     assert schema["properties"]["inputs"]["items"]["$ref"] == "#/$defs/UnderstandInput"
     # The input bound is discoverable in the schema itself.
     assert schema["properties"]["inputs"]["maxItems"] == 16
+    description = tools["gemini_understand"].description
+    assert all(label in description for label in ("Drive", "Photos", "NotebookLM", "resource_id", "10-attachment"))
 
 
 def test_gemini_research_registration_and_annotations():

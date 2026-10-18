@@ -329,6 +329,44 @@ def test_client_manager_initialize_calls_init_when_not_initialized(monkeypatch):
     assert mgr._initialized is True
 
 
+def test_authentication_deadline_does_not_shorten_later_generation(monkeypatch):
+    """SDK init's timeout persists as the generation request budget."""
+    from gemini_webapi import GeminiClient
+    from src.thinking_client import ThinkingLevelGeminiClient
+
+    client = ThinkingLevelGeminiClient("fixture-psid")
+    sdk_default = client.timeout
+
+    async def initialize_without_network(self, *, timeout, **kwargs):
+        # This assignment is the SDK's real init contract; no HTTP is needed.
+        self.timeout = timeout
+
+    monkeypatch.setattr(GeminiClient, "init", initialize_without_network)
+    manager = ClientManager()
+    manager._client = client
+    assert asyncio.run(manager.initialize()) is client
+    assert client.timeout == sdk_default
+    assert client.timeout > client_manager.INITIALIZATION_TIMEOUT_SECONDS
+
+
+def test_stalled_authentication_is_still_bounded_and_not_published(monkeypatch):
+    monkeypatch.setattr(client_manager, "INITIALIZATION_TIMEOUT_SECONDS", 0.005)
+    monkeypatch.setattr(client_manager, "INITIALIZATION_RETRY_DELAY_SECONDS", 0)
+    manager = ClientManager()
+    attempts = []
+
+    async def stalled_init(**kwargs):
+        attempts.append(kwargs["timeout"])
+        await asyncio.Event().wait()
+
+    manager._client = MagicMock(init=stalled_init)
+    with pytest.raises(TimeoutError):
+        asyncio.run(manager.initialize())
+    assert len(attempts) == client_manager.INITIALIZATION_ATTEMPTS
+    assert not manager._initialized
+    assert manager._init_task is None
+
+
 def test_client_manager_initialize_concurrent_safe(monkeypatch):
     """真实挂起期间的并发 initialize 共享同一个初始化任务。"""
     mgr = ClientManager()

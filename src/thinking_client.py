@@ -7,7 +7,7 @@ import inspect
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass, field, replace
-from typing import Any, AsyncGenerator, Callable, Iterator
+from typing import Any, AsyncGenerator, Callable, Iterator, Sequence
 
 import orjson
 from gemini_webapi import GeminiClient
@@ -23,16 +23,20 @@ from .constants import (
     supported_learning_modes,
 )
 from .domain.conversations import is_valid_remote_chat_id
+from .domain.inputs import NativeAttachment
+from .infrastructure.import_contracts import build_native_attachments
 from .infrastructure.web_request_contracts import (
     FEATURE_MODE_INDEX,
     NATIVE_TASK_MODE_ID,
     TASK_REQUEST_FLAG_INDEX,
     NativeMediaRequestShapeError,
     NativeTaskRequestShapeError,
+    NativeToolRequestShapeError,
     THINKING_LEVEL_INDEX,
     THINKING_MODE_INDEX,
     ThinkingRequestShapeError,
     native_media_mode_id,
+    native_tool_mode_id,
     synchronize_thinking_headers,
 )
 
@@ -48,6 +52,8 @@ class WebRequestOptions:
     learning_x9b_value: int | None = None
     media_mode_id: int | None = None
     task_mode: bool = False
+    tool_mode_id: int | None = None
+    native_attachments: tuple[list[Any], ...] = ()
 
 
 _web_request: ContextVar[WebRequestOptions | None] = ContextVar(
@@ -244,12 +250,15 @@ def inject_web_request_options(
     options: WebRequestOptions,
 ) -> dict[str, Any]:
     """Add Web UI-only fields to a StreamGenerate request."""
-    if options.task_mode and (options.media_mode_id is not None or options.learning_mode_id is not None):
+    if options.task_mode and (options.media_mode_id is not None or options.learning_mode_id is not None or options.tool_mode_id is not None):
         raise ValueError("task_mode cannot be combined with media_mode or learning_mode.")
-    feature_mode_id = NATIVE_TASK_MODE_ID if options.task_mode else options.media_mode_id
+    if options.tool_mode_id is not None and (options.media_mode_id is not None or options.learning_mode_id is not None):
+        raise ValueError("Native composer tools cannot be combined with media or companion learning modes.")
+    feature_mode_id = NATIVE_TASK_MODE_ID if options.task_mode else options.media_mode_id if options.media_mode_id is not None else options.tool_mode_id
     shape_error = (
         NativeTaskRequestShapeError if options.task_mode
         else NativeMediaRequestShapeError if options.media_mode_id is not None
+        else NativeToolRequestShapeError if options.tool_mode_id is not None or options.native_attachments
         else ThinkingRequestShapeError if options.thinking_level_id is not None else None
     )
     f_req = request_data.get("f.req")
@@ -293,7 +302,8 @@ def inject_web_request_options(
         raise ThinkingRequestShapeError("Thinking StreamGenerate request shape changed.")
 
     if feature_mode_id is not None:
-        feature_error = NativeTaskRequestShapeError if options.task_mode else NativeMediaRequestShapeError
+        feature_error = (NativeTaskRequestShapeError if options.task_mode else
+                         NativeMediaRequestShapeError if options.media_mode_id is not None else NativeToolRequestShapeError)
         if (
             len(inner_request) <= FEATURE_MODE_INDEX
             or not isinstance(inner_request[0], list)
@@ -324,6 +334,17 @@ def inject_web_request_options(
         # Match the explicit Task startup selection, including a false SDK
         # default if a future builder materializes this optional boolean.
         inner_request[TASK_REQUEST_FLAG_INDEX] = True
+
+    if options.native_attachments:
+        query = inner_request[0] if inner_request else None
+        if not isinstance(query, list) or len(query) < 4 or not isinstance(query[0], str):
+            raise NativeToolRequestShapeError("Native attachment query shape changed.")
+        existing_files = query[3]
+        if existing_files is not None and not isinstance(existing_files, list):
+            raise NativeToolRequestShapeError("Existing attachment collection shape changed.")
+        if len(existing_files or []) + len(options.native_attachments) > 10:
+            raise ValueError("At most ten combined local/native attachments are supported per request.")
+        query[3] = [*(existing_files or []), *options.native_attachments]
 
     if options.learning_mode_id:
         if not options.learning_x9b_field or options.learning_x9b_value is None:
@@ -421,17 +442,19 @@ class ThinkingLevelGeminiClient(GeminiClient):
         learning_mode: str | None = None,
         media_mode: str | None = None,
         task_mode: bool = False,
+        tool_mode: str | None = None,
+        native_attachments: Sequence[NativeAttachment] = (),
         media_observation: MediaRequestObservation | None = None,
         **kwargs: Any,
     ) -> ModelOutput:
-        token = self._set_web_request(model, thinking_level, learning_mode, media_mode, task_mode)
+        token = self._set_web_request(model, thinking_level, learning_mode, media_mode, task_mode, tool_mode, native_attachments)
         try:
             request = _web_request.get()
             if request and request.task_mode and media_observation is not None:
                 raise ValueError("task_mode does not accept media artifact observation.")
             if media_observation is not None:
                 args, kwargs = _with_owned_media_session(self, args, kwargs, media_observation)
-            if _generation_once.get() is self or request and (request.media_mode_id is not None or request.task_mode):
+            if _generation_once.get() is self or request and (request.media_mode_id is not None or request.task_mode or request.tool_mode_id is not None or request.native_attachments):
                 # gemini-webapi's running decorator consumes this before its
                 # HTTP kwargs. A parse/API failure must not duplicate creation.
                 kwargs["current_retry"] = 0
@@ -451,17 +474,19 @@ class ThinkingLevelGeminiClient(GeminiClient):
         learning_mode: str | None = None,
         media_mode: str | None = None,
         task_mode: bool = False,
+        tool_mode: str | None = None,
+        native_attachments: Sequence[NativeAttachment] = (),
         media_observation: MediaRequestObservation | None = None,
         **kwargs: Any,
     ) -> AsyncGenerator[ModelOutput, None]:
-        token = self._set_web_request(model, thinking_level, learning_mode, media_mode, task_mode)
+        token = self._set_web_request(model, thinking_level, learning_mode, media_mode, task_mode, tool_mode, native_attachments)
         try:
             request = _web_request.get()
             if request and request.task_mode and media_observation is not None:
                 raise ValueError("task_mode does not accept media artifact observation.")
             if media_observation is not None:
                 args, kwargs = _with_owned_media_session(self, args, kwargs, media_observation)
-            if _generation_once.get() is self or request and (request.media_mode_id is not None or request.task_mode):
+            if _generation_once.get() is self or request and (request.media_mode_id is not None or request.task_mode or request.tool_mode_id is not None or request.native_attachments):
                 kwargs["current_retry"] = 0
             args, kwargs = self._with_upstream_thinking(args, kwargs, GeminiClient.generate_content_stream)
             args, kwargs = self._with_learning_prompt(args, kwargs, learning_mode)
@@ -513,9 +538,11 @@ class ThinkingLevelGeminiClient(GeminiClient):
         learning_mode: str | None,
         media_mode: str | None = None,
         task_mode: bool = False,
+        tool_mode: str | None = None,
+        native_attachments: Sequence[NativeAttachment] = (),
     ):
         existing = _web_request.get()
-        if thinking_level is None and learning_mode is None and media_mode is None and not task_mode and existing:
+        if thinking_level is None and learning_mode is None and media_mode is None and tool_mode is None and not native_attachments and not task_mode and existing:
             return _web_request.set(existing)
 
         level_id = resolve_thinking_level_id(thinking_level)
@@ -533,14 +560,15 @@ class ThinkingLevelGeminiClient(GeminiClient):
             thinking_mode_id=mode_id,
             thinking_level_id=level_id,
             learning_mode_id=(
-                int(learning_config["id"]) if learning_config is not None else None  # type: ignore[call-overload]
+                int(learning_config["id"]) if learning_config is not None and "id" in learning_config else None  # type: ignore[call-overload]
             ),
             learning_x9b_field=(
-                str(learning_config["x9b_field"]) if learning_config is not None else None
+                str(learning_config["x9b_field"]) if learning_config is not None and "x9b_field" in learning_config else None
             ),
             learning_x9b_value=(
-                int(learning_config["x9b_value"]) if learning_config is not None else None  # type: ignore[call-overload]
+                int(learning_config["x9b_value"]) if learning_config is not None and "x9b_value" in learning_config else None  # type: ignore[call-overload]
             ),
+            tool_mode_id=int(learning_config["feature_mode_id"]) if learning_config is not None and "feature_mode_id" in learning_config else None,  # type: ignore[call-overload]
         )
         if thinking_level is None and learning_mode is None and (media_mode is not None or task_mode) and existing:
             options = existing
@@ -548,16 +576,26 @@ class ThinkingLevelGeminiClient(GeminiClient):
             native_media_mode_id(media_mode) if media_mode is not None
             else (existing.media_mode_id if existing else None)
         ), task_mode=task_mode or bool(existing and existing.task_mode))
-        if options.task_mode and (options.media_mode_id is not None or options.learning_mode_id is not None):
+        if tool_mode is not None:
+            if learning_mode is not None:
+                raise ValueError("tool_mode cannot be combined with learning_mode.")
+            options = replace(options, tool_mode_id=native_tool_mode_id(tool_mode))
+        if native_attachments:
+            options = replace(options, native_attachments=tuple(build_native_attachments(native_attachments)))
+        if options.task_mode and (options.media_mode_id is not None or options.learning_mode_id is not None or options.tool_mode_id is not None):
             raise ValueError("task_mode cannot be combined with media_mode or learning_mode.")
         if options.media_mode_id is not None and options.learning_mode_id is not None:
             raise ValueError("media_mode cannot be combined with learning_mode.")
+        if options.tool_mode_id is not None and (options.media_mode_id is not None or options.learning_mode_id is not None):
+            raise ValueError("Native composer tools cannot be combined with media or companion learning modes.")
         if not any(
             (
                 options.thinking_level_id is not None,
                 options.learning_mode_id,
                 options.media_mode_id,
                 options.task_mode,
+                options.tool_mode_id,
+                options.native_attachments,
             )
         ):
             return _web_request.set(None)
@@ -615,7 +653,7 @@ class ThinkingLevelGeminiClient(GeminiClient):
         learning_mode: str | None,
     ) -> tuple[tuple[Any, ...], dict[str, Any]]:
         config = resolve_learning_mode_config(learning_mode)
-        if not config:
+        if not config or not config.get("prompt_prefix"):
             return args, kwargs
 
         prefix = str(config["prompt_prefix"])
@@ -654,11 +692,15 @@ class ThinkingLevelGeminiClient(GeminiClient):
                     raise NativeTaskRequestShapeError("Upstream Task retry control was not consumed.")
                 if request.media_mode_id is not None and "current_retry" in kwargs:
                     raise NativeMediaRequestShapeError("Upstream native media retry control was not consumed.")
+                if (request.tool_mode_id is not None or request.native_attachments) and "current_retry" in kwargs:
+                    raise NativeToolRequestShapeError("Upstream native tool retry control was not consumed.")
                 if not isinstance(data, dict):
                     if request.task_mode:
                         raise NativeTaskRequestShapeError("Native Task StreamGenerate form data shape changed.")
                     if request.media_mode_id is not None:
                         raise NativeMediaRequestShapeError("Native media StreamGenerate form data shape changed.")
+                    if request.tool_mode_id is not None or request.native_attachments:
+                        raise NativeToolRequestShapeError("Native tool StreamGenerate form data shape changed.")
                     if request.thinking_level_id is not None:
                         raise ThinkingRequestShapeError("Thinking StreamGenerate form data shape changed.")
                     return stream(method, url, *args, **kwargs)

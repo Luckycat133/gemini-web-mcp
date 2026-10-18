@@ -125,6 +125,9 @@ class SearchService:
                 request_id=chat_result.meta.request_id,
                 diagnostic_id=chat_result.meta.diagnostic_id,
                 verification_status=chat_result.meta.verification_status,
+                lifecycle=chat_result.data.lifecycle if chat_result.data is not None else None,
+                warnings=chat_result.warnings,
+                effective_model=chat_result.meta.effective_backend,
             )
 
         chat_data = chat_result.data
@@ -288,16 +291,24 @@ def _search_failure(
     request_id: str | None = None,
     diagnostic_id: str | None = None,
     verification_status: str = "not_applicable",
+    lifecycle: ConversationLifecycleMetadata | None = None,
+    warnings: Sequence[DomainWarning] = (),
+    effective_model: str | None = None,
 ) -> DomainResult[SearchOperationData]:
     return DomainResult.failure(
         code,
         message,
-        data=SearchOperationData(query=request.query.strip(), grounding_state=GroundingState.FAILED),
+        data=SearchOperationData(query=request.query.strip(), grounding_state=GroundingState.FAILED,
+                                 requested_model=request.model, effective_model=effective_model, lifecycle=lifecycle),
+        warnings=warnings,
         retryable=retryable,
         suggested_action=suggested_action,
         operation_state=operation_state,
         request_id=request_id,
         diagnostic_id=diagnostic_id,
+        requested_backend=request.model,
+        effective_backend=effective_model,
         verification_status=verification_status,
-        details={"service": "search", "grounding_state": GroundingState.FAILED.value},
+        details={"service": "search", "grounding_state": GroundingState.FAILED.value,
+                 **({"lifecycle": lifecycle} if lifecycle is not None else {})},
     )

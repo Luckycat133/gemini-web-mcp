@@ -28,6 +28,10 @@ from .domain.results import is_transient_transport_error  # noqa: E402
 
 INITIALIZATION_ATTEMPTS = 3
 INITIALIZATION_RETRY_DELAY_SECONDS = 0.25
+INITIALIZATION_TIMEOUT_SECONDS = 30
+# Match the SDK generation budget. Its init(timeout=...) also configures all
+# later requests, including file analysis; bound authentication separately.
+REQUEST_TIMEOUT_SECONDS = 450
 
 
 def validate_config() -> None:
@@ -199,11 +203,12 @@ class ClientManager:
                 try:
                     # Initialization obtains tokens and account capabilities;
                     # it submits no generation prompt or account deletion.
-                    await client.init(
-                        timeout=30,
-                        auto_close=False,
-                        auto_refresh=os.environ.get("GEMINI_AUTO_REFRESH", "true").lower() == "true",
-                    )
+                    async with asyncio.timeout(INITIALIZATION_TIMEOUT_SECONDS):
+                        await client.init(
+                            timeout=REQUEST_TIMEOUT_SECONDS,
+                            auto_close=False,
+                            auto_refresh=os.environ.get("GEMINI_AUTO_REFRESH", "true").lower() == "true",
+                        )
                     break
                 except Exception as error:
                     if attempt + 1 == INITIALIZATION_ATTEMPTS or not is_transient_transport_error(error):

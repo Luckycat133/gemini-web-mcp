@@ -20,6 +20,7 @@ from ..domain import (
     OperationState,
     result_from_exception,
 )
+from ..domain.inputs import NativeAttachment
 from ..tools.utils import (
     IMAGE_ATTACHMENT_EXTENSIONS,
     MAX_IMAGE_ATTACHMENT_BYTES,
@@ -60,6 +61,9 @@ class UnderstandInputKind(str, Enum):
     IMAGE = "image"
     FILE = "file"
     URL = "url"
+    DRIVE = "drive"
+    PHOTOS = "photos"
+    NOTEBOOK = "notebook"
 
 
 @dataclass(frozen=True)
@@ -71,6 +75,9 @@ class UnderstandInput:
     path: str | None = None
     url: str | None = None
     text: str | None = None
+    resource_id: str | None = None
+    name: str | None = None
+    mime_type: str | None = None
 
 
 @dataclass(frozen=True)
@@ -120,6 +127,7 @@ class _PreparedInput:
     reference: str
     file_path: str | None = None
     inline_text: str | None = None
+    native_attachment: NativeAttachment | None = None
 
 
 class UnderstandService:
@@ -196,6 +204,7 @@ class UnderstandService:
                     model=request.model,
                     thinking_level=request.thinking_level,
                     files=tuple(item.file_path for item in prepared if item.file_path is not None),
+                    native_attachments=tuple(item.native_attachment for item in prepared if item.native_attachment is not None),
                     cleanup_source=request.cleanup_source,
                     include_gem_argument=False,
                     include_temporary_argument=False,
@@ -219,6 +228,9 @@ class UnderstandService:
                 request_id=chat_result.meta.request_id,
                 diagnostic_id=chat_result.meta.diagnostic_id,
                 verification_status=chat_result.meta.verification_status,
+                lifecycle=chat_result.data.lifecycle if chat_result.data is not None else None,
+                warnings=chat_result.warnings,
+                effective_model=chat_result.meta.effective_backend,
             )
 
         chat_data = chat_result.data
@@ -300,6 +312,20 @@ def _prepare_input(
         kind = UnderstandInputKind(raw_input.kind)
     except ValueError:
         return _skipped_outcome(raw_input, f"unsupported input kind {kind_label!r}."), None
+
+    if kind in {UnderstandInputKind.DRIVE, UnderstandInputKind.PHOTOS, UnderstandInputKind.NOTEBOOK}:
+        resource_id = raw_input.resource_id or ""
+        if not resource_id.strip() or resource_id != resource_id.strip() or raw_input.path or raw_input.text:
+            return _skipped_outcome(raw_input, "Native inputs require an exact resource_id and cannot contain path/text."), None
+        name = (raw_input.name or input_id).strip()
+        if not name:
+            return _skipped_outcome(raw_input, "Native input name must not be blank."), None
+        return (
+            _accepted_outcome(raw_input, input_id, kind_label, detail="native_reference_provided"),
+            _PreparedInput(input_id=input_id, reference=f"[{input_id}] native {kind.value} attachment {name}",
+                           native_attachment=NativeAttachment(kind=kind.value, resource_id=resource_id, name=name,
+                                                              mime_type=raw_input.mime_type or "", url=raw_input.url)),
+        )
 
     if kind is UnderstandInputKind.TEXT:
         text = (raw_input.text or "").strip()
@@ -539,6 +565,9 @@ def _understand_failure(
     request_id: str | None = None,
     diagnostic_id: str | None = None,
     verification_status: str = "not_applicable",
+    lifecycle: ConversationLifecycleMetadata | None = None,
+    warnings: Sequence[DomainWarning] = (),
+    effective_model: str | None = None,
 ) -> DomainResult[UnderstandOperationData]:
     failed = _with_failed_outcomes(outcomes)
     return DomainResult.failure(
@@ -549,15 +578,19 @@ def _understand_failure(
             analysis="",
             inputs=failed,
             requested_model=requested_model,
+            effective_model=effective_model,
+            lifecycle=lifecycle,
         ),
+        warnings=warnings,
         retryable=retryable,
         suggested_action=suggested_action,
         operation_state=operation_state,
         request_id=request_id,
         diagnostic_id=diagnostic_id,
         requested_backend=requested_model,
+        effective_backend=effective_model,
         verification_status=verification_status,
-        details=_operation_details(failed),
+        details={**_operation_details(failed), **({"lifecycle": lifecycle} if lifecycle is not None else {})},
     )
 
 

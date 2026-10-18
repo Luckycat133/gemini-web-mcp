@@ -27,6 +27,9 @@ from gemini_webapi.exceptions import GeminiError
 FEATURE_MODE_INDEX: Final = 49
 MEDIA_FEATURE_MODE_INDEX: Final = FEATURE_MODE_INDEX
 NATIVE_MEDIA_MODE_IDS = MappingProxyType({"image": 14, "video": 11, "music": 21})
+# 2026-10-18 official x9QgSe menu: Canvas=2, Guided Learning=24;
+# main.js Ayd/byd forwards featureMode through JSPB field 50.
+NATIVE_TOOL_MODE_IDS = MappingProxyType({"canvas": 2, "guided_learning": 24})
 # 2026-10-18 main.js flag 45829880 and mwljBd's Task selection use 40;
 # GzXWE's task sendRequest passes Cf=40 into JSPB field 50 and Rk=true
 # into field 84 (main.js's Ayd request builder).
@@ -57,6 +60,12 @@ class ThinkingRequestShapeError(GeminiError):
 
 class NativeTaskRequestShapeError(GeminiError):
     """Reject a changed native Task selector before any provider submission."""
+
+    code = "UPSTREAM_CHANGED"
+
+
+class NativeToolRequestShapeError(GeminiError):
+    """Reject changed Canvas/Guided Learning selectors before submission."""
 
     code = "UPSTREAM_CHANGED"
 
@@ -107,3 +116,11 @@ def native_media_mode_id(mode: str) -> int:
         return NATIVE_MEDIA_MODE_IDS[mode]
     except KeyError as error:
         raise ValueError("media_mode supports only image, video or music.") from error
+
+
+def native_tool_mode_id(mode: str) -> int:
+    """Resolve the native composer tools whose current request chain is known."""
+    try:
+        return NATIVE_TOOL_MODE_IDS[mode]
+    except KeyError as error:
+        raise ValueError("tool_mode supports only canvas or guided_learning.") from error

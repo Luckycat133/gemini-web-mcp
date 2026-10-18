@@ -6,7 +6,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
-from pydantic import TypeAdapter, ValidationError
+from pydantic import TypeAdapter
 
 from src.domain.account_requests import ScheduledRequest
 from src.infrastructure.rpc_contracts import get_contract
@@ -170,11 +170,11 @@ def test_current_read_backend_is_explicit_and_legacy_is_default(action, backend)
     assert adapter.validate_python({**args, "backend": backend}).backend == backend
 
 
-def test_current_backend_cannot_select_legacy_mutation():
-    with pytest.raises(ValidationError, match="list/get only"):
-        TypeAdapter(ScheduledRequest).validate_python({
-            "action": "delete", "action_id": "schedule_fixture", "backend": "remy",
-        })
+def test_current_delete_keeps_explicit_native_backend():
+    request = TypeAdapter(ScheduledRequest).validate_python({
+        "action": "delete", "action_id": "schedule_fixture", "backend": "remy",
+    })
+    assert request.backend == "remy" and request.action_id == "schedule_fixture"
 
 
 def test_legacy_delete_never_consults_current_registry_for_absence():

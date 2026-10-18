@@ -376,7 +376,7 @@ def test_describe_model_name_unknown_returns_unspecified():
 
 def test_supported_learning_modes_returns_expected_string():
     """返回稳定的 user-facing 模式串。"""
-    expected = "interactive_quiz/quiz, flashcards, practice_test, study_guide/exam_prep"
+    expected = "guided_learning/guided, interactive_quiz/quiz, flashcards, practice_test, study_guide/exam_prep"
     assert supported_learning_modes() == expected
 
 

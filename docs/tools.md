@@ -71,6 +71,8 @@
 
 - `gemini_history`
 - `gemini_account_inventory`
+- `gemini_account`
+- `gemini_scheduled`
 - `gemini_notebooks`
 - `gemini_cleanup_test_artifacts`
 - `gemini_list_chats`
@@ -604,7 +606,10 @@ cleanup 只匹配标题/ID，可能对这类聊天返回 0；`scan_turns=true` �
 
 ### gemini_notebooks
 
-Gemini Web 原生笔记本只读聚合入口。推荐给 `history-organize` 使用，和
+Gemini Web 原生笔记本聚合入口。原有 list/chats 参数保持兼容；typed `request`
+支持 get/create/update/delete、sources/add_source/remove_source 及 move。
+完整参数和安全边界见 [typed account workflows](api-reference.md#typed-account-workflows)。
+可在 `history-organize` 使用，和
 `gemini_move_chat_to_notebook` 搭配完成“先找笔记本、再移动、再校验”的流程。
 
 **参数：**

@@ -11,7 +11,7 @@ from ..domain.account_requests import (
     NotebooksRequest, PromptsRequest, ScheduledRequest,
 )
 from ..services.account_facade import get_account_facade_service
-from ..tools.annotations import DESTRUCTIVE_LOCAL, DESTRUCTIVE_REMOTE, READS_PRIVATE_REMOTE
+from ..tools.annotations import DESTRUCTIVE_LOCAL, DESTRUCTIVE_REMOTE
 
 logger = logging.getLogger(__name__)
 SERVER_NAME = "gemini_account_mcp"
@@ -27,6 +27,11 @@ Cleanup status/run/cancel refer only to this account's registered durable jobs;
 test_artifacts is an explicit bounded marker scan with dry_run=true by default.
 Operation metadata expires after seven days; pending cleanup authority may be renewed.
 The state store contains no prompts/chat contents.
+gemini_account includes typed nested Skills, sharing, Library assets and Canvas
+requests. Skills support ZIP import/replacement. Library assets support list/get/
+media delete; Canvas/document removal is unavailable. Canvas supports get/chat_artifacts/versions/create/plain-document edit/
+local export. These mixed-action facades retain mutation/destructive annotations;
+inspect actionSemantics to distinguish reads and explicit writes.
 """,
 )
 
@@ -49,23 +54,26 @@ async def gemini_history(request: HistoryRequest) -> AccountToolResult:
     return focused_result(await get_account_facade_service().execute("history", request), "History result with observed coverage.")
 
 
-@mcp.tool(annotations=DESTRUCTIVE_REMOTE, meta=_semantics(read=["list", "chats"], mutate=["move"]))
+@mcp.tool(annotations=DESTRUCTIVE_REMOTE, meta=_semantics(read=["list", "get", "chats", "sources"], mutate=["move", "create", "update", "delete", "add_source", "remove_source"]))
 async def gemini_notebooks(request: NotebooksRequest) -> AccountToolResult:
-    """List notebooks/chats or move one exact chat into one exact notebook.
+    """Read/manage one native Gemini Web Notebook, its sources, or chat membership.
 
+    Supports list/get/chats/sources, create/update/delete, move, add_source and
+    remove_source. These bot-based Notebooks have IDs distinct from NotebookLM
+    references accepted as understanding attachments.
     A move is complete only after a strict read-back observes target membership.
     """
     return focused_result(await get_account_facade_service().execute("notebooks", request), "Notebook result and read-back evidence.")
 
 
-@mcp.tool(annotations=DESTRUCTIVE_REMOTE, meta=_semantics(read=["list", "get"], mutate=["create_daily", "delete"]))
+@mcp.tool(annotations=DESTRUCTIVE_REMOTE, meta=_semantics(read=["list", "get"], mutate=["create_daily", "create", "update", "pause", "resume", "delete"]))
 async def gemini_scheduled(request: ScheduledRequest) -> AccountToolResult:
-    """List/get scheduled actions or explicitly create_daily/delete one action.
+    """Read or manage one exact scheduled action with verified read-back.
 
     Hour/timezone/instructions belong to create_daily. Delete requires action_id.
-    list/get backend=remy reads current native Task schedules. The default
-    legacy backend preserves daily-action compatibility; native mutations
-    are unsupported. Preserve the backend when reusing an observed ID.
+    backend=remy supports native create/update/pause/resume/delete and six
+    time triggers. The default legacy backend preserves daily compatibility.
+    Preserve the backend when reusing an observed ID.
     RPC acknowledgement alone is accepted; inspect observed verification state.
     """
     return focused_result(await get_account_facade_service().execute("scheduled", request), "Scheduled action result and verification.")
@@ -90,12 +98,35 @@ async def gemini_prompts(request: PromptsRequest) -> AccountToolResult:
     return focused_result(await get_account_facade_service().execute("prompts", request), "Local Prompt library result.")
 
 
-@mcp.tool(annotations=READS_PRIVATE_REMOTE, meta=_semantics(read=["capabilities", "status", "models", "features", "links", "usage", "library", "modes"], mutate=[]))
+@mcp.tool(annotations=DESTRUCTIVE_REMOTE, meta=_semantics(
+    read=["capabilities", "status", "models", "features", "links", "usage", "library", "modes",
+          "skills(list/get)", "sharing(list)", "library_assets(list/get)", "canvas(get/chat_artifacts/versions)"],
+    mutate=["skills(create/update/enable/disable/delete/upload)", "sharing(create/delete)",
+            "library_assets(delete)", "canvas(create/edit/export)"],
+))
 async def gemini_account(request: AccountRequest) -> AccountToolResult:
-    """Read explicit account inventory or auth-free documented capabilities.
+    """Inventory and typed native Skills, sharing, library and Canvas actions.
 
     Features reports sanitized RPC reachability, not feature entitlement. Models
     and usage report observed registry data without inventing availability/quota.
+    skills/sharing/library_assets/canvas take a nested request with its own action.
+    Skills support list/get/create/update/enable/disable/delete and upload of a
+    complete ZIP via file_path, optionally replacing one exact skill_id. Native
+    Skills are distinct from Gems and local Prompts; bundle files are not executed locally.
+
+    Sharing supports list/create/delete. Create publishes the explicitly selected
+    chat_id; optional response_id defaults to its latest observed model draft.
+    Delete revokes one exact token. Library assets support list/get/delete using
+    an observed asset_id and section; continuation and incomplete reads remain
+    explicit. Canvas/document Library removal is unavailable; supported media
+    kinds can be removed. Inventory action=library lists localized capability/template entries.
+
+    Canvas supports get/versions by artifact_id, chat_artifacts by chat_id, and
+    create from a prompt with reported source-retention evidence. Edit takes artifact_id and text
+    to replace a supported plain document's entire text and formatting, without
+    another generation; completion requires independent content read-back. Export
+    reads one artifact_id and writes a verified local output_path. Reuse an issued
+    source/asset ID after interruption; do not automatically repeat a mutation.
     """
     return focused_result(await get_account_facade_service().execute("account", request), "Account inventory with observed evidence.")
 
