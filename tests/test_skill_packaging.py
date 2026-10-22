@@ -201,13 +201,15 @@ def test_description_names_the_assist_sibling_and_states_the_preference() -> Non
     )
 
 
-def test_project_skill_names_are_unique_across_discovery_roots() -> None:
-    skill_files = sorted(
-        path
-        for root in (PROJECT_ROOT / ".agents" / "skills", PROJECT_ROOT / ".codex" / "skills")
+def _project_skill_names(project_root: Path) -> list[str]:
+    # IDE discovery links deliberately point to the canonical .agents source.
+    # Collapse aliases, but retain independent copies so duplicate names fail.
+    skill_files = sorted({
+        path.resolve(strict=True)
+        for root in (project_root / ".agents" / "skills", project_root / ".codex" / "skills")
         if root.exists()
         for path in root.glob("*/SKILL.md")
-    )
+    })
     discovered_names = []
     for skill_file in skill_files:
         match = re.search(r"^name:\s*(\S+)\s*$", skill_file.read_text(encoding="utf-8"), re.MULTILINE)
@@ -215,5 +217,37 @@ def test_project_skill_names_are_unique_across_discovery_roots() -> None:
         name = match.group(1)
         if name.startswith("gemini-web-mcp"):
             discovered_names.append(name)
+    return discovered_names
 
+
+def test_project_skill_names_are_unique_across_discovery_roots() -> None:
+    discovered_names = _project_skill_names(PROJECT_ROOT)
+    assert set(discovered_names) == {"gemini-web-mcp", "gemini-web-mcp-development"}
     assert len(discovered_names) == len(set(discovered_names))
+
+
+def test_project_skill_discovery_counts_source_once_for_symlink(tmp_path: Path) -> None:
+    source = tmp_path / ".agents" / "skills" / "gemini-web-mcp"
+    source.mkdir(parents=True)
+    (source / "SKILL.md").write_text("---\nname: gemini-web-mcp\n---\n", encoding="utf-8")
+    aliases = tmp_path / ".codex" / "skills"
+    aliases.mkdir(parents=True)
+    (aliases / source.name).symlink_to(source, target_is_directory=True)
+
+    assert _project_skill_names(tmp_path) == ["gemini-web-mcp"]
+
+
+def test_project_skill_discovery_retains_independent_duplicate(tmp_path: Path) -> None:
+    for directory in (".agents", ".codex"):
+        source = tmp_path / directory / "skills" / "gemini-web-mcp"
+        source.mkdir(parents=True)
+        (source / "SKILL.md").write_text("---\nname: gemini-web-mcp\n---\n", encoding="utf-8")
+
+    assert _project_skill_names(tmp_path) == ["gemini-web-mcp", "gemini-web-mcp"]
+
+
+def test_project_instructions_and_skill_sources_have_no_conflict_markers() -> None:
+    paths = [PROJECT_ROOT / name for name in ("AGENTS.md", "CLAUDE.md", "GEMINI.md")]
+    paths.extend((PROJECT_ROOT / ".agents" / "skills").rglob("*.md"))
+    for path in paths:
+        assert not re.search(r"^(?:<{7}|={7}|>{7})(?: |$)", path.read_text(encoding="utf-8"), re.MULTILINE), path
