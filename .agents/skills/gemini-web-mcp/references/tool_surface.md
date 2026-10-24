@@ -99,9 +99,6 @@ Fewer, broader tools with `action` parameters. Same safety tiers apply.
 | `edit` | `MUTATES_REMOTE` | image editing |
 | `session` | `DESTRUCTIVE_REMOTE` | create/send/list/reset actions; reset affects Gemini conversation state |
 | `prompts` | `DESTRUCTIVE_LOCAL` | local prompt list/get/create/delete |
-| `cookie` | `MUTATES_LOCAL` | `action="profiles"` read-only; `action="get"` requires explicit user approval because it caches sensitive account-authentication material locally; restrict file access and remove the cache when no longer needed |
-| `doctor` | `READ_ONLY_LOCAL` | local preflight |
-| `cleanup` | `DESTRUCTIVE_REMOTE` | `dry_run=true` is safe; `dry_run=false` deletes |
 
 History list/search/read/export/delete share typed domain data across primary and compact surfaces. For deletion,
 `verified_absent` is the only positive deletion proof; `not_available` is accepted/unverified, while `still_present` and

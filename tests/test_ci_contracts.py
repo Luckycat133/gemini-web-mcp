@@ -71,18 +71,11 @@ def test_representative_profile_snapshots_are_explicit_and_exhaustive() -> None:
         "all",
     }
     assert all(PRIMARY_PROFILE_TOOLS.values())
-    assert len(PRIMARY_PROFILE_TOOLS["all"]) == 46
+    assert len(PRIMARY_PROFILE_TOOLS["all"]) == 45
     assert COMPACT_TOOLS == {
-        "account",
         "chat",
-        "cleanup",
-        "cookie",
         "create",
-        "doctor",
         "edit",
-        "history",
-        "prompts",
-        "scheduled",
         "session",
     }
     assert ASSIST_TOOLS == {

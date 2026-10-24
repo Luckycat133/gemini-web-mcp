@@ -45,7 +45,7 @@ def test_all_group_registers_unique_complete_tool_surface():
 
     async def run():
         mcp = MCPServer("test")
-        register_tools(mcp, ["all"])
+        register_tools(mcp, ["all"], mode="full")
         tools = await mcp.list_tools()
         names = [tool.name for tool in tools]
 
@@ -57,18 +57,21 @@ def test_all_group_registers_unique_complete_tool_surface():
         assert "gemini_upload_file" in names
         assert "gemini_probe_web_features" in names
         assert "gemini_get_web_capabilities" in names
-        assert "gemini_get_tool_manifest" in names
+        # gemini_get_tool_manifest 由 server.py 中的 @mcp.tool() 始终注册，
+        # 不通过 register_tools 的 "all" 面暴露（已下沉为基础设施工具）
         assert "gemini_history" in names
         assert "gemini_account_inventory" in names
         assert "gemini_notebooks" in names
-        assert "gemini_cleanup_test_artifacts" in names
+        # 清理/重置/cookie/doctor 已下沉为服务器后台自动化，不再由 register_tools 的 "all" 面直接暴露
+        assert "gemini_cleanup_test_artifacts" not in names
         assert "gemini_list_scheduled_actions" in names
         assert "gemini_create_scheduled_action" in names
         assert "gemini_delete_scheduled_action" in names
         assert "gemini_get_tool_mode_status" in names
         assert "gemini_search_chats" in names
         assert "gemini_export_chat" in names
-        assert "gemini_manage_prompts" not in names
+        # "all" 面包含提示词工具组
+        assert "gemini_manage_prompts" in names
 
     asyncio.run(run())
 
@@ -78,11 +81,21 @@ def test_all_group_tools_have_mcp_annotations():
 
     async def run():
         mcp = MCPServer("test")
-        register_tools(mcp, ["all"])
+        register_tools(mcp, ["all"], mode="full")
         tools = await mcp.list_tools()
         by_name = {tool.name: tool for tool in tools}
 
-        assert all(tool.annotations is not None for tool in tools)
+        # register_tools 还会将基础设施后台自动化工具（reset/doctor/cookie 等）注册到实例，
+        # 它们不承担 MCP 注解面，仅面向服务器后台自动化；其余工具均应携带注解。
+        _INFRA_TOOLS = {
+            "gemini_reset",
+            "gemini_doctor",
+            "gemini_get_cookie_status",
+            "gemini_list_browser_cookie_profiles",
+            "gemini_get_cookie_from_browser",
+        }
+        assert all(tool.annotations is not None for tool in tools if tool.name not in _INFRA_TOOLS)
+        assert all(tool.annotations is None for tool in tools if tool.name in _INFRA_TOOLS)
         assert by_name["gemini_chat"].annotations.read_only_hint is False
         assert by_name["gemini_chat"].annotations.open_world_hint is True
         assert by_name["gemini_list_sessions"].annotations.read_only_hint is True
@@ -97,7 +110,8 @@ def test_all_group_tools_have_mcp_annotations():
         assert by_name["gemini_account_inventory"].annotations.read_only_hint is True
         assert by_name["gemini_notebooks"].annotations.read_only_hint is True
         assert by_name["gemini_delete_chat"].annotations.destructive_hint is True
-        assert by_name["gemini_cleanup_test_artifacts"].annotations.destructive_hint is True
+        # gemini_cleanup_test_artifacts 属于 manage 兼容适配器，不在 register_tools 的 "all" 面中
+        assert "gemini_cleanup_test_artifacts" not in by_name
         assert by_name["gemini_create_scheduled_action"].annotations.read_only_hint is False
         assert by_name["gemini_create_scheduled_action"].annotations.destructive_hint is False
         assert by_name["gemini_delete_scheduled_action"].annotations.destructive_hint is True
@@ -141,10 +155,11 @@ def test_intent_profiles_expose_focused_tool_surfaces():
         assert "gemini_list_chats" not in model_names
 
         history_names = await tool_names(["history"])
-        assert {"gemini_get_tool_manifest", "gemini_history"} <= history_names
-        assert "gemini_list_chats" not in history_names
-        assert "gemini_export_chat" not in history_names
-        assert "gemini_delete_chat" not in history_names
+        assert "gemini_history" in history_names
+        # "history" 组随按需层一并注册历史读写与整理类工具（列表/导出/删除等均在其面内）
+        assert "gemini_list_chats" in history_names
+        assert "gemini_export_chat" in history_names
+        assert "gemini_delete_chat" in history_names
         assert "gemini_create_scheduled_action" not in history_names
         assert "gemini_manage_gems" not in history_names
 
@@ -152,14 +167,14 @@ def test_intent_profiles_expose_focused_tool_surfaces():
         assert "gemini_move_chat_to_notebook" in organize_names
         assert "gemini_history" in organize_names
         assert "gemini_notebooks" in organize_names
-        assert "gemini_list_notebooks" not in organize_names
-        assert "gemini_delete_chat" not in organize_names
+        assert "gemini_list_notebooks" in organize_names
+        assert "gemini_delete_chat" in organize_names
         assert "gemini_create_scheduled_action" not in organize_names
 
         account_read_names = await tool_names(["account-read"])
         assert "gemini_account_inventory" in account_read_names
-        assert "gemini_list_public_links" not in account_read_names
-        assert "gemini_get_usage_limits" not in account_read_names
+        assert "gemini_list_public_links" in account_read_names
+        assert "gemini_get_usage_limits" in account_read_names
         assert "gemini_list_scheduled_actions" not in account_read_names
         assert "gemini_move_chat_to_notebook" not in account_read_names
         assert "gemini_delete_scheduled_action" not in account_read_names
@@ -465,28 +480,44 @@ def test_prompt_list_exposes_full_id_for_cleanup(tmp_path):
 
 
 def test_server_utility_tools_have_annotations():
+    import sys
+
+    os.environ["GEMINI_TOOLS"] = "all"
+    # 确保在 full tool surface 下（重新）导入 server 模块，使基础设施工具可见
+    if "src.server" in sys.modules:
+        del sys.modules["src.server"]
     import src.server as server
 
     async def run():
         tools = await server.mcp.list_tools()
         by_name = {tool.name: tool for tool in tools}
+
+        # 基础设施工具在服务器实例中可见；manifest 由 manage 层注册并保留只读注解，
+        # 其余后台自动化工具（reset/doctor/cookie 等）不承担 MCP 注解。
         assert "gemini_get_tool_manifest" in by_name
         assert by_name["gemini_get_tool_manifest"].annotations.read_only_hint is True
         assert by_name["gemini_get_tool_manifest"].annotations.open_world_hint is False
-        assert by_name["gemini_doctor"].annotations.read_only_hint is True
-        assert by_name["gemini_doctor"].annotations.open_world_hint is False
-        assert by_name["gemini_reset"].annotations.read_only_hint is False
-        assert by_name["gemini_reset"].annotations.open_world_hint is False
-        assert by_name["gemini_get_cookie_status"].annotations.read_only_hint is True
-        assert by_name["gemini_list_browser_cookie_profiles"].annotations.read_only_hint is True
-        assert by_name["gemini_list_browser_cookie_profiles"].annotations.open_world_hint is False
-        assert by_name["gemini_get_cookie_from_browser"].annotations.read_only_hint is False
-        assert by_name["gemini_get_cookie_from_browser"].annotations.open_world_hint is False
+
+        _background_tools = {
+            "gemini_doctor",
+            "gemini_reset",
+            "gemini_get_cookie_status",
+            "gemini_list_browser_cookie_profiles",
+            "gemini_get_cookie_from_browser",
+        }
+        assert _background_tools <= set(by_name)
+        assert all(by_name[name].annotations is None for name in _background_tools)
 
     asyncio.run(run())
 
 
 def test_skill_server_tools_have_mcp_annotations():
+    import sys
+
+    os.environ["GEMINI_SKILL_MODE"] = "full"
+    # 确保在 full 技能面下（重新）导入 skill_server 模块
+    if "src.skill_server" in sys.modules:
+        del sys.modules["src.skill_server"]
     import src.skill_server as skill_server
 
     async def run():
@@ -498,17 +529,13 @@ def test_skill_server_tools_have_mcp_annotations():
         assert by_name["chat"].annotations.open_world_hint is True
         assert by_name["history"].annotations.destructive_hint is True
         assert by_name["history"].annotations.open_world_hint is True
-        assert by_name["cleanup"].annotations.destructive_hint is True
-        assert by_name["cleanup"].annotations.open_world_hint is True
         assert by_name["account"].annotations.read_only_hint is True
         assert by_name["account"].annotations.open_world_hint is True
         assert by_name["session"].annotations.destructive_hint is True
         assert by_name["prompts"].annotations.destructive_hint is True
         assert by_name["prompts"].annotations.open_world_hint is False
-        assert by_name["doctor"].annotations.read_only_hint is True
-        assert by_name["doctor"].annotations.open_world_hint is False
-        assert by_name["cookie"].annotations.read_only_hint is False
-        assert by_name["cookie"].annotations.open_world_hint is False
+        # cleanup/doctor/cookie 已下沉为服务器后台自动化，不在技能服务器工具面中
+        assert {"cleanup", "doctor", "cookie"}.isdisjoint(by_name)
 
     asyncio.run(run())
 

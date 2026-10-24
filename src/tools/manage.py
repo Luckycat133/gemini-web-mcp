@@ -2461,6 +2461,44 @@ def _register_gem_tools(mcp: MCPServer, enabled_tool_names: set[str]) -> None:
             return [TextContent(type="text", text=f"❌ 失败: {str(e)}")]
 
 
+def register_history_tools(mcp: MCPServer, enabled_tool_names: set[str] | None = None) -> None:
+    """注册历史相关工具（按需加载）。"""
+    if enabled_tool_names is None:
+        enabled_tool_names = set()
+    tool_functions: dict[str, Callable[..., Coroutine[Any, Any, list[TextContent]]]] = {}
+    _register_history_scan_tools(mcp, enabled_tool_names, tool_functions)
+    _register_history_read_tools(mcp, enabled_tool_names, tool_functions)
+    _register_history_facade_tools(mcp, enabled_tool_names, tool_functions)
+
+
+def register_account_tools(mcp: MCPServer, enabled_tool_names: set[str] | None = None) -> None:
+    """注册账号相关工具（按需加载）。"""
+    if enabled_tool_names is None:
+        enabled_tool_names = set()
+    tool_functions: dict[str, Callable[..., Coroutine[Any, Any, list[TextContent]]]] = {}
+    _register_account_probe_tools(mcp, enabled_tool_names, tool_functions)
+    _register_manifest_tools(mcp, enabled_tool_names, tool_functions)
+    _register_account_inventory_tools(mcp, enabled_tool_names, tool_functions)
+    _register_tool_mode_tools(mcp, enabled_tool_names, tool_functions)
+    _register_model_tools(mcp, enabled_tool_names, tool_functions)
+
+
+def register_scheduled_tools(mcp: MCPServer, enabled_tool_names: set[str] | None = None) -> None:
+    """注册定时任务工具（按需加载）。"""
+    if enabled_tool_names is None:
+        enabled_tool_names = set()
+    tool_functions: dict[str, Callable[..., Coroutine[Any, Any, list[TextContent]]]] = {}
+    _register_scheduled_tools(mcp, enabled_tool_names, tool_functions)
+
+
+def register_notebook_tools(mcp: MCPServer, enabled_tool_names: set[str] | None = None) -> None:
+    """注册笔记本工具（按需加载）。"""
+    if enabled_tool_names is None:
+        enabled_tool_names = set()
+    tool_functions: dict[str, Callable[..., Coroutine[Any, Any, list[TextContent]]]] = {}
+    _register_notebook_tools(mcp, enabled_tool_names, tool_functions)
+
+
 def register_manage_tools(mcp: MCPServer, layers: list[str] | set[str] | tuple[str, ...] | None = None):
     enabled_tool_names = resolve_manage_tool_names(layers)
     tool_functions: dict[str, Callable[..., Coroutine[Any, Any, list["TextContent"]]]] = {}

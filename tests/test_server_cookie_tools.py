@@ -21,10 +21,18 @@ cookie 相关工具仅有注解形状测试（test_server_utility_tools_have_ann
 
 import asyncio
 import json
+import os
+import sys
 
+os.environ["GEMINI_TOOLS"] = "all"
+
+if "src.server" in sys.modules:
+    del sys.modules["src.server"]
 import src.server as server
 
-
+# Cookie 工具 handlers 定义在 src.tools.infrastructure，并从该模块的全局命名空间
+# 调用 get_cookie_status / list_browser_cookie_profiles / get_cookie_from_browser，
+# 故需 monkeypatch 该模块（而非 src.server）才能生效。
 async def _call_tool(name, **kwargs):
     """通过 server.mcp.call_tool 调用工具，返回 TextContent 列表。"""
     return (await server.mcp.call_tool(name, kwargs)).content

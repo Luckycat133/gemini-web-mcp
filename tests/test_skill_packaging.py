@@ -145,11 +145,18 @@ def test_compact_tool_reference_lists_exactly_the_registered_tools() -> None:
         for node in module.body
         if isinstance(node, ast.AsyncFunctionDef)
         and any(
-            isinstance(decorator, ast.Call)
-            and isinstance(decorator.func, ast.Attribute)
-            and decorator.func.attr == "tool"
-            and isinstance(decorator.func.value, ast.Name)
-            and decorator.func.value.id == "mcp"
+            (
+                isinstance(decorator, ast.Call)
+                and isinstance(decorator.func, ast.Attribute)
+                and decorator.func.attr == "tool"
+                and isinstance(decorator.func.value, ast.Name)
+                and decorator.func.value.id == "mcp"
+            )
+            or (
+                isinstance(decorator, ast.Call)
+                and isinstance(decorator.func, ast.Name)
+                and decorator.func.id == "_tool_if"
+            )
             for decorator in node.decorator_list
         )
     }

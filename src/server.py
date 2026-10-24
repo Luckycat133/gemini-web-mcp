@@ -27,7 +27,7 @@ from .services.manifest import (
     tool_manifest_payload as _tool_manifest_payload,
 )
 from .tools import groups_enable_manage, register_tools
-from .tools.annotations import MUTATES_LOCAL, READ_ONLY_LOCAL
+from .tools.annotations import READ_ONLY_LOCAL
 
 ResponseFormat = Literal["markdown", "json"]
 
@@ -76,33 +76,32 @@ Cookie 辅助工具始终可用，不依赖额外工具组。
 """,
 )
 
-# 选择性注册工具组
-register_tools(mcp, TOOL_GROUPS)
+# 选择性注册工具组 — 默认只加载底座（chat/media/file/research）
+# 若 GEMINI_TOOLS 指定了任何按需工具组，则切换为 full 模式
+_register_mode = "full" if groups_enable_manage(TOOL_GROUPS) else "default"
+register_tools(mcp, TOOL_GROUPS, mode=_register_mode)
 
 
 def _tool_groups_include_manage() -> bool:
-    return groups_enable_manage(TOOL_GROUPS)
+    return _register_mode == "full"
 
 
-if not _tool_groups_include_manage():
-
-    @mcp.tool(annotations=READ_ONLY_LOCAL)
-    async def gemini_get_tool_manifest(
-        scope: ManifestScope = "all",
-        response_format: ResponseFormat = "markdown",
-    ) -> list[TextContent]:
-        """
-        返回面向 agent 的 Gemini MCP 工具清单。
-
-        默认 core/prompts 配置也会暴露这个只读入口；manage/all 配置由 manage 工具组注册。
-        """
-        payload = _tool_manifest_payload(scope)
-        if response_format == "json":
-            return [TextContent(type="text", text=json.dumps(payload, ensure_ascii=False, indent=2))]
-        return [TextContent(type="text", text=_format_tool_manifest_markdown(payload))]
+# ── 基础设施工具（仅在 full 模式下向 agent 暴露；default 模式下仅供后台自动化） ──
 
 
-@mcp.tool(annotations=MUTATES_LOCAL)
+@mcp.tool(annotations=READ_ONLY_LOCAL)
+async def gemini_get_tool_manifest(
+    scope: ManifestScope = "all",
+    response_format: ResponseFormat = "markdown",
+) -> list[TextContent]:
+    """返回面向 agent 的 Gemini MCP 工具清单。"""
+    payload = _tool_manifest_payload(scope)
+    if response_format == "json":
+        return [TextContent(type="text", text=json.dumps(payload, ensure_ascii=False, indent=2))]
+    return [TextContent(type="text", text=_format_tool_manifest_markdown(payload))]
+
+
+@mcp.tool()
 @domain_error_boundary("gemini_reset", logger)
 async def gemini_reset() -> list[TextContent]:
     """重置客户端"""
@@ -117,7 +116,7 @@ async def gemini_reset() -> list[TextContent]:
     )
 
 
-@mcp.tool(annotations=READ_ONLY_LOCAL)
+@mcp.tool()
 async def gemini_doctor(
     browser: str = "chrome",
     validate_browser: bool = False,
@@ -130,7 +129,7 @@ async def gemini_doctor(
     return [TextContent(type="text", text=_format_doctor_markdown(payload))]
 
 
-@mcp.tool(annotations=READ_ONLY_LOCAL)
+@mcp.tool()
 async def gemini_get_cookie_status() -> list[TextContent]:
     """获取 Cookie 状态"""
     status = get_cookie_status()
@@ -148,7 +147,7 @@ Cookie: {cookie_text}
 刷新: {refresh_text}""")]
 
 
-@mcp.tool(annotations=READ_ONLY_LOCAL)
+@mcp.tool()
 async def gemini_list_browser_cookie_profiles(
     browser: str = "chrome",
     validate: bool = True,
@@ -189,7 +188,7 @@ async def gemini_list_browser_cookie_profiles(
         return [format_error_response(error_info)]
 
 
-@mcp.tool(annotations=MUTATES_LOCAL)
+@mcp.tool()
 async def gemini_get_cookie_from_browser(browser: str = "chrome", profile: str = "") -> list[TextContent]:
     """从浏览器获取 Cookie"""
     try:
@@ -204,11 +203,28 @@ async def gemini_get_cookie_from_browser(browser: str = "chrome", profile: str =
         return [format_error_response(error_info)]
 
 
+
 def main():
-    """启动服务器"""
+    """启动服务器 — 基础设施后台自动化，AI 只看到默认底座工具。"""
     logger.info("🚀 启动 Gemini Web MCP Server (v%s)", __version__)
-    logger.info(f"🔧 加载工具组: {', '.join(TOOL_GROUPS)}")
+    logger.info(f"🔧 加载工具组: {', '.join(TOOL_GROUPS)} (mode=default)")
+
+    # ── 基础设施自动化（AI 不可见）──────────────────────────────
     init_cookie_manager_integration()
+
+    # 若环境变量未设置 Cookie，尝试从已登录的 Chrome 自动获取
+    cookie_status = get_cookie_status()
+    if not cookie_status.get("has_cookie"):
+        logger.info("🍪 环境变量未设置 Cookie，尝试从 Chrome 自动获取...")
+        get_cookie_from_browser(browser="chrome", profile="")
+
+    # 运行健康预检，异常时仅记录日志，不阻塞启动
+    try:
+        _doctor_payload(browser="chrome", validate_browser=False)
+        logger.info("✅ 基础设施自动化就绪")
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("⚠️ 基础设施自动化部分失败: %s", exc)
+
     mcp.run()
 
 

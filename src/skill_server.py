@@ -67,9 +67,7 @@ from .services import (
 from .tools.annotations import (
     DESTRUCTIVE_LOCAL,
     DESTRUCTIVE_REMOTE,
-    MUTATES_LOCAL,
     MUTATES_REMOTE,
-    READ_ONLY_LOCAL,
     READS_PRIVATE_REMOTE,
 )
 from .infrastructure.rpc_contracts import WEB_FEATURE_PROBES, RawRPCData as _RawRPCData
@@ -172,6 +170,27 @@ chat(message="hi")
 create(prompt="image", type="image")
 """,
 )
+
+# ── 技能服务器分层（与 server.py 对齐）──────────────────────────────
+SKILL_MODE = os.environ.get("GEMINI_SKILL_MODE", "default")
+DEFAULT_SKILL_TOOLS = {"chat", "create", "edit", "session"}
+ON_DEMAND_SKILL_TOOLS = {"history", "account", "scheduled", "prompts"}
+# cookie、doctor、cleanup 下沉到服务器后台自动化，不在技能服务器暴露
+
+
+def _tool_if(tool_name: str, annotations=None):
+    """条件性注册装饰器：仅在默认底座或 full 模式下注册对应工具。"""
+    def decorator(func):
+        should_register = (
+            tool_name in DEFAULT_SKILL_TOOLS
+            or (tool_name in ON_DEMAND_SKILL_TOOLS and SKILL_MODE == "full")
+        )
+        if should_register:
+            if annotations is not None:
+                return mcp.tool(annotations=annotations)(func)
+            return mcp.tool()(func)
+        return func
+    return decorator
 
 
 def _normalize_model(model: str) -> str:
@@ -379,7 +398,7 @@ def _build_chat_service() -> ChatService:
 _chat_service = _build_chat_service()
 
 
-@mcp.tool(annotations=MUTATES_REMOTE)
+@_tool_if("chat", annotations=MUTATES_REMOTE)
 async def chat(
     message: str,
     model: str = "flash",
@@ -595,7 +614,7 @@ async def _history_delete_text(client: object, chat_id: Optional[str]) -> list[T
     return domain_text(result, text, use_result_data=True)
 
 
-@mcp.tool(annotations=DESTRUCTIVE_REMOTE)
+@_tool_if("history", annotations=DESTRUCTIVE_REMOTE)
 async def history(
     action: Literal["list", "search", "read", "export", "delete"],
     chat_id: Optional[str] = None,
@@ -813,7 +832,7 @@ _ACCOUNT_CLIENT_ACTIONS: dict[str, Callable[[Any], Awaitable[list[TextContent]]]
 }
 
 
-@mcp.tool(annotations=READS_PRIVATE_REMOTE)
+@_tool_if("account", annotations=READS_PRIVATE_REMOTE)
 async def account(
     action: Literal[
         "status",
@@ -926,7 +945,7 @@ async def _scheduled_delete(client: Any, action_id: str) -> list[TextContent]:
     return [TextContent(type="text", text=f"Delete requested: {clean_id} ({verification_status})")]
 
 
-@mcp.tool(annotations=DESTRUCTIVE_REMOTE)
+@_tool_if("scheduled", annotations=DESTRUCTIVE_REMOTE)
 async def scheduled(
     action: Literal["list", "get", "create", "delete"] = "list",
     title: str = "",
@@ -1027,7 +1046,7 @@ def _skill_media_result(
     )
 
 
-@mcp.tool(annotations=MUTATES_REMOTE)
+@_tool_if("create", annotations=MUTATES_REMOTE)
 async def create(
     prompt: str,
     type: Literal["image", "video", "music"] = "image",
@@ -1136,7 +1155,7 @@ async def create(
         )
 
 
-@mcp.tool(annotations=MUTATES_REMOTE)
+@_tool_if("edit", annotations=MUTATES_REMOTE)
 async def edit(
     image_path: str,
     prompt: str,
@@ -1365,7 +1384,7 @@ async def _session_reset(session_id: Optional[str], *, reset_all: bool = False) 
     )
 
 
-@mcp.tool(annotations=DESTRUCTIVE_REMOTE)
+@_tool_if("session", annotations=DESTRUCTIVE_REMOTE)
 async def session(
     action: Literal["create", "send", "list", "reset", "reset_one", "reset_all"],
     session_id: Optional[str] = None,
@@ -1408,7 +1427,7 @@ async def session(
         )
 
 
-@mcp.tool(annotations=DESTRUCTIVE_LOCAL)
+@_tool_if("prompts", annotations=DESTRUCTIVE_LOCAL)
 async def prompts(
     action: Literal["list", "get", "create", "delete"],
     name: Optional[str] = None,
@@ -1460,7 +1479,7 @@ async def prompts(
         return _error_text(e, "Prompts")
 
 
-@mcp.tool(annotations=MUTATES_LOCAL)
+# cookie 工具下沉到服务器后台自动化，不在技能服务器暴露
 async def cookie(
     action: Literal["status", "get", "profiles"],
     browser: Literal["chrome", "firefox", "edge"] = "chrome",
@@ -1512,7 +1531,7 @@ async def cookie(
         return _error_text(e, "Cookie")
 
 
-@mcp.tool(annotations=READ_ONLY_LOCAL)
+# doctor 工具下沉到服务器后台自动化，不在技能服务器暴露
 async def doctor(
     browser: Literal["chrome", "firefox", "edge"] = "chrome",
     validate_browser: bool = False,
@@ -1525,7 +1544,7 @@ async def doctor(
         return _error_text(e, "Doctor")
 
 
-@mcp.tool(annotations=DESTRUCTIVE_REMOTE)
+# cleanup 工具下沉到服务器后台自动化，不在技能服务器暴露
 async def cleanup(
     markers: str = "codex-,Cleanup Verification Marker",
     target: Literal["all", "chats", "scheduled"] = "all",
