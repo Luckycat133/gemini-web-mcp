@@ -20,6 +20,28 @@
 
 下面这份清单对应当前仓库真实注册结果，而不是历史文档残留。
 
+### 专用工具面
+
+| 入口 | 固定目录 | 用途 |
+| --- | --- | --- |
+| `gemini-mcp-assist` | `gemini_ask`、`gemini_search`、`gemini_understand_image`、`gemini_understand`、`gemini_research` | 协助、搜索、混合输入理解、研究 |
+| `gemini-mcp-create` | `gemini_generate_image`、`gemini_edit_image`、`gemini_generate_video`、`gemini_generate_music`、`gemini_get_operation_status`、`gemini_get_operation_result`、`gemini_cancel_operation` | 生成及获取本地产物 |
+| `gemini-mcp-account` | `gemini_history`、`gemini_notebooks`、`gemini_scheduled`、`gemini_gems`、`gemini_prompts`、`gemini_account`、`gemini_cleanup` | 显式账户操作和本地提示词 |
+
+图片和改图同步返回 Artifact；视频、音乐和研究默认异步，返回不透明的
+`operation_id`。恢复时使用原句柄，不能重新提交提示词。`gemini_research`
+通过 `action=start/status/result/cancel` 保持五工具目录。
+账户工具使用 `request.action`，按动作校验参数。例如：
+
+```json
+{"request": {"action": "models"}}
+```
+
+上述参数对应 `gemini_account`；`gemini_cleanup` 的 `status/cancel` 查询本地
+清理记录，`run` 执行已授权的到期任务。广泛测试记录清理另用
+`test_artifacts`，默认 `dry_run=true`。账户删除成功要求明确的读回证据。
+详见[任务恢复和清理策略](operations-and-cleanup.md)。
+
 ### 默认启用 (`GEMINI_TOOLS=core`)
 
 - `gemini_chat`
@@ -49,6 +71,8 @@
 
 - `gemini_history`
 - `gemini_account_inventory`
+- `gemini_account`
+- `gemini_scheduled`
 - `gemini_notebooks`
 - `gemini_cleanup_test_artifacts`
 - `gemini_list_chats`
@@ -164,7 +188,7 @@ report 本地产物；history 的 list/search/read/export/delete 也在 primary 
       "observed_backend": null,
       "verification": {
         "status": "verified",
-        "methods": ["file_exists", "size_checked", "size_nonzero", "image_dimensions"]
+        "methods": ["file_exists", "size_checked", "size_nonzero", "image_mime_signature", "image_decoded", "image_dimensions"]
       }
     }
   ],
@@ -179,12 +203,14 @@ report 本地产物；history 的 list/search/read/export/delete 也在 primary 
 ```
 
 - `state=remote`：响应含可用 URI，但尚未验证远端内容；artifact 的 verification 是 `unverified`。
-- `state=local`：本地文件存在且非零；记录大小和可推断的 MIME，尺寸和时长在探针可用时填写。
+- `state=local`：本地文件存在且非零；是否能验收还需检查 `verification.status`。图片需解码成功，WAV 需校验流，其他音视频需探针观察到对应流；缺少解码依赖时为 `unverified`，操作为 `partial`。
 - `state=queued`：上游明确返回 pending/processing/queued 等状态，操作结果仍为 `ok=true`、
   `operation_state=queued`。
 - `state=empty`：请求完成但没有可用产物，返回 `ARTIFACT_NOT_RETURNED`，不把普通文本当作媒体成功。
 - `state=failed`：保存或验证失败；完全失败使用 `ARTIFACT_SAVE_FAILED`/`VERIFICATION_FAILED`，
   远端 URI 仍可用但本地保存失败时使用 `operation_state=partial` 和 `ARTIFACT_SAVE_PARTIAL` 告警。
+
+缺少本地媒体验证依赖时，`meta.verification_status` 为 `artifact_saved_unverified` 或 `input_artifact_unverified`，并附 `ARTIFACT_VERIFICATION_UNAVAILABLE` 告警；不改写为已验证成功。
 
 `artifacts` 是输出，`input_artifacts` 是本地文件、URL 或参考图。相同类型和 URI 的 artifact ID
 在 primary 与 compact 表面一致。`response_format="json"` 的 research report 正文仍保持合法 JSON；
@@ -201,7 +227,7 @@ report 本地产物；history 的 list/search/read/export/delete 也在 primary 
 **参数：**
 - `message`: str - 要发送的消息
 - `model`: str - `flash-lite` / `flash` / `pro`，兼容别名，或运行时模型名 (默认: `flash`)
-- `thinking_level`: str - `standard` / `extended` (默认: `standard`)
+- `thinking_level`: str - `low` / `medium` / `high`（兼容 `standard` / `extended`） (默认: `standard`)
 - `learning_mode`: str - 可选；`interactive_quiz`/`quiz`、`flashcards`、`practice_test`、`study_guide`/`exam_prep`
 - `image_paths`: list[str] - 可选图片路径
 - `gem_id`: str - 可选 Gem ID
@@ -217,7 +243,7 @@ report 本地产物；history 的 list/search/read/export/delete 也在 primary 
 **参数：**
 - `message`: str - 要发送的消息
 - `model`: str - MCP 别名或运行时模型名 (默认: `flash`)
-- `thinking_level`: str - `standard` / `extended` (默认: `standard`)
+- `thinking_level`: str - `low` / `medium` / `high`（兼容 `standard` / `extended`） (默认: `standard`)
 - `learning_mode`: str - 可选，含义同 `gemini_chat`
 - `image_paths`: list[str] - 可选图片路径
 - `gem_id`: str - 可选 Gem ID
@@ -233,7 +259,7 @@ report 本地产物；history 的 list/search/read/export/delete 也在 primary 
 
 **参数：**
 - `model`: str - MCP 别名或运行时模型名 (默认: `flash`)
-- `thinking_level`: str - 创建会话后默认沿用的 `standard` / `extended`
+- `thinking_level`: str - 创建会话后默认沿用的 `low` / `medium` / `high`（兼容 `standard` / `extended`）
 - `learning_mode`: str - 可选，创建会话后默认沿用的学习模式
 - `gem_id`: str - 可选 Gem ID
 - `temporary`: bool - 后续会话消息默认沿用的 Temporary chat 状态
@@ -297,14 +323,19 @@ report 本地产物；history 的 list/search/read/export/delete 也在 primary 
 
 ### gemini_generate_media
 
-通用媒体生成。
+生成并保存媒体。图片和音乐请求显式选择 Gemini Web 原生生成模式；视频参数保留现有兼容路线。
 
 **参数：**
 - `prompt`: str - 生成描述
 - `media_type`: "image" | "video" | "music"
 - `model`: str - MCP 别名或运行时模型名 (默认: `flash`)
-- `thinking_level`: str - `standard` / `extended` (默认: `standard`)
+- `thinking_level`: str - `low` / `medium` / `high`（兼容 `standard` / `extended`） (默认: `standard`)
 - `image_path`: str - 可选参考图片
+- `timeout_seconds`: int - 生成、恢复读取、验证和保存的总时限
+- `output_dir`: str - 输出目录，默认 `generated_media/`
+- `filename`: str - 可选单个文件名，已有文件不会被覆盖
+- `retain_chat`: bool - 保留本次生成的源会话，默认 `false`
+- `delete_after_seconds`: int | None - 显式延迟清理；正值覆盖立即清理，任务持久化到本地 SQLite
 
 **真实网页行为：**
 - `image`: Flash-Lite 使用 `Nano Banana 2 Lite`；Flash / Pro 使用 `Nano Banana 2`
@@ -312,10 +343,21 @@ report 本地产物；history 的 list/search/read/export/delete 也在 primary 
 - `video`: 当前通用聊天路线可能只返回文本；需要结构化视频 Artifact 才算成功，已验证的网页入口是 Gemini Omni 专用视频模式
 - `image + model=pro` 不会直接切换首轮图像后端；Pro redo 是网页生成后的二次操作
 
-**artifact 行为：** 成功响应会公开远端 URI；指定输出目录后，实际写入的文件会再检查存在性、
-非零大小、MIME，以及可用的尺寸/时长。排队、空响应和保存失败有独立结构化状态。
+**artifact 行为：** primary 与 compact 均默认保存到本地；响应保留远端 URI，实际写入的文件会检查存在性、
+非零大小、真实格式和解码/流证据。排队、空响应和保存失败有独立结构化状态。
 `prompt` 不可为空；`filename` 只能是单个文件名，若目标文件已存在会另取不冲突的名字。
-排队或未返回媒体的聊天会保留以便回看，结构化结果中的 `source_chat_id` 只在上游实际提供时出现。
+延迟清理会在服务重新绑定相同凭据及原 SQLite 身份密钥后恢复；所有服务停止期间不会执行删除。
+需要撤销时，使用 `gemini-mcp-account` 的 `gemini_cleanup(request={"action":"status"})`
+找到该源聊天对应的 `job_id`，再调用 `gemini_cleanup(request={"action":"cancel","job_id":"..."})`。
+取消会撤销后续尝试，不能撤回已经发出的删除请求；详见[任务恢复和清理](operations-and-cleanup.md)。
+排队、仅远端、保存失败或尚未验证的产物会保留聊天以便恢复，结构化结果中的 `source_chat_id` 只在上游实际提供时出现。
+上游已结束且所有输出都已本地保存并验证，或响应/可信读回明确没有生成产物时，默认立即清理本次新建的源聊天。
+即使部分文件已可用，上游仍明确排队时也会保留源聊天；音乐恢复读取失败不会被当成空结果。
+清理最多等待 10 秒，结果在 `_meta.domain_result.meta.details.cleanup`；只有 `completed` / `already_completed` 表示删除已读回验证。
+`pending` / `failed` / `cancelled` 不表示已删除，也不会改写已验证本地文件的成功状态。显式保留优先。
+只有请求类型匹配的输出才计入完成状态，图片不能满足视频或音乐请求；音乐完成需要音频，封面视频是辅助产物。
+搜索返回的 `WebImage` 和聊天文字不能计作生成图片。
+音乐的音频和视频分别选择不冲突的路径，并禁用未请求的缩略图下载，避免覆盖已有文件。`timeout_seconds` 覆盖生成、恢复读取、验证和保存；超时会保留已观察的 URI/聊天 ID，避免自动重复生成。超时/看门狗参数按请求隔离，不会改写其他并发请求的默认值。
 
 ### gemini_generate_music
 
@@ -324,10 +366,12 @@ report 本地产物；history 的 list/search/read/export/delete 也在 primary 
 **参数：**
 - `prompt`: str - 音乐描述
 - `model`: str - MCP 别名或运行时模型名 (默认: `flash`)
-- `thinking_level`: str - `standard` / `extended` (默认: `extended`)
+- `thinking_level`: str - `low` / `medium` / `high`（兼容 `standard` / `extended`） (默认: `extended`)
 
-媒体工具通过 Gemini Web 通用生成接口触发图像、视频和音乐能力。
+音乐便捷工具还支持上述 `timeout_seconds`、`output_dir`、`filename`、`retain_chat` 和 `delete_after_seconds`。
+图片和音乐在现有传输中携带网页原生模式选择，服务端仍决定实际后端、账号可用性与输出。
 账号可用性、上游排队和响应形状仍由 Gemini Web 决定。
+公开字段证据和实测边界见 [原生媒体模式](native-media-mode.md)。
 
 ---
 
@@ -343,7 +387,7 @@ Gemini Web 的 Google Drive 选择器。
 
 **关键参数：**
 - `model`: str - MCP 别名或运行时模型名
-- `thinking_level`: str - `standard` / `extended` (默认: `standard`)
+- `thinking_level`: str - `low` / `medium` / `high`（兼容 `standard` / `extended`） (默认: `standard`)
 
 ### gemini_analyze_url
 
@@ -354,7 +398,7 @@ Gemini Web 的 Google Drive 选择器。
 
 **关键参数：**
 - `model`: str - MCP 别名或运行时模型名
-- `thinking_level`: str - `standard` / `extended` (默认: `standard`)
+- `thinking_level`: str - `low` / `medium` / `high`（兼容 `standard` / `extended`） (默认: `standard`)
 
 ---
 
@@ -366,7 +410,7 @@ Gemini Web 的 Google Drive 选择器。
 
 **关键参数：**
 - `model`: str - MCP 别名或运行时模型名
-- `thinking_level`: str - `standard` / `extended` (默认: `extended`)
+- `thinking_level`: str - `low` / `medium` / `high`（兼容 `standard` / `extended`） (默认: `extended`)
 - `timeout_seconds`: int - 等待最终报告的时间上限（默认: `600`）
 - `poll_interval_seconds`: int - 轮询间隔，最小 3 秒
 - `wait_for_completion`: bool - 默认 `true`；设为 `false` 时只完成 plan/start 阶段并立即返回
@@ -444,6 +488,7 @@ Gemini Web 历史对话只读聚合入口。推荐给 `GEMINI_TOOLS=history` 和
 
 结构化结果的 `count` / `offset` / `limit` 描述本次扫描的来源页，`match_count` 描述该页命中数。
 当前分页在过滤前应用，不是对全局匹配结果分页；`scan_turns=true` 也只读取当前来源页。
+来源达到上限或空页无法继续时，返回 `operation_state=partial`、覆盖告警和 `next_offset=null`，不会返回重复的游标。正文读取失败单独列在 `read_failures`；部分读取失败为 `partial`，全部失败为 `VERIFICATION_FAILED`，不能据此认定没有匹配。
 
 ### gemini_scan_chat_history_sources
 
@@ -561,7 +606,10 @@ cleanup 只匹配标题/ID，可能对这类聊天返回 0；`scan_turns=true` �
 
 ### gemini_notebooks
 
-Gemini Web 原生笔记本只读聚合入口。推荐给 `history-organize` 使用，和
+Gemini Web 原生笔记本聚合入口。原有 list/chats 参数保持兼容；typed `request`
+支持 get/create/update/delete、sources/add_source/remove_source 及 move。
+完整参数和安全边界见 [typed account workflows](api-reference.md#typed-account-workflows)。
+可在 `history-organize` 使用，和
 `gemini_move_chat_to_notebook` 搭配完成“先找笔记本、再移动、再校验”的流程。
 
 **参数：**
@@ -612,18 +660,20 @@ JSON 输出中的 `accepted=true` 仅表示 RPC 返回了可解析的确认；�
 
 ### gemini_list_scheduled_actions
 
-只读列出 Gemini Web “定时操作”页面返回的任务条目。
+只读列出选定后端的定时任务。`backend="remy"` 对应当前网页的任务；
+默认 `legacy` 保留原有每日定时操作的兼容行为。
 
 **参数：**
 - `scope`: "active" | "inactive" | "all"
+- `backend`: "legacy" | "remy"，默认 "legacy"
 - `limit`: int - 每类最多返回数量，最大 100
 - `offset`: int - 每类分页偏移
 - `response_format`: "markdown" | "json"
 - `max_chars_per_field`: int - 单个文本字段截断长度
 
 定时任务标题和时间可能属于账号私人内容，应只在用户需要查看定时任务时调用。
-JSON 输出包含 `diagnostic`，当当前 cookie/session 返回空 registry 时会给出
-账号上下文提示，方便区分“确实没有任务”和“浏览器多账号上下文不一致”。
+JSON 输出包含 `diagnostic` 和选定后端；旧 registry 为空不能证明当前任务页为空。
+Remy 的已启用／已暂停／已完成状态与旧 Task 枚举分开报告，不用于旧删除操作的回读验证。
 从 Chrome 刷新 Cookie 时，服务器会隔离 gemini_webapi 的本地 cookie cache，并在
 可用时优先选择能读到 scheduled registry 的 Chrome profile。
 
@@ -634,15 +684,18 @@ JSON 输出包含 `diagnostic`，当当前 cookie/session 返回空 registry 时
 
 **参数：**
 - `action_id`: str - 定时操作 ID
+- `backend`: "legacy" | "remy"，保持与列表返回的后端一致，默认 "legacy"
 - `response_format`: "markdown" | "json"
 - `max_chars_per_field`: int - 单个文本字段截断长度
 
 JSON 输出包含 `diagnostic.matched_task`、`item.task_state` 和 `item.is_deleted`。如果当前
 cookie/session 无法按 ID 读取任务，工具会返回 `ok=false` 和账号/profile 上下文提示。
+`remy` 只支持列表和按 ID 读取；创建、编辑、暂停、恢复和删除尚未开放。
 
 ### gemini_create_scheduled_action
 
-创建 Gemini Web “定时操作”。当前只开放已实测稳定的每日计划：每天在指定小时触发。
+创建旧版每日定时操作：每天在指定小时触发。该接口最近的真实创建／删除证据为
+2026-06-20；不创建新版原生 Task schedule。
 
 **参数：**
 - `title`: str - 定时操作名称
@@ -660,7 +713,8 @@ JSON 输出包含 `visible_in_registry`、`readable_by_id_after_create` 和
 
 ### gemini_delete_scheduled_action
 
-按 ID 删除 Gemini Web “定时操作”。删除定时操作不会删除它已经产生的历史对话。
+按 ID 删除旧版每日定时操作。它不支持新版 Remy schedule；列表和读取时应保留后端信息。
+删除定时操作不会删除它已经产生的历史对话。
 
 **参数：**
 - `action_id`: str - `gemini_list_scheduled_actions` 或创建结果返回的定时操作 ID
@@ -668,7 +722,7 @@ JSON 输出包含 `visible_in_registry`、`readable_by_id_after_create` 和
 
 JSON 输出包含 `verification_status`、`visible_after_delete`、`readable_by_id_after_delete`
 和 `deleted_by_id_after_delete`。Gemini 的 `GetTask` 在删除后可能仍返回 tombstone 对象；
-只有按 ID 读到 `task_state=deleted` 时，工具才把删除标记为已校验。
+读到相同 ID 的 `task_state=deleted` tombstone，或有效 registry 与有效 GetTask 都确认缺失时，工具才把删除标记为已校验。读回必须包含 HTTP 200、匹配 RPC 的可解析包络、无拒绝和合法条目；错误、错误 ID 和形状漂移不能作为缺失证据。
 如果 mutation 响应没有可解析 body，`verification_status="rpc_unconfirmed"`；调用方不能把它当作
 已删除。
 这个工具是 destructive 远端操作。只删除用户明确指定或当前验证流程刚创建的任务。
@@ -724,6 +778,8 @@ JSON 输出包含 `verification_status`、`visible_after_delete`、`readable_by_
 ### gemini_list_public_links
 
 列出 Gemini Web “你的公开链接”页面返回的公开链接条目。
+使用当前 `ListSharedConversations` 只读契约，从观测到的 share token 构造链接；
+响应没有提供的禁用状态保持未知。创建或撤销公开链接尚未开放。
 
 **参数：**
 - `limit`: int - 最大返回数量
@@ -812,7 +868,8 @@ macOS Keychain 读取由 `GEMINI_BROWSER_COOKIE_TIMEOUT_SECONDS` 限制，默认
 
 ### gemini_reset
 
-重置客户端。
+重置客户端和全部本地会话，并尝试立即删除未设置 `retain_chat` 的远端聊天。工具标注为 destructive 远端操作。
+本地连接重置成功而远端清理失败时，保留 `partial`、告警和清理诊断；只有新鲜读回 `verified_absent` 才能称聊天已删除。
 
 **参数：** 无
 
@@ -825,8 +882,8 @@ macOS Keychain 读取由 `GEMINI_BROWSER_COOKIE_TIMEOUT_SECONDS` 限制，默认
 | Tool | Purpose |
 |------|---------|
 | `chat` | 对话，支持图片和 session |
-| `create` | 生成图片、视频或音乐 |
-| `edit` | 基于参考图片编辑 |
+| `create` | 原生图片/音乐生成并保存验证；视频保留兼容参数 |
+| `edit` | 原生图片模式编辑参考图并保存验证 |
 | `session` | 创建、发送、列出、重置本地多轮会话 |
 | `history` | 远端 Gemini Web 历史对话 list/search/read/export/delete 和测试产物清理 |
 | `cleanup` | dry-run 或删除匹配显式 marker 的测试聊天/定时任务 |
@@ -838,8 +895,15 @@ macOS Keychain 读取由 `GEMINI_BROWSER_COOKIE_TIMEOUT_SECONDS` 限制，默认
 
 compact `session` 支持 `create` / `send` / `list` / `reset`（或 `reset_one`）/ `reset_all`。`reset` 与 `reset_one` 都必须提供 `session_id`，且只删除该会话；只有显式 `reset_all` 才会清空全部会话并重置客户端。旧的 `action="reset"` 保留为单会话别名，不再把缺少 ID 解释为全量重置。
 
+compact `create` / `edit` 复用 `src/services/media_generation.py`，默认在服务进程工作目录的 `generated_media/` 保存并验证。
+源聊天清理与 primary 采用相同规则及结构化状态。需要自定义目录、显式保留或延迟时使用 primary 媒体工具。
+
 compact 的 history/account/scheduled/doctor/cleanup 直接导入共享 service 和 RPC parser；加载
 `src.skill_server` 不再初始化 4k 行的 `src.tools.manage` 兼容适配器。
+
+primary 与 compact 的 Prompt 适配器共用 `src/services/prompts.py`：新条目使用 UUID，保留原有 ID；变更在跨进程锁内重新读取并原子替换 JSON。文件损坏、读取或保存失败会返回错误并保留原文件。持久锁文件位于库旁的 `.prompts.json.lock`，不保存提示词内容，也不能在写入期间移除。
+
+两个表面的 Cookie 更新会退役旧客户端。认证材料真正变化时，旧会话和清理任务取消，诊断为 `cancellation_reason=authentication_context_changed`；不会用新账号执行旧账号的删除。相同材料刷新保留会话和任务。显式指定的浏览器 profile 读取失败不会回退到另一个 profile；Doctor 将 cookie 存在和账号验证成功分开报告。
 
 ---
 
@@ -853,9 +917,9 @@ compact 的 history/account/scheduled/doctor/cleanup 直接导入共享 service 
 | `gemini_search` | 带观测来源的当前网页搜索；`grounding_state` 如实报告 grounded / answer_only / unavailable / failed |
 | `gemini_understand_image` | 理解单张本地图片或 http(s) 图片 URI |
 | `gemini_understand` | 文本、图片、文件、URL 的类型化混合输入理解（最多 16 个输入，逐输入记录结果） |
-| `gemini_research` | 异步启动一次 Deep Research 并返回保留的 operation handle 与上游 ID |
+| `gemini_research` | 通过显式 action=start/status/result/cancel 启动及恢复 Deep Research，返回 operation handle 与上游 ID |
 
-`gemini_search` 与 `gemini_understand` 返回信息而不是 Artifact；完成的 Deep Research 报告保留在远端聊天中，通过返回的上游标识找回。对应 Runtime Skill 为 `gemini-assist`。
+`gemini_search` 与 `gemini_understand` 返回信息而不是 Artifact；完成的 Deep Research 报告保存为本地 Artifact；通过显式 operation_id 恢复，同一任务不重复启动。对应 Runtime Skill 为 `gemini-assist`。
 
 ---
 
@@ -935,3 +999,20 @@ GEMINI_TOOLS=scheduled-admin
 # 完整维护/验证工具面
 GEMINI_TOOLS=all
 ```
+
+## 当前任务和历史更新参数
+
+primary 的五个 chat/start/send/stream 工具支持 `task_mode`；compact 的 `chat`
+和 `session` 采用相同共享服务。Task 响应包含来源 ID 和独立读回的 `task_status`；
+未知或非终态保留来源，重连后读同一 ID，不重复执行。详情见 [模型与模式](models.md)。
+
+primary `gemini_update_chat(chat_id, title?, pinned?)`、compact
+`history(action="update", chat_id=..., title=..., pinned=...)`，以及 focused
+`gemini_history(request={"action":"update","chat_id":...,"title":...,"pinned":...})`
+可重命名、固定和取消固定；至少传一个变更，省略字段保留原值。
+只有独立、无冲突的 fresh metadata 回读匹配才报告 `verified_updated`。
+`history-organize` 提供该更新工具并保留已有 Notebook 操作，未增加删除工具。
+
+三个历史表面都支持 `task_status` 只读动作。列表/搜索从 fresh RPC 读取双分组，
+拒绝 HTTP 错误、RPC 拒绝和坏形状；分页/扫描仍保留各自覆盖范围。focused 内容
+搜索支持最多 100 轮、20000 字符，primary/compact 保留已有上限。

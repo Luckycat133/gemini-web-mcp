@@ -1,4 +1,4 @@
-"""Perform real MCP initialize/list-tools handshakes against the primary, compact, and assist stdio entrypoints."""
+"""Perform real MCP handshakes against all five stdio capability surfaces."""
 
 from __future__ import annotations
 
@@ -15,11 +15,13 @@ from typing import Any
 from mcp import Client, StdioServerParameters, stdio_client
 
 if __package__:
-    from .smoke_profiles import ASSIST_TOOLS, COMPACT_TOOLS, PRIMARY_PROFILE_TOOLS
+    from .smoke_profiles import ACCOUNT_TOOLS, ASSIST_TOOLS, COMPACT_TOOLS, CREATE_TOOLS, PRIMARY_PROFILE_TOOLS
 else:
     from smoke_profiles import (  # type: ignore[import-not-found,no-redef]
         ASSIST_TOOLS,
+        ACCOUNT_TOOLS,
         COMPACT_TOOLS,
+        CREATE_TOOLS,
         PRIMARY_PROFILE_TOOLS,
     )
 
@@ -71,6 +73,8 @@ def _structured_domain_result(structured: object) -> dict[str, Any] | None:
     """Return the ``domain_result`` payload carried by one assist structured result."""
     if not isinstance(structured, dict):
         return None
+    if isinstance(structured.get("ok"), bool) and isinstance(structured.get("meta"), dict):
+        return structured
     blocks = structured.get("result")
     if not (isinstance(blocks, list) and blocks and isinstance(blocks[0], dict)):
         return None
@@ -92,7 +96,7 @@ async def _handshake(
     executable = _resolve_executable(command)
     parameters = StdioServerParameters(
         command=executable,
-        env=_safe_environment(profile),
+        env={**_safe_environment(profile), "GEMINI_STATE_DB_PATH": str(cwd / "state.sqlite3")},
         cwd=cwd,
     )
     async with asyncio.timeout(30):
@@ -148,7 +152,7 @@ async def _assist_handshake(
     executable = _resolve_executable(command)
     parameters = StdioServerParameters(
         command=executable,
-        env=_safe_environment(profile),
+        env={**_safe_environment(profile), "GEMINI_STATE_DB_PATH": str(cwd / "state.sqlite3")},
         cwd=cwd,
     )
     async with asyncio.timeout(30):
@@ -189,11 +193,49 @@ async def _assist_handshake(
     }
 
 
+async def _focused_handshake(command: str, *, surface: str, profile: str, cwd: Path, mode: str) -> dict[str, object]:
+    """Validate direct domain output schemas with credential-free tool calls."""
+    expected = CREATE_TOOLS if surface == "create" else ACCOUNT_TOOLS
+    server_expected = f"gemini_{surface}_mcp"
+    name = "gemini_generate_image" if surface == "create" else "gemini_account"
+    arguments: dict[str, Any] = {"prompt": ""} if surface == "create" else {"request": {"action": "capabilities"}}
+    parameters = StdioServerParameters(
+        command=_resolve_executable(command), cwd=cwd,
+        env={**_safe_environment(profile), "GEMINI_STATE_DB_PATH": str(cwd / "state.sqlite3")},
+    )
+    async with asyncio.timeout(30):
+        async with Client(stdio_client(parameters), mode=mode, cache=None) as client:
+            listed = await client.list_tools()
+            actual = frozenset(tool.name for tool in listed.tools)
+            if any(not tool.output_schema for tool in listed.tools):
+                raise RuntimeError(f"{surface}: all tools need typed output schemas")
+            representative = await client.call_tool(name, arguments)
+            server_name = client.server_info.name if client.server_info else None
+            protocol_version = client.protocol_version
+    _require_exact_tool_contract(command, expected, actual)
+    if server_name != server_expected or representative.is_error or representative.result_type != "complete":
+        raise RuntimeError(f"{surface}: focused handshake failed")
+    payload = _structured_domain_result(representative.structured_content)
+    if payload is None:
+        raise RuntimeError(f"{surface}: direct structured domain result is missing")
+    if surface == "create":
+        error = payload.get("error")
+        if payload.get("ok") is not False or not isinstance(error, dict) or error.get("code") != "INVALID_ARGUMENT":
+            raise RuntimeError("create: blank prompt must return typed INVALID_ARGUMENT before auth")
+    elif payload.get("ok") is not True or payload["meta"].get("verification_status") != "documented_contract":
+        raise RuntimeError("account: capabilities must report auth-free documented evidence")
+    return {"command": command, "mode": mode, "profile": profile, "protocol_version": protocol_version,
+            "server_name": server_name, "representative_tool": name, "result_type": representative.result_type,
+            "tools": len(actual)}
+
+
 async def _run(
     primary_command: str,
     compact_command: str,
     assist_command: str,
     profile: str,
+    create_command: str = "gemini-mcp-create",
+    account_command: str = "gemini-mcp-account",
 ) -> list[dict[str, object]]:
     with tempfile.TemporaryDirectory(prefix="gemini-protocol-smoke-") as directory:
         cwd = Path(directory)
@@ -221,6 +263,8 @@ async def _run(
                         cwd=cwd,
                         mode=mode,
                     ),
+                    await _focused_handshake(create_command, surface="create", profile=profile, cwd=cwd, mode=mode),
+                    await _focused_handshake(account_command, surface="account", profile=profile, cwd=cwd, mode=mode),
                 ]
             )
         return results
@@ -231,11 +275,14 @@ def main() -> None:
     parser.add_argument("--primary-command", default="gemini-mcp-server")
     parser.add_argument("--compact-command", default="gemini-mcp-skill-server")
     parser.add_argument("--assist-command", default="gemini-mcp-assist")
+    parser.add_argument("--create-command", default="gemini-mcp-create")
+    parser.add_argument("--account-command", default="gemini-mcp-account")
     parser.add_argument("--profile", choices=sorted(PRIMARY_PROFILE_TOOLS), default="model")
     args = parser.parse_args()
 
     results = asyncio.run(
-        _run(args.primary_command, args.compact_command, args.assist_command, args.profile)
+        _run(args.primary_command, args.compact_command, args.assist_command, args.profile,
+             args.create_command, args.account_command)
     )
     print(json.dumps({"handshakes": results, "status": "ok"}, sort_keys=True))
 

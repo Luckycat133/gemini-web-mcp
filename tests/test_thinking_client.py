@@ -33,7 +33,10 @@ from types import SimpleNamespace
 import orjson
 import pytest
 from gemini_webapi import GeminiClient
-from gemini_webapi.constants import Endpoint
+from gemini_webapi.constants import Endpoint, MODEL_HEADER_KEY
+
+from src.constants import resolve_thinking_level_id, resolve_thinking_mode_id
+from src.infrastructure.web_request_contracts import ThinkingRequestShapeError, synchronize_thinking_headers
 
 from src.thinking_client import (
     ThinkingLevelGeminiClient,
@@ -41,6 +44,7 @@ from src.thinking_client import (
     _encode_learning_goa,
     _encode_learning_x9b,
     _web_request,
+    client_request_timeout,
     inject_thinking_level,
     inject_web_request_options,
 )
@@ -78,9 +82,189 @@ def _parse_inner(patched):
     return orjson.loads(outer[1])
 
 
+def _model_headers(mode_id=1):
+    selector = [None] * 15
+    selector[0], selector[4], selector[14] = 1, "offline-model", mode_id
+    return {MODEL_HEADER_KEY: orjson.dumps(selector).decode()}
+
+
 def _new_client():
     """用 object.__new__ 跳过 GeminiClient.__init__ 的网络依赖。"""
     return object.__new__(ThinkingLevelGeminiClient)
+
+
+def _timeout_client():
+    client = _new_client()
+    client.timeout = 60.0
+    client.watchdog_timeout = 60.0
+    return client
+
+
+def test_request_timeout_scope_restores_nested_defaults_and_is_instance_specific():
+    client, other = _timeout_client(), _timeout_client()
+    with client_request_timeout(client, 180):
+        assert (client.timeout, client.watchdog_timeout) == (180, 120)
+        assert (other.timeout, other.watchdog_timeout) == (60, 60)
+        with client_request_timeout(client, 600):
+            assert client.timeout == 600
+        assert client.timeout == 180
+    assert (client.timeout, client.watchdog_timeout) == (60, 60)
+    assert GeminiClient.timeout.__get__(client, type(client)) == 60
+
+
+def test_concurrent_request_timeout_scopes_and_unrelated_task_are_isolated():
+    client = _timeout_client()
+
+    async def run():
+        entered_a, entered_b, release = asyncio.Event(), asyncio.Event(), asyncio.Event()
+
+        async def worker(timeout, entered, other_entered):
+            with client_request_timeout(client, timeout):
+                entered.set()
+                await other_entered.wait()
+                assert client.timeout == timeout
+                assert GeminiClient.timeout.__get__(client, type(client)) == 60
+                await release.wait()
+                assert client.timeout == timeout
+            return client.timeout
+
+        a = asyncio.create_task(worker(180, entered_a, entered_b))
+        b = asyncio.create_task(worker(600, entered_b, entered_a))
+        await entered_a.wait()
+        await entered_b.wait()
+        assert (client.timeout, client.watchdog_timeout) == (60, 60)
+        release.set()
+        assert await asyncio.gather(a, b) == [60, 60]
+
+    asyncio.run(run())
+
+
+def test_child_task_inherits_scope_without_mutating_parent_or_global_default():
+    client = _timeout_client()
+
+    async def run():
+        release = asyncio.Event()
+
+        async def child():
+            await release.wait()
+            assert client.timeout == 180
+            with client_request_timeout(client, 600):
+                assert client.timeout == 600
+            return client.timeout
+
+        with client_request_timeout(client, 180):
+            task = asyncio.create_task(child())
+            assert client.timeout == 180
+        assert client.timeout == 60
+        release.set()
+        assert await task == 180
+        assert client.timeout == 60
+
+    asyncio.run(run())
+
+
+def test_cancellation_exits_request_timeout_scope():
+    client = _timeout_client()
+    after_scope = []
+
+    async def run():
+        entered = asyncio.Event()
+
+        async def worker():
+            try:
+                with client_request_timeout(client, 600):
+                    entered.set()
+                    await asyncio.Event().wait()
+            finally:
+                after_scope.append((client.timeout, client.watchdog_timeout))
+
+        task = asyncio.create_task(worker())
+        await entered.wait()
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        assert (client.timeout, client.watchdog_timeout) == (60, 60)
+
+    asyncio.run(run())
+    assert after_scope == [(60, 60)]
+
+
+def test_global_default_update_during_a_scope_is_not_overwritten_on_exit():
+    client = _timeout_client()
+    with client_request_timeout(client, 600):
+        client.timeout = 90
+        client.watchdog_timeout = 80
+        assert (client.timeout, client.watchdog_timeout) == (600, 120)
+        assert GeminiClient.timeout.__get__(client, type(client)) == 90
+    assert (client.timeout, client.watchdog_timeout) == (90, 80)
+
+
+def test_scoped_reconnect_preserves_concurrent_default_updates_and_background_tasks(monkeypatch):
+    client = _timeout_client()
+    background_tasks = []
+
+    async def run():
+        entered, release = asyncio.Event(), asyncio.Event()
+
+        async def background():
+            await release.wait()
+            return client.timeout, client.watchdog_timeout
+
+        async def init(self, **kwargs):
+            assert (kwargs["timeout"], kwargs["watchdog_timeout"]) == (60, 60)
+            background_tasks.append(asyncio.create_task(background()))
+            entered.set()
+            await release.wait()
+            self.timeout = kwargs["timeout"]
+            self.watchdog_timeout = kwargs["watchdog_timeout"]
+
+        monkeypatch.setattr(GeminiClient, "init", init)
+        monkeypatch.setattr(client, "_install_thinking_transport", lambda: None)
+
+        async def worker():
+            with client_request_timeout(client, 600):
+                await client.init(timeout=client.timeout, watchdog_timeout=client.watchdog_timeout)
+                assert client.timeout == 600
+
+        task = asyncio.create_task(worker())
+        await entered.wait()
+        client.timeout = 90
+        client.watchdog_timeout = 80
+        release.set()
+        await task
+        assert (client.timeout, client.watchdog_timeout) == (90, 80)
+        assert await background_tasks[0] == (90, 80)
+
+    asyncio.run(run())
+
+
+def test_cancelled_scoped_reconnect_clears_initialization_guard(monkeypatch):
+    client = _timeout_client()
+
+    async def run():
+        entered = asyncio.Event()
+
+        async def init(_self, **_kwargs):
+            entered.set()
+            await asyncio.Event().wait()
+
+        monkeypatch.setattr(GeminiClient, "init", init)
+
+        async def worker():
+            try:
+                with client_request_timeout(client, 600):
+                    await client.init(timeout=600)
+            finally:
+                client.timeout = 95
+
+        task = asyncio.create_task(worker())
+        await entered.wait()
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        assert client.timeout == 95
+
+    asyncio.run(run())
 
 
 # ---------------------------------------------------------------------------
@@ -123,53 +307,17 @@ def test_encode_learning_goa_wraps_mode_id():
 # ---------------------------------------------------------------------------
 
 
-def test_inject_web_request_options_returns_unchanged_when_f_req_not_str():
-    """f.req 非 str（如 dict）→ 原样返回，不修改。"""
-    request_data = {"at": "token", "f.req": {"not": "a string"}}
-    result = inject_web_request_options(
-        request_data, WebRequestOptions(thinking_mode_id=1, thinking_level_id=2)
-    )
-    assert result is request_data
-
-
-def test_inject_web_request_options_returns_unchanged_when_outer_not_list():
-    """f.req 解析后非 list → 原样返回。"""
-    request_data = {"f.req": orjson.dumps("not-a-list").decode("utf-8")}
-    result = inject_web_request_options(
-        request_data, WebRequestOptions(thinking_mode_id=1, thinking_level_id=2)
-    )
-    assert result is request_data
-
-
-def test_inject_web_request_options_returns_unchanged_when_outer_too_short():
-    """outer_request 长度 < 2 → 原样返回。"""
-    request_data = {"f.req": orjson.dumps([None]).decode("utf-8")}
-    result = inject_web_request_options(
-        request_data, WebRequestOptions(thinking_mode_id=1, thinking_level_id=2)
-    )
-    assert result is request_data
-
-
-def test_inject_web_request_options_returns_unchanged_when_inner_payload_not_str():
-    """outer[1] 非 str → 原样返回。"""
-    request_data = {"f.req": orjson.dumps([None, 42]).decode("utf-8")}
-    result = inject_web_request_options(
-        request_data, WebRequestOptions(thinking_mode_id=1, thinking_level_id=2)
-    )
-    assert result is request_data
-
-
-def test_inject_web_request_options_returns_unchanged_when_inner_not_list():
-    """inner_request 解析后非 list → 原样返回。"""
-    request_data = {
-        "f.req": orjson.dumps(
-            [None, orjson.dumps("not-a-list").decode("utf-8")]
-        ).decode("utf-8")
-    }
-    result = inject_web_request_options(
-        request_data, WebRequestOptions(thinking_mode_id=1, thinking_level_id=2)
-    )
-    assert result is request_data
+@pytest.mark.parametrize("request_data", [
+    {}, {"f.req": {"not": "a string"}}, {"f.req": "invalid"},
+    {"f.req": '"not-a-list"'}, {"f.req": "[null]"}, {"f.req": "[null,42]"},
+    {"f.req": '[null,"invalid"]'}, _make_request_data("not-a-list"),
+    _make_request_data([]), _make_request_data([None] * 81),
+])
+@pytest.mark.parametrize("level_id", [1, 2, 3, 4])
+def test_changed_thinking_request_shape_is_rejected(request_data, level_id):
+    with pytest.raises(ThinkingRequestShapeError) as error:
+        inject_web_request_options(request_data, WebRequestOptions(thinking_mode_id=1, thinking_level_id=level_id))
+    assert error.value.code == "UPSTREAM_CHANGED"
 
 
 def test_inject_web_request_options_raises_when_learning_metadata_incomplete():
@@ -318,6 +466,50 @@ def test_set_web_request_chinese_thinking_level_resolves():
     assert opts.thinking_level_id == 1
 
 
+@pytest.mark.parametrize("level,expected", [
+    ("low", 1), ("medium", 4), ("high", 2), ("低点", 1), ("中等", 4), ("高点", 2),
+    ("standard", 1), ("extended", 2), ("标准", 1), ("扩展", 2), ("deep_think", 3),
+])
+def test_thinking_levels_follow_the_observed_enum(level, expected):
+    assert resolve_thinking_level_id(level) == expected
+
+
+def test_dynamic_model_category_precedes_legacy_name_metadata():
+    model = SimpleNamespace(model_number=8, model_name="gemini-3-flash", display_name="Runtime model")
+    assert resolve_thinking_mode_id(model) == 8
+
+
+def test_unknown_model_with_explicit_thinking_is_not_silently_ignored():
+    client = _new_client()
+    with pytest.raises(ValueError, match="no observed thinking category"):
+        client._set_web_request("not-in-the-runtime-catalog", "medium", None)
+    assert _web_request.get() is None
+
+
+@pytest.mark.parametrize("has_session", [False, True])
+def test_thinking_header_synchronization_preserves_model_and_session(has_session):
+    selector = orjson.loads(_model_headers(8)[MODEL_HEADER_KEY])
+    if has_session:
+        selector.extend([1, "offline-instance"])
+    original = {MODEL_HEADER_KEY: orjson.dumps(selector).decode(), "unrelated": "kept"}
+    patched = synchronize_thinking_headers(original, mode_id=8, level_id=4)
+    expected = list(selector)
+    if has_session:
+        expected[15] = 4
+    else:
+        expected.append(4)
+    assert orjson.loads(patched[MODEL_HEADER_KEY]) == expected
+    assert patched["unrelated"] == "kept"
+    assert orjson.loads(original[MODEL_HEADER_KEY]) == selector
+    assert original is not patched
+
+
+@pytest.mark.parametrize("header", [None, "invalid", "{}", "[]", "[null]", '[null,null,null,null,"id"]'])
+def test_changed_thinking_header_shape_is_rejected(header):
+    with pytest.raises(ThinkingRequestShapeError):
+        synchronize_thinking_headers({MODEL_HEADER_KEY: header}, mode_id=8, level_id=4)
+
+
 # ---------------------------------------------------------------------------
 # _with_learning_prompt + _prefix_learning_prompt
 # ---------------------------------------------------------------------------
@@ -449,6 +641,33 @@ def test_generate_content_resets_token_on_exception(monkeypatch):
         asyncio.run(
             client.generate_content("p", model="flash", thinking_level="standard")
         )
+    assert _web_request.get() is None
+
+
+def test_concurrent_thinking_levels_keep_request_scope_isolated(monkeypatch):
+    client = _new_client()
+
+    async def run():
+        both_entered = asyncio.Event()
+        active = []
+
+        async def fake_generate(self, *args, **kwargs):
+            request = _web_request.get()
+            active.append(request.thinking_level_id)
+            if len(active) == 2:
+                both_entered.set()
+            await both_entered.wait()
+            assert _web_request.get() is request
+            return request.thinking_level_id
+
+        monkeypatch.setattr(GeminiClient, "generate_content", fake_generate)
+        results = await asyncio.gather(
+            client.generate_content("fixture", model="flash", thinking_level="medium"),
+            client.generate_content("fixture", model="flash", thinking_level="high"),
+        )
+        assert results == [4, 2]
+
+    asyncio.run(run())
     assert _web_request.get() is None
 
 
@@ -612,8 +831,7 @@ def test_install_thinking_transport_skips_when_url_not_generate():
     assert "x-goog-ext-73010990-jspb" not in (calls[0].get("headers") or {})
 
 
-def test_install_thinking_transport_skips_when_data_not_dict():
-    """url==GENERATE 但 data 非 dict → 调原始 stream，不注入。"""
+def test_install_thinking_transport_rejects_malformed_form_before_io():
     client = _new_client()
     _web_request.set(WebRequestOptions(thinking_mode_id=1, thinking_level_id=1))
     calls = []
@@ -625,8 +843,9 @@ def test_install_thinking_transport_skips_when_data_not_dict():
     session = SimpleNamespace(stream=original_stream)
     client.client = session
     client._install_thinking_transport()
-    session.stream("POST", Endpoint.GENERATE, data="not-a-dict")
-    assert "x-goog-ext-73010990-jspb" not in (calls[0].get("headers") or {})
+    with pytest.raises(ThinkingRequestShapeError):
+        session.stream("POST", Endpoint.GENERATE, data="not-a-dict")
+    assert calls == []
 
 
 def test_install_thinking_transport_injects_on_generate_with_dict_data():
@@ -643,7 +862,8 @@ def test_install_thinking_transport_injects_on_generate_with_dict_data():
     client.client = session
     client._install_thinking_transport()
     request_data = _make_request_data()
-    session.stream("POST", Endpoint.GENERATE, data=request_data)
+    session.stream("POST", Endpoint.GENERATE, data=request_data,
+                   headers=_model_headers())
     injected = calls[0]
     # data 被注入（f.req 改变）
     assert injected["data"]["f.req"] != request_data["f.req"]
@@ -667,7 +887,7 @@ def test_install_thinking_transport_preserves_existing_headers():
     session.stream(
         "POST", Endpoint.GENERATE,
         data=_make_request_data(),
-        headers={"existing": "kept"},
+        headers={"existing": "kept", **_model_headers()},
     )
     assert calls[0]["headers"]["existing"] == "kept"
     assert calls[0]["headers"]["x-goog-ext-73010990-jspb"] == "[0,0,0]"

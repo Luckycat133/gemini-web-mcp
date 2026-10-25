@@ -94,6 +94,7 @@ def _sanitize_profiles(browser: str, raw_profiles: list[dict[str, Any]]) -> list
             "chrome_selected_profile": item.get("chrome_selected_profile"),
             "chrome_selected_profile_directory": item.get("chrome_selected_profile_directory"),
             "account_available": item.get("account_available"),
+            "validation_error": "ACCOUNT_VALIDATION_FAILED" if item.get("validation_error") else None,
             "scheduled_registry_count": item.get("scheduled_registry_count"),
             "error": item.get("error"),
             "error_code": item.get("error_code"),
@@ -117,7 +118,11 @@ def _collect_profiles(
 
 
 def select_recommended_profile(browser_profiles: list[dict[str, Any]]) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
-    profiles_with_psid = [item for item in browser_profiles if item.get("has_psid")]
+    profiles_with_psid = [
+        item for item in browser_profiles
+        if item.get("has_psid") and item.get("account_available") is not False
+        and not item.get("error") and not item.get("validation_error")
+    ]
     selected_profile = next((item for item in browser_profiles if item.get("chrome_selected_profile")), None)
     recommended_profile = next(
         (item for item in profiles_with_psid if item.get("account_available") is True),
@@ -147,6 +152,14 @@ def _browser_profile_check(browser: str, validate_browser: bool, browser_profile
             f"No {browser} profile has a Gemini PSID",
             profiles=browser_profiles,
         )
+    if recommended_profile is None:
+        return doctor_check(
+            "browser_profile_alignment", "warn",
+            "Gemini cookies were found, but no profile has usable account validation evidence",
+            selected_profile=selected_profile.get("profile") if selected_profile else None,
+            validate_browser=validate_browser,
+            profiles=browser_profiles,
+        )
     if selected_profile and not selected_profile.get("has_psid"):
         return doctor_check(
             "browser_profile_alignment",
@@ -156,6 +169,18 @@ def _browser_profile_check(browser: str, validate_browser: bool, browser_profile
             selected_profile_directory=selected_profile.get("chrome_selected_profile_directory"),
             recommended_profile=recommended_profile.get("profile") if recommended_profile else None,
             validate_browser=validate_browser,
+        )
+    if selected_profile and (selected_profile.get("account_available") is False or selected_profile.get("validation_error")):
+        return doctor_check(
+            "browser_profile_alignment", "warn", "Chrome selected profile failed Gemini account validation",
+            selected_profile=selected_profile.get("profile"),
+            recommended_profile=recommended_profile.get("profile"), validate_browser=validate_browser,
+        )
+    if recommended_profile.get("account_available") is not True:
+        return doctor_check(
+            "browser_profile_alignment", "warn", "Gemini cookies were found; account availability is unvalidated",
+            selected_profile=selected_profile.get("profile") if selected_profile else None,
+            recommended_profile=recommended_profile.get("profile"), validate_browser=validate_browser,
         )
     return doctor_check(
         "browser_profile_alignment",
@@ -193,7 +218,10 @@ def _recommendations(browser: str, validate_browser: bool, profile_state: dict[s
     ffprobe_path = profile_state["ffprobe_path"]
 
     recommendations: list[str] = []
-    if recommended_profile and selected_profile and not selected_profile.get("has_psid"):
+    if recommended_profile and selected_profile and (
+        not selected_profile.get("has_psid") or selected_profile.get("account_available") is False
+        or selected_profile.get("validation_error")
+    ):
         recommendations.append(
             f'Use gemini_get_cookie_from_browser(browser="{browser}", profile="{recommended_profile.get("profile")}") before live account checks.'
         )
@@ -201,6 +229,8 @@ def _recommendations(browser: str, validate_browser: bool, profile_state: dict[s
         recommendations.append(
             f'Load cookies with gemini_get_cookie_from_browser(browser="{browser}", profile="{recommended_profile.get("profile")}").'
         )
+    elif validate_browser and not recommended_profile:
+        recommendations.append("Refresh Gemini sign-in in a Chrome profile and run account validation again.")
     if validate_browser is False:
         recommendations.append(
             "Run gemini_doctor(validate_browser=true) when you need live account/profile validation."
@@ -279,6 +309,8 @@ def format_doctor_markdown(payload: dict[str, Any]) -> str:
                 f"selected={selected}, account={account_text}, "
                 f"scheduled_registry_count={item.get('scheduled_registry_count', 'unvalidated')}"
             )
+            if item.get("validation_error"):
+                lines.append(f"  validation_error={item['validation_error']}")
     if payload.get("recommendations"):
         lines.extend(["", "### Recommendations"])
         lines.extend(f"- {item}" for item in payload["recommendations"])

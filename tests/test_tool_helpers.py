@@ -7,8 +7,8 @@
   / `parse_response` / `get_stream_text_piece`：零直接覆盖
 - `constants.resolve_model_name` / `normalize_model_alias` / `resolve_media_request`
   / `describe_model_name` / `supported_learning_modes`：纯查表函数零覆盖
-- `media._safe_media_filename` / `_media_timeout` / `_set_client_timeouts`
-  / `_restore_client_timeouts` / `_prepend_backend_note` / `_media_from_music_card`：零覆盖
+- `media._safe_media_filename` / `_media_timeout`
+  / `_prepend_backend_note` / `_media_from_music_card`：零覆盖
 - `file._validate_url`：4 分支纯函数零覆盖；`_validate_file_path`：纯转发壳
 
 本文件以纯输入输出断言为主，仅在 `_media_from_music_card` 用 SimpleNamespace fake client。
@@ -30,9 +30,7 @@ from src.tools.media import (
     _media_from_music_card,
     _media_timeout,
     _prepend_backend_note,
-    _restore_client_timeouts,
     _safe_media_filename,
-    _set_client_timeouts,
 )
 from src.tools.utils import (
     extract_remote_chat_id,
@@ -335,6 +333,8 @@ def test_resolve_model_name_known_alias_returns_configured_name():
     assert resolve_model_name("flash-lite") == "Flash-Lite"
     assert resolve_model_name("3.5 Flash-Lite") == "Flash-Lite"
     assert resolve_model_name("3.8 Flash") == "gemini-3-flash"
+    assert resolve_model_name("thinking") == "gemini-3-flash"
+    assert resolve_model_name("gemini-3-flash-thinking") == "gemini-3-flash"
 
 
 def test_resolve_model_name_unknown_passthrough():
@@ -376,7 +376,7 @@ def test_describe_model_name_unknown_returns_unspecified():
 
 def test_supported_learning_modes_returns_expected_string():
     """返回稳定的 user-facing 模式串。"""
-    expected = "interactive_quiz/quiz, flashcards, practice_test, study_guide/exam_prep"
+    expected = "guided_learning/guided, interactive_quiz/quiz, flashcards, practice_test, study_guide/exam_prep"
     assert supported_learning_modes() == expected
 
 
@@ -423,9 +423,9 @@ def test_resolve_media_request_music_thinking_level_does_not_claim_backend():
 def test_resolve_media_request_video_does_not_claim_omni_mode():
     """通用聊天的视频参数不能冒充 Omni 视频模式。"""
     out = resolve_media_request("flash", "video")
-    assert out["backend_label"] == "Gemini Web generic chat"
+    assert out["backend_label"] == "Gemini Web video feature"
     assert out["effective_alias"] == "flash"
-    assert "未证实" in out["note"]
+    assert "实际后端版本" in out["note"]
 
 
 # ---------------------------------------------------------------------------
@@ -486,72 +486,6 @@ def test_media_timeout_non_image_default_600():
     """非 image + 无显式值 → 600。"""
     assert _media_timeout("music", None) == 600
     assert _media_timeout("video", None) == 600
-
-
-# ---------------------------------------------------------------------------
-# media._set_client_timeouts / _restore_client_timeouts
-# ---------------------------------------------------------------------------
-
-
-def test_set_client_timeouts_no_previous_attributes_returns_none_pair():
-    """client 无 timeout/watchdog_timeout 属性 → 返回 (None, None)，不设置。"""
-    client = SimpleNamespace()
-    prev = _set_client_timeouts(client, 300)
-    assert prev == (None, None)
-    assert not hasattr(client, "timeout")
-    assert not hasattr(client, "watchdog_timeout")
-
-
-def test_set_client_timeouts_takes_max_of_previous_and_requested():
-    """previous_timeout=100, requested=300 → 设为 300（取 max）。"""
-    client = SimpleNamespace(timeout=100.0, watchdog_timeout=200.0)
-    prev = _set_client_timeouts(client, 300)
-    assert prev == (100.0, 200.0)
-    assert client.timeout == 300.0
-    # watchdog = min(max(200, 120), max(300, 120)) = min(200, 300) = 200
-    assert client.watchdog_timeout == 200.0
-
-
-def test_set_client_timeouts_keeps_smaller_previous_when_requested_smaller():
-    """previous=400, requested=200 → 设为 400（取 max，不降低）。"""
-    client = SimpleNamespace(timeout=400.0, watchdog_timeout=400.0)
-    _set_client_timeouts(client, 200)
-    assert client.timeout == 400.0
-    # watchdog = min(max(400, 120), max(200, 120)) = min(400, 200) = 200
-    assert client.watchdog_timeout == 200.0
-
-
-def test_set_client_timeouts_watchdog_floored_at_120():
-    """watchdog 计算下限 120（即使 requested < 120）。"""
-    client = SimpleNamespace(timeout=50.0, watchdog_timeout=50.0)
-    _set_client_timeouts(client, 30)
-    # watchdog = min(max(50, 120), max(30, 120)) = min(120, 120) = 120
-    assert client.watchdog_timeout == 120.0
-
-
-def test_restore_client_timeouts_writes_back_previous_values():
-    """restore 把 prev 值写回 client 属性。"""
-    client = SimpleNamespace(timeout=999.0, watchdog_timeout=999.0)
-    _restore_client_timeouts(client, 100.0, 200.0)
-    assert client.timeout == 100.0
-    assert client.watchdog_timeout == 200.0
-
-
-def test_restore_client_timeouts_skips_none_prev():
-    """prev 为 None → 不写回（保持 client 当前值）。"""
-    client = SimpleNamespace(timeout=999.0, watchdog_timeout=999.0)
-    _restore_client_timeouts(client, None, None)
-    assert client.timeout == 999.0
-    assert client.watchdog_timeout == 999.0
-
-
-def test_set_then_restore_roundtrip_restores_original():
-    """set → restore 完整往返恢复原值。"""
-    client = SimpleNamespace(timeout=100.0, watchdog_timeout=200.0)
-    prev = _set_client_timeouts(client, 500)
-    _restore_client_timeouts(client, *prev)
-    assert client.timeout == 100.0
-    assert client.watchdog_timeout == 200.0
 
 
 # ---------------------------------------------------------------------------

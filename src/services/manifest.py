@@ -60,6 +60,7 @@ MANIFEST_TOOL_NAMES = {"gemini_get_tool_manifest"}
 HISTORY_FACADE_TOOL_NAMES = {"gemini_history"}
 NOTEBOOKS_FACADE_TOOL_NAMES = {"gemini_notebooks"}
 ACCOUNT_INVENTORY_TOOL_NAMES = {"gemini_account_inventory"}
+ACCOUNT_ADMIN_TOOL_NAMES = {"gemini_account"}
 CHAT_TOOL_NAMES = {
     "gemini_chat",
     "gemini_chat_stream",
@@ -76,7 +77,7 @@ HISTORY_READ_TOOL_NAMES = {
     "gemini_read_chat",
     "gemini_export_chat",
 }
-HISTORY_WRITE_TOOL_NAMES = {"gemini_cleanup_test_artifacts", "gemini_delete_chat"}
+HISTORY_WRITE_TOOL_NAMES = {"gemini_cleanup_test_artifacts", "gemini_delete_chat", "gemini_update_chat"}
 NOTEBOOKS_READ_TOOL_NAMES = {"gemini_list_notebooks", "gemini_list_notebook_chats"}
 NOTEBOOKS_WRITE_TOOL_NAMES = {"gemini_move_chat_to_notebook"}
 ACCOUNT_READ_TOOL_NAMES = {
@@ -91,16 +92,18 @@ ACCOUNT_READ_TOOL_NAMES = {
     *NOTEBOOKS_READ_TOOL_NAMES,
 }
 SCHEDULED_READ_TOOL_NAMES = {"gemini_list_scheduled_actions", "gemini_get_scheduled_action"}
-SCHEDULED_WRITE_TOOL_NAMES = {"gemini_create_scheduled_action", "gemini_delete_scheduled_action"}
+SCHEDULED_WRITE_TOOL_NAMES = {"gemini_create_scheduled_action", "gemini_delete_scheduled_action", "gemini_scheduled"}
 GEMS_TOOL_NAMES = {"gemini_manage_gems"}
 MANAGE_TOOL_LAYER_NAMES = {
     "history-read": HISTORY_FACADE_TOOL_NAMES,
     "history-write": HISTORY_WRITE_TOOL_NAMES,
+    "history-update": {"gemini_update_chat"},
     "history-granular": HISTORY_READ_TOOL_NAMES,
     "notebooks-read": NOTEBOOKS_FACADE_TOOL_NAMES,
     "notebooks-write": NOTEBOOKS_WRITE_TOOL_NAMES,
     "notebooks-granular": NOTEBOOKS_READ_TOOL_NAMES,
     "account-read": ACCOUNT_INVENTORY_TOOL_NAMES,
+    "account-write": ACCOUNT_ADMIN_TOOL_NAMES,
     "account-granular": ACCOUNT_READ_TOOL_NAMES | SCHEDULED_READ_TOOL_NAMES,
     "scheduled-read": SCHEDULED_READ_TOOL_NAMES,
     "scheduled-write": SCHEDULED_WRITE_TOOL_NAMES,
@@ -112,6 +115,7 @@ ALL_MANAGE_TOOL_NAMES = (
     | HISTORY_READ_TOOL_NAMES
     | HISTORY_WRITE_TOOL_NAMES
     | ACCOUNT_INVENTORY_TOOL_NAMES
+    | ACCOUNT_ADMIN_TOOL_NAMES
     | ACCOUNT_READ_TOOL_NAMES
     | NOTEBOOKS_FACADE_TOOL_NAMES
     | SCHEDULED_READ_TOOL_NAMES
@@ -230,6 +234,15 @@ MANIFEST_WORKFLOWS = [
         "notes": "Read-only local/profile diagnostics before live account workflows; use validate_browser=true only when account validation is needed.",
     },
     {
+        "name": "media_creation_and_cleanup",
+        "steps": [
+            "gemini_generate_media or gemini_generate_music",
+            "inspect requested-kind local artifacts and verification",
+            "inspect domain_result.meta.details.cleanup",
+        ],
+        "notes": "Primary and compact creation select native image/video/music modes. Text or search WebImage alone cannot satisfy generation. New source chats with a finished operation's outputs saved and verified, or definitive empty output, are cleaned immediately with bounded deletion read-back; completed/already_completed proves absence. Queued requests retain their source even with ready local output. Remote-only, unverified, partial-save, failed recovery reads and interrupted results also retain recovery. Failed or timed-out requests preserve an observed source_chat_id; a missing ID does not prove no chat was created. Inspect known recovery evidence before deciding on another generation; never scan unrelated history or automatically restart. Primary retain_chat=true or a positive delete_after_seconds overrides immediate cleanup; delays persist in the local metadata-only SQLite queue and resume for the same credential scope after restart. Pending/failed cleanup is not verified deletion.",
+    },
+    {
         "name": "test_artifact_cleanup",
         "steps": [
             "gemini_cleanup_test_artifacts with dry_run=true",
@@ -264,7 +277,7 @@ def _configured_manage_layers(configured: list[str]) -> set[str]:
         "admin": {"all"},
         "history": {"history-read"},
         "history-read": {"history-read"},
-        "history-organize": {"history-read", "notebooks-read", "notebooks-write"},
+        "history-organize": {"history-read", "history-update", "notebooks-read", "notebooks-write"},
         "account-read": {"account-read"},
         "scheduled-read": {"scheduled-read"},
         "scheduled-admin": {"scheduled-read", "scheduled-write"},
@@ -313,11 +326,15 @@ def _tool_availability(tool: dict[str, Any]) -> list[str]:
     if name in HISTORY_FACADE_TOOL_NAMES:
         return ["history", "history-organize", "manage", "all"]
     if name in NOTEBOOKS_FACADE_TOOL_NAMES:
-        return ["history-organize", "account-read", "manage", "all"]
+        return ["history-organize", "manage", "all"]
     if name in ACCOUNT_INVENTORY_TOOL_NAMES:
         return ["account-read", "manage", "all"]
+    if name in ACCOUNT_ADMIN_TOOL_NAMES:
+        return ["admin", "manage", "all"]
     if name in HISTORY_READ_TOOL_NAMES:
         return ["manage", "all"]
+    if name == "gemini_update_chat":
+        return ["history-organize", "admin", "manage", "all"]
     if name in HISTORY_WRITE_TOOL_NAMES:
         return ["admin", "manage", "all"]
     if name in NOTEBOOKS_READ_TOOL_NAMES:
@@ -362,7 +379,10 @@ def tool_manifest_payload(scope: ManifestScope = "all") -> dict[str, Any]:
         if filter_scope == "all"
         or item["group"] == filter_scope
         or (filter_scope == "core" and item["group"] == "core")
-        or (filter_scope == "notebooks" and item["name"] in NOTEBOOKS_READ_TOOL_NAMES | NOTEBOOKS_WRITE_TOOL_NAMES)
+        or (
+            filter_scope == "notebooks"
+            and item["name"] in NOTEBOOKS_FACADE_TOOL_NAMES | NOTEBOOKS_READ_TOOL_NAMES | NOTEBOOKS_WRITE_TOOL_NAMES
+        )
         or (filter_scope == "scheduled" and item["name"] in SCHEDULED_READ_TOOL_NAMES | SCHEDULED_WRITE_TOOL_NAMES)
     ]
     groups: dict[str, int] = {}
@@ -452,9 +472,12 @@ def web_capabilities_payload() -> dict[str, Any]:
             "gemini_search_chats",
             "gemini_read_chat",
             "gemini_export_chat",
+            "gemini_update_chat",
             "gemini_delete_chat",
         ],
         "account": [
+            "gemini_account",
+            "gemini_scheduled",
             "gemini_account_inventory",
             "gemini_inspect_account",
             "gemini_get_tool_manifest",

@@ -27,6 +27,8 @@ import json
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
+from tests._account_rpc_fakes import scheduled_ack_response, scheduled_read
+
 from src.adapters.mcp_sdk import MCPServer
 
 import src.tools.manage as manage_tools
@@ -240,6 +242,7 @@ def test_payload_chats_dry_run_false_deletes_successfully():
     client = _make_client_with_chats([{"id": "codex-1", "title": "T"}])
     body = [None, None, []]
     client._batch_execute = AsyncMock(return_value=SimpleNamespace(
+        status_code=200,
         text=json.dumps([["wrb.fr", "MaZiqc", json.dumps(body), None, None, None, "generic"]]),
     ))
 
@@ -429,16 +432,16 @@ def test_payload_scheduled_dry_run_matches(monkeypatch):
 def test_payload_scheduled_dry_run_false_deletes(monkeypatch):
     """target=scheduled + dry_run=False + task_state_id=6 → deleted=True, verification_status='deleted_state_by_id'。"""
     client = MagicMock()
-    client._batch_execute = AsyncMock(return_value=SimpleNamespace(text='["wrb.fr","Q4Gw3c","body"]'))
+    client._batch_execute = AsyncMock(return_value=scheduled_ack_response())
 
     entries = [{"id": "task-codex-1", "title": "Codex", "instructions": "", "schedule_label": ""}]
     monkeypatch.setattr(
         manage_tools, "_fetch_scheduled_registry",
-        AsyncMock(return_value=(entries, {"ok": True})),
+        AsyncMock(return_value=scheduled_read(entries)),
     )
     monkeypatch.setattr(
         manage_tools, "_fetch_scheduled_task_by_id",
-        AsyncMock(return_value=({"task_state_id": 6}, {})),
+        AsyncMock(return_value=scheduled_read({"id": "task-codex-1", "task_state_id": 6})),
     )
     monkeypatch.setattr(manage_tools, "_extract_rpc_bodies", lambda *a, **kw: ["body"])
 
@@ -453,11 +456,11 @@ def test_payload_scheduled_dry_run_false_deletes(monkeypatch):
 
 def test_payload_scheduled_failed_read_back_is_not_counted_deleted(monkeypatch):
     client = MagicMock()
-    client._batch_execute = AsyncMock(return_value=SimpleNamespace(text="response", status_code=200))
+    client._batch_execute = AsyncMock(return_value=scheduled_ack_response())
     entry = {"id": "task-codex-1", "title": "Codex", "instructions": "", "schedule_label": ""}
     registry = AsyncMock(side_effect=[([entry], {}), RuntimeError("read-back unavailable")])
     monkeypatch.setattr(manage_tools, "_fetch_scheduled_registry", registry)
-    monkeypatch.setattr(manage_tools, "_fetch_scheduled_task_by_id", AsyncMock(return_value=(None, {})))
+    monkeypatch.setattr(manage_tools, "_fetch_scheduled_task_by_id", AsyncMock(return_value=scheduled_read(None)))
     monkeypatch.setattr(manage_tools, "_extract_rpc_bodies", lambda *_args: [["ok"]])
 
     payload = asyncio.run(_cleanup_test_artifacts_payload(

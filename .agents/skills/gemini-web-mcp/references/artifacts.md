@@ -1,95 +1,73 @@
 # Artifact Acceptance and Handoff
 
-Load this reference for image, video, audio, file, webpage, data, or report outputs.
+Read when consuming generated media, a report or a file-producing result.
 
-## Principle
+## Result Envelopes
 
-A generated result is useful when the calling agent can consume it. Response prose is not an Artifact.
+Normalize the result before inspecting domain fields:
 
-The agent should normally use the Artifact in the user's requested workflow rather than merely report a path.
+| Surface | Authoritative domain envelope |
+| --- | --- |
+| Focused create/account | top-level MCP `structuredContent`: `ok`, `data`, `error`, `warnings`, `meta` |
+| Focused assist, primary and compact content-block tools | first block's `content[0]._meta.domain_result`; its structured representation may be `structuredContent.result[0]._meta.domain_result` |
 
-Examples:
+Focused create/account also preserve compatibility block metadata. Follow the
+registered `outputSchema`; a transport/container wrapper is not itself the
+domain result. Some legacy tools return only text: do not invent structured
+verification when it is absent.
 
-- insert the image into a document or website;
-- replace the old asset in an app;
-- attach the video to the project;
-- use the audio file in the requested edit;
-- read a research report and cite it;
-- pass a generated file to another tool.
-
-## Structured Fields To Inspect
-
-```text
-domain_result.ok, error, meta.operation_state
-domain_result.data.state
-domain_result.data.artifacts[].id, kind, state, uri, local_path
-domain_result.data.artifacts[].mime_type, size_bytes, width, height, duration_seconds
-domain_result.data.artifacts[].source_chat_id
-domain_result.data.artifacts[].requested_backend, request_model, effective_backend, observed_backend
-domain_result.data.artifacts[].verification.status
-```
-
-The tools attach `domain_result` to the first content block's `_meta`; MCP clients may also expose it through structured content. Many fields are optional or apply only to certain media. Keep requested, routed/effective, and observed backend evidence separate.
-
-## State Semantics
-
-- `local` — a local file is available.
-- `remote` — an upstream URI was observed; access has not necessarily been independently verified, and it is not a local file.
-- `queued` — generation has started; no completed Artifact exists yet.
-- `partial` is an operation state when some locations failed verification; it is not an Artifact state. Check the result's warnings and individual Artifact states.
-- `empty` — no usable Artifact was observed.
-- `failed` — the operation failed.
-
-Do not convert `queued`, `partial`, or `empty` into completed success.
-
-## Local File Verification
-
-Before treating a local Artifact as complete:
-
-1. resolve the path;
-2. confirm it exists;
-3. confirm it is a regular non-empty file;
-4. confirm it is inside the requested destination when a destination was specified;
-5. inspect MIME/type;
-6. inspect dimensions for images;
-7. inspect duration when available for audio/video;
-8. preserve the structured verification result.
-
-For generated images, inspect actual file bytes rather than trusting a requested
-suffix. The primary media saver now aligns a mismatched image extension with
-the detected format (for example, JPEG bytes requested as `.png` become `.jpg`).
-
-## Resource Links
-
-When the MCP client supports resource links or embedded resources, prefer returning them alongside structured metadata. The local path remains a practical fallback for local stdio agents.
-
-Do not base workflow completion on whether a particular chat UI renders the preview. The Artifact contract is the source of truth.
-
-## Agent Handoff
-
-### Search and Understanding
-
-These normally return information to the calling agent. Synthesize it and continue the task. A file is optional unless the user asked for a durable deliverable.
-
-### Image, Video, and Music
-
-These normally return files or resource links. Use them in the next step. Do not end with only “saved to …” when the user's request includes a downstream use.
-
-### Deep Research
-
-Prefer a Markdown report Artifact plus structured operation/source metadata. The calling agent should read the report, extract conclusions and sources, and create the user's requested deliverable.
-
-## Failure Handoff
-
-When the Artifact is unavailable, return:
+From the envelope, inspect:
 
 ```text
-state
-error code
-retryability
-observed upstream identifiers
-what evidence exists
-the next recovery action
+ok, error, warnings, meta.operation_state, meta.verification_status
+data.state, data.artifacts[], data.input_artifacts[]
+artifacts[].id, kind, state, uri, local_path, verification
+artifacts[].mime_type, size_bytes, width, height, duration_seconds
+artifacts[].source_chat_id, requested_backend, request_model, effective_backend, observed_backend
 ```
 
-Do not invent a local file, MIME type, duration, dimensions, or backend identity.
+Fields are optional by result type. Keep requested/routed backend evidence
+separate from the backend actually observed. Input artifacts identify submitted
+material; they cannot satisfy a generated-output requirement.
+
+## Readiness and Verification
+
+| State | Meaning |
+| --- | --- |
+| `local` | a local file location was observed; inspect verification and current availability |
+| `remote` | a URI was observed; this does not establish local availability or access |
+| `queued` | processing remains incomplete, even if a separate local artifact is already usable |
+| `empty` / `failed` | no usable output or a failed artifact-producing request |
+
+`partial` is an operation state, not an Artifact state. Inspect individual
+outputs and warnings; one saved file does not establish that all requested
+outputs completed. A path or URI alone is insufficient.
+
+Accept a matching output with `verification.status=verified` and an available
+regular, non-empty file at handoff. Check destination containment when the user
+specified a destination. Verification decodes image pixels/WAV content or
+observes an audio/video stream; missing decoders leave `unverified`, and corrupt
+or HTML bytes fail. Repair saving or decoding without repeating generation.
+The filename extension may change to match detected image bytes. Music audio
+and companion video have distinct paths, including when a suffix was requested.
+
+`verified` reports file integrity. Review the media itself against the requested
+content before accepting or publishing it.
+
+Focused/primary media supports `output_dir` and `filename`; compact media uses
+`generated_media/` under the server's working directory. Recovered Research
+reports use `generated_reports/`. Paths belong to the MCP server's filesystem:
+ensure the consuming tool can access the returned location.
+
+## Handoff
+
+Search and understanding normally return information; synthesize it into the
+requested work. When the task includes a destination, pass verified media to
+that document, app, deck or edit. For a standalone media request, deliver the
+artifact with a preview when supported. Read a recovered report before using or
+citing it. UI preview availability does not determine artifact readiness.
+
+Preserve remote/source locators and operation IDs when saving or verification
+fails. Artifact readiness is independent of source-chat cleanup; inspect
+`meta.details.cleanup` separately. See [operations.md](operations.md) for the
+cleanup and recovery contract.

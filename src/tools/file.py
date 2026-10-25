@@ -68,7 +68,10 @@ def _validate_url(url: str) -> tuple[bool, str]:
 
 def _analysis_state(response, outputs: tuple[Artifact, ...], source: Artifact) -> ArtifactState:
     state = classify_artifact_state(response, outputs)
-    return source.state if state == ArtifactState.EMPTY else state
+    text = getattr(response, "text", None)
+    if state == ArtifactState.EMPTY and isinstance(text, str) and text.strip():
+        return source.state
+    return state
 
 
 def _analysis_content(
@@ -289,8 +292,15 @@ def register_file_tools(mcp: MCPServer) -> None:
                 observed_backend=observed_backend_from_response(response),
             )
             data, result = _analysis_success_result(response, source_artifact, model, model_name, "file_analysis")
+            prefix = f"✅ Successfully analyzed {Path(safe_file_path).name}"
+            if data.state == ArtifactState.EMPTY:
+                prefix = "⚠️ Gemini returned no analysis text or output artifacts."
+            elif data.state == ArtifactState.QUEUED:
+                prefix = "⚠️ File analysis is queued; no completed analysis is available yet."
+            elif data.state == ArtifactState.FAILED:
+                prefix = "❌ The analysis input or output artifact could not be verified."
             content = _analysis_content(
-                f"✅ Successfully analyzed {Path(safe_file_path).name}\n\n{result_text}",
+                f"{prefix}\n\n{result_text}",
                 data,
             )
             return attach_domain_result(content, result, use_result_data=True)
@@ -391,6 +401,8 @@ def register_file_tools(mcp: MCPServer) -> None:
                 verification_method="input_uri_provided",
             )
             data, result = _analysis_success_result(response, source_artifact, model, model_name, "url_analysis")
+            if data.state == ArtifactState.EMPTY:
+                result_text = f"⚠️ Gemini returned no analysis text or output artifacts.\n\n{result_text}"
             return attach_domain_result(
                 _analysis_content(result_text, data),
                 result,

@@ -12,7 +12,7 @@ dated Gemini Web observations are documented separately in
 | Group | Tools | Intended use |
 |-------|-------|--------------|
 | `core` | Chat, media, file/URL, Deep Research | Recommended default |
-| `manage` | Chat history, model listing, Gems | Account content management |
+| `manage` | History, notebooks, schedules, Skills, sharing, Library, Canvas, Gems | Account content management |
 | `prompts` | Local prompt library | Optional local helper |
 | `all` | `core` + `manage` | Complete Gemini workflow without local prompt library |
 
@@ -27,20 +27,71 @@ Use narrow `GEMINI_TOOLS` profiles for agent-facing deployments:
 | Profile | Use case |
 |---------|----------|
 | `model` / `chat` | Call Gemini models only; no history, media, file, research, or account tools |
-| `history` | One read-only `gemini_history` facade for list/scan/search/read/export, without delete, scheduled actions, or Gems |
-| `history-organize` | `gemini_history`, read-only `gemini_notebooks`, and the explicit Notebook move operation |
+| `history` | One read-only `gemini_history` facade for list/scan/search/read/export/task_status, without delete, scheduled actions, or Gems |
+| `history-organize` | `gemini_history`, `gemini_update_chat` for rename/pin/unpin, typed `gemini_notebooks`, and the explicit Notebook move operation |
 | `account-read` | One read-only `gemini_account_inventory` facade for links, usage, library, notebooks, scheduled entries, modes, and models |
 | `scheduled-read` | Scheduled-action list/get only |
-| `scheduled-admin` | Scheduled-action list/get/create/delete after explicit authorization |
+| `scheduled-admin` | Typed native Remy create/update/pause/resume/delete and legacy scheduled tools after authorization |
 | `core` | Broad content work: chat, media, file/URL analysis, and Deep Research |
 | `all` | Full maintenance/verification surface; avoid as a default for general agents |
 
 `gemini_get_tool_manifest` reports these profiles in JSON and Markdown output,
 with `availability` and `current_enabled` per tool.
 
+For focused agent deployments, `gemini-mcp-assist` exposes five assistance tools,
+`gemini-mcp-create` exposes seven creation and operation tools, and
+`gemini-mcp-account` exposes seven account facades. Their catalogs and task-first
+Skills are documented in [tools](tools.md) and [client examples](client-examples.md).
+The tables below document the primary surface.
+
+---
+
+## Typed account workflows
+
+The focused account server and primary `all`/`manage` surfaces accept the same
+`request` objects. Compact compatibility uses `account(request=...)` and
+`scheduled(request=...)`. Action-specific schemas reject unrelated arguments.
+
+| Tool / resource | Actions |
+| --- | --- |
+| `gemini_notebooks` | `list`, `chats`, `move`, `get`, `create`, `update`, `delete`, `sources`, `add_source`, `remove_source` |
+| `gemini_scheduled` | `list`, `get`, `create`, `update`, `pause`, `resume`, `delete` with `backend="remy"`; legacy actions remain available |
+| `gemini_account`, `action="skills"` | Nested `list`, `get`, `create`, `update`, `upload` ZIP, `enable`, `disable`, `delete` |
+| `gemini_account`, `action="sharing"` | Nested `list`, `create` from an exact chat, `delete` exact token |
+| `gemini_account`, `action="library_assets"` | Nested paginated `list`, exact `get`, guarded media `delete` |
+| `gemini_account`, `action="canvas"` | Nested `chat_artifacts`, `get`, `versions`, `create`, `edit`, `export` |
+
+For example, `gemini_account` accepts:
+
+```json
+{"request":{"action":"canvas","request":{"action":"edit","artifact_id":"<observed ID>","text":"Replacement document text\n"}}}
+```
+
+Canvas edit replaces the whole plain document, including formatting; it
+preserves whitespace and does not create a version. Unsupported attachment,
+citation and non-document shapes are rejected. Export requires a new absolute
+local path. Native Skills differ from Gems and the local Prompt library. Library deletion
+supports the current media kinds; Canvas/document single-asset deletion is
+unavailable, matching the current Web caller.
+Notebook creation/update supports title and instructions; description writes
+are unavailable. Source indexing can remain `accepted` until independently
+observed ready with matching content. Notebook deletion keeps chats unless
+`delete_chats=true` is explicitly supplied.
+
+Drive, Photos and **NotebookLM** references in focused `gemini_understand`
+use `kind`, a real `resource_id`, `name`, and optional `mime_type`/`url`.
+`kind="notebook"` identifies NotebookLM, not a Gemini Web Notebook. These
+references require existing account access; the tool does not grant access or
+operate the picker. At most ten native/local attachments can be combined.
+
 ---
 
 ## Default Tools (`GEMINI_TOOLS=core`)
+
+For native Tasks, include a history profile (for example `GEMINI_TOOLS=core,history`)
+to read `gemini_history(action="task_status", chat_id=...)` after reconnect.
+Task status is read-only and does not resubmit execution. Unsupported cancel
+semantics are not inferred from chat deletion.
 
 ### Chat
 
@@ -58,18 +109,19 @@ Common chat parameters:
 
 | Parameter | Type | Notes |
 |-----------|------|-------|
-| `model` | `str` | `flash-lite`, `flash`, `pro`; `fast` and `thinking` remain compatibility aliases |
-| `thinking_level` | `str` | `standard` or `extended` |
-| `learning_mode` | `str` | Optional guided-learning companion: `interactive_quiz`/`quiz`, `flashcards`, `practice_test`, `study_guide`/`exam_prep` |
+| `model` | `str` | Stable aliases or a current runtime directory name, including `4 Argon` when available |
+| `thinking_level` | `str` | `low`, `medium`, `high`; `standard=low`, `extended=high` remain compatible |
+| `task_mode` | `bool` | Native Task execution; omitted session values inherit. Read status by exact chat ID; unfinished sources are retained |
+| `learning_mode` | `str` | `guided_learning`/`guided` selects native Guided Learning; existing `interactive_quiz`/`quiz`, `flashcards`, `practice_test`, `study_guide`/`exam_prep` remain companion modes |
 | `image_paths` | `list[str]` | Optional local image attachments |
 | `gem_id` | `str` | Optional Gem ID for one-shot or session creation |
 | `temporary` | `bool` | Use Gemini Web temporary chat behavior |
 | `retain_chat` | `bool` | Keep the remote Gemini chat instead of scheduling cleanup |
 | `delete_after_seconds` | `int` | Override remote chat cleanup delay |
 
-`learning_mode` is implemented as a Web-compatible request injection for the
-observed 2026-06-19 Guided Learning companion. It is available on one-shot and
-session chat tools, including streaming variants.
+Native Guided Learning uses the observed 2026-10-18 Web selector. The older
+companion modes retain their separate request fields. Both are available on
+one-shot and session tools, including streaming variants.
 
 The compatibility names ending in `_stream` describe the Gemini Web transport,
 not MCP incremental delivery. These tools collect the upstream chunks, normalize
@@ -81,7 +133,7 @@ chunk semantics and counts.
 
 | Tool | Purpose |
 |------|---------|
-| `gemini_generate_media` | Generate image, video, or music |
+| `gemini_generate_media` | Native image, reference-image editing, video, and music creation with verified local artifacts |
 | `gemini_generate_music` | Convenience wrapper for music generation |
 
 Current Gemini Web media routing:
@@ -91,13 +143,16 @@ Current Gemini Web media routing:
 | `media_type=image`, `model=flash-lite` | `Nano Banana 2 Lite` route; exact observed backend may be unavailable |
 | `media_type=image`, `model=flash` / `pro` | First pass reports `Nano Banana 2`; Pro redo is separate |
 | `media_type=music` | `Lyria` family; exact version is unverified unless upstream identifies it |
-| `media_type=video` | Generic chat route is not a verified Omni video mode; require a video Artifact |
+| `media_type=video` | Explicit native video feature mode 11; require a matching video Artifact, with backend version reported only when observed |
 
 `model=pro` does not directly select a different first-pass image backend than
 Flash. The Pro image redo control is a post-generation Gemini Web UI action.
-The signed-in 2026-09-26 live check produced images and music through MCP, while
-generic MCP video returned `ARTIFACT_NOT_RETURNED`; Gemini Web's dedicated
-Videos page produced a downloadable Omni video.
+Bounded signed-in focused MCP tests on 2026-10-03 produced independently decoded
+image/edit JPEGs, music MP3 plus companion MP4, and a native 1280×720 video MP4.
+Earlier generic-video and interrupted requests remain separate dated observations
+in [live UI coverage](live-ui-coverage.md).
+
+Primary and compact creation save and verify local output by default. Image/edit, video, and music select their native Web features explicitly. Finished verified outputs or definitive empty responses trigger bounded cleanup of the request's new source chat. Queued, unsaved and failed recovery results retain the source. Primary `retain_chat` / `delete_after_seconds` overrides the default; structured cleanup observations do not replace Artifact verification. Focused video/music return durable operation handles for polling and completed-file retrieval after restart. See [native media and cleanup](native-media-mode.md) and [operations](operations-and-cleanup.md).
 
 ### File And URL
 
@@ -159,8 +214,8 @@ Adds these management tools to `core`:
 | `gemini_list_notebooks` | List native Gemini Web Notebooks with ids and metadata |
 | `gemini_list_notebook_chats` | List recent chats assigned to a native Gemini Web Notebook |
 | `gemini_move_chat_to_notebook` | Move an existing Gemini Web chat into a native Gemini Web Notebook |
-| `gemini_list_scheduled_actions` | Read scheduled-action entries returned by Gemini Web scheduled actions surface |
-| `gemini_get_scheduled_action` | Read one scheduled action by id using the observed Web GetTask RPC |
+| `gemini_list_scheduled_actions` | Read legacy actions, or current native Task schedules with `backend=remy` |
+| `gemini_get_scheduled_action` | Read one action by id from the explicitly selected schedule backend |
 | `gemini_create_scheduled_action` | Create a daily Gemini Web scheduled action |
 | `gemini_delete_scheduled_action` | Delete a Gemini Web scheduled action by id |
 | `gemini_get_tool_mode_status` | Read Web-internal tool/mode status rows observed around Canvas and Guided Learning toggles |
@@ -170,6 +225,12 @@ Adds these management tools to `core`:
 List-style tools in this group return pagination metadata in JSON mode
 (`total_count`, `count`, `offset`, `limit`, `has_more`, and `next_offset`) when
 the underlying Web surface can be represented as a bounded list.
+Scheduled list/get defaults to `backend=legacy` for compatibility. Use
+`backend=remy` for the current `/scheduled` page and preserve that backend with
+the returned ID. Native schedule mutations are unsupported; the existing daily
+create/delete tools operate on the legacy backend only. A legacy empty registry
+does not establish that the current page has no tasks.
+
 Primary server tools expose native MCP `ToolAnnotations` for read-only,
 destructive, idempotent, and open-world hints. `gemini_get_tool_manifest`
 provides a client-readable safety map for planning multi-step workflows, with

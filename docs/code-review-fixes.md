@@ -1,0 +1,308 @@
+# Full Review Repairs — 2026-10-02
+
+The counts and pending checks below describe their dated revisions. See the
+[focused delivery review](#focused-delivery-review--2026-10-03) and
+[Skill consolidation](#skill-consolidation--2026-10-03) for later follow-ups.
+
+The full review identified 26 product findings and two compatibility issues in the vendored evaluator. Repairs preserve public tool names and delegate shared behavior to services/lifecycle owners. The release remains `0.2.2` preparation until the release PR passes review.
+
+## Finding map
+
+| ID | Repair | Regression evidence |
+| --- | --- | --- |
+| F01 | Cleanup requires positive fresh `verified_absent`; rejection or missing evidence remains retryable. | `test_runtime_review_regressions.py`, `test_remote_chat_cleanup_manager.py` |
+| F02 | Compact and primary browser authentication updates retire the old client; changed contexts cancel old sessions/jobs and late cleanup. | `test_runtime_review_regressions.py`, `test_authentication_cleanup_scope.py` |
+| F03 | Reset is destructive/open-world; partial cleanup and warnings survive the adapter. | `test_runtime_review_regressions.py`, `test_tool_workflows.py`, reviewed MCP annotation fingerprint |
+| F04 | Prompt writes atomically replace the file and propagate failures; damaged sources remain untouched. | `test_prompt_storage.py` |
+| F05 | An explicit browser profile fails closed. | `test_runtime_review_regressions.py`, `test_cookie_manager_browser.py` |
+| F06 | Cookie data and client locks no longer wait in opposite order; update notifications remain ordered. | `test_runtime_review_regressions.py` |
+| F07 | RPC parsers reject malformed child rows, missing IDs, and invalid/repeated continuations. | `test_rpc_contracts.py`, `test_account_review_regressions.py` |
+| F08 | Scheduled deletion checks valid HTTP/RPC/parser observations and matching IDs before absence/tombstone acceptance. | `test_account_review_regressions.py`, `test_manage_scheduled_actions.py` |
+| F09 | Caller cancellation does not cancel shared deletion; actual deletion cancellation is diagnosed. | `test_runtime_review_regressions.py` |
+| F10 | Client creation/init failures return cleanup/lifecycle diagnostics. | `test_runtime_review_regressions.py` |
+| F11 | Expiry skips sessions with active sends. | `test_runtime_review_regressions.py` |
+| F12 | Proxy user/password fields are redacted in logs. | `test_runtime_review_regressions.py` |
+| F13 | Music audio/video save independently, including suffixed and existing filenames. | `test_media_recovery_deadlines.py` with upstream `GeneratedMedia.save` |
+| F14 | Completion requires the requested output kind; music requires audio. | `test_artifacts.py`, `test_media_recovery_deadlines.py`, `test_skill_server_helpers.py` |
+| F15 | Images/WAV are decoded, other AV files require stream evidence; malformed files fail and decoder absence remains unverified. | `test_artifacts.py`, valid media fixtures |
+| F16 | A single media deadline bounds generation, recovery, validation, and save, including endless HTTP 206 polls. | `test_media_recovery_deadlines.py` |
+| F17 | Timeout/watchdog overrides are isolated by task and client, including reconnects and cancellation. | `test_thinking_client.py`, `test_media_recovery_deadlines.py` |
+| F18 | File/URL inputs do not make empty output successful. | `test_file_tools.py` |
+| F19 | Research recovery and no-ID polling/report/follow-up calls obey the remaining phase deadline. | `test_research_review_regressions.py` |
+| F20 | Changed text and refusals are insufficient; report evidence and non-success terminal states are preserved. | `test_research_review_regressions.py`, `test_research_report_helpers.py` |
+| F21 | Prompt identity uses UUIDs rather than normalized names. | `test_prompt_storage.py` |
+| F22 | Prompt transactions reload under a stable cross-process lock before writing. | `test_prompt_storage.py`, including two spawned writers |
+| F23 | History stops at the source bound with partial coverage and no repeated empty cursor. | `test_account_review_regressions.py` |
+| F24 | Content read failures are independent of matches; all-failed scans fail and partial scans disclose coverage. | `test_account_review_regressions.py`, `test_compact_history_contract.py` |
+| F25 | Doctor separates cookie presence from successful account validation and excludes failed accounts. | `test_account_review_regressions.py` |
+| F26 | Scoped Notebook metadata includes the enabled facade and correct profile availability. | `test_research_review_regressions.py`, `test_evaluations.py` |
+| V01 | Project evaluator bridge uses SDK v2 stdio/SSE/HTTP transport APIs. | `test_mcp_builder_evaluation.py`, real auth-free stdio connection |
+| V02 | The bridge serializes native content blocks, metadata, structured content, and error/incomplete states. | `test_mcp_builder_evaluation.py`, unchanged upstream engine with fake provider |
+
+## Contracts and documentation
+
+The MCP fingerprint change is limited to `gemini_reset` annotations; tool names and input/output schemas are unchanged. The evaluation XML and manifest describe the revised safety and evidence boundaries. Runtime Skill references cover authentication changes, cleanup, incomplete history, artifact verification, and operation recovery. The upstream `mcp-builder` Skill files remain intact; use the maintained [evaluation entrypoint](agent-verification.md#model-backed-mcp-evaluation).
+
+## Evidence limits
+
+Offline regressions use sanitized RPC fixtures, valid image/WAV/video fixtures, two real Prompt writer processes, upstream media save with a fake HTTP boundary, and real auth-free stdio MCP calls. These do not verify current account entitlements or upstream generation availability. Local video/MP3 verification requires an available decoder; absence is explicitly unverified. Model-backed evaluator runs and live-account canaries remain separate opt-in evidence.
+
+The previous signed-in [live observations](live-ui-coverage.md) are dated and unchanged by this repair pass. Durable restart-safe operation/cleanup storage and a verified MCP Omni route remain in the [development roadmap](development-status.md).
+
+## Verified repair gates
+
+Local run on 2026-10-02, Python 3.13:
+
+| Gate | Result |
+| --- | --- |
+| Ruff / Mypy | Passed; 69 source files checked by Mypy |
+| Complete offline suite | 1,818 passed |
+| Architecture/distribution checklist | 261 passed |
+| Representative profile catalogs | Seven primary profiles, eleven compact tools, five assist tools passed |
+| Source stdio protocols | Modern and legacy discovery/list/call passed for all three surfaces in model/core profiles |
+| Agent Skills | All three project Skills passed the repository reference validator |
+| Distribution | Wheel, sdist, and two Runtime Skill bundles built; version consistency passed |
+| Independent wheel installation | `pip check`, installed entrypoints/resources/profiles, core modern/legacy protocols, and isolated `uvx` onboarding passed |
+
+The installed wheel was exercised outside the checkout with no Gemini account calls. Hosted CI, model-backed evaluation, live account acceptance, and release publication are separate evidence.
+
+## Native media follow-up — 2026-10-02
+
+The follow-up addresses native image/music selection and disposable generation chats. Primary and compact surfaces retain their public names, arguments and annotations; shared request, recovery and saving behavior lives in services.
+
+| Area | Repair and regression evidence |
+| --- | --- |
+| Native request | Public frontend selectors are injected into the real upstream request builder; shape/conflict drift fails before generation HTTP, internal arguments do not leak, and native creation does not silently repeat after an SDK API error. `test_native_media_transport.py` covers SDK 2.0 and 2.1.1. |
+| Created artifacts | Search `WebImage` does not satisfy creation. Original URI identity survives full-size URL mutation; filenames are reserved atomically and failed/cancelled reservations are released. `test_media_generation_workflows.py` and `test_artifacts.py`. |
+| Music recovery | Failed transport, rejected/missing envelopes and malformed observed music-card URLs remain typed recovery failures. A valid empty read remains empty. Both surfaces retain failed recovery chats. `test_media_generation_workflows.py` and `test_rpc_contracts.py`. |
+| SDK side effects | Request-local media copies suppress unrequested audio/video thumbnails, preserving existing files and the original response. Real SDK saves run against a sealed HTTP fixture in `test_media_generation_workflows.py`. |
+| Partial/queued work | A ready verified local file does not complete an explicitly queued request or permit source deletion. Partial-save timeout is triggered during the second save after first-file verification. `test_media_generation_workflows.py`. |
+| Source cleanup | Owned new chats with finished verified outputs or definitive empty responses use bounded positive deletion read-back. Recovery, explicit retention and delayed cleanup remain separate. Automatic due work rejects changed retention, deadline, job identity or attempts after its snapshot; source attribution survives immediate and late terminal results. `test_ephemeral_chat_cleanup.py`. |
+| Browser access | OS refusal produces `BROWSER_COOKIE_ACCESS_DENIED`; modern `Network/Cookies` retains the Chrome profile name and selects one database per profile. `test_cookie_browser_access_regressions.py`. |
+
+Independent reviewers reproduced recovery, thumbnail and queued-output defects before their repairs. After the stable source handoff, the four media/native findings passed independent checks on SDK 2.0.0 and 2.1.1. These are offline checks, not current account acceptance.
+
+### Verified follow-up gates
+
+| Gate | Result |
+| --- | --- |
+| Ruff / Mypy | Passed; 71 source files checked by Mypy |
+| Complete offline suite | 1,962 passed on Python 3.13 / gemini-webapi 2.0.0 |
+| Architecture/distribution checklist | 269 passed |
+| SDK compatibility | 2.1.1: 173 native/media/parser cases and 66 runtime cases passed; independent media review resolved all four findings |
+| Agent Skills | All three project Skills passed reference validation |
+| Distribution | Wheel, sdist and two Runtime Skill bundles built; `0.2.2` version/tag consistency passed |
+| Independent installation | Clean wheel with gemini-webapi 2.1.1 / MCP 2.2.0; `pip check`, resources, four entrypoints and seven primary profile catalogs passed |
+| Installed MCP protocol | Primary/compact/assist, model/core, modern `2026-07-28` and legacy `2025-11-25` discovery/list/call passed |
+| Isolated onboarding | `uvx` wheel preflight passed with `credentials_accessed=false` |
+
+Signed-in generation/deletion acceptance for the new native path remains **NOT_RUN**: Chrome data access was denied by macOS, and browser control later encountered the locked Mac. No old test-chat deletion was positively verified in this pass. The [dated live results](live-ui-coverage.md) and [native source evidence](native-media-mode.md) remain distinct.
+
+## Focused delivery review — 2026-10-03
+
+Independent reviewers examined shared services, durable operations and cleanup,
+account mutation evidence, focused adapters, Skills and distribution. All
+confirmed reproducible findings were repaired and independently rechecked
+within the supported POSIX runtime.
+
+| Finding | Repair | Regression evidence |
+| --- | --- | --- |
+| Research hidden SDK retries | Native plan/start/fallback and report follow-up submit at most once. Streamed source metadata survives SDK rollback. Polling reads existing reports after its one follow-up. | `test_research_transport.py`, actual SDK construction with sealed transport; independently reproduced six submissions reduced to one |
+| Repeated media recovery downloads | Re-probe and reuse matching local artifacts; download missing/corrupt files and missing music companions only. Preserve queued state and source retention. | `test_creation_service.py`; independently reproduced three downloads/files reduced to one |
+| Onboarding start-response loss | Preserve the generated idempotency key and any observed handle through transport, parsing, verification and shutdown failures. Report completion only after independent file verification. | `test_onboarding_media.py`; original sealed response-loss repro now returns the start key after one call |
+| Filesystem support boundary | Private state creation requires POSIX ownership/no-follow APIs and fails with a typed error before writing when unavailable. Windows authenticated runtime is explicitly unsupported. | `test_operation_service.py`; independent missing-API repro; Windows installation/ACL verification remains NOT_RUN |
+
+Focused delivery source gates passed: Ruff, Mypy (80 source files), 2,234 offline tests and
+358 architecture/distribution checks. Reviewer test groups overlap and are
+not added to these totals. The SDK submission-count checks use sealed transport
+and make no provider calls.
+
+Fresh agent handoffs exercised realistic mixed-intent and near-miss tasks;
+stale compatibility-router instructions were corrected. The static routing
+fixtures and these handoffs are separate from a measured model-backed trigger
+score. A local downstream product-card preview reused independently verified
+image artifacts with unchanged hashes; see [handoff evidence](../compatibility/focused-agent-handoff-20261003.md).
+
+Bounded authorized focused MCP tests independently decoded image/edit JPEGs,
+music MP3 plus companion MP4, and a native video MP4. Completed music/video
+operations returned their original files after restart. Nineteen exactly
+identified, owned test-chat deletions were positively verified across the
+dated runs. Dedicated-account canaries, unfinished provider recovery after a
+hard crash and current live Research/account mutation coverage remain separate
+in [development status](development-status.md).
+
+The first hosted clean Python 3.11/3.12 run exposed an undeclared PyYAML
+dependency in the new focused Skill tests. The `dev` extra now declares it
+directly; no runtime dependency was added. Clean development installation and
+the final hosted CI run verify this distribution repair separately from the
+existing local-environment gates.
+
+## Concurrent SQLite initialization — 2026-10-03
+
+The subsequent hosted Python 3.11/3.12 suites both exposed a first-initialization
+race in `test_two_connections_create_one_idempotent_operation`. A real second
+SQLite connection holding `BEGIN IMMEDIATE` reproduced immediate `SQLITE_BUSY`
+from `PRAGMA journal_mode=WAL`; the connection's timeout did not wait for that
+statement. Independent reproduction reached no transaction body.
+
+`StateStore` now retries only pre-body initialization statements for the
+`SQLITE_BUSY` error family under one monotonic three-second budget. It disables
+SQLite's nested wait for that phase, then restores the existing busy timeout.
+Other database errors fail directly. Schema migrations, caller statements,
+transaction commits and remote work are never replayed by this retry.
+
+Regressions cover fresh and existing-WAL connections, independent spawned
+processes sharing one idempotency key, bounded waiting, non-busy failures and
+body/commit rollback without replay. These tests use local SQLite only; no
+Gemini account or provider requests are involved.
+
+Repair source gates passed in the clean development environment: Ruff,
+Mypy (80 source files), 2,247 offline tests, 358 architecture/distribution
+checks, eleven exact profile catalogs and modern/legacy real stdio calls for
+all five surfaces under both model and core profiles. An independent reviewer
+also verified 24 cross-process idempotent creates, a real three-second lock
+deadline, non-busy errors, rollback without replay and a single CAS winner.
+The earlier delivery counts above remain dated evidence for that snapshot.
+
+## Skill consolidation — 2026-10-03
+
+All five project-owned Skills now keep task selection and stable tool/result
+contracts in their entrypoints. Optional action details remain in linked
+references. Fixed single-tool workflows, repeated catalogs, historical work
+packages and long default prompts were removed. Compatibility notes remain
+in metadata; invocation policy and runtime capabilities are unchanged.
+
+Skill checks validate actual tool schemas, source entrypoints, installation
+commands and complete bundle contents. They no longer depend on prose,
+headings, dates or a fixed number of routing examples. Both Skill validators,
+29 targeted tests and 345 architecture/distribution checks passed. The pinned
+Skills CLI copied all five packages with source-identical file contents.
+
+The consolidated implementation at `dc2ade5` passed the complete offline
+suite: 2,234 tests locally and on hosted Python 3.11/3.12. The
+[CI run](https://github.com/Luckycat133/gemini-web-mcp/actions/runs/37086461479)
+also passed static checks, the 345 architecture/distribution cases, real
+stdio, Skill installation and clean-wheel/uvx checks;
+[CodeQL Analysis](https://github.com/Luckycat133/gemini-web-mcp/actions/runs/37086461487)
+passed separately. The lower counts follow removal/consolidation of
+prose-dependent Skill tests; runtime regressions remain covered.
+
+An independent agent exercised eight offline tasks involving mixed intent,
+artifact handoff, operation recovery, mutation read-back, local cleanup and
+repository work. Its five proposed MCP requests passed actual schema
+validation without submission. The local page and exact filesystem deletion
+were executed. This verifies task guidance under fixture conditions; it does
+not claim new live Gemini results or a measured trigger-accuracy score.
+
+## Recovery review repairs — 2026-10-17
+
+Creation status/result and both Research entrypoints now declare the possible
+file writes and source-chat deletion performed by recovery. The primary
+manifest, evaluation contract and MCP annotation snapshots agree with these
+semantics; tool names and input/output schemas are unchanged.
+
+SQLite schema v4 stores the optional requested media filename. Restart recovery
+passes it back to materialization, retaining collision avoidance. Migration
+tests cover v1 and v3 databases; interrupted-worker tests rebuild the operation
+service and recover through both focused status/result tools, checking saved
+filenames, cleanup policy and the absence of another generation request.
+
+The media and cleanup documentation now describes durable delayed deletion,
+its credential-scope/identity-key recovery conditions and exact-job cancellation
+through the account facade. Stopping every server pauses execution but does
+not discard the job; cancellation cannot retract an in-flight deletion.
+
+Local verification used Python 3.13.12, MCP SDK 2.2.0 and gemini-webapi 2.1.1:
+
+| Gate | Result |
+| --- | --- |
+| Targeted recovery/annotation/migration regressions | 115 passed |
+| Ruff / Mypy | Passed; 80 source files checked by Mypy |
+| Complete offline suite | 2,246 passed |
+| Architecture/distribution checklist | 351 passed |
+| Representative profile catalogs | All eleven exact catalogs passed |
+| Real MCP stdio | Modern/legacy list/call passed on all five surfaces in model/core profiles |
+
+These results cover local recovery and protocol behavior without live Gemini
+account calls. Earlier hosted and live evidence above remains tied to its
+original revision.
+
+## Main integration — 2026-10-17
+
+Merged `origin/main` at `3d5e517` into the release work. The three Skill
+conflicts retain the concise runtime contracts and add current-source
+verification guidance, without restoring obsolete implementation snapshots.
+The development and compatibility entrypoints remain 50 and 65 lines.
+Committed conflict markers in the incoming `AGENTS.md` were also removed.
+
+Discovery now counts symlinks to the same Skill source once, while retaining
+independent copies for duplicate-name detection. The existing failure was
+reproduced, then two filesystem regressions and the actual five-Skill catalog
+check passed. Third-party Skill packages and discovery links remain identical
+to main; their existing formatting is preserved.
+
+A fresh Python 3.13.12 environment resolved MCP SDK 2.3.0. Ruff, Mypy (80 source
+files), 2,248 offline tests, 353 architecture/distribution checks, all eleven
+profile catalogs and modern/legacy stdio on all five surfaces in model/core
+profiles passed. Both validators accepted all five project Skills, and the
+pinned Skills CLI installed a source-identical development package. Manually
+edited paths passed whitespace checks. No live Gemini calls were made.
+
+## Skill usability review — 2026-10-17
+
+Independent contract and task reviews found that focused Skill setup selected
+`main`, whose entrypoints and Research arguments did not yet match the release
+Skills. Setup now uses a compatible installed version or a local checkout;
+temporary branch names and release status remain outside the Skills. Assist
+also identifies its content-block domain envelope explicitly.
+
+Creation setup includes the `image` extra. In isolated installations, the same
+valid 64×64 PNG was unverified without the decoder and verified with that extra.
+Actual documented checkout commands were started over stdio outside the repo:
+Assist/Create/Account exposed 5/7/7 tools, including the Research continuation
+arguments. No Gemini tool or account calls were submitted.
+
+An independent offline agent exercised five requests covering mixed image
+analysis/edit/handoff, music continuation, exact-ID deletion, search plus a
+text-only prompt, and a small documentation change. Eleven proposed calls
+matched real schemas; four wrong-surface argument shapes were rejected. The
+agent preserved missing-connection and unfinished-output limits instead of
+claiming remote work or broadening authorization.
+
+Command-aware setup regressions, 2,248 offline tests, 353 architecture contracts,
+Ruff, Mypy and both validators for all five project Skills passed. Four rebuilt
+runtime bundles matched source file sets and bytes. These results verify local
+guidance, installation and schemas; they add no live-generation acceptance or
+measured model-trigger accuracy claim.
+
+## Unfinished media recovery — 2026-10-17
+
+Authorized live MCP testing exposed premature source deletion after restarting
+an unfinished video. A valid SDK model turn without a media card or queued flag
+was classified as definitive empty output. Recovery now keeps such read-backs
+queued and retains the source, including when completion text or an earlier
+preview is present. Actual read, identity and save errors remain failures.
+
+Regressions cover the real SDK turn shape, wrong media kinds, partial music with
+a later companion-only read-back, and video/music SQLite restarts with one
+generation submission, preserved handle/filename and cleanup only after
+verified output. Offline recovery fixtures do not require a system ffprobe.
+Ruff, Mypy, 2,268 offline tests and 353 architecture/distribution checks passed.
+A fresh live video survived a
+controlled unfinished-operation restart and completed through the same handle;
+the initial failed sample remains recorded. Image/edit, music, completed-file
+recovery, delayed cleanup and all five exact owned deletions are documented in
+[the dated live report](live-ui-coverage.md#2026-10-17-multimodal-generation-recovery-and-cleanup).
+
+## Cleanup heartbeat regression — 2026-10-18
+
+The [Python 3.11 CI run](https://github.com/Luckycat133/gemini-web-mcp/actions/runs/39047055535)
+exposed scheduler sensitivity in an existing heartbeat test using a 60 ms lease
+and a 150 ms sleep. The test now waits for a real SQLite lease renewal, advances
+controlled time past the original deadline while remaining inside the renewed
+lease, and checks that a second instance cannot claim the job. Attempt and
+deletion counts remain one. The clock replacement is confined to the cleanup
+module; production lease timing and deletion behavior retain their contracts.
+The repaired case passed 20 independent repetitions. An in-memory negative
+control that disabled heartbeat renewal failed at the bounded handshake as
+expected. Ruff, Mypy, 2,268 offline tests and 353 contract checks passed locally.

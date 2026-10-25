@@ -35,6 +35,8 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 from tests._fastmcp_shim import FastMCP
+from tests._account_rpc_fakes import notebook_read_diagnostic, scheduled_read
+from src.infrastructure.rpc_contracts import get_contract
 
 import src.tools.manage as manage_tools
 
@@ -68,6 +70,12 @@ class _FakeBatchClient:
         else:
             text = ""
         return SimpleNamespace(text=text, status_code=self._status_code)
+
+
+def _rpc_text(rpc_id, body, *, reject_code=None):
+    """Construct actual matching HTTP response evidence for adapter tests."""
+    return json.dumps([["wrb.fr", rpc_id, json.dumps(body), None, None,
+                        [reject_code] if reject_code is not None else None]])
 
 
 class _NoBatchClient:
@@ -240,18 +248,8 @@ def test_probe_web_features_markdown_grouped_reachable_unreachable_reject(monkey
         _probe("sharing", "fake_sharing_probe", "rpcB", source_path="/app/sharing"),
     ]
     monkeypatch.setattr(manage_tools, "WEB_FEATURE_PROBES", probes)
-    client = _FakeBatchClient(responses=["r1", "r2"], status_code=200)
+    client = _FakeBatchClient(responses=[_rpc_text("rpcA", []), _rpc_text("rpcB", [], reject_code=7)])
     _patch_seams(monkeypatch, client)
-
-    summaries = [
-        {"parsed": True, "response_parts": 1, "body_count": 1, "reject_code": None},
-        {"parsed": True, "response_parts": 1, "body_count": 0, "reject_code": 7},
-    ]
-
-    def fake_summarize(_text, _rpcid):
-        return summaries.pop(0)
-
-    monkeypatch.setattr(manage_tools, "_summarize_probe_response", fake_summarize)
 
     mcp = _make_mcp()
     result = _run(_call(mcp, "gemini_probe_web_features", surface="all"))
@@ -289,13 +287,9 @@ def test_probe_web_features_json_response(monkeypatch):
         _probe("history", "fake_history_probe", "rpcA", source_path="/app"),
     ]
     monkeypatch.setattr(manage_tools, "WEB_FEATURE_PROBES", probes)
-    client = _FakeBatchClient(responses=["r1"], status_code=200)
+    client = _FakeBatchClient(responses=[_rpc_text("rpcA", [])], status_code=200)
     _patch_seams(monkeypatch, client)
 
-    monkeypatch.setattr(
-        manage_tools, "_summarize_probe_response",
-        lambda _t, _r: {"parsed": True, "response_parts": 1, "body_count": 1, "reject_code": None},
-    )
 
     mcp = _make_mcp()
     result = _run(_call(mcp, "gemini_probe_web_features", response_format="json"))
@@ -327,26 +321,25 @@ def test_list_public_links_no_batch_execute_short_circuits(monkeypatch):
 
 
 def test_list_public_links_markdown_with_links_and_has_more(monkeypatch):
-    """markdown 渲染 links（disabled 三态映射 启用/禁用 + ID + URL）+ has_more 下一页。
+    """markdown 渲染 links（缺少 disabled 证据时显示状态未知 + ID + URL）+ has_more 下一页。
 
-    _parse_public_link_entry 期望 entry 形如 [id, title, disabled, _, url]。
+    使用当前 ListSharedConversations 的 wrapper/metadata/share token 行。
     """
     entries = [
-        ["id_1", "Link One", False, "", "https://example.com/1"],
-        ["id_2", "Link Two", True, "", "https://example.com/2"],
+        [None, None, [False, "Link One"], "id_1"],
+        [None, None, [True, "Link Two"], "id_2"],
     ]
-    client = _FakeBatchClient(responses=["r1"], status_code=200)
+    client = _FakeBatchClient(responses=[_rpc_text(get_contract("sharing.public_links").rpc_id, [entries])], status_code=200)
     _patch_seams(monkeypatch, client)
-    monkeypatch.setattr(manage_tools, "_extract_rpc_bodies", lambda _t, _r: [entries])
 
     mcp = _make_mcp()
     result = _run(_call(mcp, "gemini_list_public_links", limit=1, offset=0))
     text = result[0].text
     assert "## Gemini 公开链接" in text
     assert "共 2 条；当前 offset=0 count=1" in text
-    assert "1. Link One [启用]" in text
+    assert "1. Link One [状态未知]" in text
     assert "ID: id_1" in text
-    assert "URL: https://example.com/1" in text
+    assert "URL: https://gemini.google.com/share/id_1" in text
     # 第二条因 limit=1 不在当前页，但 has_more=True 触发下一页提示
     assert "Link Two" not in text
     assert "下一页: offset=1" in text
@@ -354,9 +347,8 @@ def test_list_public_links_markdown_with_links_and_has_more(monkeypatch):
 
 def test_list_public_links_empty_placeholder(monkeypatch):
     """空 entries → '暂无公开链接。'"""
-    client = _FakeBatchClient(responses=["r1"], status_code=200)
+    client = _FakeBatchClient(responses=[_rpc_text(get_contract("sharing.public_links").rpc_id, [[]])], status_code=200)
     _patch_seams(monkeypatch, client)
-    monkeypatch.setattr(manage_tools, "_extract_rpc_bodies", lambda _t, _r: [[]])
 
     mcp = _make_mcp()
     result = _run(_call(mcp, "gemini_list_public_links"))
@@ -364,18 +356,14 @@ def test_list_public_links_empty_placeholder(monkeypatch):
 
 
 def test_list_public_links_top_level_exception(monkeypatch):
-    """_extract_rpc_bodies 抛异常 → 顶层 except '❌ 读取公开链接失败: {e}'。"""
-    client = _FakeBatchClient(responses=["r1"], status_code=200)
+    """_batch_execute 抛异常 → 顶层 except '❌ 读取公开链接失败: {e}'。"""
+    client = _FakeBatchClient(raise_exc=RuntimeError("rpc fail"))
     _patch_seams(monkeypatch, client)
-    monkeypatch.setattr(
-        manage_tools, "_extract_rpc_bodies",
-        lambda _t, _r: (_ for _ in ()).throw(RuntimeError("parse fail")),
-    )
 
     mcp = _make_mcp()
     result = _run(_call(mcp, "gemini_list_public_links"))
     assert "❌ 读取公开链接失败" in result[0].text
-    assert "parse fail" in result[0].text
+    assert "rpc fail" in result[0].text
 
 
 # ===========================================================================
@@ -402,9 +390,8 @@ def test_list_library_capabilities_markdown_with_entries_and_has_more(monkeypatc
         [["alias_a", "alias_b"], "Capability One", "描述一", "更多细节"],
         [[], "Capability Two", "描述二", ""],
     ]
-    client = _FakeBatchClient(responses=["r1"], status_code=200)
+    client = _FakeBatchClient(responses=[_rpc_text(get_contract("library.locale_capabilities").rpc_id, [entries])], status_code=200)
     _patch_seams(monkeypatch, client)
-    monkeypatch.setattr(manage_tools, "_extract_rpc_bodies", lambda _t, _r: [[entries]])
 
     mcp = _make_mcp()
     result = _run(_call(mcp, "gemini_list_library_capabilities", limit=1, offset=0))
@@ -422,9 +409,8 @@ def test_list_library_capabilities_markdown_with_entries_and_has_more(monkeypatc
 
 def test_list_library_capabilities_empty_placeholder(monkeypatch):
     """空 entries → '暂无 Library 能力条目。'"""
-    client = _FakeBatchClient(responses=["r1"], status_code=200)
+    client = _FakeBatchClient(responses=[_rpc_text(get_contract("library.locale_capabilities").rpc_id, [[]])], status_code=200)
     _patch_seams(monkeypatch, client)
-    monkeypatch.setattr(manage_tools, "_extract_rpc_bodies", lambda _t, _r: [[]])
 
     mcp = _make_mcp()
     result = _run(_call(mcp, "gemini_list_library_capabilities"))
@@ -432,18 +418,14 @@ def test_list_library_capabilities_empty_placeholder(monkeypatch):
 
 
 def test_list_library_capabilities_top_level_exception(monkeypatch):
-    """_extract_rpc_bodies 抛异常 → 顶层 except '❌ 读取 Library 能力失败: {e}'。"""
-    client = _FakeBatchClient(responses=["r1"], status_code=200)
+    """_batch_execute 抛异常 → 顶层 except '❌ 读取 Library 能力失败: {e}'。"""
+    client = _FakeBatchClient(raise_exc=RuntimeError("rpc fail"))
     _patch_seams(monkeypatch, client)
-    monkeypatch.setattr(
-        manage_tools, "_extract_rpc_bodies",
-        lambda _t, _r: (_ for _ in ()).throw(RuntimeError("parse fail")),
-    )
 
     mcp = _make_mcp()
     result = _run(_call(mcp, "gemini_list_library_capabilities"))
     assert "❌ 读取 Library 能力失败" in result[0].text
-    assert "parse fail" in result[0].text
+    assert "rpc fail" in result[0].text
 
 
 # ===========================================================================
@@ -480,6 +462,7 @@ def test_list_notebooks_markdown_with_notebooks_and_has_more(monkeypatch):
         },
     ]
     diagnostic = {
+        **notebook_read_diagnostic(notebooks),
         "source_rpc": "CNgdBe",
         "observed": "2026-07-04 Pro UI / Native Gemini Notebooks",
     }
@@ -508,6 +491,7 @@ def test_list_notebooks_empty_placeholder(monkeypatch):
     monkeypatch.setattr(
         manage_tools, "_fetch_native_notebooks",
         AsyncMock(return_value=([], {
+            **notebook_read_diagnostic([]),
             "source_rpc": "CNgdBe",
             "observed": "2026-07-04 Pro UI / Native Gemini Notebooks",
         })),
@@ -567,7 +551,8 @@ def test_list_scheduled_actions_markdown_enabled_three_states_with_label_hour_ti
         },
     ]
     diagnostic = {
-        "source_rpc": "CNgdBe",  # 实际 probe rpcid
+        **scheduled_read(entries)[1],
+        "source_rpc": get_contract("scheduled.registry").rpc_id,
         "observed": "2026-06-20 Pro UI / Scheduled action registry",
     }
     client = _FakeBatchClient(responses=["r1"], status_code=200)
@@ -597,6 +582,7 @@ def test_list_scheduled_actions_markdown_enabled_three_states_with_label_hour_ti
 def test_list_scheduled_actions_empty_placeholder_with_empty_hint(monkeypatch):
     """空 entries + diagnostic.empty_hint → 渲染 '- 暂无条目' + '- 诊断: {empty_hint}'。"""
     diagnostic = {
+        **scheduled_read([])[1],
         "source_rpc": "CNgdBe",
         "observed": "observed",
         "empty_hint": "The current Gemini cookie/session returned an empty scheduled-actions registry.",
@@ -669,6 +655,7 @@ def test_get_scheduled_action_markdown_found_item(monkeypatch):
         "timezone_name": "Asia/Shanghai",
     }
     diagnostic = {
+        **scheduled_read(item)[1],
         "source_rpc": "kwDCne",
         "observed": "2026-06-20 Pro UI / Scheduled action get-by-id",
     }

@@ -1,0 +1,545 @@
+{
+  "observed_at": "2026-10-18",
+  "build": "BardChatUi.zh_CN.D3Wg_SjWYeA.2018.O",
+  "evidence_kind": "public_frontend_static",
+  "files": [
+    {
+      "file": "main.js",
+      "url": "https://gemini.gstatic.com/_/mss/boq-gemini-web-uiserver/_/js/k=boq-gemini-web-uiserver.BardChatUi.zh_CN.D3Wg_SjWYeA.2018.O/ck=boq-gemini-web-uiserver.BardChatUi.vdtO_D010b4.L.B1.O/am=8QsB2PAPMPv2QQu_CB0MKMAIdEEAPQAAAABC/d=1/exm=_b/excm=_b/ed=1/br=1/wt=2/ujg=1/rs=AKrAJMoCJAvHKm2rBUnhCaAGw5CO3yIbUA/ee=DGWCxb:CgYiQ;EmZ2Bf:zr1jrb;NJ1rfe:yGfSdd;Pjplud:PoEs9b;QGR0gd:Mlhmy;ScI3Yc:e7Hzgb;UYRIEb:HzTAQc;YIZmRd:A1yn5d;cEt90b:ws9Tlc;dIoSBb:SpsfSb;dowIGb:ebZ3mb;eBAeSb:zbML3c;iFQyKf:vfuNJf;oGtAuc:sOXFj;qQEoOc:KUM7Z;qddgKe:xQtZb;wR5FRb:siKnQd;yxTchf:KUM7Z/dti=1/m=xqG9Nd?wli=BardChatUi.t6Zy63jb7qM.libheifWasm.O%3A%3BBardChatUi.spde9pvPkaw.mediaIntentWasm.O%3A%3B",
+      "bytes": 3309608,
+      "sha256": "5d9d08be834ebd7682e1f9c0859603710fc7a6bf16df3747f71fa7b8261e2e54"
+    },
+    {
+      "file": "mwljBd.js",
+      "url": "https://gemini.gstatic.com/_/mss/boq-gemini-web-uiserver/_/js/k=boq-gemini-web-uiserver.BardChatUi.zh_CN.D3Wg_SjWYeA.2018.O/ck=boq-gemini-web-uiserver.BardChatUi.vdtO_D010b4.L.B1.O/am=8QsB2PAPMPv2QQu_CB0MKMAIdEEAPQAAAABC/d=1/exm=ABELSd,AdpaDf,BIsfnb,BenWQc,C0Qatc,C3yBDb,CK6Z6b,CMdPsb,CsakMb,DTcCS,E3fsbf,FRlTNb,G5GDje,GzXWE,HbEaCf,HwBxOc,ItLZxc,JKGJfb,KkfGCf,LVUOyb,MGIlxc,N9BqIf,No94jc,OWHuje,OpU7Tc,PU1dDc,PdaDwd,QuxHpf,RTzAed,TK6Kl,TRJwtb,Tsm3ee,UE0P2d,VSiC6e,XuiMae,Z1MNA,Z8wCif,ZQlXXb,_b,bNyBZd,bnLiYc,cteZTb,eK0zfd,euv2wd,f8N0N,fSXoCf,h4lope,hSZKtd,ir0vzb,jCFZSc,k9O9ef,mqe9lc,nShoMc,o2mxrc,o2nH0b,ponblb,pwgmXb,q6pD8e,qxlpjc,sAsF2c,tCaMKd,uEAQfd,uEXP3c,v6p8ad,v9r4Te,xmtx9e,xqG9Nd,xrScke,xy0Mif,zSgmx/excm=_b/ed=1/br=1/wt=2/ujg=1/rs=AKrAJMoCJAvHKm2rBUnhCaAGw5CO3yIbUA/ee=DGWCxb:CgYiQ;EmZ2Bf:zr1jrb;NJ1rfe:yGfSdd;Pjplud:PoEs9b;QGR0gd:Mlhmy;ScI3Yc:e7Hzgb;UYRIEb:HzTAQc;YIZmRd:A1yn5d;cEt90b:ws9Tlc;dIoSBb:SpsfSb;dowIGb:ebZ3mb;eBAeSb:zbML3c;iFQyKf:vfuNJf;oGtAuc:sOXFj;qQEoOc:KUM7Z;qddgKe:xQtZb;wR5FRb:siKnQd;yxTchf:KUM7Z/dti=1/m=mwljBd?wli=BardChatUi.t6Zy63jb7qM.libheifWasm.O%3A%3BBardChatUi.spde9pvPkaw.mediaIntentWasm.O%3A%3B",
+      "bytes": 17380,
+      "sha256": "a9c996f6ebd8a1599a52d71abc54b79ce81cbf46fd7a3f3794a8ec12368151b2"
+    },
+    {
+      "file": "GzXWE.js",
+      "url": "https://gemini.gstatic.com/_/mss/boq-gemini-web-uiserver/_/js/k=boq-gemini-web-uiserver.BardChatUi.zh_CN.D3Wg_SjWYeA.2018.O/ck=boq-gemini-web-uiserver.BardChatUi.vdtO_D010b4.L.B1.O/am=8QsB2PAPMPv2QQu_CB0MKMAIdEEAPQAAAABC/d=1/exm=ABELSd,AdpaDf,BenWQc,C0Qatc,HbEaCf,HwBxOc,LVUOyb,MGIlxc,No94jc,OpU7Tc,QuxHpf,UE0P2d,XuiMae,Z1MNA,Z8wCif,ZQlXXb,_b,fSXoCf,o2mxrc,pwgmXb,q6pD8e,uEAQfd,v9r4Te,xqG9Nd,zSgmx/excm=_b/ed=1/br=1/wt=2/ujg=1/rs=AKrAJMoCJAvHKm2rBUnhCaAGw5CO3yIbUA/ee=DGWCxb:CgYiQ;EmZ2Bf:zr1jrb;NJ1rfe:yGfSdd;Pjplud:PoEs9b;QGR0gd:Mlhmy;ScI3Yc:e7Hzgb;UYRIEb:HzTAQc;YIZmRd:A1yn5d;cEt90b:ws9Tlc;dIoSBb:SpsfSb;dowIGb:ebZ3mb;eBAeSb:zbML3c;iFQyKf:vfuNJf;oGtAuc:sOXFj;qQEoOc:KUM7Z;qddgKe:xQtZb;wR5FRb:siKnQd;yxTchf:KUM7Z/dti=1/m=GzXWE?wli=BardChatUi.t6Zy63jb7qM.libheifWasm.O%3A%3BBardChatUi.spde9pvPkaw.mediaIntentWasm.O%3A%3B",
+      "bytes": 17640,
+      "sha256": "fee6b731366d6363e09de16e3a3c1fa57871611d6053096740968ee983c33eed"
+    },
+    {
+      "file": "public-sharing.js",
+      "url": "https://gemini.gstatic.com/_/mss/boq-gemini-web-uiserver/_/js/k=boq-gemini-web-uiserver.BardChatUi.zh_CN.D3Wg_SjWYeA.2018.O/ck=boq-gemini-web-uiserver.BardChatUi.vdtO_D010b4.L.B1.O/am=8QsB2PAPMPv2QQu_CB0MKMAIdEEAPQAAAABC/d=1/exm=_b/excm=_b/ed=1/br=1/wt=2/ujg=1/rs=AKrAJMoCJAvHKm2rBUnhCaAGw5CO3yIbUA/ee=DGWCxb:CgYiQ;EmZ2Bf:zr1jrb;NJ1rfe:yGfSdd;Pjplud:PoEs9b;QGR0gd:Mlhmy;ScI3Yc:e7Hzgb;UYRIEb:HzTAQc;YIZmRd:A1yn5d;cEt90b:ws9Tlc;dIoSBb:SpsfSb;dowIGb:ebZ3mb;eBAeSb:zbML3c;iFQyKf:vfuNJf;oGtAuc:sOXFj;qQEoOc:KUM7Z;qddgKe:xQtZb;wR5FRb:siKnQd;yxTchf:KUM7Z/dti=1/m=xaI2P?wli=BardChatUi.t6Zy63jb7qM.libheifWasm.O%3A%3BBardChatUi.spde9pvPkaw.mediaIntentWasm.O%3A%3B",
+      "bytes": 2619522,
+      "sha256": "a2265803f90756eeeae0644fd97909c25b071165b601ba1de50816e1244bf0d6"
+    },
+    {
+      "file": "x9QgSe.js",
+      "url": "https://gemini.gstatic.com/_/mss/boq-gemini-web-uiserver/_/js/k=boq-gemini-web-uiserver.BardChatUi.zh_CN.D3Wg_SjWYeA.2018.O/ck=boq-gemini-web-uiserver.BardChatUi.vdtO_D010b4.L.B1.O/am=8QsB2PAPMPv2QQu_CB0MKMAIdEEAPQAAAABC/d=1/exm=_b/excm=_b/ed=1/br=1/wt=2/ujg=1/rs=AKrAJMoCJAvHKm2rBUnhCaAGw5CO3yIbUA/ee=DGWCxb:CgYiQ;EmZ2Bf:zr1jrb;NJ1rfe:yGfSdd;Pjplud:PoEs9b;QGR0gd:Mlhmy;ScI3Yc:e7Hzgb;UYRIEb:HzTAQc;YIZmRd:A1yn5d;cEt90b:ws9Tlc;dIoSBb:SpsfSb;dowIGb:ebZ3mb;eBAeSb:zbML3c;iFQyKf:vfuNJf;oGtAuc:sOXFj;qQEoOc:KUM7Z;qddgKe:xQtZb;wR5FRb:siKnQd;yxTchf:KUM7Z/dti=1/m=x9QgSe?wli=BardChatUi.t6Zy63jb7qM.libheifWasm.O%3A%3BBardChatUi.spde9pvPkaw.mediaIntentWasm.O%3A%3B",
+      "bytes": 4360945,
+      "sha256": "9c39107399fbb5d51a69c095b3635bc0b8b4421d661d1e37771847f1fddd253d"
+    },
+    {
+      "file": "lbYGFc.js",
+      "url": "https://gemini.gstatic.com/_/mss/boq-gemini-web-uiserver/_/js/k=boq-gemini-web-uiserver.BardChatUi.zh_CN.D3Wg_SjWYeA.2018.O/ck=boq-gemini-web-uiserver.BardChatUi.vdtO_D010b4.L.B1.O/am=8QsB2PAPMPv2QQu_CB0MKMAIdEEAPQAAAABC/d=1/exm=_b/excm=_b/ed=1/br=1/wt=2/ujg=1/rs=AKrAJMoCJAvHKm2rBUnhCaAGw5CO3yIbUA/ee=DGWCxb:CgYiQ;EmZ2Bf:zr1jrb;NJ1rfe:yGfSdd;Pjplud:PoEs9b;QGR0gd:Mlhmy;ScI3Yc:e7Hzgb;UYRIEb:HzTAQc;YIZmRd:A1yn5d;cEt90b:ws9Tlc;dIoSBb:SpsfSb;dowIGb:ebZ3mb;eBAeSb:zbML3c;iFQyKf:vfuNJf;oGtAuc:sOXFj;qQEoOc:KUM7Z;qddgKe:xQtZb;wR5FRb:siKnQd;yxTchf:KUM7Z/dti=1/m=lbYGFc?wli=BardChatUi.t6Zy63jb7qM.libheifWasm.O%3A%3BBardChatUi.spde9pvPkaw.mediaIntentWasm.O%3A%3B",
+      "bytes": 3397017,
+      "sha256": "adbc8720eeb0db06885ebf5aea8f8f6fb325e8f3213be237cc9fee45eab44d6e"
+    },
+    {
+      "file": "ScPWJf.js",
+      "url": "https://gemini.gstatic.com/_/mss/boq-gemini-web-uiserver/_/js/k=boq-gemini-web-uiserver.BardChatUi.zh_CN.D3Wg_SjWYeA.2018.O/ck=boq-gemini-web-uiserver.BardChatUi.vdtO_D010b4.L.B1.O/am=8QsB2PAPMPv2QQu_CB0MKMAIdEEAPQAAAABC/d=1/exm=_b/excm=_b/ed=1/br=1/wt=2/ujg=1/rs=AKrAJMoCJAvHKm2rBUnhCaAGw5CO3yIbUA/ee=DGWCxb:CgYiQ;EmZ2Bf:zr1jrb;NJ1rfe:yGfSdd;Pjplud:PoEs9b;QGR0gd:Mlhmy;ScI3Yc:e7Hzgb;UYRIEb:HzTAQc;YIZmRd:A1yn5d;cEt90b:ws9Tlc;dIoSBb:SpsfSb;dowIGb:ebZ3mb;eBAeSb:zbML3c;iFQyKf:vfuNJf;oGtAuc:sOXFj;qQEoOc:KUM7Z;qddgKe:xQtZb;wR5FRb:siKnQd;yxTchf:KUM7Z/dti=1/m=ScPWJf?wli=BardChatUi.t6Zy63jb7qM.libheifWasm.O%3A%3BBardChatUi.spde9pvPkaw.mediaIntentWasm.O%3A%3B",
+      "bytes": 3282802,
+      "sha256": "cbcfcdf653dc201406249636d36203e9c2db57959be8769f35915079ca57a29c"
+    },
+    {
+      "file": "mRNCI.js",
+      "url": "https://gemini.gstatic.com/_/mss/boq-gemini-web-uiserver/_/js/k=boq-gemini-web-uiserver.BardChatUi.zh_CN.D3Wg_SjWYeA.2018.O/ck=boq-gemini-web-uiserver.BardChatUi.vdtO_D010b4.L.B1.O/am=8QsB2PAPMPv2QQu_CB0MKMAIdEEAPQAAAABC/d=1/exm=_b/excm=_b/ed=1/br=1/wt=2/ujg=1/rs=AKrAJMoCJAvHKm2rBUnhCaAGw5CO3yIbUA/ee=DGWCxb:CgYiQ;EmZ2Bf:zr1jrb;NJ1rfe:yGfSdd;Pjplud:PoEs9b;QGR0gd:Mlhmy;ScI3Yc:e7Hzgb;UYRIEb:HzTAQc;YIZmRd:A1yn5d;cEt90b:ws9Tlc;dIoSBb:SpsfSb;dowIGb:ebZ3mb;eBAeSb:zbML3c;iFQyKf:vfuNJf;oGtAuc:sOXFj;qQEoOc:KUM7Z;qddgKe:xQtZb;wR5FRb:siKnQd;yxTchf:KUM7Z/dti=1/m=mRNCI?wli=BardChatUi.t6Zy63jb7qM.libheifWasm.O%3A%3BBardChatUi.spde9pvPkaw.mediaIntentWasm.O%3A%3B",
+      "bytes": 3426786,
+      "sha256": "b81b110e7beebccade602f403f68da083511e7c7253ba31d5c5a30370eae5fff"
+    },
+    {
+      "file": "lNX4ad.js",
+      "url": "https://gemini.gstatic.com/_/mss/boq-gemini-web-uiserver/_/js/k=boq-gemini-web-uiserver.BardChatUi.zh_CN.D3Wg_SjWYeA.2018.O/ck=boq-gemini-web-uiserver.BardChatUi.vdtO_D010b4.L.B1.O/am=8QsB2PAPMPv2QQu_CB0MKMAIdEEAPQAAAABC/d=1/exm=_b/excm=_b/ed=1/br=1/wt=2/ujg=1/rs=AKrAJMoCJAvHKm2rBUnhCaAGw5CO3yIbUA/ee=DGWCxb:CgYiQ;EmZ2Bf:zr1jrb;NJ1rfe:yGfSdd;Pjplud:PoEs9b;QGR0gd:Mlhmy;ScI3Yc:e7Hzgb;UYRIEb:HzTAQc;YIZmRd:A1yn5d;cEt90b:ws9Tlc;dIoSBb:SpsfSb;dowIGb:ebZ3mb;eBAeSb:zbML3c;iFQyKf:vfuNJf;oGtAuc:sOXFj;qQEoOc:KUM7Z;qddgKe:xQtZb;wR5FRb:siKnQd;yxTchf:KUM7Z/dti=1/m=lNX4ad?wli=BardChatUi.t6Zy63jb7qM.libheifWasm.O%3A%3BBardChatUi.spde9pvPkaw.mediaIntentWasm.O%3A%3B",
+      "bytes": 2553612,
+      "sha256": "467f543260b6e25d17d4a98d4e708f5333522c2038fa0a5de9f43df517291e68"
+    },
+    {
+      "file": "QAfPpb.js",
+      "url": "https://gemini.gstatic.com/_/mss/boq-gemini-web-uiserver/_/js/k=boq-gemini-web-uiserver.BardChatUi.zh_CN.D3Wg_SjWYeA.2018.O/ck=boq-gemini-web-uiserver.BardChatUi.vdtO_D010b4.L.B1.O/am=8QsB2PAPMPv2QQu_CB0MKMAIdEEAPQAAAABC/d=1/exm=_b/excm=_b/ed=1/br=1/wt=2/ujg=1/rs=AKrAJMoCJAvHKm2rBUnhCaAGw5CO3yIbUA/ee=DGWCxb:CgYiQ;EmZ2Bf:zr1jrb;NJ1rfe:yGfSdd;Pjplud:PoEs9b;QGR0gd:Mlhmy;ScI3Yc:e7Hzgb;UYRIEb:HzTAQc;YIZmRd:A1yn5d;cEt90b:ws9Tlc;dIoSBb:SpsfSb;dowIGb:ebZ3mb;eBAeSb:zbML3c;iFQyKf:vfuNJf;oGtAuc:sOXFj;qQEoOc:KUM7Z;qddgKe:xQtZb;wR5FRb:siKnQd;yxTchf:KUM7Z/dti=1/m=QAfPpb?wli=BardChatUi.t6Zy63jb7qM.libheifWasm.O%3A%3BBardChatUi.spde9pvPkaw.mediaIntentWasm.O%3A%3B",
+      "bytes": 2549297,
+      "sha256": "3fce9f108ce55119ace1387bcc1b909dd34f27ecd06e1523d46f4813ee5d3fae"
+    },
+    {
+      "file": "xmJ3d.js",
+      "url": "https://gemini.gstatic.com/_/mss/boq-gemini-web-uiserver/_/js/k=boq-gemini-web-uiserver.BardChatUi.zh_CN.D3Wg_SjWYeA.2018.O/ck=boq-gemini-web-uiserver.BardChatUi.vdtO_D010b4.L.B1.O/am=8QsB2PAPMPv2QQu_CB0MKMAIdEEAPQAAAABC/d=1/exm=_b/excm=_b/ed=1/br=1/wt=2/ujg=1/rs=AKrAJMoCJAvHKm2rBUnhCaAGw5CO3yIbUA/ee=DGWCxb:CgYiQ;EmZ2Bf:zr1jrb;NJ1rfe:yGfSdd;Pjplud:PoEs9b;QGR0gd:Mlhmy;ScI3Yc:e7Hzgb;UYRIEb:HzTAQc;YIZmRd:A1yn5d;cEt90b:ws9Tlc;dIoSBb:SpsfSb;dowIGb:ebZ3mb;eBAeSb:zbML3c;iFQyKf:vfuNJf;oGtAuc:sOXFj;qQEoOc:KUM7Z;qddgKe:xQtZb;wR5FRb:siKnQd;yxTchf:KUM7Z/dti=1/m=xmJ3d?wli=BardChatUi.t6Zy63jb7qM.libheifWasm.O%3A%3BBardChatUi.spde9pvPkaw.mediaIntentWasm.O%3A%3B",
+      "bytes": 2953448,
+      "sha256": "231fb19a4e2cf81443452f69dcaa7853dd963ee059c1cd7a57d6122f55745730"
+    },
+    {
+      "file": "ChatLayoutSurface-DHxz-PIz.js",
+      "url": "https://www.gstatic.com/bg3/boq-bard-web/islands/assets/ChatLayoutSurface-DHxz-PIz.js",
+      "bytes": 182046,
+      "sha256": "5214c0af76fc46e0f9b6a215487f5187ef07e41118a5bb9b48ee83a43a2d19d6"
+    },
+    {
+      "file": "useChatSession-DG7QezyD.js",
+      "url": "https://www.gstatic.com/bg3/boq-bard-web/islands/assets/useChatSession-DG7QezyD.js",
+      "bytes": 83521,
+      "sha256": "7194a620df9a4e3e95c943f63780c8d2f22a0ccd1b6e3eda6089a225fb2d1515"
+    },
+    {
+      "file": "NotebooksDialogContent-DE8m_Smr.js",
+      "url": "https://www.gstatic.com/bg3/boq-bard-web/islands/assets/NotebooksDialogContent-DE8m_Smr.js",
+      "bytes": 8151,
+      "sha256": "ab23a2861904846ece93ae9b685639ef541b7a9828d02665078a144b496a997a"
+    },
+    {
+      "file": "library-DK15KHwO.js",
+      "url": "https://www.gstatic.com/bg3/boq-bard-web/islands/assets/library-DK15KHwO.js",
+      "bytes": 2208,
+      "sha256": "0ef8edcbe5dcd37317967957e3badf0ef8dd6885db968ad08c9748da7fced6a3"
+    },
+    {
+      "file": "LibraryOverviewSurface-QfmGPrUE.js",
+      "url": "https://www.gstatic.com/bg3/boq-bard-web/islands/assets/LibraryOverviewSurface-QfmGPrUE.js",
+      "bytes": 126800,
+      "sha256": "a914a69ca64360b63c7bc9a548dbb50f47d1368f841653f713b8f0463f8955dc"
+    },
+    {
+      "file": "LibraryDocumentsSurface-DAFKX9PY.js",
+      "url": "https://www.gstatic.com/bg3/boq-bard-web/islands/assets/LibraryDocumentsSurface-DAFKX9PY.js",
+      "bytes": 13504,
+      "sha256": "b3883c088195f8739ab6abbb77f15813de7b3432f1480cda6bdc396732473df7"
+    },
+    {
+      "file": "LibraryPage-BhGyCd-s.js",
+      "url": "https://www.gstatic.com/bg3/boq-bard-web/islands/assets/LibraryPage-BhGyCd-s.js",
+      "bytes": 9181,
+      "sha256": "306271696633277b32626a3c5b7dd40785f1b962653abd766181988d2464e038"
+    }
+  ],
+  "thinking": {
+    "enum": {
+      "low": 1,
+      "medium": 4,
+      "high": 2
+    },
+    "aliases": {
+      "standard": "low",
+      "extended": "high"
+    },
+    "chain": [
+      "main.js:1269-1271 EF/Juc decode level enum and display labels",
+      "main.js:1287 ivc reads user status field25 thinking registry",
+      "main.js:3756-3760 PCb/NCb sets header mode field15 and level field16",
+      "main.js:3996-4015 Rwd/Twd sets body mode field80 and level field81"
+    ]
+  },
+  "history_update": {
+    "rpc_id": "MUAZcd",
+    "method": "BardFrontendService.UpdateConversation",
+    "request_metadata_field": 3,
+    "request_field_mask_field": 2,
+    "response_metadata_field": 2,
+    "metadata_fields": {
+      "conversation_id": 1,
+      "title": 2,
+      "pinned": 3
+    },
+    "chain": [
+      "main.js:4166 RPC descriptor",
+      "main.js:4417-4418 VQd sets only requested title/pinned fields and FieldMask",
+      "main.js:4521 Zia requires returned metadata field2"
+    ]
+  },
+  "task": {
+    "feature_mode": 40,
+    "stream_generate_index": 49,
+    "selector_chain": [
+      "main.js:2222 task selector flag default 40",
+      "mwljBd.js:19-23 Task toggle dispatches the selected feature mode",
+      "main.js:4629,4663-4668 selected mode becomes request.Cf",
+      "main.js:4008-4009,4145 Cf maps to StreamGenerate proto field50",
+      "GzXWE.js:24 native Task helper explicitly submits Cf40",
+      "GzXWE.js:24 sets Rk=true; main.js:4008 writes proto field84 (array83), SDK2.1.1 default body has only81 fields"
+    ],
+    "status_rpc": "mXV10b",
+    "status_method": "BardFrontendService.GetRemyGoal",
+    "get_request_conversation_field": 1,
+    "get_response_goal_field": 1,
+    "goal_conversation_field": 14,
+    "goal_state_field": 3,
+    "status_chain": [
+      "GzXWE.js:37-39 Tic uses the response conversationId",
+      "main.js:1946 GetRemyGoal requires goal field1"
+    ],
+    "states": {
+      "1": "pending",
+      "2": "running",
+      "3": "done",
+      "4": "failed",
+      "5": "blocked",
+      "6": "monitoring",
+      "7": "scheduled",
+      "8": "cancelled"
+    },
+    "cancel_mutation_verified": false,
+    "request_flag_index": 83,
+    "request_flag_value": true
+  },
+  "privacy": "Public JavaScript fetched without browser authentication. No account contents, credentials, chat IDs or session identifiers included.",
+  "sharing": {
+    "rpc_id": "OXxBcc",
+    "method": "BardFrontendService.ListSharedConversations",
+    "request": [],
+    "source_path": "/sharing",
+    "response_items_field": 1,
+    "item_fields": {
+      "metadata": 3,
+      "share_token": 4
+    },
+    "metadata_title_field": 2,
+    "url_prefix": "https://gemini.google.com/share/",
+    "chain": [
+      "main.js:6654 sharing fallback loads xaI2P",
+      "public-sharing.js:5431 S3d descriptor, R3d empty request",
+      "public-sharing.js:5620 vHb fetches response field1 and maps CAf",
+      "public-sharing.js:5571 CAf maps metadata field3/title field2 and token field4",
+      "public-sharing.js:5557 sP formats the share-token URL"
+    ],
+    "mutations_exposed": true,
+    "create": {
+      "rpc_id": "fuVx7",
+      "method": "BardFrontendService.CreateSharedConversation",
+      "request_fields": {
+        "2": "observed conversation ID",
+        "4": "observed response/draft ID",
+        "5": "[full_conversation,title]",
+        "6": "[locale]",
+        "7": false,
+        "10": 1
+      },
+      "response_token_field": 3,
+      "verification": "independent exact-token public-link listing",
+      "chain": [
+        "public-sharing.js:5424-5436 TN.Lka public destination type1"
+      ]
+    },
+    "delete": {
+      "rpc_id": "SgORbf",
+      "request": [
+        null,
+        "<observed exact share token>"
+      ],
+      "excluded": "field3 delete-all switch",
+      "verification": "independent exact-token absence from a valid complete listing",
+      "chain": [
+        "public-sharing.js:5619-5621 WKm / TN.XVa token field2"
+      ]
+    },
+    "disabled_state_observed": false
+  },
+  "ui_only": {
+    "unimplemented_or_ui_only_entries": [
+      "repository_import",
+      "task_settings",
+      "media_watermark"
+    ]
+  },
+  "native_schedules": {
+    "registry": {
+      "rpc_id": "Ey90Ac",
+      "method": "BardFrontendService.ListRemySchedules",
+      "request": []
+    },
+    "get": {
+      "rpc_id": "Mfr55e",
+      "method": "BardFrontendService.ReadRemySchedule",
+      "request": [
+        "<observed schedule_id>"
+      ]
+    },
+    "source_path": "/scheduled",
+    "public_backend_selector": "remy",
+    "default_backend": "legacy",
+    "mutations_exposed": true,
+    "states": {
+      "0": "unspecified",
+      "1": "active",
+      "2": "paused",
+      "3": "completed"
+    },
+    "chain": [
+      "main.js:1883 TZe/VZe descriptors",
+      "main.js:1941,1948,1960 Load schedules dispatches empty SZe to ListRemySchedules",
+      "main.js:1918-1938 schedule fields and trigger conversion",
+      "x9QgSe.js:8453-8461 scheduled-tasks-tab, state filters and ngOnInit Load schedules",
+      "x9QgSe.js:6199 ReadRemySchedule sets field1 exact schedule ID and requires response field1",
+      "main.js:1878-1885 Create/Update/DeleteRemySchedule descriptors",
+      "main.js:1918-1938 N1e/O1e converts schedule and trigger fields",
+      "main.js:1946-1948 ZS.Ppd/ovc wraps schedule field1; Qpd deletes field1 exact ID",
+      "main.js:1960-1962 create/update/delete/toggle effects reuse the schedule contracts"
+    ],
+    "create": {
+      "rpc_id": "mDJkAd",
+      "method": "BardFrontendService.CreateRemySchedule"
+    },
+    "update": {
+      "rpc_id": "xrJXie",
+      "method": "BardFrontendService.UpdateRemySchedule"
+    },
+    "delete": {
+      "rpc_id": "CK9lTc",
+      "method": "BardFrontendService.DeleteRemySchedule"
+    },
+    "write_schedule_field": 1,
+    "triggers": [
+      "hourly",
+      "daily",
+      "weekly",
+      "monthly",
+      "yearly",
+      "one_off"
+    ],
+    "pause_resume_states": {
+      "active": 1,
+      "paused": 2
+    },
+    "verification": "independent exact schedule fields; deletion requires registry and exact-ID absence",
+    "limits": [
+      "Only the six time-trigger types are exposed; event/Gmail triggers require separate contracts.",
+      "CRUD read-back does not establish later scheduled execution."
+    ]
+  },
+  "notebooks": {
+    "namespace": "Gemini Web type2 bot project; distinct from NotebookLM picker references",
+    "rpc_ids": {
+      "get": "HcT8bb",
+      "create": "oMH3Zd",
+      "update": "kHv0Vd",
+      "delete": "UXcSJb",
+      "delete_with_chats": "Nwkn9",
+      "add_source": "ko3zcd",
+      "remove_source": "AptDmf"
+    },
+    "writable_metadata": [
+      "title",
+      "instructions"
+    ],
+    "description_write_supported": false,
+    "update_ack": {
+      "success": [
+        true
+      ],
+      "rejected": [
+        false
+      ]
+    },
+    "sources": {
+      "context": [
+        1,
+        3
+      ],
+      "variants": {
+        "url_field4": [
+          "<url>"
+        ],
+        "upload_field5": [
+          "<observed upload reference>",
+          "<MIME type>"
+        ],
+        "text_field6": [
+          "<supplied text>",
+          "<format:1 plain or2 Markdown>"
+        ]
+      },
+      "ready_state": 2,
+      "processing_states": [
+        1,
+        4
+      ]
+    },
+    "verification": "independent exact Notebook/source read-back; acknowledgement is insufficient",
+    "chain": [
+      "main.js:2596-2621 Vjd/nK metadata and CreateBot/GetBot/UpdateBotMetadata/DeleteBot callers",
+      "ScPWJf.js:6126,6174,6247 Notebook create selects type2/subtype1 and a title",
+      "lbYGFc.js:6900 jyh source variants;6911-6913 CreateNotebookSource/DeleteNotebookSource context",
+      "lbYGFc.js:6914 UpdateBotMetadata;6916-6918 DeleteBotAndConversations",
+      "lbYGFc.js:6930 source readiness;6942-6943 title/emoji rename UI"
+    ],
+    "limits": [
+      "CreateBot does not establish retained instructions; follow with exact-ID metadata update and fresh read-back.",
+      "Notebook absence alone does not prove deletion of its conversations."
+    ]
+  },
+  "native_skills": {
+    "path": "/customize/skills",
+    "distinct_from": [
+      "Gems",
+      "server-local Prompts"
+    ],
+    "rpc_ids": {
+      "list": "cCSu7",
+      "get": "pvBRnd",
+      "save": "SMuXte",
+      "delete": "SL49ud",
+      "remove_license": "NwCpae",
+      "set_license_enabled": "qlXjKc"
+    },
+    "save_request": [
+      "<uploaded ZIP reference>",
+      "<existing Skill ID or null>",
+      "<3=create;2=update>",
+      "<enabled boolean>",
+      "<optional external resources>"
+    ],
+    "upload": {
+      "tenant": "agent_skills",
+      "push_id": "feeds/or3baakvdgsg4i",
+      "mime_type": "application/zip",
+      "filename_suffix": ".zip",
+      "entrypoint": "SKILL.md"
+    },
+    "permission_evidence": "metadata field13 permissions: explicit can_edit/can_delete govern edits and license removal",
+    "verification": "independent exact Skill fields/files/enabled read-back; delete/license removal requires list absence",
+    "chain": [
+      "main.js:2134-2149 managed Skill descriptors and service methods",
+      "main.js:6755-6758 GSa save fields;6761 upload configuration;6769-6772 manual ZIP create/update",
+      "main.js:6775 tlc Drive-backed license enable caller",
+      "mRNCI.js:6332 Jhn loads the lNX4ad Skill editor",
+      "lNX4ad.js:5255 root SKILL.md;5290-5296 name normalization/validation"
+    ],
+    "limits": [
+      "Static upload configuration and offline archive validation do not establish live ZIP-import acceptance."
+    ]
+  },
+  "library_assets": {
+    "page": {
+      "rpc_id": "jGArJ",
+      "request": [
+        "<ten section filter booleans>",
+        "<page size>",
+        "<optional continuation>"
+      ],
+      "response": [
+        "<asset rows>",
+        "<optional continuation>"
+      ]
+    },
+    "delete": {
+      "rpc_id": "PGX16d",
+      "target": [
+        [
+          "<observed source conversation>",
+          "<observed source turn>"
+        ],
+        "<UI artifact category>",
+        null,
+        null,
+        "<optional native asset ID>"
+      ],
+      "supported_type_ids": [
+        0,
+        1,
+        2,
+        3,
+        7,
+        8,
+        11
+      ],
+      "unsupported_before_mutation": "Canvas documents/code, Deep Research, generated files, mini apps and unknown types",
+      "current_caller_fields": [
+        "responseIdentifier.conversationId",
+        "responseIdentifier.requestId",
+        "artifactType",
+        "deleteKeyToken"
+      ]
+    },
+    "sections": [
+      "all",
+      "documents",
+      "media",
+      "purchases"
+    ],
+    "all_excludes_purchases": true,
+    "identity": "native field11 when present; otherwise local content snapshot identity with a separately verified unique source target",
+    "verification": "complete pre-list, exact unambiguous target, fresh complete post-list in the selected section",
+    "chain": [
+      "QAfPpb.js:5267 XAf fields and optional native ID field11",
+      "QAfPpb.js:5274-5275 delete/page descriptors",
+      "QAfPpb.js:5331-5339 source/category deletion targets and filtered pages/continuations",
+      "library-DK15KHwO.js:1 imports LibraryOverviewSurface-QfmGPrUE and LibraryDocumentsSurface-DAFKX9PY",
+      "LibraryOverviewSurface-QfmGPrUE.js:1 offset42017 Ot restricts delete types and throws for unsupported types;offset42651 jt submits exact responseIdentifier/category/token and checks failed keys",
+      "LibraryDocumentsSurface-DAFKX9PY.js:1 imports LibraryPage-BhGyCd-s;document rows expose source navigation without the media delete mutation",
+      "LibraryPage-BhGyCd-s.js:1 offset1775 k distinguishes Canvas code/Deep Research/generated files from media;document list renderer has no delete caller"
+    ],
+    "limits": [
+      "No observed rename/update caller.",
+      "Missing source identity and ambiguous grouped targets cannot be deleted.",
+      "Omission from a bounded page or another section does not prove absence.",
+      "Current React delete caller rejects Canvas/documents even though the legacy Angular WEf maps them to category0. No source-chat deletion is substituted."
+    ]
+  },
+  "canvas": {
+    "create": {
+      "feature_mode": 2,
+      "verification": "source chat artifacts independently identify a native Canvas artifact",
+      "chain": [
+        "x9QgSe.js:7811-7812 Canvas tool-menu featureMode2; Guided Learning featureMode24",
+        "main.js:4008-4009,4145 Cf maps to StreamGenerate field50"
+      ]
+    },
+    "rpc_ids": {
+      "get": "vCj0tc",
+      "chat_artifacts": "hNvQHb",
+      "versions": "VNbbrc",
+      "update": "taAw7b"
+    },
+    "update_request": [
+      "<observed exact artifact ID>",
+      "<deep-copied ez with four content slots replaced>"
+    ],
+    "update_ack": [],
+    "replaced_fields": [
+      "outer field5 text",
+      "outer field9 structured content",
+      "document field14.field1 text",
+      "document field14.field3 structured content"
+    ],
+    "verification": "fresh exact-ID get matches both text copies and both structured copies",
+    "export": "UTF-8 text to a new local output path; not native PDF or Google Docs export",
+    "chain": [
+      "QAfPpb.js:3327 draft field31 ez; x9QgSe.js:4379-4380 response continuation and4480 request field3",
+      "xmJ3d.js:4279,4482 GetArtifactVersion descriptor/caller",
+      "x9QgSe.js:4279-4280 distinct version/get/update/navigation descriptors",
+      "x9QgSe.js:4917-4919 qqc uses UpdateCurrentArtifact taAw7b with artifactId field1 and DJc field2",
+      "x9QgSe.js:2908,2912-2915,3474 text-node and structured-node serialization",
+      "x9QgSe.js:2927,2938,3501-3506 document/outer attachment and citation fields"
+    ],
+    "limits": [
+      "Whole plain document replacement discards rich formatting and does not create a new artifact version.",
+      "Other kinds, attachment/citation nodes and unsupported structured metadata are rejected before mutation.",
+      "Nhy0te is NavigateToNextArtifactVersion, not UpdateCurrentArtifact."
+    ],
+    "structured_verification": "Both source text copies must match exactly, including whitespace. Each structured copy is independently checked against supported plain/heading paragraphs, with only observed ASCII space/LF block-edge normalization."
+  },
+  "native_attachments": {
+    "kinds": [
+      "drive",
+      "photos",
+      "notebook"
+    ],
+    "notebook_namespace": "NotebookLM; not Gemini Web Notebooks",
+    "id_policy": "exact caller-selected native resource IDs only; no title-derived IDs or automatic picker discovery",
+    "wire_oneof_fields": {
+      "drive": 5,
+      "photos": 8,
+      "notebook": 12
+    },
+    "query_attachment_field": 4,
+    "chain": [
+      "ChatLayoutSurface-DHxz-PIz.js:4 offsets57240,71056 picker bridge and NotebookLM selection",
+      "NotebooksDialogContent-DE8m_Smr.js:1 offsets2473,2857 NotebookLM list endpoint and metadata",
+      "useChatSession-DG7QezyD.js:1 offsets82457,82857 driveFile/photosFile/notebookFile and nested notebook ID",
+      "x9QgSe.js:3912-3913 dtd/SK attachment oneofs5/8/12;3968 query field4;1594-1599 MIME classification"
+    ],
+    "limits": [
+      "Native repository import is not implemented.",
+      "Reference encoding is not live proof of account resource access."
+    ]
+  }
+}
