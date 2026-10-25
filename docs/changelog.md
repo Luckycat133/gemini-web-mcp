@@ -9,28 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-- Added native Notebook title/instructions CRUD and source management, Remy schedule CRUD/pause/resume with six trigger types, and native Skill CRUD/enable/disable/ZIP import through the existing account facades. Notebook descriptions remain non-writable; native Skills, Gems and local Prompts are distinct resources.
-- Added paginated Library asset reads and exact-target media removal with identity/coverage guards (Canvas/document removal is explicitly unavailable), plus public-link create and exact-token deletion. Current public-link reads use `ListSharedConversations`; native Remy IDs retain `backend=remy` alongside separate legacy daily actions.
-- Added native Canvas creation, exact reads, chat-artifact discovery, version listing, UTF-8 export and whole plain-document text replacement. Replacement preserves unknown fields, checks all four content copies and updates the same artifact without creating a new version; attachments/citations and other document kinds are excluded.
-- Disabled hidden SDK mutation/generation replays, retained observed ordinary-chat and Canvas sources across failure/cancellation, and separated authentication deadlines from generation timeouts. Preserved source/instruction whitespace, verified complete ZIP file sets, and required unchanged schedule fields to survive updates.
-- Added typed native Drive, Photos and NotebookLM references to mixed-input understanding without guessing IDs or treating Gemini Web Notebooks as NotebookLM. Native repository import remains unsupported.
-- Audited signed-in Web surfaces and corrected misleading capability routes/report-menu evidence. Dated documentation separates bounded MCP acceptance, static public protocol evidence and failed/retried samples without claiming Research report completion.
-- Required a unique matching HTTP/RPC observation across account inventories and probes; failures, malformed rows and duplicate/null envelopes cannot become empty success or deletion evidence.
-- Followed the 2026-10-18 signed-in UI: dynamic Argon selection, low/medium/high thinking with synchronized body/header values, native Task execution and read-only state recovery.
-- Added exact-chat rename/pin/unpin with field masks and independent read-back. History listing/search/export/deep scans now reject failed or malformed metadata instead of reporting an empty account.
-- Preserved unfinished Task sources across stream end, timeout and local session reset/expiry; status reads never restart execution.
+## [0.2.2] - 2026-10-25
 
-## [0.2.2] - 2026-09-27
-
-This section records release preparation in
-[PR #34](https://github.com/Luckycat133/gemini-web-mcp/pull/34).
-Publication still requires review and merge.
+Published on 2026-10-25 from [PR #38](https://github.com/Luckycat133/gemini-web-mcp/pull/38).
 
 ### Added
 - Added seven-tool `gemini-mcp-create` and seven-facade `gemini-mcp-account` servers with direct typed output schemas, focused Runtime Skills, installation examples and release assets. Primary/compact creation delegates to the shared CreationService.
 - Added metadata-only SQLite operation/cleanup recovery, opaque handles, optional idempotency keys, seven-day operation retention, credential-lineage isolation, transactional claims, renewable leases and CAS. Saved Artifact locators are retained before source cleanup; interruption never resubmits generation.
 - Added explicit Research start/status/result/cancel actions while retaining the five-tool assist catalog, plus local report Artifacts and exact-source recovery.
 - Added multimodal onboarding with opt-in video/music starts and explicit operation recovery, and an evidence-backed client/OS/distribution matrix.
+- Added native Notebook title/instructions CRUD and source management, Remy schedule CRUD/pause/resume with six trigger types, and native Skill CRUD/enable/disable/ZIP import through the existing account facades. Notebook descriptions remain non-writable; native Skills, Gems and local Prompts are distinct resources.
+- Added paginated Library asset reads and exact-target media removal with identity/coverage guards (Canvas/document removal is explicitly unavailable), plus public-link create and exact-token deletion. Current public-link reads use `ListSharedConversations`; native Remy IDs retain `backend=remy` alongside separate legacy daily actions.
+- Added native Canvas creation, exact reads, chat-artifact discovery, version listing, UTF-8 export and whole plain-document text replacement. Replacement preserves unknown fields, checks all four content copies and updates the same artifact without creating a new version; attachments/citations and other document kinds are excluded.
+- Added typed native Drive, Photos and NotebookLM references to mixed-input understanding without guessing IDs or treating Gemini Web Notebooks as NotebookLM. Native repository import remains unsupported.
+- Followed the 2026-10-18 signed-in UI: dynamic Argon selection, low/medium/high thinking with synchronized body/header values, native Task execution and read-only state recovery.
+- Added exact-chat rename/pin/unpin with field masks and independent read-back. History listing/search/export/deep scans now reject failed or malformed metadata instead of reporting an empty account.
 
 ### Fixed
 - Made the cleanup heartbeat regression use controlled time and a persisted-renewal handshake, preserving peer-claim and single-delete assertions without depending on millisecond runner scheduling.
@@ -64,6 +57,9 @@ Publication still requires review and merge.
 - Preserved Deep Research's upstream chat ID when it appeared only in the start response, including timeout results; completed runs without a report no longer claim `report_observed`.
 - Required field-matched Gem creation read-back and target-Notebook read-back before claiming a move succeeded. Test cleanup counts only positively verified chat and scheduled-action deletion; scheduled results no longer render unverified success.
 - Made local Prompt storage atomic with in-memory rollback on write failure and preserved corrupt source files for recovery.
+- Disabled hidden SDK mutation/generation replays, retained observed ordinary-chat and Canvas sources across failure/cancellation, and separated authentication deadlines from generation timeouts. Preserved source/instruction whitespace, verified complete ZIP file sets, and required unchanged schedule fields to survive updates.
+- Required a unique matching HTTP/RPC observation across account inventories and probes; failures, malformed rows and duplicate/null envelopes cannot become empty success or deletion evidence.
+- Preserved unfinished Task sources across stream end, timeout and local session reset/expiry; status reads never restart execution.
 
 ### Changed
 - Rechecked multimodal creation through Chrome-authenticated focused MCP on 2026-10-17: image generation/editing, native video, music, unfinished-video recovery, completed-file retrieval and delayed cleanup across restart. All five sources from this run were verified absent; dated measurements and the initial failed recovery sample are recorded in `docs/live-ui-coverage.md`.
@@ -77,6 +73,7 @@ Publication still requires review and merge.
 - Verified exact owned test-chat cleanup through focused account and compatibility MCP calls with positive deletion read-back.
 - Centralized the music chat read-back RPC and its four response-shape fixtures in the infrastructure contract/parser boundary, with shared media handling for primary and compact surfaces.
 - Added bounded concurrent isolated profile probes and covered the documented `core` surface in local and CI protocol checks.
+- Audited signed-in Web surfaces and corrected misleading capability routes/report-menu evidence. Dated documentation separates bounded MCP acceptance, static public protocol evidence and failed/retried samples without claiming Research report completion.
 
 ## [0.2.1] - 2026-08-23
 
