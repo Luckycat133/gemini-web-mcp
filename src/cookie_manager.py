@@ -196,7 +196,11 @@ class CookieManager:
         profile: str = "",
         timeout_seconds: Optional[float] = None,
     ) -> Dict[str, str]:
-        """从浏览器获取 Gemini 所需的完整 Google 认证 Cookie。"""
+        """从浏览器获取 Gemini 所需的完整 Google 认证 Cookie。
+
+        若指定浏览器因 Keychain 锁定、权限不足或未安装而失败，
+        会自动回退到其他可用浏览器（Chrome→Edge→Brave→Firefox→Opera）。
+        """
         cookie_names = CookieManager._google_cookie_names()
 
         try:
@@ -204,57 +208,79 @@ class CookieManager:
         except ImportError:
             logger.warning("⚠️ browser-cookie3 未安装，无法从浏览器获取Cookie")
             logger.warning("   请运行: pip install browser-cookie3")
+            logger.info("   备选方案: 直接设置 GEMINI_PSID 和 GEMINI_PSIDTS 环境变量")
             return {}
 
+        # 浏览器优先级：指定浏览器优先，失败后按此顺序回退
+        fallback_order = ["chrome", "chrome-beta", "edge", "brave", "firefox", "opera"]
         cookie_functions = {
             "chrome": browser_cookie3.chrome,
+            "chrome-beta": browser_cookie3.chrome,
             "firefox": browser_cookie3.firefox,
             "edge": browser_cookie3.edge,
             "opera": browser_cookie3.opera,
-            "brave": browser_cookie3.brave
+            "brave": browser_cookie3.brave,
         }
 
-        if browser not in cookie_functions:
-            logger.error(f"❌ 不支持的浏览器: {browser}")
-            return {}
+        # 构建尝试列表：先指定的浏览器，再按 fallback_order 追加其余
+        tried: set[str] = set()
+        if browser in cookie_functions:
+            tried.add(browser)
+        attempt_browsers = [b for b in ([browser] if browser in cookie_functions else [])]
+        attempt_browsers += [b for b in fallback_order if b not in tried]
 
-        try:
-            with _bounded_macos_keychain_reader(
-                browser_cookie3,
-                _browser_cookie_timeout_seconds(timeout_seconds),
-            ):
-                logger.info(f"🔍 正在从 {browser} 浏览器获取 Cookie...")
-                candidates = CookieManager._browser_cookie_candidates(
+        last_error: Optional[str] = None
+        for attempt_browser in attempt_browsers:
+            cookie_function = cookie_functions[attempt_browser]
+            try:
+                with _bounded_macos_keychain_reader(
                     browser_cookie3,
-                    browser,
-                    cookie_functions[browser],
-                    cookie_names,
-                )
-                if profile and candidates:
-                    cookies = CookieManager._select_named_cookie_candidate(candidates, profile)
-                elif not candidates:
-                    cookies = CookieManager._read_cookie_jar(
-                        cookie_functions[browser](domain_name="google.com"),
+                    _browser_cookie_timeout_seconds(timeout_seconds),
+                ):
+                    logger.info(f"🔍 正在从 {attempt_browser} 浏览器获取 Cookie...")
+                    candidates = CookieManager._browser_cookie_candidates(
+                        browser_cookie3,
+                        attempt_browser,
+                        cookie_function,
                         cookie_names,
                     )
-                else:
-                    cookies = CookieManager._select_valid_cookie_candidate(candidates)
+                    if profile and candidates:
+                        cookies = CookieManager._select_named_cookie_candidate(candidates, profile)
+                    elif not candidates:
+                        cookies = CookieManager._read_cookie_jar(
+                            cookie_function(domain_name="google.com"),
+                            cookie_names,
+                        )
+                    else:
+                        cookies = CookieManager._select_valid_cookie_candidate(candidates)
 
-            if not cookies.get("__Secure-1PSID"):
-                logger.warning("⚠️ 未在浏览器中找到有效的 Cookie")
-                return {}
+                if cookies.get("__Secure-1PSID"):
+                    for name in ("__Secure-1PSID", "__Secure-1PSIDTS"):
+                        if name in cookies:
+                            logger.info(f"✅ 从 {attempt_browser} 获取到 {name}")
+                    logger.info(f"✅ 已获取 {len(cookies)} 个 Google 认证 Cookie (来源: {attempt_browser})")
+                    return cookies
 
-            for name in ("__Secure-1PSID", "__Secure-1PSIDTS"):
-                if name in cookies:
-                    logger.info(f"✅ 获取到 {name}")
-            logger.info(f"✅ 已获取 {len(cookies)} 个 Google 认证 Cookie")
-            return cookies
-        except _BrowserCookieAccessTimeout:
-            logger.error("Browser cookie access timed out while waiting for macOS Keychain")
-            return {}
-        except Exception as e:
-            logger.error(f"❌ 从浏览器获取 Cookie 失败: {e}")
-            return {}
+                last_error = f"{attempt_browser}: 未找到有效的 __Secure-1PSID"
+                logger.debug(last_error)
+
+            except _BrowserCookieAccessTimeout:
+                # macOS Keychain 是系统级锁定，所有浏览器都会受影响，
+                # 无需逐个尝试，直接停止回退并提示用户设置环境变量
+                last_error = f"{attempt_browser}: macOS Keychain 锁定超时"
+                logger.warning(f"⚠️ {last_error}，Keychain 为系统级锁定，停止浏览器回退")
+                break
+            except Exception as e:
+                last_error = f"{attempt_browser}: {e}"
+                logger.debug("从 %s 获取 Cookie 失败: %s", attempt_browser, e)
+                continue
+
+        # 所有浏览器都失败，给出明确的用户引导
+        logger.error("❌ 无法从任何浏览器获取 Gemini Cookie")
+        if last_error:
+            logger.error("   最后错误: %s", last_error)
+        logger.info("   请手动设置 GEMINI_PSID 和 GEMINI_PSIDTS 环境变量，或确保浏览器已登录并解锁系统密钥串")
+        return {}
 
     @staticmethod
     def list_browser_cookie_profiles(
@@ -352,6 +378,42 @@ class CookieManager:
             return Path.home() / ".config/google-chrome"
 
     @staticmethod
+    def _browser_base_paths(browser: str) -> list[Path]:
+        """返回当前平台下指定浏览器的用户数据目录候选。"""
+        home = Path.home()
+        if sys.platform == "darwin":
+            base = home / "Library/Application Support"
+            paths = {
+                "chrome": base / "Google/Chrome",
+                "chrome-beta": base / "Google/Chrome Beta",
+                "edge": base / "Microsoft Edge",
+                "brave": base / "BraveSoftware/Brave-Browser",
+                "opera": base / "com.operasoftware.Opera",
+                "firefox": home / "Library/Application Support/Firefox/Profiles",
+            }
+        elif sys.platform == "win32":
+            base = home / "AppData/Local"
+            paths = {
+                "chrome": base / "Google/Chrome/User Data",
+                "chrome-beta": base / "Google/Chrome SxS/User Data",
+                "edge": base / "Microsoft/Edge/User Data",
+                "brave": base / "BraveSoftware/Brave-Browser/User Data",
+                "opera": base / "Opera Software/Opera Stable",
+                "firefox": home / "AppData/Roaming/Mozilla/Firefox/Profiles",
+            }
+        else:
+            base = home / ".config"
+            paths = {
+                "chrome": base / "google-chrome",
+                "chrome-beta": base / "google-chrome-beta",
+                "edge": base / "microsoft-edge",
+                "brave": base / "BraveSoftware/Brave-Browser",
+                "opera": base / "opera",
+                "firefox": home / ".mozilla/firefox",
+            }
+        return [p for p in [paths.get(browser)] if p is not None]
+
+    @staticmethod
     def _browser_cookie_candidates(
         browser_cookie3,
         browser: str,
@@ -359,34 +421,99 @@ class CookieManager:
         cookie_names: set[str],
         require_psid: bool = True,
     ) -> list[tuple[str, Dict[str, str]]]:
-        if browser != "chrome":
+        """从指定浏览器枚举可用的 Cookie 候选。
+
+        Chrome 使用 profile 目录枚举；Firefox/Edge/Brave/Opera 使用
+        浏览器自带的 Cookie 数据库读取。
+
+        Auto 候选始终要求 __Secure-1PSID（与历史行为一致），仅 profile
+        候选在 require_psid=False 时允许无 PSID。
+        """
+        # Chrome 族使用历史兼容的 _chrome_base_path；其余浏览器使用跨平台路径
+        if browser in ("chrome", "chrome-beta"):
+            base = CookieManager._chrome_base_path()
+            bases = [base] if base else []
+        else:
+            bases = CookieManager._browser_base_paths(browser)
+
+        if not bases:
             return []
 
-        base = CookieManager._chrome_base_path()
-        if base is None:
-            return []
-        paths = [base / "Default/Cookies", *sorted(base.glob("Profile */Cookies"))]
         candidates: list[tuple[str, Dict[str, str]]] = []
-        try:
-            cookies = CookieManager._read_cookie_jar(cookie_function(domain_name="google.com"), cookie_names)
-            if cookies.get("__Secure-1PSID"):
-                candidates.append(("auto", cookies))
-        except Exception as e:
-            logger.debug("跳过 Chrome auto cookie: %s", e)
+        seen_profiles: set[str] = set()
 
-        for path in paths:
-            if not path.exists():
+        for base in bases:
+            if not base or not base.exists():
                 continue
+
+            # 先尝试浏览器自带的域名查询（最快路径）
             try:
                 cookies = CookieManager._read_cookie_jar(
-                    browser_cookie3.chrome(cookie_file=str(path), domain_name="google.com"),
-                    cookie_names,
+                    cookie_function(domain_name="google.com"), cookie_names
                 )
+                if cookies.get("__Secure-1PSID"):
+                    key = "auto"
+                    if key not in seen_profiles:
+                        seen_profiles.add(key)
+                        candidates.append((key, cookies))
             except Exception as e:
-                logger.debug("跳过 Chrome profile cookie %s: %s", path.parent.name, e)
-                continue
-            if cookies.get("__Secure-1PSID") or not require_psid:
-                candidates.append((path.parent.name, cookies))
+                logger.debug("跳过 %s 自动 Cookie: %s", browser, e)
+
+            # Chrome 族浏览器：枚举 Profile 目录
+            if browser in ("chrome", "chrome-beta", "edge", "brave", "opera"):
+                cookie_files = [base / "Default/Cookies", *sorted(base.glob("Profile */Cookies"))]
+                for path in cookie_files:
+                    if not path.exists():
+                        continue
+                    profile_name = path.parent.name
+                    if profile_name in seen_profiles:
+                        continue
+                    try:
+                        profile_cookies = CookieManager._read_cookie_jar(
+                            browser_cookie3.chrome(cookie_file=str(path), domain_name="google.com"),
+                            cookie_names,
+                        )
+                    except Exception as e:
+                        logger.debug(
+                            "跳过 %s profile %s Cookie: %s", browser, profile_name, e
+                        )
+                        continue
+                    if profile_cookies.get("__Secure-1PSID") or not require_psid:
+                        seen_profiles.add(profile_name)
+                        candidates.append((profile_name, profile_cookies))
+
+            # Firefox：Profiles 目录下的 cookies.sqlite
+            elif browser == "firefox":
+                for profile_dir in sorted(base.glob("*")):
+                    if not profile_dir.is_dir():
+                        continue
+                    profile_name = profile_dir.name
+                    if profile_name in seen_profiles:
+                        continue
+                    cookie_db = profile_dir / "cookies.sqlite"
+                    if not cookie_db.exists():
+                        continue
+                    try:
+                        import sqlite3
+
+                        conn = sqlite3.connect(f"file:{cookie_db}?mode=ro", uri=True)
+                        try:
+                            cur = conn.execute(
+                                "SELECT name, value FROM moz_cookies WHERE base_domain LIKE '%google.com'",
+                            )
+                            profile_cookies = {
+                                row[0]: row[1]
+                                for row in cur
+                                if row[0] in cookie_names and row[1]
+                            }
+                        finally:
+                            conn.close()
+                    except Exception as e:
+                        logger.debug("跳过 Firefox profile %s Cookie: %s", profile_name, e)
+                        continue
+                    if profile_cookies.get("__Secure-1PSID") or not require_psid:
+                        seen_profiles.add(profile_name)
+                        candidates.append((profile_name, profile_cookies))
 
         if not candidates:
             return []
