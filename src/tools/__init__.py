@@ -42,6 +42,33 @@ TOOL_GROUP_ALIASES: dict[str, list[str]] = {
     "all": ["chat", "media", "file", "research", "history", "account", "scheduled", "notebooks", "prompts"],
 }
 
+# 按需工具组 -> manage 层工具名映射（供 register_tools 过滤，模块级常量避免重复创建）
+MANAGE_TOOL_NAMES: dict[str, set[str]] = {
+    "history": {
+        "gemini_list_chats", "gemini_scan_chat_history_sources",
+        "gemini_read_chat", "gemini_search_chats", "gemini_export_chat",
+        "gemini_history", "gemini_delete_chat",
+    },
+    "account": {
+        "gemini_inspect_account", "gemini_probe_web_features",
+        "gemini_get_web_capabilities",
+        "gemini_account_inventory", "gemini_list_public_links",
+        "gemini_get_usage_limits", "gemini_list_library_capabilities",
+        "gemini_get_tool_mode_status", "gemini_list_models",
+    },
+    "scheduled": {
+        "gemini_list_scheduled_actions", "gemini_get_scheduled_action",
+        "gemini_create_scheduled_action", "gemini_delete_scheduled_action",
+    },
+    "notebooks": {
+        "gemini_list_notebooks", "gemini_list_notebook_chats",
+        "gemini_notebooks", "gemini_move_chat_to_notebook",
+    },
+    "prompts": {
+        "gemini_manage_prompts",
+    },
+}
+
 
 def groups_enable_manage(groups: list | None = None) -> bool:
     """向后兼容：检查是否启用了任何按需（原 manage）工具组。"""
@@ -118,33 +145,6 @@ def register_tools(mcp: MCPServer, groups: list[str] | None = None, mode: str = 
         register_tools(mcp, ["all"], mode="full")            # 全部工具（管理员）
     """
     selected = _resolve_tool_selection(groups, mode)
-
-    # 按需工具组 -> manage 层工具名映射（供 _conditional_tool_decorator 过滤）
-    MANAGE_TOOL_NAMES: dict[str, set[str]] = {
-        "history": {
-            "gemini_list_chats", "gemini_scan_chat_history_sources",
-            "gemini_read_chat", "gemini_search_chats", "gemini_export_chat",
-            "gemini_history", "gemini_delete_chat",
-        },
-        "account": {
-            "gemini_inspect_account", "gemini_probe_web_features",
-            "gemini_get_web_capabilities",
-            "gemini_account_inventory", "gemini_list_public_links",
-            "gemini_get_usage_limits", "gemini_list_library_capabilities",
-            "gemini_get_tool_mode_status", "gemini_list_models",
-        },
-        "scheduled": {
-            "gemini_list_scheduled_actions", "gemini_get_scheduled_action",
-            "gemini_create_scheduled_action", "gemini_delete_scheduled_action",
-        },
-        "notebooks": {
-            "gemini_list_notebooks", "gemini_list_notebook_chats",
-            "gemini_notebooks", "gemini_move_chat_to_notebook",
-        },
-        "prompts": {
-            "gemini_manage_prompts",
-        },
-    }
 
     if "chat" in selected:
         from .chat import register_chat_tools
