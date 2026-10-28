@@ -437,6 +437,21 @@ def list_browser_cookie_profiles(browser: str = "chrome", validate: bool = True)
     return get_cookie_manager().list_browser_cookie_profiles(browser, validate=validate)
 
 
+def init_startup_infrastructure() -> None:
+    """服务器启动时的基础设施自动化（AI 不可见）。
+
+    初始化 Cookie Manager，并在未配置 Cookie 时尝试从已登录浏览器自动获取。
+    所有 MCP 服务器入口（server.py、skill_server.py、assist.py）均应调用，
+    以保证启动行为一致，无需用户每次确认。
+    """
+    init_cookie_manager_integration()
+
+    cookie_status = get_cookie_status()
+    if not cookie_status.get("has_cookie"):
+        logger.info("🍪 环境变量未设置 Cookie，尝试从 Chrome 自动获取...")
+        get_cookie_from_browser(browser="chrome", profile="")
+
+
 def get_cookie_status() -> Dict[str, Any]:
     """获取 Cookie 状态"""
     if not COOKIE_MANAGER_AVAILABLE:

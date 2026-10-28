@@ -26,7 +26,7 @@ from .client_wrapper import (
     get_cookie_from_browser,
     get_cookie_status,
     get_gemini_client,
-    init_cookie_manager_integration,
+    init_startup_infrastructure,
     initialize_client,
     list_browser_cookie_profiles,
     list_sessions,
@@ -1613,13 +1613,7 @@ def main() -> None:
     _init_default_prompts()
 
     # ── 基础设施自动化（AI 不可见）──────────────────────────────
-    init_cookie_manager_integration()
-
-    # 若环境变量未设置 Cookie，尝试从已登录的 Chrome 自动获取，无需用户每次确认
-    cookie_status = get_cookie_status()
-    if not cookie_status.get("has_cookie"):
-        logger.info("🍪 环境变量未设置 Cookie，尝试从 Chrome 自动获取...")
-        get_cookie_from_browser(browser="chrome", profile="")
+    init_startup_infrastructure()
 
     mcp.run()
 

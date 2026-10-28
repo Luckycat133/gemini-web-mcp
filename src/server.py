@@ -14,7 +14,7 @@ from .adapters import MCPServer, TextContent, domain_error_boundary, domain_text
 from .client_wrapper import (
     get_cookie_from_browser,
     get_cookie_status,
-    init_cookie_manager_integration,
+    init_startup_infrastructure,
     list_browser_cookie_profiles,
     reset_client_async,
 )
@@ -210,13 +210,7 @@ def main():
     logger.info(f"🔧 加载工具组: {', '.join(TOOL_GROUPS)} (mode=default)")
 
     # ── 基础设施自动化（AI 不可见）──────────────────────────────
-    init_cookie_manager_integration()
-
-    # 若环境变量未设置 Cookie，尝试从已登录的 Chrome 自动获取
-    cookie_status = get_cookie_status()
-    if not cookie_status.get("has_cookie"):
-        logger.info("🍪 环境变量未设置 Cookie，尝试从 Chrome 自动获取...")
-        get_cookie_from_browser(browser="chrome", profile="")
+    init_startup_infrastructure()
 
     # 运行健康预检，异常时仅记录日志，不阻塞启动
     try:

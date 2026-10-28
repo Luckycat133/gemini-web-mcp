@@ -24,7 +24,7 @@ from ..client_wrapper import (
     cleanup_due_remote_chats,
     create_session,
     get_gemini_client,
-    init_cookie_manager_integration,
+    init_startup_infrastructure,
     initialize_client,
     lookup_session,
     schedule_remote_chat_cleanup,
@@ -420,7 +420,7 @@ def main() -> None:
     """Run the gemini_assist_mcp stdio server."""
     logging.basicConfig(level=logging.INFO)
     logger.info("Starting %s (v%s)", SERVER_NAME, __version__)
-    init_cookie_manager_integration()
+    init_startup_infrastructure()
     mcp.run()
 
 
