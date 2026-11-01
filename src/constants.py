@@ -21,7 +21,8 @@ ENDPOINTS = {
 }
 
 # 默认的会话/远端聊天保留时间（秒），可通过 GEMINI_CHAT_RETENTION_SECONDS 环境变量覆盖
-DEFAULT_CHAT_RETENTION_SECONDS = 1800
+DEFAULT_CHAT_RETENTION_SECONDS = 0
+DEFAULT_SESSION_MAX_AGE_SECONDS = 1800
 
 
 class ModelConfig(TypedDict):
@@ -78,6 +79,12 @@ MODEL_CONFIG: dict[str, ModelConfig] = {
 }
 
 THINKING_LEVEL_IDS = {
+    "low": 1,
+    "medium": 4,
+    "high": 2,
+    "低": 1,
+    "中": 4,
+    "高": 2,
     "standard": 1,
     "extended": 2,
     "标准": 1,
@@ -88,6 +95,7 @@ THINKING_MODE_IDS = {
     "3.5 flash-lite": 6,
     "3.1 flash-lite": 6,
     "flash-lite": 6,
+    "gemini-flash-lite": 6,
     "lite": 6,
     "8c46e95b1a07cecc": 6,
     "3.5 flash": 1,
@@ -96,6 +104,7 @@ THINKING_MODE_IDS = {
     "fast": 1,
     "thinking": 1,
     "gemini-3-flash": 1,
+    "gemini-flash": 1,
     "gemini-3-flash-thinking": 1,
     "fbb127bbb056c959": 1,
     "56fdd199312815e2": 1,
@@ -104,6 +113,7 @@ THINKING_MODE_IDS = {
     "3.1 pro": 3,
     "pro": 3,
     "gemini-3-pro": 3,
+    "gemini-pro": 3,
     "9d8ca3786ebdfbea": 3,
     "e6fa609c3fa255c0": 3,
 }
@@ -158,8 +168,12 @@ def resolve_model_name(model: str | None) -> str:
         "3.5 flash-lite": "flash-lite",
         "3.8 flash": "flash",
         "3.1 pro": "pro",
+        "4 argon": "argon",
+        "gemini-4-argon": "argon",
     }
     alias = current_web_names.get(model.strip().lower(), model)
+    if alias == "argon":
+        return "gemini-argon"
     config = MODEL_CONFIG.get(alias)
     return config["name"] if config else model
 
@@ -176,6 +190,8 @@ def normalize_model_alias(model: str | None) -> str:
         return "flash"
     if alias in {"3.1 pro", "pro"}:
         return "pro"
+    if alias in {"4 argon", "argon", "gemini-argon", "gemini-4-argon"}:
+        return "argon"
     if alias in {"thinking", "gemini-3-flash-thinking"}:
         return "thinking"
     return alias
@@ -226,8 +242,8 @@ def resolve_media_request(
             "requested_alias": alias,
             "effective_alias": alias,
             "request_model": resolve_model_name(alias),
-            "backend_label": "Gemini Web generic chat",
-            "note": "当前通用聊天请求未证实进入 Gemini Omni 视频模式；需验证视频产物。",
+            "backend_label": "Gemini Web video mode",
+            "note": "使用已观测的视频专用请求模式；仅在实际视频文件及视频轨道验证通过后报告完成。",
         }
 
     return {
@@ -265,7 +281,7 @@ def resolve_thinking_mode_id(model: object) -> int | None:
 
 
 def resolve_thinking_level_id(thinking_level: str | None) -> int | None:
-    """Resolve the Web UI standard/extended thinking-level selector."""
+    """Resolve low/medium/high and compatible standard/extended Web selectors."""
     if thinking_level is None:
         return None
     return THINKING_LEVEL_IDS.get(thinking_level.strip().lower())

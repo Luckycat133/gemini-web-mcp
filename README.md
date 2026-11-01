@@ -27,7 +27,15 @@
 
 Gemini Web MCP exposes Gemini Web capabilities to MCP-compatible clients such as Codex, Claude Desktop, VS Code MCP clients, and other agent runtimes.
 
-The main design choice is controlled tool layering. Agents should not see every private, account-level, or destructive operation by default. This server ships narrow `GEMINI_TOOLS` profiles, facade tools, MCP annotations, and a public Codex skill that tells agents how to choose the right surface.
+This development branch diverges from the published 0.2.2 interfaces. See [source integration notes](docs/source-update-integration.md) before installing it over an existing release; use a reviewed commit SHA for branch-specific verification.
+
+The default function surface serves assistance, chat, Task workflows, media and research with 17 tools. `gemini_ask` handles ordinary questions, current-web questions and natural-language requests to available connected apps, with Flash as the default model and no web/tool enable switches. Explicit `notebook_ids` add NotebookLM/Gemini Notebook sources to a background chat; `gemini_run_task` starts the separate Task experience. Both return a persistent operation handle for status and verified answer retrieval. The separate account surface exposes 17 explicit account-management tools, including native Skills, Notebook/text sources, Task progress and schedules, browser observation and saved preferences. Both share services and operation storage; compatibility servers and explicitly selected `GEMINI_TOOLS` profiles remain available.
+
+See [Notebook, Chat and Task workflows](docs/notebook-task-workflows.md) for examples, automatic cleanup and restart recovery. Task schedules, bounded progress and explicit browser inputs are available; exclusive browser handoff and automatic app permission approvals are not implemented; completed answer prose alone does not verify an external app change.
+
+Supported native Task file attachments are saved and verified before cleanup. See [native Skills and Notebook management](docs/native-account-resources.md) and the [Web feature coverage matrix](docs/web-feature-coverage.md) for actual live evidence and remaining gaps. Saved permission read-back does not establish that a Task will skip confirmation.
+
+Account history defaults to compact metadata and bounded explicit text reads. `gemini_manage_chat` renames, pins or unpins an exact chat ID with fresh read-back verification, without a browser DOM or a generation request. See [chat management](docs/web-chat-management.md) and [official model calling distinctions](docs/models.md).
 
 ## MCP Protocol Compatibility
 
@@ -65,7 +73,7 @@ The two roles are intentionally separate: `gemini-web-mcp` is for tool use; `gem
 
 Changes listed under **Unreleased** are available from the current repository source; a published Skill listing may lag behind `main` until its next release.
 
-The three-file runtime skill bundle is released on ClawHub under MIT-0. The MCP server source and the
+The runtime skill bundle is released on ClawHub under MIT-0. The MCP server source and the
 repository-development skill remain [AGPL-3.0-only](LICENSE).
 
 ## Install The MCP Server
@@ -76,7 +84,7 @@ One-command, credential-free proof (requires [uv](https://docs.astral.sh/uv/)):
 uvx --from git+https://github.com/Luckycat133/gemini-web-mcp@main gemini-mcp-onboarding
 ```
 
-This installs into an isolated environment, starts the real stdio server with the `model` profile, and calls the static text manifest without forwarding Gemini Cookies or making a Gemini request. Pin `@main` to a reviewed commit SHA for immutable installs.
+This installs into an isolated environment, starts `gemini-mcp-function`, verifies its 17-tool catalog and checks the typed `INVALID_ARGUMENT` response to an empty `gemini_ask` prompt. It forwards no Gemini Cookies and makes no Gemini request. Pin `@main` to a reviewed commit SHA for immutable installs.
 
 Minimal MCP client configuration:
 
@@ -88,11 +96,8 @@ Minimal MCP client configuration:
       "args": [
         "--from",
         "git+https://github.com/Luckycat133/gemini-web-mcp@main",
-        "gemini-mcp-server"
-      ],
-      "env": {
-        "GEMINI_TOOLS": "model"
-      }
+        "gemini-mcp-function"
+      ]
     }
   }
 }
@@ -108,13 +113,14 @@ python -m venv .venv
 pip install -e ".[all,dev]"
 ```
 
-Run the default content workflow surface:
+Run the default function surface, or the explicit account surface:
 
 ```bash
-GEMINI_TOOLS=core python -m src.server
-# equivalent installed console entrypoint
-GEMINI_TOOLS=core gemini-mcp-server
+gemini-mcp-function
+gemini-mcp-account
 ```
+
+`gemini-mcp-server` without `GEMINI_TOOLS` also serves the function surface. An explicitly configured profile retains its compatibility meaning.
 
 Run the compact, low-token facade:
 
@@ -122,15 +128,22 @@ Run the compact, low-token facade:
 gemini-mcp-skill-server
 ```
 
-Run the focused assistance surface (second opinions, grounded search, image/mixed-input understanding, async Deep Research):
+The five-tool assistance server remains available for compatibility:
 
 ```bash
 gemini-mcp-assist
 ```
 
+Function tools `gemini_generate_image`, `gemini_edit_image`, `gemini_generate_video`, and `gemini_generate_music` always start in the background. Deep Research also defaults to background execution. Preserve the returned `operation_id` and retrieve the same operation with `gemini_get_operation_status` / `gemini_get_operation_result`; use `background=false` for the waiting path where the compatibility tool exposes it. The compact server uses `session(action="operation_status" | "operation_result", session_id=operation_id)`, and assist uses `gemini_research(action="status" | "result", operation_id=...)`.
+
+The function surface defaults video to `model="flash"` and preserves an explicit model choice without automatically falling back to Pro. In earlier authorized local observations, Pro produced a verified video with audio while the same prompt returned a text refusal with Flash; those observations do not verify current Flash video availability.
+
+Music and Deep Research start with `thinking_level="standard"` by default. An explicit `extended` choice is preserved, as is the original level when recovering a research operation. The level does not identify a Lyria, Veo, or Research model version.
+An authorized local Flash/standard test produced verified music files and a separate Flash/standard research report; both conversations were independently verified absent after cleanup. Other requests and account conditions can produce different results.
+
 See [copyable Codex, Claude Desktop, Claude Code, and VS Code configurations plus verified text/image walkthroughs](docs/client-examples.md). Live examples require explicit account opt-in; no live Gemini request is part of PR CI.
 
-## Tool Profiles
+## Compatibility Tool Profiles
 
 | Profile | Use When | Surface |
 | --- | --- | --- |
@@ -143,17 +156,17 @@ See [copyable Codex, Claude Desktop, Claude Code, and VS Code configurations plu
 | `core` | General content workflows | Chat, media, files, research, manifest/cookie helpers |
 | `all` | Maintainers are verifying the full surface | Full maintenance surface |
 
-Use `model` as the primary starting profile for text-only work, `core` for multimodal/content workflows, and `gemini-mcp-skill-server` when a fixed eleven-tool facade is more valuable than the primary schemas. `all` is not a general default.
+The function surface is the default for ordinary work; connect the account surface for explicitly requested account operations. Explicit `model`, `core` and other profiles plus the compact server remain compatibility options. `all` is not a general default.
 
 ## Capabilities
 
 | Area | Supported Workflows |
 | --- | --- |
-| Models | Gemini Web model aliases for Flash-Lite, Flash, Pro, thinking levels, and guided learning modes |
+| Models | Flash defaults search and multimodal work; Argon for writing and difficult reasoning; explicit Pro; runtime-gated Lite quota fallback with fixed thinking |
 | Chat | One-shot chat, normalized collection of Gemini upstream streams, local sessions, temporary chat, saved Gem usage |
-| Media | Image generation/editing and music through MCP with verified local artifacts; video through Gemini Web's dedicated Omni mode while the generic MCP route remains unverified |
+| Media | Image generation/editing, music and video through MCP with verified local artifacts; inspect artifact type and completion evidence |
 | History | List, scan, search, read, export, delete, and cleanup test artifacts |
-| Notebooks | List native Gemini notebooks, inspect notebook chats, move chats into notebooks |
+| Notebooks | Discover NotebookLM/Gemini Notebook sources, use them in chat or Task, and inspect the Gemini project view for verified chat moves |
 | Account Inventory | Public links, usage limits, library capabilities, modes, models, scheduled actions |
 | Safety Metadata | MCP annotations, tool manifest, privacy/destructive-operation guidance |
 | Distribution | Standalone Codex skill zip, wheel, source distribution, launch kit |
@@ -165,7 +178,7 @@ history list/search/read/export/delete share typed results; deletion is verified
 An authorized 2026-08-08 run checked text, sessions, and history. A separate signed-in Chrome check on 2026-09-26
 produced MCP image and music files and a video through Gemini Web's dedicated Omni page; the generic MCP video call
 returned no video artifact, and a later music retry showed an upstream technical error. These targeted observations are
-not a dedicated-account full canary. Remaining work includes durable operation/cleanup recovery, more account-result
+not a dedicated-account full canary. A later 2026-10-31 authorized local test verified primary and compact MCP video and music, compact image editing, and cross-process Research report recovery with automatic cleanup. Remaining work includes broader cleanup validation, more account-result
 verification, and the focused creation/account products. The active package and Skill metadata remain `0.2.1`; these
 post-tag changes are recorded under **Unreleased**.
 
@@ -229,4 +242,14 @@ done
 
 ## Security Notes
 
-Do not commit `.env`, `cookies.json`, `prompts.json`, generated media, logs, or browser cookie material. Browser Cookie export can materialize sensitive account-authentication data in a local cache: require explicit approval, restrict access, never log/back up/share it, and remove it when no longer needed. Prefer `GEMINI_TOOLS=core` or narrower profiles unless the workflow requires account-level tools. Treat private chat text and destructive operations as explicit-user-intent actions. On macOS, browser-cookie access is bounded by `GEMINI_BROWSER_COOKIE_TIMEOUT_SECONDS` (15 seconds by default) so an unanswered system authorization request returns a sanitized error instead of hanging the MCP process.
+Completed one-shot requests extract their results and automatically attempt verified remote-chat deletion before returning by default. `retain_chat=true` opts into retention; `delete_after_seconds` sets a delay. Active sessions remain available for subsequent turns and are cleaned up after they end. Unread research is protected while it can still be recovered, then cleaned up after the server assembles the report. This happens before delivery to the client is confirmed, so an interrupted response may not be recoverable after deletion. Background media and research use an operation handle for status and result recovery. Active work remains protected while its outcome is unresolved.
+
+The account-scoped SQLite cleanup queue survives process exit. Failed or unverified deletion remains pending for retry while the server runs or after restart with the same account. The server scans for due work every 15 seconds; failure retries use backoff, and a process killed during a claimed deletion can leave a lease in place for up to 600 seconds. Neither interval guarantees when deletion will complete. Inspect the returned cleanup evidence rather than treating scheduling as success.
+
+Do not commit `.env`, `cookies.json`, `prompts.json`, generated media, logs, or browser cookie material. Browser Cookie export can materialize sensitive account-authentication data in a local cache: require explicit approval, restrict access, never log/back up/share it, and remove it when no longer needed. Use the default function surface for ordinary work and the separate account surface for explicitly requested account operations. Treat private chat text and destructive operations as explicit-user-intent actions. On macOS, browser-cookie access is bounded by `GEMINI_BROWSER_COOKIE_TIMEOUT_SECONDS` (15 seconds by default) so an unanswered system authorization request returns a sanitized error instead of hanging the MCP process.
+
+Task schedules are managed through account `gemini_tasks`, separately from Chat scheduled actions. Account `gemini_task_browser` can return a verified PNG and native image preview; explicit browser input uses the exact screenshot identity and frame hash. Install `gemini-web-mcp[browser-control]` for this optional capability. See [Notebook and Task workflows](docs/notebook-task-workflows.md) for limits and verification.
+
+### Task preferences and thinking strength
+
+Chat and Task accept `thinking_level="low"`, `"medium"` or `"high"`; legacy `standard` / `extended` remain low/high aliases. The account tool `gemini_preferences` manages persistent browser choice and known action permissions with independent read-back. See [the settings workflow](docs/task-preferences.md).

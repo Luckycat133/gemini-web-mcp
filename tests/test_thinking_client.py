@@ -28,12 +28,19 @@ generate_content_stream 在类层面打桩。ContextVar _web_request 在每个�
 """
 
 import asyncio
+import copy
+import json
+import logging
+from pathlib import Path
 from types import SimpleNamespace
 
 import orjson
 import pytest
 from gemini_webapi import GeminiClient
 from gemini_webapi.constants import Endpoint
+from gemini_webapi.types import AvailableModel
+
+from src.infrastructure.rpc_contracts import VIDEO_GENERATION_TRANSPORT, VideoTransportChanged, apply_video_generation_transport
 
 from src.thinking_client import (
     ThinkingLevelGeminiClient,
@@ -81,6 +88,110 @@ def _parse_inner(patched):
 def _new_client():
     """用 object.__new__ 跳过 GeminiClient.__init__ 的网络依赖。"""
     return object.__new__(ThinkingLevelGeminiClient)
+
+
+_VIDEO_CASES = json.loads((Path(__file__).parent / "fixtures" / "video_generation_transport_cases.json").read_text())
+
+
+def _video_sdk_request(case):
+    inner = [None] * 81
+    inner[0] = copy.deepcopy(case["content"])
+    inner[3] = case["nonce"]
+    inner[4] = case["context"]
+    inner[49] = case["mode"]
+    inner[54] = [[[[[1]]]]]
+    inner[55] = [[1]]
+    return inner
+
+
+def test_video_transport_contract_preserves_nonce_and_mirrors_observed_mode():
+    inner = _video_sdk_request(_VIDEO_CASES["success"])
+    apply_video_generation_transport(inner)
+    assert inner[3:5] == ["!fixture_nonce", "fixture_context"]
+    assert inner[VIDEO_GENERATION_TRANSPORT.mode_index] == 11
+    assert inner[54] == [] and inner[55] == [[1]]
+    assert inner[0][9] == [None] * 6 + [[[None, None, None, 1]]]
+
+
+@pytest.mark.parametrize("case", ["empty", "rejected", "changed_shape"])
+def test_video_transport_rejects_missing_or_changed_sdk_scaffolding(case):
+    with pytest.raises(VideoTransportChanged, match="Video generation"):
+        apply_video_generation_transport(_video_sdk_request(_VIDEO_CASES[case]))
+
+
+def test_video_transport_shape_change_has_typed_upstream_error():
+    from src.domain import result_from_exception
+
+    result = result_from_exception(
+        VideoTransportChanged("changed fixture"), logger=logging.getLogger(__name__), operation="video",
+    )
+    assert result.error is not None and result.error.code.value == "UPSTREAM_CHANGED"
+
+
+def test_video_transport_rejects_malformed_json_as_upstream_change():
+    with pytest.raises(VideoTransportChanged):
+        inject_web_request_options({"f.req": "invalid"}, WebRequestOptions(video_generation=True))
+
+
+def test_video_transport_is_not_in_batch_rpc_probe_registry():
+    from src.infrastructure.rpc_contracts import RPC_CONTRACTS, WEB_FEATURE_PROBE_KEYS
+
+    assert VIDEO_GENERATION_TRANSPORT.key not in RPC_CONTRACTS
+    assert VIDEO_GENERATION_TRANSPORT.key not in WEB_FEATURE_PROBE_KEYS
+
+
+def _registry_client(names):
+    client = ThinkingLevelGeminiClient()
+    for name in names:
+        client._model_registry[name] = AvailableModel(
+            model_id=name, model_name=name, display_name=name, description="", capacity=1,
+        )
+    return client
+
+
+@pytest.mark.parametrize(
+    ("requested", "expected"),
+    [("gemini-3-flash", "gemini-flash"), ("flash", "gemini-flash"),
+     ("Flash-Lite", "gemini-flash-lite"), ("lite", "gemini-flash-lite"),
+     ("gemini-3-pro", "gemini-pro"), ("pro", "gemini-pro"), ("gemini-argon", "gemini-argon")],
+)
+def test_model_resolution_uses_exact_discovered_family_not_first_partial_match(requested, expected):
+    client = _registry_client(["gemini-flash-lite", "gemini-flash", "gemini-pro", "gemini-argon"])
+    assert client._resolve_model_by_name(requested).model_name == expected
+
+
+@pytest.mark.parametrize(
+    ("requested", "available"),
+    [("gemini-3-flash", ["gemini-flash-lite", "gemini-pro"]),
+     ("Flash-Lite", ["gemini-flash", "gemini-pro"]),
+     ("gemini-3-pro", ["gemini-flash-lite", "gemini-flash"]),
+     ("gemini-flash", ["gemini-flash-lite"])],
+)
+def test_missing_model_family_fails_without_silent_fallback(requested, available):
+    client = _registry_client(available)
+    with pytest.raises(ValueError, match="not available"):
+        client._resolve_model_by_name(requested)
+
+
+def test_model_resolution_does_not_trust_cross_family_alias():
+    client = _registry_client(["gemini-flash-lite"])
+    client._model_registry["gemini-flash-lite"].aliases = ["gemini-3-flash"]
+    with pytest.raises(ValueError, match="not available"):
+        client._resolve_model_by_name("gemini-3-flash")
+
+
+def test_model_resolution_accepts_explicit_legacy_family_name_when_discovered():
+    client = _registry_client(["gemini-3-flash", "gemini-flash-lite"])
+    assert client._resolve_model_by_name("gemini-3-flash").model_name == "gemini-3-flash"
+
+
+@pytest.mark.parametrize(("model", "expected"), [
+    ("gemini-flash", 1), ("gemini-flash-lite", 6), ("gemini-pro", 3),
+])
+def test_dynamic_sdk_names_select_correct_thinking_mode(model, expected):
+    client = _new_client()
+    client._set_web_request(model, "standard", None)
+    assert _web_request.get().thinking_mode_id == expected
 
 
 # ---------------------------------------------------------------------------
@@ -217,6 +328,14 @@ def test_inject_web_request_options_thinking_only_sets_mode_and_level():
     assert inner[80] == 2
     assert inner[54] is None
     assert inner[55] is None
+
+
+@pytest.mark.parametrize("selector", [None, False, True, 0, -1, "7", [], {}])
+def test_invalid_existing_selector_uses_legacy_fallback(selector):
+    inner = [None] * 81
+    inner[79] = selector
+    result = inject_thinking_level(_make_request_data(inner), mode_id=3, level_id=2)
+    assert _parse_inner(result)[79:81] == [3, 2]
     assert len(inner) == 81  # 从 69 扩展到 81
 
 
@@ -318,6 +437,25 @@ def test_set_web_request_chinese_thinking_level_resolves():
     assert opts.thinking_level_id == 1
 
 
+def test_task_confirmation_choice_scope_is_request_local_and_resets_after_failure():
+    client = _new_client()
+    with client.task_generation_scope('c_0123456789abcdef', action_choice_id='vm'):
+        with client.thinking_scope('flash', 'medium'):
+            assert _web_request.get().task_action_choice_id == 'vm'
+            assert _web_request.get().task_conversation_id == 'c_0123456789abcdef'
+            assert _web_request.get().thinking_level_id == 4
+        with pytest.raises(RuntimeError), client.task_generation_scope('c_fedcba9876543210', action_choice_id='local_chrome:fixture'):
+            with client.thinking_scope('flash', 'high'):
+                assert _web_request.get().task_action_choice_id == 'local_chrome:fixture'
+                raise RuntimeError('synthetic failure')
+        with client.thinking_scope('flash', 'medium'):
+            assert _web_request.get().task_action_choice_id == 'vm'
+    with client.thinking_scope('flash', 'low'):
+        assert not _web_request.get().task_generation
+        assert _web_request.get().task_action_choice_id is None
+        assert _web_request.get().task_conversation_id is None
+
+
 # ---------------------------------------------------------------------------
 # _with_learning_prompt + _prefix_learning_prompt
 # ---------------------------------------------------------------------------
@@ -393,6 +531,80 @@ def test_thinking_scope_resets_token_even_on_exception():
         with client.thinking_scope("flash", "standard"):
             raise RuntimeError("boom")
     assert _web_request.get() is None
+
+
+def test_video_scope_builds_video_transport_and_preserves_thinking(monkeypatch):
+    observed = []
+
+    async def fake_stream(_client, *args, **kwargs):
+        observed.append((kwargs.get("deep_research"), _web_request.get()))
+        patched = inject_web_request_options(_make_request_data(_video_sdk_request(_VIDEO_CASES["success"])), _web_request.get())
+        inner = _parse_inner(patched)
+        assert inner[49] == 11 and inner[0][9][6][0][3] == 1
+        yield SimpleNamespace(text="video")
+
+    monkeypatch.setattr(GeminiClient, "generate_content_stream", fake_stream)
+    client = _new_client()
+
+    async def run():
+        with client.thinking_scope("flash", "standard"):
+            with client.video_generation_scope():
+                assert [item.text async for item in client.generate_content_stream("make a video")] == ["video"]
+            assert _web_request.get().video_generation is False
+        assert _web_request.get() is None
+
+    asyncio.run(run())
+    assert observed[0][0] is True
+    assert observed[0][1].video_generation is True
+    assert observed[0][1].thinking_mode_id == 1 and observed[0][1].thinking_level_id == 1
+
+
+def test_video_and_normal_generation_scopes_are_task_local(monkeypatch):
+    observed = {}
+
+    async def fake_generate(_client, prompt, **kwargs):
+        await asyncio.sleep(0)
+        observed[prompt] = (kwargs.get("deep_research", False), _web_request.get())
+        return SimpleNamespace(text="ok")
+
+    monkeypatch.setattr(GeminiClient, "generate_content", fake_generate)
+    client = _new_client()
+
+    async def video():
+        with client.video_generation_scope():
+            await client.generate_content("video", model="flash", thinking_level="standard")
+
+    async def normal():
+        await client.generate_content("normal", model="flash", thinking_level="extended")
+
+    async def run():
+        await asyncio.gather(video(), normal())
+
+    asyncio.run(run())
+    assert observed["video"][0] is True and observed["video"][1].video_generation is True
+    assert observed["normal"][0] is False and observed["normal"][1].video_generation is False
+    assert observed["normal"][1].thinking_level_id == 2
+
+
+def test_video_scope_rejects_deep_research_and_learning_modes(monkeypatch):
+    called = []
+
+    async def fake_generate(_client, *args, **kwargs):
+        called.append(True)
+        return SimpleNamespace(text="ok")
+
+    monkeypatch.setattr(GeminiClient, "generate_content", fake_generate)
+    client = _new_client()
+
+    async def run():
+        with client.video_generation_scope():
+            with pytest.raises(ValueError, match="Deep Research"):
+                await client.generate_content("video", deep_research=True)
+            with pytest.raises(ValueError, match="learning mode"):
+                await client.generate_content("video", learning_mode="quiz")
+
+    asyncio.run(run())
+    assert called == []
 
 
 # ---------------------------------------------------------------------------
@@ -629,6 +841,18 @@ def test_install_thinking_transport_skips_when_data_not_dict():
     assert "x-goog-ext-73010990-jspb" not in (calls[0].get("headers") or {})
 
 
+def test_video_transport_rejects_missing_form_data_instead_of_sending_research():
+    client = _new_client()
+    _web_request.set(WebRequestOptions(video_generation=True))
+    calls = []
+    session = SimpleNamespace(stream=lambda *args, **kwargs: calls.append((args, kwargs)))
+    client.client = session
+    client._install_thinking_transport()
+    with pytest.raises(VideoTransportChanged, match="Video generation transport request is unavailable"):
+        session.stream("POST", Endpoint.GENERATE, data="not-a-dict")
+    assert calls == []
+
+
 def test_install_thinking_transport_injects_on_generate_with_dict_data():
     """url==GENERATE + data 是 dict + 有 active request → 注入 options + 加 header。"""
     client = _new_client()
@@ -692,3 +916,267 @@ def test_init_calls_super_init_then_installs_transport(monkeypatch):
 
     assert client._initialized is True
     assert client.client._mcp_thinking_stream is True
+
+
+@pytest.mark.parametrize(
+    ("api", "level", "scope_level", "native", "expected"),
+    [
+        ("generate", "standard", None, True, 1),
+        ("generate", "extended", None, False, 2),
+        ("stream", "standard", None, True, 1),
+        ("stream", "extended", None, False, 2),
+        ("generate", "low", None, True, 1),
+        ("generate", "medium", None, False, 4),
+        ("stream", "high", None, False, 2),
+        ("stream", "中", None, False, 4),
+        ("generate", None, "medium", False, 4),
+        ("generate-default", "medium", None, False, 4),
+        ("generate", None, "extended", False, 2),
+        ("stream", None, "extended", False, 2),
+        ("generate", None, None, True, 2),
+        ("stream", None, None, False, 1),
+    ],
+)
+def test_real_sdk_model_header_and_body_agree_on_thinking_level(
+    monkeypatch, api, level, scope_level, native, expected,
+):
+    """Exercise SDK construction and our transport with a synthetic, unsent request."""
+    from contextlib import nullcontext
+    from gemini_webapi.constants import MODEL_HEADER_KEY
+
+    class CapturedRequest(BaseException):
+        pass
+
+    class FakeSession:
+        def __init__(self):
+            self.kwargs = None
+
+        def stream(self, method, url, **kwargs):
+            assert method == "POST" and url == Endpoint.GENERATE
+            self.kwargs = kwargs
+            raise CapturedRequest()
+
+    async def no_activity(_self):
+        return None
+
+    monkeypatch.setattr(GeminiClient, "_sync_activity", no_activity)
+    client = _registry_client(["gemini-pro", "gemini-flash"])
+    model = client._model_registry["gemini-pro"]
+    session = FakeSession()
+    client.client = session
+    client._running = True
+    client._install_thinking_transport()
+
+    async def run():
+        scope = client.thinking_scope("gemini-pro", scope_level) if scope_level else nullcontext()
+        with scope, pytest.raises(CapturedRequest):
+            kwargs = {"model": model, "extended_thinking": native}
+            if api == "generate-default":
+                kwargs.pop("model")
+            if level:
+                kwargs["thinking_level"] = level
+            if api.startswith("generate"):
+                await client.generate_content("synthetic", **kwargs)
+            else:
+                async for _ in client.generate_content_stream("synthetic", **kwargs):
+                    pass
+
+    asyncio.run(run())
+    assert session.kwargs is not None
+    header = json.loads(session.kwargs["headers"][MODEL_HEADER_KEY])
+    body = _parse_inner(session.kwargs["data"])
+    assert header[-2] == expected
+    assert body[80] == expected
+
+
+@pytest.mark.parametrize("number", [7, 8])
+@pytest.mark.parametrize("video", [False, True])
+def test_real_sdk_dynamic_model_selector_survives_transport(monkeypatch, number, video):
+    """The SDK-discovered selector remains aligned with its model header."""
+    from contextlib import nullcontext
+    from gemini_webapi.constants import MODEL_HEADER_KEY
+
+    class CapturedRequest(BaseException):
+        pass
+
+    class FakeSession:
+        def stream(self, method, url, **kwargs):
+            assert method == "POST" and url == Endpoint.GENERATE
+            self.kwargs = kwargs
+            raise CapturedRequest()
+
+    async def no_activity(_self):
+        return None
+
+    monkeypatch.setattr(GeminiClient, "_sync_activity", no_activity)
+    monkeypatch.setattr(GeminiClient, "_check_account_status", lambda *_a, **_kw: None)
+    client = _registry_client(["gemini-pro"])
+    client._model_registry["gemini-pro"].model_number = number
+    client.client = session = FakeSession()
+    client._running = True
+    client._install_thinking_transport()
+
+    async def run():
+        with client.video_generation_scope() if video else nullcontext():
+            with pytest.raises(CapturedRequest):
+                async for _ in client.generate_content_stream(
+                    "synthetic", model="gemini-3-pro", thinking_level="extended", current_retry=0,
+                ):
+                    pass
+
+    asyncio.run(run())
+    header = json.loads(session.kwargs["headers"][MODEL_HEADER_KEY])
+    body = _parse_inner(session.kwargs["data"])
+    assert header[-3:-1] == [number, 2]
+    assert body[79:81] == [number, 2]
+    assert body[49] == (11 if video else None)
+    if video:
+        assert body[0][9][6][0][3] == 1
+
+
+def test_native_level_propagates_through_video_and_learning_without_leaking(monkeypatch):
+    captured = []
+
+    async def fake_generate(_self, *args, **kwargs):
+        captured.append(kwargs)
+        return SimpleNamespace(text="ok")
+
+    monkeypatch.setattr(GeminiClient, "generate_content", fake_generate)
+    client = _new_client()
+
+    async def run():
+        with client.thinking_scope("pro", "extended"):
+            with client.video_generation_scope():
+                await client.generate_content("video")
+        await client.generate_content("quiz", model="pro", thinking_level="standard", learning_mode="quiz")
+        await client.generate_content("normal", extended_thinking=True)
+
+    asyncio.run(run())
+    assert captured[0]["deep_research"] is True
+    assert captured[0]["extended_thinking"] is True
+    assert captured[1]["extended_thinking"] is False
+    assert captured[2]["extended_thinking"] is True
+    assert "deep_research" not in captured[2]
+    assert _web_request.get() is None
+
+
+def test_sdk_transport_observes_metadata_before_any_model_output(monkeypatch):
+    """Use the installed SDK frame parser with synthetic bytes and no network."""
+    from src.services.cleanup_scope import observe_cleanup_frames
+
+    inner = json.dumps([None, ["c_first_frame", "r_first_frame"]], separators=(",", ":"))
+    body = json.dumps([[None, None, inner]], separators=(",", ":"))
+    wire = (str(len(body) + 1) + "\n" + body).encode()
+
+    class Response:
+        status_code = 200
+        http_version = 2
+
+        async def aiter_content(self):
+            yield wire
+            raise asyncio.CancelledError()
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return False
+
+    class Session:
+        def stream(self, *args, **kwargs):
+            return Response()
+
+    async def no_activity(_self):
+        return None
+
+    monkeypatch.setattr(GeminiClient, "_sync_activity", no_activity)
+    client = _registry_client(["gemini-pro"])
+    client.client = Session()
+    client._running = True
+    chat = client.create_cleanup_chat()
+    observed = []
+
+    async def run():
+        with observe_cleanup_frames(lambda item: observed.append(getattr(item, "cid", ""))):
+            with pytest.raises(asyncio.CancelledError):
+                await client.generate_content("synthetic", chat=chat, model=client._model_registry["gemini-pro"])
+
+    asyncio.run(run())
+    assert "c_first_frame" in observed
+
+
+@pytest.mark.parametrize("early_identity", [False, True])
+@pytest.mark.parametrize("retry_argument", [None, 5])
+def test_sdk_research_plan_never_replays_failed_generation(monkeypatch, early_identity, retry_argument):
+    """Exercise native research and the installed retry decorator without network."""
+    from unittest.mock import AsyncMock
+    from gemini_webapi.exceptions import APIError
+    from src.services.cleanup_scope import observe_cleanup_frames
+
+    inner = json.dumps([None, ["c_synthetic", "r_synthetic"]], separators=(",", ":"))
+    body = json.dumps([[None, None, inner]], separators=(",", ":"))
+    wire = (str(len(body) + 1) + "\n" + body).encode()
+
+    class Response:
+        status_code = 200
+        http_version = 2
+        async def aiter_content(self):
+            if early_identity:
+                yield wire
+            raise APIError("synthetic transport failure")
+        async def __aenter__(self):
+            return self
+        async def __aexit__(self, *_args):
+            return False
+
+    class Transport:
+        requests = 0
+        def stream(self, *_args, **_kwargs):
+            self.requests += 1
+            return Response()
+
+    monkeypatch.setattr(GeminiClient, "_sync_activity", AsyncMock())
+    monkeypatch.setattr(GeminiClient, "_check_account_status", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(GeminiClient, "close", AsyncMock())
+    monkeypatch.setattr(GeminiClient, "fetch_latest_chat_response", AsyncMock(return_value=None))
+    client = _registry_client(["gemini-pro"])
+    client.client = transport = Transport()
+    client._running = True
+    chat = client.start_chat(model=client._model_registry["gemini-pro"])
+    original_send = chat.send_message
+    async def send_with_retry_argument(prompt, **kwargs):
+        return await original_send(prompt, current_retry=retry_argument, **kwargs)
+    monkeypatch.setattr(type(chat), "send_message", lambda _self, prompt, **kwargs: send_with_retry_argument(prompt, **kwargs))
+
+    observed = []
+    async def run():
+        with observe_cleanup_frames(lambda value: observed.append(value.cid)):
+            with pytest.raises(APIError):
+                await client.create_deep_research_plan("synthetic", chat=chat)
+    asyncio.run(run())
+    assert transport.requests == 1
+    assert ("c_synthetic" in observed) is early_identity
+
+
+def test_native_research_plan_and_confirmation_are_distinct_turns(monkeypatch):
+    from unittest.mock import AsyncMock
+    from gemini_webapi.types import Candidate, DeepResearchPlan, ModelOutput
+
+    prompts = []
+    async def fake_sdk_generate(_client, prompt, **_kwargs):
+        prompts.append(prompt)
+        plan = DeepResearchPlan(title="Synthetic", confirm_prompt="Start research") if len(prompts) == 1 else None
+        yield ModelOutput(metadata=["c_synthetic", "r_synthetic", "rc_synthetic"],
+                          candidates=[Candidate(rcid="rc_synthetic", text="ok", deep_research_plan=plan)])
+
+    monkeypatch.setattr(GeminiClient, "_generate", fake_sdk_generate)
+    monkeypatch.setattr(GeminiClient, "_sync_activity", AsyncMock())
+    monkeypatch.setattr(GeminiClient, "_check_account_status", lambda *_args, **_kwargs: True)
+    client = _registry_client(["gemini-pro"])
+    client._running = True
+    chat = client.start_chat(model=client._model_registry["gemini-pro"])
+    async def run():
+        plan = await client.create_deep_research_plan("synthetic", chat=chat)
+        await client.start_deep_research(plan, chat=chat)
+    asyncio.run(run())
+    assert prompts == ["synthetic", "Start research"]

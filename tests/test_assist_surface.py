@@ -21,7 +21,7 @@ surface-local copy of request construction. These tests pin:
   outcomes (accepted/analyzed/skipped/failed) without one overloaded string;
 - research delegation: the asynchronous start contract (one opaque
   high-entropy ``operation_id``, preserved upstream operation/chat IDs, a
-  typed ``state``, ``retain_chat`` defaulting to true, and no wait for the
+  typed ``state``, ``retain_chat`` defaulting to false, and no wait for the
   final report), plus the plan-phase deadline contract (a missed deadline
   returns one typed TIMED_OUT result with the issued handle preserved, and
   ``timeout_seconds`` keeps its 30-second phase floor).
@@ -35,11 +35,13 @@ import src.services.research as research_service
 import src.surfaces.assist as assist
 
 from src import __version__
-from src.domain import DomainErrorCode, DomainResult
+from src.domain import CleanupObservation, CleanupState, DomainErrorCode, DomainResult
 from src.services.research import phase_timeout
 
 
 async def _call_tool(name: str, **kwargs):
+    if name == "gemini_research":
+        kwargs.setdefault("background", False)
     return (await assist.mcp.call_tool(name, kwargs)).content
 
 
@@ -61,6 +63,9 @@ class _FakeAskClient:
             observed_backend=self._observed_backend,
             metadata=["c_ask1", "r_response"],
         )
+
+    async def generate_content_stream(self, **kwargs):
+        yield await self.generate_content(**kwargs)
 
 
 class _FakeUnderstandClient:
@@ -104,10 +109,15 @@ class _FakeSearchClient:
             metadata=["c_search1", "r_response"],
         )
 
+    async def generate_content_stream(self, **kwargs):
+        yield await self.generate_content(**kwargs)
+
 
 def _patch_ask_client_env(monkeypatch, client, *, captured_schedule=None):
     """Patch the client/cleanup seams the assist surface binds to ChatService."""
+    monkeypatch.setenv("GEMINI_PSID", "synthetic-assist-test-account")
     monkeypatch.setattr(assist, "get_gemini_client", lambda: client)
+    monkeypatch.setattr(assist, "schedule_remote_chat_cleanup", lambda *_args, **_kwargs: None)
 
     async def fake_initialize():
         return None
@@ -132,11 +142,18 @@ def _patch_ask_client_env(monkeypatch, client, *, captured_schedule=None):
 
     monkeypatch.setattr(assist, "schedule_remote_chat_cleanup_from_response", fake_schedule_from_response)
 
+    async def fake_finalize_from_response(response, *, retain_chat, delete_after_seconds, source, client):
+        return fake_schedule_from_response(
+            response, retain_chat=retain_chat, delete_after_seconds=delete_after_seconds, source=source,
+        )
+
+    monkeypatch.setattr(assist, "finalize_remote_chat_cleanup_from_response", fake_finalize_from_response)
+
 
 class _FakeResearchClient:
     """Capture the native Deep Research start request without waiting for the report."""
 
-    def __init__(self, *, research_id="r_123", plan_cid="c_plan1", plan_title="Research Plan", start_state=None):
+    def __init__(self, *, research_id="r_123", plan_cid="c_plan1", plan_title="Research Plan", start_state="running"):
         self._research_id = research_id
         self._plan_cid = plan_cid
         self._plan_title = plan_title
@@ -182,6 +199,7 @@ class _FakeResearchClient:
 
 def _patch_research_client_env(monkeypatch, client, *, captured_schedule=None):
     """Patch the client/cleanup seams the assist surface binds to ResearchService."""
+    monkeypatch.setenv("GEMINI_PSID", "synthetic-assist-test-account")
     monkeypatch.setattr(assist, "get_gemini_client", lambda: client)
 
     async def fake_initialize():
@@ -204,8 +222,20 @@ def _patch_research_client_env(monkeypatch, client, *, captured_schedule=None):
                     "source": source,
                 }
             )
+        return CleanupObservation(
+            state=CleanupState.RETAINED if retain_chat else CleanupState.PENDING,
+            upstream_chat_id=cid,
+        )
 
     monkeypatch.setattr(assist, "schedule_remote_chat_cleanup", fake_schedule_chat_cleanup)
+
+    async def fake_finalize_chat_cleanup(cid, *, retain_chat, **kwargs):
+        return CleanupObservation(
+            state=CleanupState.RETAINED if retain_chat else CleanupState.COMPLETED,
+            upstream_chat_id=cid,
+        )
+
+    monkeypatch.setattr(assist, "finalize_remote_chat_cleanup", fake_finalize_chat_cleanup)
 
 
 # ---------------------------------------------------------------------------
@@ -250,7 +280,8 @@ def test_gemini_ask_input_schema_is_deterministic():
 
     assert schema["type"] == "object"
     assert schema["required"] == ["prompt"]
-    assert set(schema["properties"]) == {"prompt", "context", "model", "thinking_level"}
+    assert set(schema["properties"]) == {"prompt", "context", "model", "thinking_level", "retain_chat", "delete_after_seconds"}
+    assert schema["properties"]["retain_chat"]["default"] is False
     assert schema["properties"]["model"]["default"] == "flash"
     assert schema["properties"]["thinking_level"]["default"] == "standard"
 
@@ -341,9 +372,9 @@ def test_gemini_research_registration_and_annotations():
 
     assert tool.description and tool.description.strip()
     assert tool.annotations is not None
-    # gemini_research starts a remote Deep Research run: mutating, not destructive.
+    # The result action can clean the unretained chat; the facade covers all actions.
     assert tool.annotations.read_only_hint is False
-    assert tool.annotations.destructive_hint is False
+    assert tool.annotations.destructive_hint is True
     assert tool.annotations.idempotent_hint is False
     assert tool.annotations.open_world_hint is True
 
@@ -353,7 +384,7 @@ def test_gemini_research_input_schema_is_deterministic():
     schema = tools["gemini_research"].input_schema
 
     assert schema["type"] == "object"
-    assert schema["required"] == ["query"]
+    assert "query" not in schema.get("required", [])
     assert set(schema["properties"]) == {
         "query",
         "model",
@@ -361,12 +392,16 @@ def test_gemini_research_input_schema_is_deterministic():
         "timeout_seconds",
         "retain_chat",
         "delete_after_seconds",
+        "operation_id",
+        "action",
+        "background",
     }
     assert schema["properties"]["model"]["default"] == "flash"
-    assert schema["properties"]["thinking_level"]["default"] == "extended"
+    assert schema["properties"]["thinking_level"]["default"] == "standard"
     assert schema["properties"]["timeout_seconds"]["default"] == 600
-    # The research chat is retained by default so the report stays recoverable.
-    assert schema["properties"]["retain_chat"]["default"] is True
+    # Default research chats are scheduled for cleanup.
+    assert schema["properties"]["retain_chat"]["default"] is False
+    assert schema["properties"]["background"]["default"] is True
 
 
 def test_assist_surface_exposes_no_account_or_history_tools():
@@ -422,6 +457,38 @@ def test_gemini_ask_returns_backend_and_lifecycle_evidence(monkeypatch):
     assert domain_result["meta"]["requested_backend"] == "pro"
     assert domain_result["meta"]["effective_backend"] == "gemini-3-pro"
     assert domain_result["data"]["lifecycle"]["upstream_chat_id"] == "c_ask1"
+
+
+def test_gemini_ask_observes_only_sources_from_matching_stream_reply(monkeypatch):
+    class Client(_FakeAskClient):
+        async def generate_content_stream(self, **kwargs):
+            self.captured_generate_kwargs = dict(kwargs)
+            def frame(rcid, citations, text):
+                return SimpleNamespace(text=text, text_delta="", images=[], videos=[], media=[],
+                                       metadata=["c_ask1", "r_response"], rcid=rcid, citations=citations)
+            yield frame("rc_other", [{"url": "https://other.example/"}], "old")
+            yield frame("rc_target", [{"url": "https://source.example/", "title": "Source"}], "answer")
+            yield frame("rc_target", [], "answer")
+
+    client = Client()
+    _patch_ask_client_env(monkeypatch, client)
+    prompt = "  Use Google Maps to find a cafe  "
+    content = asyncio.run(_call_tool("gemini_ask", prompt=prompt))
+    data = content[0].meta["domain_result"]["data"]
+    assert client.captured_generate_kwargs["prompt"] == prompt
+    assert data["answer"] == "answer" and "answer" in content[0].text
+    assert data["grounding_state"] == "grounded"
+    assert data["sources"] == [{"url": "https://source.example/", "title": "Source", "role": "citation"}]
+    assert data["observed_source_count"] == 1 and data["observed_at"]
+
+
+def test_gemini_ask_prose_url_is_not_source_evidence(monkeypatch):
+    client = _FakeAskClient(response_text="See https://example.com/")
+    _patch_ask_client_env(monkeypatch, client)
+    result = asyncio.run(_call_tool("gemini_ask", prompt="Find a source"))[0]
+    data = result.meta["domain_result"]["data"]
+    assert data["grounding_state"] == "answer_only"
+    assert data["sources"] == [] and data["observed_source_count"] == 0
 
 
 def test_gemini_ask_appends_optional_context_to_the_prompt(monkeypatch):
@@ -492,7 +559,7 @@ def test_gemini_ask_preserves_shared_chat_failure(monkeypatch):
             verification_status="authentication_expired",
         )
 
-    monkeypatch.setattr(assist._chat_service, "generate", fail_with_typed_result)
+    monkeypatch.setattr(assist._chat_service, "generate_stream", fail_with_typed_result)
     content = asyncio.run(_call_tool("gemini_ask", prompt="Hi"))
 
     domain_result = content[0].meta["domain_result"]
@@ -530,6 +597,39 @@ def test_gemini_search_delegates_query_model_and_cleanup_source(monkeypatch):
     assert "search answer" in content[0].text
 
 
+def test_gemini_search_preserves_early_structured_citations_and_finalizes_cleanup(monkeypatch):
+    from gemini_webapi.types import Candidate, Citation, ModelOutput
+
+    citation = Citation(id=1, title="NASA", url="https://nasa.gov/artemis")
+    frames = [
+        ModelOutput(metadata=["c_search1", "r_one"], candidates=[
+            Candidate(rcid="rc_one", text="Search answer", citations=[citation]),
+        ]),
+        ModelOutput(metadata=["c_search1", "r_one"], candidates=[
+            Candidate(rcid="rc_one", text="Search answer", citations=[]),
+        ]),
+    ]
+
+    class StreamingClient(_FakeSearchClient):
+        async def generate_content_stream(self, **kwargs):
+            self.captured_generate_kwargs = kwargs
+            for frame in frames:
+                yield frame
+
+    client = StreamingClient()
+    finalizations = []
+    _patch_ask_client_env(monkeypatch, client, captured_schedule=finalizations)
+    checkpoints = []
+    monkeypatch.setattr(assist, "schedule_remote_chat_cleanup", lambda cid, **kwargs: checkpoints.append((cid, kwargs)))
+
+    content = asyncio.run(_call_tool("gemini_search", query="NASA Artemis"))
+    domain = content[0].meta["domain_result"]
+    assert domain["data"]["grounding_state"] == "grounded"
+    assert domain["data"]["sources"][0]["url"] == "https://nasa.gov/artemis"
+    assert len(checkpoints) == 1 and checkpoints[0][0] == "c_search1"
+    assert len(finalizations) == 1 and finalizations[0]["source"] == "gemini_search"
+
+
 def test_gemini_search_returns_grounded_state_with_observed_sources(monkeypatch):
     client = _FakeSearchClient(
         response_text="Release notes say X shipped.",
@@ -549,8 +649,8 @@ def test_gemini_search_returns_grounded_state_with_observed_sources(monkeypatch)
     assert data["grounding_state"] == "grounded"
     assert data["query"] == "latest release"
     assert data["sources"] == [
-        {"url": "https://example.com/release-notes", "title": "Release Notes"},
-        {"url": "https://blog.example.com/announcement", "title": None},
+        {"url": "https://example.com/release-notes", "title": "Release Notes", "role": "citation"},
+        {"url": "https://blog.example.com/announcement", "title": None, "role": "citation"},
     ]
     assert data["observed_at"]
     assert data["requested_model"] == "pro"
@@ -1130,6 +1230,19 @@ def test_gemini_research_operation_handles_are_unique_per_call(monkeypatch):
     assert first_handle != second_handle
 
 
+def test_gemini_research_caller_handle_is_preserved_and_duplicate_does_not_restart(monkeypatch):
+    client = _FakeResearchClient()
+    _patch_research_client_env(monkeypatch, client)
+    handle = "op_" + "a" * 32
+    first = asyncio.run(_call_tool("gemini_research", query="first", operation_id=handle))
+    client.captured_plan_query = None
+    second = asyncio.run(_call_tool("gemini_research", query="retry", operation_id=handle))
+    assert first[0].meta["domain_result"]["data"]["operation_id"] == handle
+    assert second[0].meta["domain_result"]["data"]["operation_id"] == handle
+    assert client.captured_plan_query is None
+    assert second[0].meta["domain_result"]["warnings"][0]["code"] == "operation_already_exists"
+
+
 def test_gemini_research_preserves_upstream_ids_in_structured_metadata(monkeypatch):
     client = _FakeResearchClient(research_id="r_unique", plan_cid="c_plan_unique")
     _patch_research_client_env(monkeypatch, client)
@@ -1150,9 +1263,10 @@ def test_gemini_research_preserves_upstream_ids_in_structured_metadata(monkeypat
     assert "Upstream chat ID: c_plan_unique" in content[0].text
 
 
-def test_gemini_research_recovers_chat_id_from_start_response(monkeypatch):
+def test_gemini_research_refuses_confirmation_without_preexisting_chat_id(monkeypatch):
     class _StartResponseHasChatId(_FakeResearchClient):
         async def start_deep_research(self, plan, chat=None):
+            self.captured_start_plan = plan
             return SimpleNamespace(text="Research started", metadata=["c_start_response", "r_start"])
 
     client = _StartResponseHasChatId(plan_cid="")
@@ -1162,12 +1276,11 @@ def test_gemini_research_recovers_chat_id_from_start_response(monkeypatch):
     content = asyncio.run(_call_tool("gemini_research", query="Study this."))
 
     domain_result = content[0].meta["domain_result"]
-    assert domain_result["ok"] is True
-    assert domain_result["data"]["upstream_chat_id"] == "c_start_response"
-    assert domain_result["data"]["continuation_possible"] is True
-    assert captured_schedule == [
-        {"cid": "c_start_response", "retain_chat": True, "delete_after_seconds": None, "source": "gemini_research"}
-    ]
+    assert domain_result["ok"] is False
+    assert domain_result["data"]["upstream_chat_id"] is None
+    assert domain_result["data"]["continuation_possible"] is False
+    assert client.captured_start_plan is None
+    assert captured_schedule == []
 
 
 def test_gemini_research_maps_upstream_state_to_typed_states(monkeypatch):
@@ -1186,12 +1299,25 @@ def test_gemini_research_maps_upstream_state_to_typed_states(monkeypatch):
 
     assert queued_result["data"]["state"] == "queued"
     assert queued_result["meta"]["verification_status"] == "upstream_queued"
-    assert queued_result["data"]["latest_upstream_state"] == "queued"
+    assert queued_result["data"]["latest_upstream_state"] == "accepted"
     assert running_result["data"]["state"] == "running"
     assert failed_result["ok"] is False
     assert failed_result["error"]["code"] == "INTERNAL_ERROR"
     assert failed_result["data"]["state"] == "failed"
     assert failed_result["meta"]["operation_state"] == "failed"
+
+
+def test_gemini_research_unrecognized_confirmation_is_not_reported_running(monkeypatch):
+    class UnconfirmedResearch(_FakeResearchClient):
+        async def start_deep_research(self, plan, chat=None):
+            return SimpleNamespace(text="I cannot start this research", state=None)
+
+    _patch_research_client_env(monkeypatch, UnconfirmedResearch())
+    result = asyncio.run(_call_tool("gemini_research", query="q"))[0].meta["domain_result"]
+    assert result["data"]["state"] == "accepted"
+    assert result["data"]["latest_upstream_state"] is None
+    assert result["meta"]["verification_status"] == "start_outcome_unverified"
+    assert result["data"]["report_available"] is False
 
 
 def test_gemini_research_does_not_claim_report_observed_from_start_state_alone(monkeypatch):
@@ -1202,23 +1328,22 @@ def test_gemini_research_does_not_claim_report_observed_from_start_state_alone(m
 
     domain_result = content[0].meta["domain_result"]
     assert domain_result["ok"] is True
-    assert domain_result["data"]["state"] == "completed"
+    assert domain_result["data"]["state"] == "partial"
     assert domain_result["data"]["report_available"] is False
-    assert domain_result["meta"]["verification_status"] == "upstream_completed_report_not_observed"
-    assert "did not return a report" in content[0].text
+    assert domain_result["meta"]["verification_status"] == "report_not_observed"
+    assert "completion is not verified" in content[0].text
 
 
-def test_gemini_research_schedules_cleanup_with_retain_chat_default_true(monkeypatch):
+def test_gemini_research_schedules_deferred_cleanup_by_default(monkeypatch):
     client = _FakeResearchClient()
     captured_schedule = []
     _patch_research_client_env(monkeypatch, client, captured_schedule=captured_schedule)
 
     asyncio.run(_call_tool("gemini_research", query="How did the standard evolve?"))
 
-    # The research chat is retained by default so the report stays recoverable
-    # through the preserved upstream chat ID.
+    # Default cleanup is deferred while the research may still be running.
     assert captured_schedule == [
-        {"cid": "c_plan1", "retain_chat": True, "delete_after_seconds": None, "source": "gemini_research"}
+        {"cid": "c_plan1", "retain_chat": False, "delete_after_seconds": 1800, "source": "gemini_research"}
     ]
 
 
@@ -1241,6 +1366,16 @@ def test_gemini_research_forwards_explicit_cleanup_overrides(monkeypatch):
     ]
 
 
+def test_gemini_research_explicit_retain_never_schedules_deletion(monkeypatch):
+    client = _FakeResearchClient()
+    captured_schedule = []
+    _patch_research_client_env(monkeypatch, client, captured_schedule=captured_schedule)
+    asyncio.run(_call_tool("gemini_research", query="q", retain_chat=True))
+    assert captured_schedule == [
+        {"cid": "c_plan1", "retain_chat": True, "delete_after_seconds": None, "source": "gemini_research"}
+    ]
+
+
 def test_gemini_research_delegates_query_model_and_thinking_level(monkeypatch):
     client = _FakeResearchClient()
     _patch_research_client_env(monkeypatch, client)
@@ -1256,8 +1391,8 @@ def test_gemini_research_delegates_query_model_and_thinking_level(monkeypatch):
 
     assert "Compare vector databases." in client.captured_plan_query
     assert "Requested MCP model alias: pro" in client.captured_plan_query
-    # The default transport for Deep Research is the account's default mode.
-    assert getattr(client.captured_start_chat_model, "model_name", None) == "unspecified"
+    # A named Pro request must never become the account's implicit default.
+    assert client.captured_start_chat_model == "gemini-3-pro"
 
 
 def test_gemini_research_blank_query_is_rejected_before_client_use(monkeypatch):
@@ -1312,7 +1447,7 @@ def test_gemini_research_failure_is_typed_with_the_issued_handle(monkeypatch):
     assert data["upstream_chat_id"] == "c_plan1"
     # The started research chat is still scheduled for retention-aware cleanup.
     assert captured_schedule == [
-        {"cid": "c_plan1", "retain_chat": True, "delete_after_seconds": None, "source": "gemini_research"}
+        {"cid": "c_plan1", "retain_chat": False, "delete_after_seconds": 1800, "source": "gemini_research"}
     ]
 
 
@@ -1375,7 +1510,7 @@ def test_gemini_research_start_timeout_without_readback_is_not_reported_running(
     assert data["upstream_chat_id"] == "c_plan1"
     assert data["continuation_possible"] is True
     assert captured_schedule == [
-        {"cid": "c_plan1", "retain_chat": True, "delete_after_seconds": None, "source": "gemini_research"}
+        {"cid": "c_plan1", "retain_chat": False, "delete_after_seconds": 1800, "source": "gemini_research"}
     ]
 
 

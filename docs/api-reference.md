@@ -1,11 +1,43 @@
 # API Reference
 
-This reference documents the current MCP tool surface exposed by
-`src.server`. It reflects the current checked-in `list_tools()` contract;
-dated Gemini Web observations are documented separately in
-[`live-ui-coverage.md`](./live-ui-coverage.md).
+This reference documents the function/account MCP surfaces and explicitly selected
+compatibility profiles. It reflects the current checked-in `list_tools()` contract;
+dated Gemini Web observations are documented separately in the
+[feature coverage matrix](web-feature-coverage.md).
 
 ---
+
+## Business Surfaces
+
+`gemini-mcp-function` exposes 17 tools; `gemini-mcp-account` exposes 17 explicit account tools. The main server without `GEMINI_TOOLS` uses the function surface. Authentication helpers belong to explicit compatibility profiles, not these business catalogs.
+
+| Tool | Current business contract |
+| --- | --- |
+| Function `gemini_ask` | Ordinary/current-web questions; optional `notebook_ids` starts a background ordinary chat with `execution_mode="chat"` |
+| Function `gemini_run_task` | Explicit background Task with `execution_mode="task"`, default Flash and optional Notebook sources |
+| Function `gemini_get_operation_status/result` | Read the original persistent operation; the worker verifies the full answer and recognized native Task file artifacts before default owned-thread cleanup |
+| Account `gemini_notebooks` | Default `source="notebooklm"` lists compact source metadata; `source="gemini"` retains the same product's project view and project-chat listing |
+| Account `gemini_manage_notebook` | Native Notebook and text-source create/read/delete with independent metadata verification; Notebook deletion includes its conversations |
+| Account `gemini_skills` | Native Skills list/get/create/update/enable/delete; instruction reads require explicit opt-in |
+| Account `gemini_preferences` | Saved browser/action preferences with read-back; runtime effects remain unverified unless separately observed |
+| Account `gemini_tasks` | Task metadata, bounded progress, explicit deletion and Task schedule management |
+| Account `gemini_task_browser` | Verified Task browser PNG, or one explicit journaled input |
+
+The function version of `gemini_ask` accepts `prompt`, optional `context`, `model="flash"`, `thinking_level="standard"`, optional `notebook_ids`, `timeout_seconds=600`, `retain_chat=false`, optional `delete_after_seconds` and `operation_id`. A caller-supplied operation ID requires Notebook context. Other ordinary questions return through the usual direct path. Assist and compact compatibility schemas remain separate.
+
+`gemini_run_task` accepts the same model, thinking, Notebook, timeout, retention and operation controls, without `context`, plus optional `input_id` and `input_option_id` for a current confirmation card. Start returns an operation handle; to answer a card, keep that same `operation_id` and use the exact prompt returned in `input_options`. The token dispatches once and preserves original model/retention. `gemini_tasks` accepts list/get/delete/progress plus list_schedules/get_schedule/create_schedule/update_schedule/pause_schedule/resume_schedule/delete_schedule. Task list/get do not read chat text; progress reads bounded activity metadata. Schedule listing uses local offset/limit pagination. Both Task tools carry destructive annotations because they can perform explicitly requested app changes or delete a thread.
+
+Task schedules are separate from Chat scheduled actions. Task browser observation and explicit input do not provide exclusive pause, automatic permission approval, login or Task stop/resume; website effects need independent verification. See [Notebook, Chat and Task workflows](notebook-task-workflows.md) for examples and evidence boundaries.
+
+An App connection card returns `needs_attention`, `setup_required` and `setup_kind`, rather than a fabricated permission choice or completed answer. Connection setup must be resolved in the original Gemini Task; a text reply cannot grant OAuth. A metadata-only status read can report a previously observed setup state without revalidating the card.
+
+Task result artifacts include the full answer and supported structured file cards. The complete native file inventory and every saved file must verify before default cleanup. Failed downloads or changed shapes preserve protection and return a partial result; a legacy saved answer without the new inventory remains available as partial, without claiming attachment coverage. Restarted result reads verify cached files and do not regenerate. Native export menus and every possible attachment type are not covered. Native account examples and pagination are documented in [Skills and Notebook management](native-account-resources.md).
+
+Research workers save and verify the full ready nonempty report as a Markdown Artifact before default cleanup. Result reads return a preview of at most 4,000 characters and the full local Artifact. Cached reads work after restart and recheck account, source identity, size and SHA-256; missing or corrupt files remain partial. Status uses progress metadata and never downloads or cleans a report.
+
+`gemini_list_research_report_actions` and `gemini_create_from_research_report` accept either `chat_id` or `operation_id`, never both. The operation path reads only its verified local report and does not authenticate remotely, generate or delete. An unavailable local report must first be recovered with the original result handle. This lets derivatives work after the source conversation was cleaned.
+
+## Explicit Compatibility Profiles
 
 ## Tool Groups
 
@@ -16,7 +48,7 @@ dated Gemini Web observations are documented separately in
 | `prompts` | Local prompt library | Optional local helper |
 | `all` | `core` + `manage` | Complete Gemini workflow without local prompt library |
 
-The server always exposes authentication helpers and `gemini_reset`.
+The explicitly selected primary compatibility profiles expose authentication helpers and `gemini_reset`.
 
 ---
 
@@ -40,7 +72,7 @@ with `availability` and `current_enabled` per tool.
 
 ---
 
-## Default Tools (`GEMINI_TOOLS=core`)
+## Compatibility Tools (`GEMINI_TOOLS=core`)
 
 ### Chat
 
@@ -58,8 +90,8 @@ Common chat parameters:
 
 | Parameter | Type | Notes |
 |-----------|------|-------|
-| `model` | `str` | `flash-lite`, `flash`, `pro`; `fast` and `thinking` remain compatibility aliases |
-| `thinking_level` | `str` | `standard` or `extended` |
+| `model` | `str` | `flash` (default), `argon`, `pro`; `fast` and `thinking` remain compatibility aliases. `flash-lite` requires fresh same-account basic Flash quota exhaustion evidence. |
+| `thinking_level` | `str` | `low`, `medium` or `high`; `standard`/`extended` remain low/high aliases. Lite ignores caller strength and reports `thinking_selectable=false` |
 | `learning_mode` | `str` | Optional guided-learning companion: `interactive_quiz`/`quiz`, `flashcards`, `practice_test`, `study_guide`/`exam_prep` |
 | `image_paths` | `list[str]` | Optional local image attachments |
 | `gem_id` | `str` | Optional Gem ID for one-shot or session creation |
@@ -70,6 +102,8 @@ Common chat parameters:
 `learning_mode` is implemented as a Web-compatible request injection for the
 observed 2026-06-19 Guided Learning companion. It is available on one-shot and
 session chat tools, including streaming variants.
+
+`gemini_send_message(session_id=..., recover_only=true)` reads the previous unverified session turn without sending another prompt. Omit `message` and `image_paths`. An uncertain turn blocks new messages until the original exact reply can be verified; no latest-reply fallback or generation replay is used. Session recovery requires the original active server process and is distinct from durable background operation handles. Reset cannot claim deletion while a reply remains unverified. The compact session schema and streaming tools do not expose `recover_only`.
 
 The compatibility names ending in `_stream` describe the Gemini Web transport,
 not MCP incremental delivery. These tools collect the upstream chunks, normalize
@@ -142,7 +176,7 @@ Adds these management tools to `core`:
 |------|---------|
 | `gemini_history` | Read-only facade for chat-history list/scan/search/read/export workflows |
 | `gemini_account_inventory` | Read-only facade for account and Gemini Web surface inventory |
-| `gemini_notebooks` | Read-only facade for native Gemini Web Notebook list/chats inventory |
+| `gemini_notebooks` | Read-only Notebook facade; compatibility profiles default to the Gemini project view, while the account surface defaults to the source picker |
 | `gemini_inspect_account` | Inspect current account feature/RPC status without exposing raw RPC previews |
 | `gemini_get_web_capabilities` | Return the observed Pro Web model/menu/settings capability manifest and MCP coverage map |
 | `gemini_list_chats` | List Gemini Web chat history metadata with pagination |
@@ -158,7 +192,7 @@ Adds these management tools to `core`:
 | `gemini_list_library_capabilities` | List localized Library capability/template entries |
 | `gemini_list_notebooks` | List native Gemini Web Notebooks with ids and metadata |
 | `gemini_list_notebook_chats` | List recent chats assigned to a native Gemini Web Notebook |
-| `gemini_move_chat_to_notebook` | Move an existing Gemini Web chat into a native Gemini Web Notebook |
+| `gemini_move_chat_to_notebook` | Resolve a target in the fresh Gemini project view, move the exact chat, then independently verify membership |
 | `gemini_list_scheduled_actions` | Read scheduled-action entries returned by Gemini Web scheduled actions surface |
 | `gemini_get_scheduled_action` | Read one scheduled action by id using the observed Web GetTask RPC |
 | `gemini_create_scheduled_action` | Create a daily Gemini Web scheduled action |
@@ -224,3 +258,9 @@ Runtime Skill documents its trigger boundary.
 | `gemini_list_features` | Removed |
 | Independent image tool aliases | Merged into `gemini_generate_media` |
 | `gemini_health_check` | Not exposed by the current server |
+
+`gemini_task_browser(chat_id, response_id=None, candidate_id=None, browser_input=None, action_id=None, expected_frame_sha256=None)` is a destructive union tool. A read can return a verified PNG artifact and native image block. Explicit `click`, `scroll`, `key` or `type` requires both exact reply IDs, its prior frame hash and a unique action ID of at least 20 characters; the Task must have fresh unchanged state 3 or 5. Duplicate IDs are consumed and never replayed. A frame does not prove a website action, exclusive pause or authorization. Install the `browser-control` extra. See [workflow details](notebook-task-workflows.md).
+
+## Persistent Task preferences
+
+`gemini_preferences` supports `get_browser`, `set_browser`, `list_permissions` and `set_permission`. Browser values are `automatic` / `remote_only`; permission values are `always_ask` / `always_allow`. Select app actions by returned opaque handles, and use `expected_revision` to reject stale snapshots. These settings affect future Tasks; once/thread confirmation cards remain separate. See [examples and read-back rules](task-preferences.md). Chat and Task thinking strength accepts `low` / `medium` / `high`, with legacy low/high aliases `standard` / `extended`.

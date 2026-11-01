@@ -51,45 +51,9 @@ For every dedicated surface, test:
 - delegation to shared services rather than duplicated execution;
 - compatibility behavior where the old surface exposes the same workflow.
 
-### Assistance Expected Catalog
+### Function and Account Catalogs
 
-```text
-gemini_ask
-gemini_search
-gemini_understand_image
-gemini_understand
-gemini_research
-```
-
-Reject account/admin and generation-only tools in this catalog.
-
-### Creation Expected Catalog
-
-```text
-gemini_generate_image
-gemini_edit_image
-gemini_generate_video
-gemini_generate_music
-gemini_get_operation_status
-gemini_get_operation_result
-gemini_cancel_operation
-```
-
-Reject account tools, generic chat, and unbounded operation lists.
-
-### Account Expected Catalog
-
-```text
-gemini_history
-gemini_notebooks
-gemini_scheduled
-gemini_gems
-gemini_prompts
-gemini_account
-gemini_cleanup
-```
-
-Verify list/read versus mutation semantics remain distinguishable in structured output and annotations.
+Verify the function and explicit account tools match the current registered catalogs, including schemas and annotations. Function `gemini_ask` covers current-web requests with source evidence and Notebook-backed ordinary Chat; `gemini_run_task` explicitly starts Task. The assist compatibility server retains its five-tool catalog including `gemini_search`, without Notebook attachment arguments. Function media, Task and Notebook Chat starts always return a handle; account cleanup is limited to the MCP-owned ledger, not title matching. Cookie, Doctor and local Prompts stay outside both catalogs. The explicit legacy profiles, assist and compact remain available.
 
 Golden catalogs and schemas are reviewed contracts. Do not regenerate them automatically after failure.
 
@@ -101,8 +65,10 @@ Golden catalogs and schemas are reviewed contracts. Do not regenerate them autom
 - model/thinking controls;
 - structured failure/text agreement;
 - no mixed-input machinery required for pure text.
+- current-web and natural-language app requests preserve observed sources and truthful grounding; app execution is not inferred from prose.
+- Model routing: the client gate implements account-bound basic Flash text-quota evidence and fixed Lite thinking; verify default Flash, 60-second expiry and basic-Flash-success revocation, no replay of the original request, and requested/effective/fallback/selectability metadata. Installed-SDK offline and public MCP integration checks passed; do not exhaust an account to test the unverified live quota boundary. Advanced-thinking, file, research and media-only limits do not authorize Lite. Preserve explicit Pro/Argon choices even when unavailable.
 
-### `gemini_search`
+### `gemini_search` (assist compatibility)
 
 - observed sources produce `grounded`;
 - source-free answer produces `answer_only`;
@@ -129,6 +95,18 @@ Golden catalogs and schemas are reviewed contracts. Do not regenerate them autom
 - no duplicate start after timeout;
 - report result becomes an Artifact.
 
+### Notebook and Task
+
+- Function Ask with Notebook IDs preserves `execution_mode="chat"` without Task flags; Run Task explicitly uses `execution_mode="task"`. Default phase timeout is 600 seconds.
+- Caller-supplied handles prevent duplicate starts after disconnect; status is metadata only, and result reads preserve the original CID/RID/candidate without regeneration or model changes.
+- Require exact completed-candidate evidence and, for Task, the same chat's completed goal metadata. A Task goal without a completed reply is not a saved answer.
+- Workers save and verify the full answer Artifact before cleanup even when the caller has not requested the result. Cover crash recovery before/after save, restart local retrieval, file size/hash validation and unread/unknown cleanup protection.
+- Notebook objects and sources are never temporary-chat cleanup targets; explicit retention preserves only the owned chat lifecycle requested by the caller.
+- Account Notebook defaults to source-picker metadata. The same product's `source="gemini"` project view must use strict envelopes; missing/error envelopes cannot become an empty success. Move targets need fresh exact-ID/type resolution and independent read-back, without guessed ID conversion.
+- Task account list/get expose metadata only; delete requires an exact Task chat ID, no mutation replay and independent absence verification. Check union destructive annotations for `gemini_tasks` and destructive `gemini_run_task`.
+- Authorized live source-QA evidence needs a synthetic marker absent from the prompt, public MCP disconnect/restart retrieval and independent chat absence; ordinary Notebook Chat must not create a Task goal.
+- Verify Notebook/source app mutations through fresh metadata or exact source evidence, not the generated answer alone. Keep rich Task control, Task schedules and experimental ProcessSession probes separate from current production claims.
+
 ## Skill Tests
 
 For each Runtime Skill:
@@ -150,16 +128,13 @@ Also verify:
 
 ### Trigger Evaluations
 
-Maintain positive cases and near-miss negatives for assist/create/account. Test paraphrases, mixed languages, indirect requests, and multi-intent prompts.
+Maintain positive cases and near-miss negatives for function/account routing. Test paraphrases, mixed languages, indirect requests, and multi-intent prompts.
 
 Expected behavior:
 
-- assistance requests select `gemini-assist`;
-- generation requests select `gemini-create`;
-- explicit Gemini account requests select `gemini-account`;
+- assistance and generation requests select `gemini-mcp-function`;
+- explicit Gemini account requests select `gemini-mcp-account`;
 - repository work selects `gemini-web-mcp-development`;
-- understanding an image does not select create;
-- creating an image does not select assist;
 - internal account use does not select account without user account-data intent.
 
 ## SQLite OperationService Tests
@@ -170,14 +145,14 @@ Cover:
 - atomic operation creation;
 - high-entropy opaque IDs;
 - provider/chat ID preservation;
-- queued/running/completed/timed_out/cancel_requested/cancelled/failed/expired transitions;
+- queued/running/completed/timed_out/failed/expired transitions;
 - legal and illegal transitions;
 - restart recovery;
 - cross-client status/result lookup;
-- concurrent status/result/cancel;
-- idempotent terminal reads and repeated cancel;
+- concurrent status/result;
+- idempotent terminal reads;
 - seven-day expiry/pruning with injectable clock;
-- best-effort versus provider-confirmed cancellation;
+- no unsupported cancellation claim;
 - missing/corrupt/expired records;
 - Artifact identity continuity;
 - no duplicate upstream start on retry;
@@ -187,7 +162,7 @@ If protocol-native MCP Tasks are added, separately test capability negotiation, 
 
 ## Durable Cleanup Tests
 
-Cover:
+Cover the implemented SQLite queue and use the remaining items as future acceptance targets; pagination, cancellation and terminal-failure management are not current queue APIs:
 
 - SQLite migrations and restart-safe pending work;
 - pending/running/completed/failed/cancelled states;
@@ -288,9 +263,7 @@ A full live baseline should verify the new focused surfaces, classify entitlemen
 Re-read pyproject.toml and the current sources before reporting implementation.
 The inspected package exposes `gemini-mcp-server`, `gemini-mcp-skill-server`,
 `gemini-mcp-onboarding`, and `gemini-mcp-assist`. `src/surfaces/assist.py` owns
-five assistance tools. Dedicated create/account entrypoints and a durable shared
-SQLite OperationService are target architecture in these documents; their names
-must not become active Runtime Skill promises before source and package evidence.
+five assistance tools. Function and account entrypoints use shared SQLite operation and cleanup services; compatibility surfaces remain available.
 
 | Change | Shared owner / contract | First useful checks |
 |---|---|---|
@@ -302,10 +275,14 @@ must not become active Runtime Skill promises before source and package evidence
 | Account/history parity or verified mutation | `src/services/history.py`, `gems.py`, `cleanup.py` | `tests/test_history_typed_parity.py`, `tests/test_manage_gem_verification_contract.py`, `tests/test_remote_chat_cleanup_manager.py` |
 | Public skill packaging | Existing .agents skill directories and `scripts/package_release.py` | `tests/test_development_skill.py`, `tests/test_skill_packaging.py`, `tests/test_package_integrity.py` |
 
-ResearchService currently returns an opaque operation_id while preserving
-upstream identifiers, and explicitly keeps no connection-local registry. Do not
-infer that opaque ID alone supports persisted status/result lookup after restart.
-Trace the actual recovery route and tests before claiming that level of support.
+ResearchService persists operation metadata in SQLite before issuing a remote
+start and checkpoints the observed chat identity. Primary research-profile
+`gemini_get_operation_status` and `gemini_get_operation_result` recover these
+explicit handles across restart; the focused assist catalog remains five tools.
+Ordinary records expire after seven days, while a protected research operation
+with an upstream chat ID remains recoverable past that period. Verify storage
+failures, expiry, concurrent terminal reads and ready-document
+evidence before claiming completed report recovery. Compatibility research and media starts also return durable operation handles by default; verify same-handle status/result and artifact recovery on primary, compact and assist surfaces.
 A timeout after start must not trigger a duplicate upstream research request.
 
 Focused documentation/skill checks can run without Gemini access:

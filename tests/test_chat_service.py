@@ -2,15 +2,17 @@
 
 import asyncio
 import json
+from dataclasses import replace
 from types import SimpleNamespace
 from typing import Any
+from unittest.mock import AsyncMock
 
 import pytest
 from src.adapters.mcp_sdk import MCPServer, TextContent
 
 import src.skill_server as skill_server
 import src.tools.chat as chat_tools
-from src.domain import DomainErrorCode, DomainResult, StreamChunkSemantics, StreamDelivery
+from src.domain import CleanupObservation, CleanupState, DomainErrorCode, DomainResult, StreamChunkSemantics, StreamDelivery
 from src.services import (
     ChatOperationData,
     ChatRequest,
@@ -21,6 +23,8 @@ from src.services import (
     StartSessionRequest,
 )
 from src.session_manager import SessionService
+from src.remote_chat_cleanup_manager import RemoteChatCleanupManager
+from src.services import ConversationLifecycleService
 
 
 class _FakeClient:
@@ -135,6 +139,7 @@ def test_generate_preserves_adapter_specific_request_shape(
         "model": "web-flash",
         "thinking_level": "extended",
         "learning_mode": "quiz",
+        "timeout": 300,
         **expected_optional,
     }
     assert events[4][2] == {
@@ -251,6 +256,7 @@ def test_session_request_fallback_and_cleanup_strategy_are_centralized():
             "files": None,
             "thinking_level": "extended",
             "learning_mode": "quiz",
+            "timeout": 300,
         },
     )
     assert events[4][0] == "cleanup_response"
@@ -268,6 +274,171 @@ def test_session_request_fallback_and_cleanup_strategy_are_centralized():
     assert payload["data"]["remote_chat_id"] == "c_session"
     assert "response" not in payload["data"]
     assert "session" not in payload["data"]["session_state"]
+
+
+@pytest.mark.parametrize("stream", [False, True])
+@pytest.mark.parametrize("old_retain,new_retain", [(False, True), (True, False)])
+def test_explicit_session_policy_is_saved_before_send_and_used_at_reset(
+    tmp_path, stream, old_retain, new_retain,
+):
+    service, _client, _events, sessions = _make_service()
+    manager = RemoteChatCleanupManager(store_path=tmp_path / "cleanup.sqlite", account_key_provider=lambda: "a")
+    manager.schedule_cleanup_result("c_session", retain_chat=old_retain, delete_after_seconds=1800, dispatch=False)
+
+    class RuntimeSession:
+        cid = "c_session"
+
+        async def send_message(self, **_kwargs):
+            assert manager._store.get("a", self.cid)["state"] == ("retained" if new_retain else "pending")
+            return SimpleNamespace(text="answer", metadata=[self.cid])
+
+        async def send_message_stream(self, **_kwargs):
+            yield await self.send_message()
+
+    state = sessions.store_session("sess_shared", RuntimeSession(), retain_chat=old_retain)
+    state.account_key = "a"
+    service._dependencies = replace(service._dependencies, schedule_chat_cleanup=manager.schedule_cleanup_result,
+                                    account_key_provider=lambda: "a")
+    lifecycle = ConversationLifecycleService(session_provider=lambda: sessions, cleanup_provider=lambda: manager)
+    delete = AsyncMock(return_value=CleanupObservation(state=CleanupState.COMPLETED, upstream_chat_id="c_session"))
+
+    async def run():
+        request = SessionMessageRequest(session_id="sess_shared", message="hello", retain_chat=new_retain)
+        result = await (service.send_session_stream(request) if stream else service.send_session(request))
+        assert result.ok and state.retain_chat is new_retain
+        return await lifecycle.reset_one("sess_shared", delete_callback=delete)
+
+    reset = asyncio.run(run())
+    assert reset.ok
+    assert delete.await_count == (0 if new_retain else 1)
+
+
+@pytest.mark.parametrize("first_retain,second_retain", [(True, False), (False, True)])
+def test_concurrent_session_policy_changes_are_serialized(tmp_path, first_retain, second_retain):
+    service, _client, _events, sessions = _make_service()
+    manager = RemoteChatCleanupManager(store_path=tmp_path / "cleanup.sqlite", account_key_provider=lambda: "a")
+    service._dependencies = replace(service._dependencies, schedule_chat_cleanup=manager.schedule_cleanup_result)
+
+    async def run():
+        started = asyncio.Event()
+        release = asyncio.Event()
+        count = 0
+
+        class RuntimeSession:
+            cid = "c_session"
+
+            async def send_message(self, **_kwargs):
+                nonlocal count
+                count += 1
+                if count == 1:
+                    started.set()
+                    await release.wait()
+                return SimpleNamespace(text="answer", metadata=[self.cid])
+
+        state = sessions.store_session("sess_shared", RuntimeSession(), retain_chat=not first_retain)
+        first = asyncio.create_task(service.send_session(
+            SessionMessageRequest(session_id="sess_shared", message="one", retain_chat=first_retain),
+        ))
+        await started.wait()
+        second = asyncio.create_task(service.send_session(
+            SessionMessageRequest(session_id="sess_shared", message="two", retain_chat=second_retain),
+        ))
+        await asyncio.sleep(0)
+        assert state.retain_chat is first_retain
+        assert manager._store.get("a", "c_session")["state"] == ("retained" if first_retain else "pending")
+        release.set()
+        assert (await first).ok and (await second).ok
+        assert state.retain_chat is second_retain
+        assert manager._store.get("a", "c_session")["state"] == ("retained" if second_retain else "pending")
+
+    asyncio.run(run())
+
+
+def test_shutdown_waits_for_inflight_session_retain_policy(tmp_path):
+    service, _client, _events, sessions = _make_service()
+    manager = RemoteChatCleanupManager(store_path=tmp_path / "cleanup.sqlite", account_key_provider=lambda: "a")
+    service._dependencies = replace(service._dependencies, schedule_chat_cleanup=manager.schedule_cleanup_result)
+    lifecycle = ConversationLifecycleService(session_provider=lambda: sessions, cleanup_provider=lambda: manager)
+    delete = AsyncMock(return_value=CleanupObservation(state=CleanupState.COMPLETED, upstream_chat_id="c_session"))
+
+    async def run():
+        started, release = asyncio.Event(), asyncio.Event()
+
+        class RuntimeSession:
+            cid = "c_session"
+
+            async def send_message(self, **_kwargs):
+                started.set()
+                await release.wait()
+                return SimpleNamespace(text="answer", metadata=[self.cid])
+
+        sessions.store_session("sess_shared", RuntimeSession())
+        send = asyncio.create_task(service.send_session(
+            SessionMessageRequest(session_id="sess_shared", message="hi", retain_chat=True),
+        ))
+        await started.wait()
+        shutdown = asyncio.create_task(lifecycle.reset_all(delete_callback=delete))
+        await asyncio.sleep(0)
+        assert not shutdown.done()
+        release.set()
+        assert (await send).ok and (await shutdown).ok
+        delete.assert_not_awaited()
+        assert manager._store.get("a", "c_session")["state"] == "retained"
+
+    asyncio.run(run())
+
+
+def test_expiry_waits_for_inflight_session_policy(tmp_path):
+    sessions = SessionService(max_age=1)
+    service, _client, _events, _ = _make_service(session_service=sessions)
+    manager = RemoteChatCleanupManager(store_path=tmp_path / "cleanup.sqlite", account_key_provider=lambda: "a")
+    service._dependencies = replace(service._dependencies, schedule_chat_cleanup=manager.schedule_cleanup_result)
+    lifecycle = ConversationLifecycleService(session_provider=lambda: sessions, cleanup_provider=lambda: manager)
+
+    async def run():
+        started, release = asyncio.Event(), asyncio.Event()
+
+        class RuntimeSession:
+            cid = "c_session"
+
+            async def send_message(self, **_kwargs):
+                started.set()
+                await release.wait()
+                return SimpleNamespace(text="answer", metadata=[self.cid])
+
+        state = sessions.store_session("sess_shared", RuntimeSession())
+        send = asyncio.create_task(service.send_session(
+            SessionMessageRequest(session_id="sess_shared", message="hi", retain_chat=True),
+        ))
+        await started.wait()
+        state.created_at -= 10
+        lifecycle.cleanup_expired_sessions()
+        assert sessions.get_session("sess_shared") is state
+        release.set()
+        assert (await send).ok
+        lifecycle.cleanup_expired_sessions()
+        assert sessions.get_session("sess_shared") is None
+        assert manager._store.get("a", "c_session")["state"] == "retained"
+
+    asyncio.run(run())
+
+
+def test_session_does_not_send_when_retain_cannot_cancel_inflight_delete(tmp_path):
+    service, _client, _events, sessions = _make_service()
+    manager = RemoteChatCleanupManager(store_path=tmp_path / "cleanup.sqlite", account_key_provider=lambda: "a")
+    service._dependencies = replace(service._dependencies, schedule_chat_cleanup=manager.schedule_cleanup_result)
+    manager._store.schedule("a", "c_session", 0, "test", retain=False)
+    assert manager._store.claim("a", "c_session") is not None
+    session = SimpleNamespace(cid="c_session", send_message=AsyncMock())
+    state = sessions.store_session("sess_shared", session, retain_chat=False)
+
+    result = asyncio.run(service.send_session(
+        SessionMessageRequest(session_id="sess_shared", message="hi", retain_chat=True),
+    ))
+
+    assert not result.ok and result.meta.verification_status == "cleanup_policy_not_saved"
+    assert state.retain_chat is False
+    session.send_message.assert_not_awaited()
 
 
 def test_generate_stream_collects_text_and_uses_final_response_for_cleanup():
@@ -320,6 +491,43 @@ def test_generate_stream_cancellation_propagates_and_closes_upstream_iterator():
 
     asyncio.run(run())
     assert not any(isinstance(event, tuple) and event[0] == "cleanup_response" for event in events)
+
+
+@pytest.mark.parametrize("failure", [ConnectionError, asyncio.CancelledError])
+@pytest.mark.parametrize("retain", [False, True])
+def test_interrupted_stream_schedules_known_conversation_with_the_requested_policy(failure, retain):
+    service, client, events, _sessions = _make_service()
+
+    async def interrupted(**_kwargs):
+        yield SimpleNamespace(text_delta="partial", cid="c_partial")
+        raise failure()
+
+    client.generate_content_stream = interrupted
+    with pytest.raises(failure):
+        asyncio.run(service.generate_stream(ChatRequest(message="test", retain_chat=retain)))
+    jobs = [event for event in events if isinstance(event, tuple) and event[0] == "cleanup_chat"]
+    assert jobs[0][1] == "c_partial"
+    assert jobs[0][2]["delete_after_seconds"] == 1800
+    assert jobs[-1][1] == "c_partial"
+    assert jobs[-1][2]["retain_chat"] is retain
+    assert jobs[-1][2]["delete_after_seconds"] is None
+    assert jobs[-1][2]["reschedule_pending"] is True
+
+
+def test_stream_finalization_keeps_the_observed_cid_when_last_chunk_omits_it():
+    service, client, events, _sessions = _make_service(response_cleanup_id=None)
+
+    async def chunks(**_kwargs):
+        yield SimpleNamespace(text_delta="first", cid="c_observed")
+        yield SimpleNamespace(text_delta="last")
+
+    client.generate_content_stream = chunks
+    result = asyncio.run(service.generate_stream(ChatRequest(message="test")))
+    assert result.data.remote_chat_id == "c_observed"
+    assert result.data.stream_text == "firstlast"
+    assert result.data.response.text_delta == "last"
+    assert events[-1][0] == "cleanup_response"
+    assert events[-1][1].cid == "c_observed"
 
 
 def test_session_stream_normalizes_cumulative_chunks_before_returning_once():
@@ -404,6 +612,8 @@ def test_compact_cleanup_adapter_forwards_shared_retention_policy(monkeypatch):
                 "retain_chat": True,
                 "delete_after_seconds": 90,
                 "source": "compact",
+                "reschedule_pending": False,
+                "_owner_account": None,
             },
         ),
     ]
@@ -439,11 +649,15 @@ def test_primary_and_compact_chat_adapters_have_success_contract_parity(monkeypa
     async def cleanup_due_remote_chats(_client: Any) -> int:
         return 0
 
+    async def finalized(*_args, **_kwargs):
+        return CleanupObservation(state=CleanupState.COMPLETED, upstream_chat_id="c_shared", attempts=1)
+
     for module in (chat_tools, skill_server):
         monkeypatch.setattr(module, "get_gemini_client", lambda: client)
         monkeypatch.setattr(module, "initialize_client", initialize_client)
         monkeypatch.setattr(module, "cleanup_due_remote_chats", cleanup_due_remote_chats)
         monkeypatch.setattr(module, "resolve_model_name", lambda _model: "web-flash")
+        monkeypatch.setattr(module, "finalize_remote_chat_cleanup_from_response", finalized)
     monkeypatch.setattr(
         chat_tools,
         "schedule_remote_chat_cleanup_from_response",
@@ -478,9 +692,9 @@ def test_primary_and_compact_chat_adapters_have_success_contract_parity(monkeypa
         "retain_chat": False,
         "delete_after_seconds": None,
         "cleanup": {
-            "state": "pending",
+            "state": "completed",
             "upstream_chat_id": "c_shared",
-            "attempts": 0,
+            "attempts": 1,
             "diagnostic_id": None,
             "idempotent": False,
         },
@@ -509,6 +723,7 @@ def test_primary_and_compact_chat_adapters_have_success_contract_parity(monkeypa
         "files": None,
         "model": "web-flash",
         "thinking_level": "standard",
+        "timeout": 300,
     }
     assert upstream_calls == [
         {**common_kwargs, "gem": None, "temporary": False},
@@ -588,6 +803,7 @@ def test_chat_tool_argument_schemas_remain_compatible():
         "gemini_send_message": {
             "session_id",
             "message",
+            "recover_only",
             "image_paths",
             "learning_mode",
             "temporary",
@@ -601,6 +817,8 @@ def test_chat_tool_argument_schemas_remain_compatible():
             "learning_mode",
             "image_path",
             "session_id",
+            "retain_chat",
+            "delete_after_seconds",
         },
         "session": {
             "action",
@@ -612,3 +830,162 @@ def test_chat_tool_argument_schemas_remain_compatible():
             "image_path",
         },
     }
+
+
+@pytest.mark.parametrize("failure", [ConnectionError, asyncio.CancelledError])
+def test_sdk_metadata_observed_before_first_output_survives_rollback(monkeypatch, failure):
+    from gemini_webapi import GeminiClient
+    from src.thinking_client import ThinkingLevelGeminiClient
+
+    async def fake_generate(self, *args, **kwargs):
+        chat = kwargs["chat"]
+        chat.metadata = ["c_before_output", "r_one"]
+        chat.cid = ""  # SDK restores the original session after a failed turn.
+        raise failure()
+        yield  # pragma: no cover
+
+    client = ThinkingLevelGeminiClient()
+    from gemini_webapi.types import AvailableModel
+    client._running = True
+    client._model_registry = {"flash": AvailableModel(model_id="flash", model_name="web-flash", display_name="Flash", description="", capacity=1)}
+    monkeypatch.setattr(GeminiClient, "_generate", fake_generate)
+    monkeypatch.setattr(ThinkingLevelGeminiClient, "_sync_activity", AsyncMock())
+    service, _, events, _ = _make_service()
+    service._dependencies = replace(service._dependencies, client_provider=lambda: client,
+                                    client_initializer=AsyncMock(), cleanup_due_remote_chats=AsyncMock())
+    with pytest.raises(failure):
+        asyncio.run(service.generate(ChatRequest(message="test", retain_chat=True)))
+    jobs = [event for event in events if isinstance(event, tuple) and event[0] == "cleanup_chat"]
+    assert jobs and jobs[0][1] == "c_before_output"
+    assert jobs[0][2]["retain_chat"] is True
+
+
+def test_failed_early_cleanup_is_not_reported_as_success():
+    service, _, _, _ = _make_service()
+    fail = CleanupObservation(state=CleanupState.FAILED, upstream_chat_id="c_service")
+    service._dependencies = replace(service._dependencies, schedule_chat_cleanup=lambda *a, **k: fail,
+                                    finalize_response_cleanup=AsyncMock(return_value=fail))
+    with pytest.raises(RuntimeError, match="cleanup could not be persisted"):
+        asyncio.run(service.generate(ChatRequest(message="test")))
+
+
+def test_session_first_turn_cancellation_records_cid_with_active_hold():
+    from src.services.cleanup_scope import observe_upstream_identity
+
+    service, _, events, sessions = _make_service()
+    session = SimpleNamespace(cid="")
+    created = sessions.create_session(session, "flash", retain_chat=False)
+
+    async def interrupted(_session_id, **kwargs):
+        session.cid = "c_first_session"
+        observe_upstream_identity(session)
+        raise asyncio.CancelledError()
+
+    service._dependencies = replace(service._dependencies, send_session_message=interrupted)
+    with pytest.raises(asyncio.CancelledError):
+        asyncio.run(service.send_session(SessionMessageRequest(session_id=created.session.session_id, message="hello")))
+    jobs = [event for event in events if isinstance(event, tuple) and event[0] == "cleanup_chat"]
+    assert jobs and jobs[0][1] == "c_first_session"
+    assert jobs[0][2]["retain_chat"] is False and jobs[0][2]["delete_after_seconds"] >= 1800
+
+
+@pytest.fixture(autouse=True)
+def _synthetic_chat_account(monkeypatch):
+    monkeypatch.setenv("GEMINI_PSID", "synthetic-chat-test-account")
+
+
+def test_late_oneshot_cid_is_registered_to_original_account_after_switch(monkeypatch):
+    from src.infrastructure.account_identity import current_account_key
+    from src.services.cleanup_scope import observe_upstream_identity
+
+    service, client, events, _ = _make_service()
+    owner = current_account_key()
+    finalize = AsyncMock()
+    service._dependencies = replace(service._dependencies, finalize_response_cleanup=finalize)
+
+    async def switched(**kwargs):
+        monkeypatch.setenv("GEMINI_PSID", "synthetic-other-account")
+        observe_upstream_identity(SimpleNamespace(cid="c_late"))
+        return SimpleNamespace(metadata=["c_late"], text="answer", images=[], videos=[], media=[])
+
+    client.generate_content = switched
+    result = asyncio.run(service.generate(ChatRequest(message="test")))
+    jobs = [event for event in events if isinstance(event, tuple) and event[0] == "cleanup_chat"]
+    assert len(jobs) == 1 and jobs[0][1] == "c_late"
+    assert jobs[0][2]["_owner_account"] == owner
+    finalize.assert_not_awaited()
+    assert result.ok and result.data.lifecycle.cleanup.state == CleanupState.FAILED
+
+
+def test_session_account_switch_refuses_send_before_policy_changes(monkeypatch):
+    service, _, events, sessions = _make_service()
+    session = SimpleNamespace(cid="c_session")
+    created = sessions.create_session(session, "flash", retain_chat=False)
+    monkeypatch.setenv("GEMINI_PSID", "synthetic-other-account")
+    result = asyncio.run(service.send_session(SessionMessageRequest(
+        session_id=created.session.session_id, message="hello", retain_chat=True,
+    )))
+    assert not result.ok and result.meta.verification_status == "account_mismatch_or_unbound"
+    assert not any(isinstance(event, tuple) and event[0] in {"session_send", "cleanup_chat"} for event in events)
+    assert not created.session.retain_chat
+
+
+def test_session_late_cid_after_account_switch_uses_original_account(monkeypatch):
+    from src.infrastructure.account_identity import current_account_key
+    from src.services.cleanup_scope import observe_upstream_identity
+    from src.session_manager import SessionOperationResult
+
+    service, _, events, sessions = _make_service()
+    session = SimpleNamespace(cid="")
+    state = sessions.create_session(session, "flash").session
+    owner = current_account_key()
+
+    async def switched(_session_id, **kwargs):
+        monkeypatch.setenv("GEMINI_PSID", "synthetic-other-account")
+        session.cid = "c_late_session"
+        observe_upstream_identity(session)
+        return SessionOperationResult.success(state, response=SimpleNamespace(cid=session.cid))
+
+    service._dependencies = replace(service._dependencies, send_session_message=switched)
+    result = asyncio.run(service.send_session(SessionMessageRequest(session_id=state.session_id, message="test")))
+    jobs = [event for event in events if isinstance(event, tuple) and event[0] == "cleanup_chat"]
+    assert not result.ok and result.meta.verification_status == "account_mismatch_or_unbound"
+    assert len(jobs) == 1 and jobs[0][1] == "c_late_session"
+    assert jobs[0][2]["_owner_account"] == owner
+
+
+def test_account_change_while_finalizer_awaits_never_reports_cleanup_complete(monkeypatch):
+    service, _, _, _ = _make_service()
+    async def switching_finalize(response, **kwargs):
+        monkeypatch.setenv("GEMINI_PSID", "synthetic-other-account")
+        return CleanupObservation(state=CleanupState.COMPLETED, upstream_chat_id="c_service")
+    service._dependencies = replace(service._dependencies, finalize_response_cleanup=switching_finalize)
+    result = asyncio.run(service.generate(ChatRequest(message="test")))
+    assert result.ok and result.data.lifecycle.cleanup.state == CleanupState.FAILED
+
+
+def test_late_cid_is_persisted_in_original_account_cleanup_store(monkeypatch, tmp_path):
+    from src import client_wrapper
+    from src.infrastructure.account_identity import current_account_key
+    from src.services.cleanup_scope import observe_upstream_identity
+
+    service, client, _, _ = _make_service()
+    owner = current_account_key()
+    manager = RemoteChatCleanupManager(store_path=tmp_path / "cleanup.sqlite")
+    monkeypatch.setattr(client_wrapper, "_cleanup_manager", manager)
+    finalize = AsyncMock()
+    service._dependencies = replace(service._dependencies, schedule_chat_cleanup=client_wrapper.schedule_remote_chat_cleanup,
+                                    finalize_response_cleanup=finalize)
+
+    async def switched(**kwargs):
+        monkeypatch.setenv("GEMINI_PSID", "synthetic-other-account")
+        observe_upstream_identity(SimpleNamespace(cid="c_late_ledger"))
+        return SimpleNamespace(metadata=["c_late_ledger"], text="answer", images=[], videos=[], media=[])
+
+    client.generate_content = switched
+    result = asyncio.run(service.generate(ChatRequest(message="test")))
+    other = current_account_key()
+    assert result.ok and result.data.lifecycle.cleanup.state == CleanupState.FAILED
+    assert manager._store.get(owner, "c_late_ledger")["state"] == "pending"
+    assert manager._store.get(other, "c_late_ledger") is None
+    finalize.assert_not_awaited()

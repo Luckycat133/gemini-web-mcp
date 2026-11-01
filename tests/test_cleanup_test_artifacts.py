@@ -24,6 +24,7 @@ _format_cleanup_markdown）也零行为覆盖。作为破坏性工具（dry_run=
 
 import asyncio
 import json
+import pytest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
@@ -37,6 +38,11 @@ from src.tools.manage import (
     _split_cleanup_markers,
     register_manage_tools,
 )
+
+
+@pytest.fixture(autouse=True)
+def _synthetic_account(monkeypatch):
+    monkeypatch.setenv("GEMINI_PSID", "synthetic-test-account")
 
 
 # ---------------------------------------------------------------------------
@@ -280,7 +286,7 @@ def test_payload_chats_dry_run_false_delete_raises_records_error():
 
     assert payload["deleted_chat_count"] == 0
     assert payload["matched_chats"][0]["deleted"] is False
-    assert "RuntimeError: network down" in payload["matched_chats"][0]["delete_error"]
+    assert payload["matched_chats"][0]["delete_error"] == "RuntimeError"
 
 
 def test_payload_chats_dry_run_false_without_delete_chat_capability():
@@ -429,7 +435,7 @@ def test_payload_scheduled_dry_run_matches(monkeypatch):
 def test_payload_scheduled_dry_run_false_deletes(monkeypatch):
     """target=scheduled + dry_run=False + task_state_id=6 → deleted=True, verification_status='deleted_state_by_id'。"""
     client = MagicMock()
-    client._batch_execute = AsyncMock(return_value=SimpleNamespace(text='["wrb.fr","Q4Gw3c","body"]'))
+    client._batch_execute = AsyncMock(return_value=SimpleNamespace(text='["wrb.fr","Q4Gw3c","body"]', status_code=200))
 
     entries = [{"id": "task-codex-1", "title": "Codex", "instructions": "", "schedule_label": ""}]
     monkeypatch.setattr(
@@ -486,7 +492,7 @@ def test_payload_scheduled_delete_error(monkeypatch):
 
     assert payload["deleted_scheduled_count"] == 0
     assert payload["matched_scheduled_actions"][0]["verification_status"] == "delete_error"
-    assert "RuntimeError: rpc failed" in payload["matched_scheduled_actions"][0]["delete_error"]
+    assert payload["matched_scheduled_actions"][0]["delete_error"] == "RuntimeError"
 
 
 def test_payload_scheduled_missing_batch_execute_records_error():

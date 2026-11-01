@@ -1,0 +1,1 @@
+{"custom_gems":{"contract_key":"gems.custom_list","cases":{"success":{"body":[null,null,[["fixture",["Synthetic","Description"],["instruction"]]]]},"empty":{"body":[null,null,[]]},"rejected":{"body":[],"reject_code":403},"changed_shape":{"body":[null,null,null]}}}}

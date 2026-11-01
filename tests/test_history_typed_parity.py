@@ -25,6 +25,7 @@ def _domain_result(content):
 
 
 def _patch_clients(monkeypatch, client) -> None:
+    monkeypatch.setenv("GEMINI_PSID", "synthetic-test-account")
     monkeypatch.setattr(skill_server, "get_gemini_client", lambda: client)
     monkeypatch.setattr(manage_tools, "get_gemini_client", lambda: client)
     monkeypatch.setattr(skill_server, "initialize_client", AsyncMock())
@@ -383,3 +384,12 @@ def test_history_delete_fails_closed_when_read_back_errors(monkeypatch) -> None:
     assert _domain_result(primary)["error"]["code"] == "VERIFICATION_FAILED"
     assert "private upstream detail" not in compact[0].text
     assert "private upstream detail" not in primary[0].text
+
+
+def test_compact_delete_preserves_auth_required_when_no_data(monkeypatch):
+    from src.domain import DomainErrorCode, DomainResult
+    result = DomainResult.failure(DomainErrorCode.AUTH_REQUIRED, "Gemini authentication is required.")
+    monkeypatch.setattr(skill_server, "_delete_chat_result", AsyncMock(return_value=result))
+    content = _run(skill_server._history_delete_text(object(), "c_fixture"))
+    assert content[0].meta["domain_result"]["error"]["code"] == "AUTH_REQUIRED"
+    assert "authentication" in content[0].text.lower()

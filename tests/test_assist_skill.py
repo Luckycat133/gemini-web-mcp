@@ -260,10 +260,12 @@ def test_assist_skill_frontmatter_is_complete() -> None:
 def test_assist_skill_documents_the_real_surface_catalog() -> None:
     _, body = _frontmatter_and_body()
 
-    # Only the five real assist tools (plus the server name) may appear as
-    # gemini_-prefixed identifiers; no phantom tool may be documented.
-    documented = set(re.findall(r"gemini_[a-z_]+", body))
-    assert documented == ASSIST_TOOLS | {ASSIST_SERVER_NAME}
+    # Recovery is explicitly handed to the primary companion, not added to
+    # the focused five-tool assist catalog.
+    without_source_urls = re.sub(r"\]\(https?://[^)]+\)", "]", body)
+    documented = set(re.findall(r"gemini_[a-z_]+", without_source_urls))
+    assert documented == ASSIST_TOOLS | {ASSIST_SERVER_NAME, "gemini_get_operation_status", "gemini_get_operation_result", "gemini_run_task"}
+    assert "primary companion" in body
     assert ASSIST_TOOLS <= documented
 
 
@@ -281,7 +283,7 @@ def test_assist_skill_documents_entrypoint_and_core_contracts() -> None:
 
     # Artifact-less information-return semantics for search/understanding.
     assert "Information, Not Artifacts" in text
-    assert "return information to the calling agent, not files" in text
+    assert "return information to the calling agent" in text
 
     # Asynchronous research start with operation handle preservation.
     assert "Starts Asynchronously" in text

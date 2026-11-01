@@ -1,6 +1,6 @@
 # Gemini MCP Server 文档中心
 
-欢迎使用 Gemini MCP Server v0.2.1 文档！
+本目录说明当前源码的工具、安装与验证合同；已发布版本和分支差异以 Changelog 为准。
 
 ---
 
@@ -19,7 +19,11 @@
 ### 使用指南
 - [工具使用手册](./tools.md) - 所有 MCP 工具详细说明（含媒体生成、Deep Research、会话管理）
 - [模型选择指南](./models.md) - 选择合适的模型
-- [现网 UI 覆盖表](./live-ui-coverage.md) - 已登录 Gemini Web UI 与 MCP 覆盖关系
+- [网页版功能实测矩阵](./web-feature-coverage.md) - 当前实现、真实证据与尚未覆盖能力
+- [Notebook、Chat 与 Task](./notebook-task-workflows.md) - 模式选择、确认、后台恢复与附件
+- [原生 Skills 与 Notebook 管理](./native-account-resources.md) - 准确资源 ID、分页与读回
+- [Task 偏好](./task-preferences.md) - 已保存偏好与实际行为的区别
+- [历史 UI 覆盖表](./live-ui-coverage.md) - 保留的原生界面观察快照
 
 ### 部署与配置
 - [Launch Kit](./launch-kit.md) - 分发链接、安装文案和社交媒体发布素材
@@ -40,6 +44,8 @@
 - [常见问题 FAQ](./faq.md)
 - [故障排除](./troubleshooting.md)
 - [实机测试清单](./manual-testing.md) - 哪些内容需要真实账号验证
+- [逐工具质量记录](./tool-quality.md) - 34 个业务工具的检查和证据边界
+- [源码集成说明](./source-update-integration.md) - 当前分支与已发布 0.2.2 的合同差异
 - [Changelog](./changelog.md)
 - [贡献指南](./contributing.md)
 
@@ -60,12 +66,12 @@
 | 特性 | 说明 |
 |------|------|
 | 模型 | 旧别名 + 运行时模型发现 |
-| 媒体生成 | MCP 图片和音乐已实机产出文件；视频目前通过 Gemini Omni 专用网页模式，MCP 路线待修复 |
-| 推荐工具面 | 文本从 `model` 开始，多模态用 `core`，低 token 用 compact，`all` 仅维护验证 |
+| 媒体生成 | 图片、编辑、视频和音乐后台返回句柄；完成须有已保存并验证的实际文件 |
+| 推荐工具面 | 功能面 `gemini-mcp-function` 与显式账号面 `gemini-mcp-account`；旧 profile、assist、compact 保留兼容 |
 | Deep Research | 需要当前账号具备相应权限；完成报告须另行验证 |
 | Assistance 专用面 | ✅ `gemini-mcp-assist`：五工具确定性目录（ask/搜索/图像理解/混合理解/异步 Research） |
 | Gem 管理 | ✅ 自定义助手管理 |
-| MCP 评估 | ✅ 17 个只读 contract-level QA |
+| MCP 评估 | 维护工具选择、错误、生命周期及安全注解的契约场景；离线通过不等于线上可用 |
 | Agent Skills | ✅ 运行时/开发 skill 分离，`.agents/skills` 为唯一仓库来源 |
 | History 结果 | ✅ primary/compact 的 list/search/read/export/delete 共用 typed service；delete 区分已验证与仅接受 |
 | 浏览器 Cookie | ✅ 不输出 Cookie 值；macOS Keychain 等待有可配置超时 |

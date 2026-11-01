@@ -1,6 +1,6 @@
 ---
 name: gemini-web-mcp-development
-description: "Develop, refactor, evaluate, package, and release gemini-web-mcp as three focused agent capability products: Gemini assistance and understanding, multimodal creation, and explicit Gemini account management. Use for repository audits, MCP surface design, task-first Agent Skills, shared services, long-operation recovery, artifacts, live compatibility, tests, packaging, or releases."
+description: "Develop, refactor, evaluate, package, and release gemini-web-mcp as two focused business tool surfaces: Gemini functions and explicit Gemini account management. Use for repository audits, MCP surface design, task-first Agent Skills, shared services, long-operation recovery, artifacts, live compatibility, tests, packaging, or releases."
 license: AGPL-3.0-only
 metadata:
   author: Luckycat133
@@ -41,7 +41,7 @@ git log --oneline -20
 
 Inspect the affected source/tests or documentation first. Read `pyproject.toml`, release history, development status, PRs/issues, CI/CodeQL, live-canary evidence, and public Skill state when needed for the task or a current compatibility/distribution claim.
 
-The active package and both current public Skills declare `0.2.1`. Preserve the existing `v0.2.0` tag and use `v0.2.1` for the audited patch release.
+Read the branch version from `pyproject.toml` and compare it with fetched published tags before preparing an update. Preserve published tags. This branch's function/account design diverges from the published 0.2.2 facades; repository integration notes describe the schema and state-store differences. A source push does not establish release compatibility or authorize a new package publication.
 
 A green offline suite proves repository contracts. It does not prove current Gemini Web behavior.
 
@@ -57,7 +57,7 @@ in this Skill is not proof that the corresponding package entrypoint exists.
 The repository already has:
 
 - MCP Python SDK v2 plus modern/legacy protocol smoke;
-- profile-based primary server and fixed eleven-tool low-token server;
+- profile-based primary server and fixed four-tool low-token server;
 - shared client, chat, session, lifecycle, Artifact, and typed-history services;
 - text/session, image, video, music, file, URL, and Deep Research workflows;
 - Notebook, Scheduled, account, Gem, Prompt, Cookie, Doctor, and Cleanup surfaces;
@@ -68,69 +68,34 @@ The repository already has:
 
 Do not rebuild these foundations. Treat the current broad/compact servers as compatibility surfaces while implementing the focused products below.
 
-## Target Product Architecture
+## Business Tool Architecture
 
-| Product | Agent Skill | Console entrypoint | MCP server name | Purpose |
-| --- | --- | --- | --- | --- |
-| Assistance | `gemini-assist` | `gemini-mcp-assist` | `gemini_assist_mcp` | second opinion, grounded search, image/multimodal understanding, Deep Research |
-| Creation | `gemini-create` | `gemini-mcp-create` | `gemini_create_mcp` | image generation/editing, video, music, operation recovery |
-| Account | `gemini-account` | `gemini-mcp-account` | `gemini_account_mcp` | history, Notebook, Scheduled, Gems, Prompts, inventory, cleanup |
+One repository and Python distribution exposes two focused surfaces:
 
-Keep one repository, one Python distribution, one Gemini adapter, and shared domain/services. Do not create three business implementations or three repositories.
+| Surface | Console entrypoint | Scope |
+| --- | --- | --- |
+| Function | `gemini-mcp-function` | 17 tools for assistance, sessions, Task, media, research and operations |
+| Account | `gemini-mcp-account` | 17 explicit account tools |
 
-The current `gemini-web-mcp` Runtime Skill remains a task-first compatibility router until the dedicated servers and Skills are independently usable.
+The main command without `GEMINI_TOOLS` defaults to the function surface; explicit profiles retain their compatibility semantics. The older `gemini-mcp-assist` and compact servers remain supported. All surfaces reuse shared services and the same operation store. Cookie, Doctor and local Prompts are outside both business catalogs. `gemini_cleanup` is limited to MCP-owned ledger entries, never title matching.
 
-Read [architecture.md](references/architecture.md) before changing product boundaries.
+Function tools: `gemini_ask`, `gemini_understand_image`, `gemini_understand`, `gemini_research`, `gemini_start_chat`, `gemini_send_message`, `gemini_list_sessions`, `gemini_reset_session`, `gemini_generate_image`, `gemini_edit_image`, `gemini_generate_video`, `gemini_generate_music`, `gemini_run_task`, `gemini_get_operation_status`, `gemini_get_operation_result`, `gemini_list_research_report_actions`, `gemini_create_from_research_report`.
 
-## Public Tool Contracts
+Use `gemini_ask` for ordinary questions, current-web requests and natural-language app requests. Flash is the default; no web or tool enable switch is exposed. Preserve observed sources and grounding evidence. Function Ask with `notebook_ids` starts background ordinary Chat (`execution_mode="chat"`, default timeout 600 seconds); Ask without Notebook IDs keeps the direct-response path. `gemini_run_task` explicitly starts background Task (`execution_mode="task"`) and accepts optional Notebook IDs. Keep these modes separate: complex questions, App requests, Notebook context and asynchronous execution do not by themselves require Task. Default to Chat; choose Task for explicit Task or delegated workflows needing ongoing execution, tracked work or browser operation. Check action-specific app availability. Task supports discovered Flash/Argon only; saved browser/action preferences use account `gemini_preferences`; stored read-back never proves runtime effects. Low/medium/high thinking maps to 1/4/2 in both request body and model header; standard/extended remain low/high aliases and Lite is locked. The five-tool assist compatibility schema retains `gemini_search` and does not gain the function-only Notebook arguments. Do not infer successful external app changes from response prose.
 
-All public tools use the `gemini_` prefix because hosts may aggregate multiple MCP servers.
+Account tools: `gemini_history`, `gemini_manage_chat`, `gemini_delete_chat`, `gemini_notebooks`, `gemini_tasks`, `gemini_task_browser`, `gemini_skills`, `gemini_manage_notebook`, `gemini_move_chat_to_notebook`, `gemini_account_inventory`, `gemini_list_scheduled_actions`, `gemini_get_scheduled_action`, `gemini_create_scheduled_action`, `gemini_delete_scheduled_action`, `gemini_manage_gems`, `gemini_cleanup`, `gemini_preferences`.
 
-### Assistance
+Account history defaults to compact metadata and pagination with bounded explicit text reads. `gemini_manage_chat` renames, pins or unpins an exact chat ID after a fresh metadata pre-read and independent read-back. Preserve unknown `changed=null` after a sent but unverified mutation, and never replay it automatically. Keep API model IDs distinct from discovered Cookie transport selectors; official low/medium/high names alone do not establish Web protocol numbers.
 
-```text
-gemini_ask
-gemini_search
-gemini_understand_image
-gemini_understand
-gemini_research
-```
+Account `gemini_notebooks` defaults to `source="notebooklm"` source-picker metadata. `source="gemini"` retains the same integrated Notebook product's project view; move targets require fresh exact-ID/type resolution in that view, not guessed prefix conversion. `gemini_tasks` list/get are metadata only; explicit exact-ID delete requires independent absence verification. Its union annotation and `gemini_run_task` are destructive. Task schedules are not Chat scheduled actions. Task progress, schedules and explicit browser inputs are available; exclusive handoff, automatic permission approval, Task pause/resume and export are unavailable; experimental ProcessSession probes are not a production transport.
 
-`gemini_ask` remains a distinct tool for second opinions, critique, code review, and ordinary text reasoning.
+Function media tools always start in the background. Research defaults to background. Preserve the same operation handle for status/result. Cancellation is not implemented. A report `audio_overview` is a script and `custom_app` is an application specification, not generated audio or deployment.
 
-`gemini_search` may claim grounded search only when observed source evidence exists. Otherwise return `answer_only`, `unavailable`, or `failed` rather than pretending the model searched the web.
+Task and Notebook Chat workers preserve the original CID/RID/candidate and read exact completed-answer evidence. They save and verify the full local answer Artifact before automatic owned-chat cleanup, independently of a caller requesting the result. Task additionally requires a complete recognized native file inventory and verified saved attachments; failed downloads or changed shapes cannot release protection. Restarted reads verify saved files under the original handle. Legacy answer-only caches remain partial without inventing an empty inventory. Unknown work stays protected, and Notebook objects/sources are not temporary-chat cleanup targets. Keep answer bytes out of SQLite; persist only verified Artifact locators and metadata.
 
-`gemini_understand_image` is the simple high-frequency visual tool. `gemini_understand` accepts typed mixed inputs—text, image, file, URL, and later audio/video—without making callers encode them into one generic string.
+Ordinary session uncertainty blocks new prompts; `gemini_send_message(recover_only=true)` reads the previous exact turn without generation replay or SDK latest-reply fallback. This requires the original active process, unlike persistent operation handles. Keep active/in-flight sessions protected from stale cleanup timers. Treat native App connection setup separately from confirmation choices and never turn a text reply into OAuth. Cookie extraction and SDK init success do not establish authentication; reject an unauthenticated fresh user status before dispatch, with at most one same-account pre-dispatch credential refresh.
 
-`gemini_research` starts asynchronously by default and returns an opaque operation handle immediately.
-
-### Creation
-
-```text
-gemini_generate_image
-gemini_edit_image
-gemini_generate_video
-gemini_generate_music
-gemini_get_operation_status
-gemini_get_operation_result
-gemini_cancel_operation
-```
-
-The modality-specific tool starts work. Shared operation tools recover it. Do not add a broad unpaginated operation-list tool to assist/create surfaces.
-
-### Account
-
-```text
-gemini_history
-gemini_notebooks
-gemini_scheduled
-gemini_gems
-gemini_prompts
-gemini_account
-gemini_cleanup
-```
-
-Account tools load only for explicit account-data intent. Keep list/read and mutation semantics machine-distinguishable even when one facade uses an `action` field.
+Read [architecture.md](references/architecture.md) before changing boundaries.
 
 ## Working Method
 
@@ -168,13 +133,13 @@ A successful request is not proof that a remote create/update/move/delete took e
 
 ### Opaque, Explicit Handles
 
-Long work must not depend on connection-local MCP state. Return a high-entropy opaque `operation_id`; every status/result/cancel call receives it explicitly. Preserve provider/research/chat IDs in structured metadata when observed.
+Long work must not depend on connection-local MCP state. Return a high-entropy opaque `operation_id`; every status/result call receives it explicitly. Preserve provider/research/chat IDs in structured metadata when observed.
 
 ### Local SQLite Persistence Is Settled
 
 Use local-only SQLite tables such as `operations` and `cleanup_jobs`. Persist IDs, type, state, timestamps, attempts, stable errors, verification status, and Artifact locators only.
 
-Never persist Cookies, prompts, chat/report text, raw Gemini responses, or generated bytes. Long-operation metadata defaults to seven-day retention. Support restart and cross-client resume. Cancellation is best effort unless provider cancellation is positively observed.
+Never persist Cookies, prompts, chat/report text, raw Gemini responses, or generated bytes. Long-operation metadata defaults to seven-day retention. Support restart and cross-client resume. Cancellation is not implemented.
 
 ### Artifact-First Creation
 
@@ -194,32 +159,21 @@ Treat browser Cookies as sensitive authentication material, but do not turn ordi
 
 ## Active Development Order
 
-1. Finish the task-first compatibility Runtime Skill and its trigger/hand-off contracts.
-2. Implement `gemini-assist` as the first focused vertical slice.
-3. Implement `gemini-create` with Artifact-first image generation/editing.
-4. Add the shared SQLite OperationService; connect Deep Research, video, and music with asynchronous starts.
-5. Implement `gemini-account` from shared account/history services.
-6. Run the dedicated full live baseline through the new surfaces.
-7. Complete typed admin results, mutation verification, and durable SQLite cleanup.
-8. Add multimodal onboarding, real-agent evaluations, and the official client/OS matrix.
-9. Add selected Drive/Canvas/Notebook/sharing parity only after core workflows are reliable.
+1. Verify function and account catalogs, annotations, package entrypoints and compatibility profiles.
+2. Validate background operation recovery, artifact verification and MCP-owned cleanup with scoped evidence.
+3. Keep onboarding, Skills, evaluations and client examples aligned; distinguish fixture and live evidence.
+4. Expand the client/OS support matrix and targeted compatibility evidence.
 
-Read [roadmap.md](references/roadmap.md) for issue-sized packages and acceptance criteria.
+Read [roadmap.md](references/roadmap.md) for issue-sized validation packages.
 
 ## Settled Product Decisions
 
-Do not reopen these during routine work:
-
-- product priority is assistance/understanding, then generated Artifacts, then explicit account management;
-- one repository exposes three focused MCP servers and three focused Runtime Skills;
-- `gemini_ask` remains distinct;
-- Deep Research starts asynchronously by default;
-- dedicated public tools use the `gemini_` prefix;
-- long-operation status/result/cancel use explicit opaque handles;
-- local SQLite provides operation recovery and delayed cleanup;
-- the broad and eleven-tool servers remain compatibility surfaces during migration;
-- manifest is for discovery/recovery, not a mandatory call before every known workflow;
-- reliability and agent task completion precede broad UI parity.
+- One repository and shared services support the function and account surfaces.
+- Preserve `gemini_ask` as a distinct assistance tool.
+- Media, Research, Task and Notebook-backed Chat use explicit background operation handles; no cancel is promised.
+- SQLite stores operation metadata and cleanup state, not prompts or credentials.
+- Explicit legacy profiles, assist and compact remain compatibility surfaces.
+- Manifest is for discovery/recovery, not a mandatory first call.
 
 The remaining owner-level choice is the first officially supported client/OS/distribution matrix.
 
@@ -243,7 +197,7 @@ Do not claim a live capability from fixtures, package smoke, a skipped canary, o
 
 ## Focus Rules
 
-- Do not reopen the three-product split, `gemini_ask`, asynchronous research, SQLite, or task-first Skill decisions.
+- Do not reopen the two-surface split, `gemini_ask`, asynchronous research, SQLite, or task-first Skill decisions.
 - Do not add generic unprefixed names such as `search` to public aggregated tool surfaces.
 - Do not put account/admin tools into assist or create catalogs.
 - Do not publish a Skill whose named tools do not exist.
@@ -281,3 +235,5 @@ Actual client or live Gemini observations:
 Remaining gaps:
 Owner decision required:
 ```
+
+Task schedules are separate from Chat scheduled actions: use `gemini_tasks` schedule actions, preserve timezone and up to nine fractional seconds, and independently verify each mutation. Associated schedules protect MCP-owned Task threads. For `gemini_task_browser`, install `[browser-control]`; input requires exact reply IDs, the prior frame hash and a unique action ID. The Task must remain in state 3 or 5; never replay an action ID or auto-approve login/permissions. Frames and input dispatch do not verify website effects or exclusive pause.

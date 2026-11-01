@@ -17,13 +17,13 @@ codex mcp add gemini-compact -- uvx --from git+https://github.com/Luckycat133/ge
 codex mcp list
 ```
 
-The compact server covers chat, image/music generation, and account facades. Connect `gemini-mcp-assist` for the five focused assistance tools, including file/URL understanding and Deep Research. Connect `gemini-mcp-server` with `GEMINI_TOOLS=core` when a compatibility file, URL, media, or report-extraction tool is required. Client configuration examples are in the project documentation. Restart or reload the client if newly connected tools are not visible in the current task.
+Connect `gemini-mcp-function` for assistance, chat, media and Research, or `gemini-mcp-account` for explicitly requested account operations. The compact and assist servers and explicit `GEMINI_TOOLS` profiles remain compatibility options. Client configuration examples are in the project documentation. Restart or reload the client if newly connected tools are not visible in the current task.
 
 For focused assistance or the primary content surface in Codex:
 
 ```bash
-codex mcp add gemini-assist -- uvx --from git+https://github.com/Luckycat133/gemini-web-mcp@main gemini-mcp-assist
-codex mcp add gemini-core --env GEMINI_TOOLS=core -- uvx --from git+https://github.com/Luckycat133/gemini-web-mcp@main gemini-mcp-server
+codex mcp add gemini-function -- uvx --from git+https://github.com/Luckycat133/gemini-web-mcp@main gemini-mcp-function
+codex mcp add gemini-account -- uvx --from git+https://github.com/Luckycat133/gemini-web-mcp@main gemini-mcp-account
 ```
 
 This setup does not authenticate a Gemini account. Keep Cookie values in the client host's secret environment; never put them in command arguments, committed files, or chat. An authentication error after the offline preflight means the connection works but live Gemini access still needs account setup.
@@ -45,6 +45,8 @@ browser Cookies again, and retry once. This recovered the 2026-09-26 live probe.
 If it still fails, report the authentication blocker without exposing values.
 
 Authentication recovery is separate from user-facing task design. Resume the original workflow after the runtime is configured.
+
+Successful Cookie extraction and SDK initialization do not prove authentication. A fresh unauthenticated user status returns `AUTH_REQUIRED` before dispatch; the runtime can refresh matching browser credentials once at this boundary. It never replays an already submitted generation. Respect a user's decision to proceed without login and report which remote result or cleanup checks remain unavailable.
 
 ## Entitlement Unavailable
 
@@ -72,7 +74,9 @@ If quick search returns an answer but no observed sources:
 2. use the retained upstream chat ID to inspect the chat; history reads can be truncated or show only a completion notice;
 3. do not restart automatically;
 4. if the report is absent, try primary `gemini_create_from_research_report(chat_id=..., artifact_type="webpage")` and verify the returned file;
-5. if no chat ID was observed or the extraction fails, report the current recovery limit; the local operation ID has no status/result tool.
+5. use the same operation handle with the relevant status/result action; if no upstream identity was observed, report the recovery limit without starting a duplicate.
+
+For an ordinary active session, use function `gemini_send_message(session_id=..., recover_only=true)` with no message or images. This reads the previous unverified exact turn without resending it. Do not substitute the latest chat reply, send another prompt, or confuse process-local session recovery with restart-safe operation handles. New messages remain blocked while the prior reply is unverified.
 
 ## Artifact Missing or Partial
 

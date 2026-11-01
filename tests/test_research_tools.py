@@ -21,12 +21,14 @@ _format_deep_research_result 走真实实现。
 
 import asyncio
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 from src.adapters.mcp_sdk import MCPServer
 
 import src.services.research as research_service
 import src.tools.research as research_tools
+from src.domain import CleanupObservation, CleanupState
 from src.services.research import null_scope
 
 
@@ -36,6 +38,9 @@ from src.services.research import null_scope
 
 
 async def _call_tool(mcp, name, **kwargs):
+    if name == "gemini_deep_research":
+        kwargs.setdefault("background", False)
+        kwargs.setdefault("wait_for_completion", True)
     return (await mcp.call_tool(name, kwargs)).content
 
 
@@ -77,7 +82,7 @@ class _FakeNativeResearchClient:
                  result_text="final report body",
                  result_done=True,
                  plan_exc=None, start_exc=None, wait_exc=None,
-                 thinking_scope_obj=None, start_state=None,
+                 thinking_scope_obj=None, start_state="running",
                  result_status_state="completed"):
         self._research_id = research_id
         self._plan_cid = plan_cid
@@ -137,7 +142,10 @@ class _FakeNativeResearchClient:
         self.captured_wait_timeout = timeout
         return SimpleNamespace(
             plan=plan,
-            final_output=SimpleNamespace(text=self._result_text),
+            final_output=SimpleNamespace(
+                text=self._result_text,
+                deep_research_document=SimpleNamespace(ready=self._result_done, content=self._result_text),
+            ),
             statuses=[
                 SimpleNamespace(
                     state=self._result_status_state,
@@ -158,6 +166,7 @@ class _FakeNativeResearchClient:
 def _patch_research_env(monkeypatch, client, *, captured_schedule=None,
                         captured_schedule_response=None, captured_cleanup=None):
     """统一 patch research 工具的外部接缝。"""
+    monkeypatch.setenv("GEMINI_PSID", "synthetic-research-tools-account")
     monkeypatch.setattr(research_tools, "get_gemini_client", lambda: client)
 
     async def fake_init():
@@ -177,6 +186,8 @@ def _patch_research_env(monkeypatch, client, *, captured_schedule=None,
                 "delete_after_seconds": delete_after_seconds,
                 "source": source,
             })
+        return CleanupObservation(state=CleanupState.RETAINED if retain_chat else CleanupState.PENDING,
+                                  upstream_chat_id=cid)
     monkeypatch.setattr(research_tools, "schedule_remote_chat_cleanup", fake_schedule)
 
     def fake_schedule_response(response, *, retain_chat, delete_after_seconds, source):
@@ -189,6 +200,7 @@ def _patch_research_env(monkeypatch, client, *, captured_schedule=None,
             })
     monkeypatch.setattr(research_tools, "schedule_remote_chat_cleanup_from_response",
                         fake_schedule_response)
+    monkeypatch.setattr(research_tools, "finalize_remote_chat_cleanup", AsyncMock(return_value=None))
 
 
 def _make_mcp():
@@ -218,8 +230,8 @@ def test_deep_research_calls_cleanup_due_remote_chats_with_client(monkeypatch):
     assert captured_cleanup == [client]
 
 
-def test_deep_research_default_thinking_level_is_extended(monkeypatch):
-    """默认 thinking_level='extended'（与 gemini_chat 默认 'standard' 不同）。"""
+def test_deep_research_default_thinking_level_is_standard(monkeypatch):
+    """默认 thinking_level 为 standard。"""
     client = _FakeFallbackResearchClient()
     _patch_research_env(monkeypatch, client)
 
@@ -230,7 +242,12 @@ def test_deep_research_default_thinking_level_is_extended(monkeypatch):
                                 query="x", timeout_seconds=5)  # 不传 thinking_level
 
     asyncio.run(run())
-    assert client.captured_generate_kwargs["thinking_level"] == "extended"
+    assert client.captured_generate_kwargs["thinking_level"] == "standard"
+
+
+def test_research_request_default_and_explicit_level_are_preserved():
+    assert research_service.ResearchRequest(query="test").thinking_level == "standard"
+    assert research_service.ResearchRequest(query="test", thinking_level="extended").thinking_level == "extended"
 
 
 def test_deep_research_default_timeout_is_600(monkeypatch):
@@ -379,9 +396,12 @@ def test_fallback_default_retain_chat_false_delete_none(monkeypatch):
         return await _call_tool(mcp, "gemini_deep_research",
                                 query="x", timeout_seconds=5)  # 默认值
 
-    asyncio.run(run())
+    content = asyncio.run(run())
     assert schedule_calls[0]["retain_chat"] is False
-    assert schedule_calls[0]["delete_after_seconds"] is None
+    assert schedule_calls[0]["delete_after_seconds"] == 1800
+    assert content[0].meta["domain_result"]["data"]["operation_id"].startswith("op_")
+    from src.infrastructure.operation_store import OperationStore
+    assert OperationStore().is_cleanup_protected("c_fb1")
 
 
 def test_fallback_returns_plan_heading_with_query(monkeypatch):
@@ -415,7 +435,7 @@ def test_fallback_returns_model_metadata_lines(monkeypatch):
     text = result[0].text
     assert "- 请求模型: flash" in text
     assert "- 实际研究传输:" in text
-    assert "Gemini Web default Deep Research mode" in text  # model_note 内容
+    assert "gemini-3-flash" in text
 
 
 def test_fallback_returns_warning_about_missing_polling_api(monkeypatch):
@@ -472,7 +492,7 @@ def test_native_path_taken_when_client_has_three_methods(monkeypatch):
 
 
 def test_native_calls_start_chat_with_research_model(monkeypatch):
-    """start_chat 接收 research_model（默认 model='flash' → Model.UNSPECIFIED）。"""
+    """The default request preserves Flash rather than the account's implicit model."""
     client = _FakeNativeResearchClient()
     _patch_research_env(monkeypatch, client)
 
@@ -483,8 +503,7 @@ def test_native_calls_start_chat_with_research_model(monkeypatch):
                                 query="x", model="flash", timeout_seconds=30)
 
     asyncio.run(run())
-    # research_model 是 Model.UNSPECIFIED（enum），model_name == "unspecified"
-    assert getattr(client.captured_start_chat_model, "model_name", None) == "unspecified"
+    assert client.captured_start_chat_model == "gemini-3-flash"
 
 
 def test_native_create_plan_receives_query_with_model_metadata(monkeypatch):
@@ -613,6 +632,47 @@ def test_native_returns_report_heading_when_done(monkeypatch):
     assert "final report" in text
 
 
+def test_native_waits_for_ready_report_before_finalizing_own_chat(monkeypatch):
+    from src.domain import CleanupObservation, CleanupState
+    from src.infrastructure.operation_store import OperationStore
+
+    client = _FakeNativeResearchClient(plan_cid="c_owned")
+    events = []
+    _patch_research_env(monkeypatch, client)
+    original_wait = client.wait_for_deep_research
+
+    async def wait(*args, **kwargs):
+        events.append("wait")
+        return await original_wait(*args, **kwargs)
+
+    async def finalize(cid, **kwargs):
+        events.append(("cleanup", cid, kwargs["retain_chat"]))
+        return CleanupObservation(state=CleanupState.COMPLETED, upstream_chat_id=cid)
+
+    monkeypatch.setattr(client, "wait_for_deep_research", wait)
+    monkeypatch.setattr(research_tools, "finalize_remote_chat_cleanup", finalize)
+    result = asyncio.run(_call_tool(_make_mcp(), "gemini_deep_research", query="q"))[0]
+    assert events == ["wait", ("cleanup", "c_owned", False)]
+    assert result.meta["domain_result"]["data"]["cleanup"]["state"] == "completed"
+    assert not OperationStore().is_cleanup_protected("c_owned")
+
+
+def test_native_does_not_finalize_or_claim_completion_without_ready_document(monkeypatch):
+    client = _FakeNativeResearchClient(plan_cid="c_owned")
+    _patch_research_env(monkeypatch, client)
+    client.wait_for_deep_research = AsyncMock(return_value=SimpleNamespace(
+        plan=SimpleNamespace(cid="c_owned"), final_output=SimpleNamespace(text="finished"),
+        statuses=[], done=True,
+    ))
+    finalize = AsyncMock()
+    monkeypatch.setattr(research_tools, "finalize_remote_chat_cleanup", finalize)
+    result = asyncio.run(_call_tool(_make_mcp(), "gemini_deep_research", query="q"))[0]
+    data = result.meta["domain_result"]["data"]
+    assert data["state"] == "partial" and data["report_available"] is False
+    assert "完成: 否" in result.text
+    finalize.assert_not_awaited()
+
+
 def test_native_includes_research_id_and_title_in_status(monkeypatch):
     """plan.research_id 与 plan.title 出现在返回文本的 '## 状态' 部分。"""
     client = _FakeNativeResearchClient(research_id="r_unique", plan_title="My Plan")
@@ -643,12 +703,56 @@ def test_native_includes_model_note_in_status(monkeypatch):
 
     result = asyncio.run(run())
     assert "- 实际研究传输:" in result[0].text
-    assert "Gemini Web default Deep Research mode" in result[0].text
+    assert "gemini-3-flash" in result[0].text
 
 
 # ---------------------------------------------------------------------------
 # D. thinking_scope（非 default transport）
 # ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(("alias", "expected"), [
+    ("thinking", "gemini-flash"), ("gemini-3-flash-thinking", "gemini-flash"),
+    ("gemini-flash", "gemini-flash"), ("gemini-3-flash", "gemini-flash"),
+    ("gemini-pro", "gemini-pro"), ("gemini-3-pro", "gemini-pro"),
+    ("argon", "gemini-argon"), ("gemini-4-argon", "gemini-argon"),
+    ("gemini-flash-lite", "gemini-flash-lite"),
+])
+def test_research_model_alias_resolves_exact_discovered_family(alias, expected):
+    from gemini_webapi.types import AvailableModel
+    from src.thinking_client import ThinkingLevelGeminiClient
+
+    client = ThinkingLevelGeminiClient()
+    models = [AvailableModel(model_id=str(index), model_name=name, display_name=name,
+                             description="", capacity=1) for index, name in enumerate(
+        ("gemini-flash-lite", "gemini-pro", "gemini-flash", "gemini-argon"),
+    )]
+    client._model_registry = {model.model_id: model for model in models}
+    selected, _ = research_service.resolve_deep_research_transport_model(alias, client)
+    assert selected is next(model for model in models if model.model_name == expected)
+
+
+def test_research_model_missing_family_does_not_resolve_another_discovered_family():
+    from src.constants import resolve_model_name
+    from gemini_webapi.types import AvailableModel
+    from src.thinking_client import ThinkingLevelGeminiClient
+
+    client = ThinkingLevelGeminiClient()
+    lite = AvailableModel(model_id="lite", model_name="gemini-flash-lite", display_name="Lite",
+                          description="", capacity=1)
+    client._model_registry = {lite.model_id: lite}
+    for alias in ("thinking", "gemini-flash", "gemini-pro"):
+        selected, note = research_service.resolve_deep_research_transport_model(alias, client)
+        assert selected == note == resolve_model_name(alias)
+
+
+def test_thinking_research_preserves_requested_level_with_flash_descriptor():
+    from contextlib import nullcontext
+    scope = []
+    client = SimpleNamespace(thinking_scope=lambda model, level: scope.append((model, level)) or nullcontext())
+    with research_service.research_thinking_scope(client, object(), "gemini-3-flash-thinking", "extended"):
+        pass
+    assert scope == [("gemini-3-flash-thinking", "extended")]
 
 
 def test_thinking_scope_called_for_non_default_transport(monkeypatch):
@@ -674,8 +778,8 @@ def test_thinking_scope_called_for_non_default_transport(monkeypatch):
     assert client.captured_scope_thinking == "extended"
 
 
-def test_thinking_scope_skipped_for_default_transport(monkeypatch):
-    """model='flash'（标准 alias）→ Model.UNSPECIFIED → default transport → 不调 thinking_scope。"""
+def test_thinking_scope_applied_to_named_default_flash(monkeypatch):
+    """The named Flash route also preserves the requested thinking policy."""
     client = _FakeNativeResearchClient()
     _patch_research_env(monkeypatch, client)
 
@@ -686,7 +790,7 @@ def test_thinking_scope_skipped_for_default_transport(monkeypatch):
                                 query="x", model="flash", timeout_seconds=30)
 
     asyncio.run(run())
-    assert client.scope_called is False
+    assert client.scope_called is True
 
 
 # ---------------------------------------------------------------------------
@@ -724,7 +828,8 @@ def test_generic_exception_returns_error_with_message(monkeypatch):
 
     result = asyncio.run(run())
     text = result[0].text
-    assert "❌ Deep Research 失败: capability missing" in text
+    assert "❌ Deep Research 失败（RuntimeError）" in text
+    assert "capability missing" not in text
     assert "该功能在您所在的区域是否可用" in text
 
 
@@ -771,7 +876,8 @@ def test_native_wait_generic_exception_returns_error(monkeypatch):
                                 query="x", timeout_seconds=30)
 
     result = asyncio.run(run())
-    assert "❌ Deep Research 失败: network down" in result[0].text
+    assert "❌ Deep Research 失败（RuntimeError）" in result[0].text
+    assert "network down" not in result[0].text
 
 
 # ---------------------------------------------------------------------------
@@ -805,7 +911,47 @@ def test_native_completed_result_exposes_completed_operation_and_ids(monkeypatch
     assert payload["data"]["report_available"] is True
 
 
-def test_fallback_plan_is_running_not_falsely_completed(monkeypatch):
+def test_research_response_text_alone_does_not_prove_a_report():
+    from src.services.research import research_operation_data
+    from src.domain import OperationState
+
+    result = SimpleNamespace(final_output=SimpleNamespace(text="Research finished", deep_research_document=None))
+    data = research_operation_data(OperationState.COMPLETED, upstream_result=result)
+    assert data.report_available is False
+
+
+def test_native_plan_failure_does_not_expose_sdk_preview(monkeypatch, caplog):
+    from gemini_webapi.exceptions import GeminiError
+
+    client = _FakeNativeResearchClient(
+        plan_exc=GeminiError("Gemini did not return a deep research plan. Preview: 'PRIVATE OUTPUT'"),
+    )
+    _patch_research_env(monkeypatch, client)
+    result = asyncio.run(_call_tool(_make_mcp(), "gemini_deep_research", query="SENSITIVE PROMPT"))[0]
+    assert "PRIVATE OUTPUT" not in result.text
+    assert "PRIVATE OUTPUT" not in str(result.meta)
+    assert "PRIVATE OUTPUT" not in caplog.text
+    assert "SENSITIVE PROMPT" not in caplog.text
+    assert result.meta["domain_result"]["meta"]["details"]["failure_reason"] == "plan_missing"
+
+
+@pytest.mark.parametrize("upstream", [None, "mystery", "", "unknown"])
+def test_research_unknown_upstream_state_is_accepted_but_not_running(upstream):
+    from src.domain import OperationState
+    from src.services.research import operation_state_from_upstream
+
+    assert operation_state_from_upstream(upstream) is OperationState.ACCEPTED
+
+
+@pytest.mark.parametrize("upstream", ["running", "processing", "in_progress"])
+def test_research_observed_running_states_are_preserved(upstream):
+    from src.domain import OperationState
+    from src.services.research import operation_state_from_upstream
+
+    assert operation_state_from_upstream(upstream) is OperationState.RUNNING
+
+
+def test_fallback_reply_is_accepted_without_claiming_research_running(monkeypatch):
     client = _FakeFallbackResearchClient(response_cid="c_fallback_running")
     _patch_research_env(monkeypatch, client)
     mcp = _make_mcp()
@@ -815,8 +961,8 @@ def test_fallback_plan_is_running_not_falsely_completed(monkeypatch):
 
     payload = _domain_payload(asyncio.run(run())[0])
     assert payload["ok"] is True
-    assert payload["meta"]["operation_state"] == "running"
-    assert payload["data"]["state"] == "running"
+    assert payload["meta"]["operation_state"] == "accepted"
+    assert payload["data"]["state"] == "accepted"
     assert payload["data"]["upstream_chat_id"] == "c_fallback_running"
     assert payload["data"]["continuation_possible"] is True
     assert payload["data"]["report_available"] is False
@@ -841,14 +987,15 @@ def test_native_can_return_running_without_waiting_for_completion(monkeypatch):
     assert payload["meta"]["operation_state"] == "running"
     assert payload["data"]["upstream_operation_id"] == "r_running"
     assert payload["data"]["upstream_chat_id"] == "c_running"
-    # 兼容面不签发 operation handle（结构化增量是有意为之）；
-    # operation handle 只由异步 gemini_research 签发。
-    assert payload["data"]["operation_id"] is None
+    # 兼容面也持久化 handle，供后续读取或恢复。
+    assert payload["data"]["operation_id"].startswith("op_")
+    from src.infrastructure.operation_store import OperationStore
+    assert OperationStore().is_cleanup_protected("c_running")
     assert client.captured_wait_plan is None
     assert "本次调用未等待最终报告" in content.text
 
 
-def test_native_non_waiting_call_recovers_chat_id_from_start_response(monkeypatch):
+def test_native_refuses_to_confirm_when_plan_has_no_chat_id(monkeypatch):
     class _StartResponseHasChatId(_FakeNativeResearchClient):
         async def start_deep_research(self, plan, chat=None):
             return SimpleNamespace(text="Research started", metadata=["c_start_response", "r_start"])
@@ -867,9 +1014,27 @@ def test_native_non_waiting_call_recovers_chat_id_from_start_response(monkeypatc
     ))[0]
 
     payload = _domain_payload(content)
-    assert payload["data"]["upstream_chat_id"] == "c_start_response"
-    assert payload["data"]["continuation_possible"] is True
-    assert schedule_calls[0]["cid"] == "c_start_response"
+    assert payload["data"]["upstream_chat_id"] is None
+    assert payload["data"]["continuation_possible"] is False
+    assert payload["error"]["code"] == "CAPABILITY_UNAVAILABLE"
+    assert schedule_calls == []
+
+
+def test_native_plan_timeout_preserves_observed_chat_under_guard(monkeypatch):
+    from src.infrastructure.operation_store import OperationStore
+
+    class _TimeoutPlanClient(_FakeNativeResearchClient):
+        async def create_deep_research_plan(self, query, chat=None, model=None):
+            chat.cid = "c_plan_timeout"
+            raise asyncio.TimeoutError
+
+    client = _TimeoutPlanClient()
+    _patch_research_env(monkeypatch, client)
+    content = asyncio.run(_call_tool(_make_mcp(), "gemini_deep_research", query="x"))[0]
+    data = _domain_payload(content)["data"]
+    assert data["upstream_chat_id"] == "c_plan_timeout"
+    assert OperationStore().is_cleanup_protected("c_plan_timeout")
+    assert OperationStore().get(data["operation_id"]).upstream_chat_id == "c_plan_timeout"
 
 
 def test_native_non_waiting_start_timeout_without_readback_is_typed(monkeypatch):
@@ -1019,3 +1184,70 @@ def test_deadline_propagates_caller_cancellation_and_cancels_child() -> None:
         await asyncio.wait_for(child_cancelled.wait(), timeout=1)
 
     asyncio.run(run())
+
+
+def test_native_plan_turn_ready_report_is_rendered_without_confirmation(monkeypatch):
+    from gemini_webapi.exceptions import GeminiError
+    from src.domain import CleanupObservation, CleanupState
+
+    class ImmediateReport(_FakeNativeResearchClient):
+        async def create_deep_research_plan(self, query, chat=None, model=None):
+            chat.cid = "c_ready_plan"
+            chat.last_output = SimpleNamespace(
+                text="finished", deep_research_document=SimpleNamespace(ready=True, content="Immediate report"),
+            )
+            raise GeminiError("Gemini did not return a deep research plan.")
+
+    client = ImmediateReport()
+    client.start_deep_research = AsyncMock()
+    client.wait_for_deep_research = AsyncMock()
+    _patch_research_env(monkeypatch, client)
+    finalize = AsyncMock(return_value=CleanupObservation(state=CleanupState.COMPLETED, upstream_chat_id="c_ready_plan"))
+    monkeypatch.setattr(research_tools, "finalize_remote_chat_cleanup", finalize)
+    result = asyncio.run(_call_tool(_make_mcp(), "gemini_deep_research", query="fixture"))[0]
+    assert "Immediate report" in result.text
+    assert result.meta["domain_result"]["data"]["report_available"] is True
+    client.start_deep_research.assert_not_awaited()
+    client.wait_for_deep_research.assert_not_awaited()
+    finalize.assert_awaited_once()
+
+
+def test_native_plan_missing_with_chat_is_unknown_and_never_deleted(monkeypatch):
+    from gemini_webapi.exceptions import GeminiError
+    from src.infrastructure.operation_store import OperationStore
+
+    class UnknownPlan(_FakeNativeResearchClient):
+        async def create_deep_research_plan(self, query, chat=None, model=None):
+            chat.cid = "c_unknown"
+            raise GeminiError("Gemini did not return a deep research plan.")
+
+    client = UnknownPlan()
+    client.start_deep_research = AsyncMock()
+    _patch_research_env(monkeypatch, client)
+    finalize = AsyncMock()
+    monkeypatch.setattr(research_tools, "finalize_remote_chat_cleanup", finalize)
+    result = asyncio.run(_call_tool(_make_mcp(), "gemini_deep_research", query="fixture"))[0]
+    assert result.meta["domain_result"]["data"]["state"] == "partial"
+    assert OperationStore().is_cleanup_protected("c_unknown")
+    client.start_deep_research.assert_not_awaited()
+    finalize.assert_not_awaited()
+
+
+def test_native_unknown_plan_transport_error_keeps_chat_protected(monkeypatch):
+    from src.infrastructure.operation_store import OperationStore
+
+    class DisconnectedPlan(_FakeNativeResearchClient):
+        async def create_deep_research_plan(self, query, chat=None, model=None):
+            chat.cid = "c_transport_unknown"
+            raise ConnectionError("synthetic failure")
+
+    client = DisconnectedPlan()
+    client.start_deep_research = AsyncMock()
+    _patch_research_env(monkeypatch, client)
+    finalize = AsyncMock()
+    monkeypatch.setattr(research_tools, "finalize_remote_chat_cleanup", finalize)
+    result = asyncio.run(_call_tool(_make_mcp(), "gemini_deep_research", query="fixture"))[0]
+    assert result.meta["domain_result"]["data"]["state"] == "partial"
+    assert OperationStore().is_cleanup_protected("c_transport_unknown")
+    client.start_deep_research.assert_not_awaited()
+    finalize.assert_not_awaited()

@@ -1,4 +1,4 @@
-"""Perform real MCP initialize/list-tools handshakes against the primary, compact, and assist stdio entrypoints."""
+"""Verify functional/account and legacy MCP stdio entrypoints without Gemini requests."""
 
 from __future__ import annotations
 
@@ -15,11 +15,13 @@ from typing import Any
 from mcp import Client, StdioServerParameters, stdio_client
 
 if __package__:
-    from .smoke_profiles import ASSIST_TOOLS, COMPACT_TOOLS, PRIMARY_PROFILE_TOOLS
+    from .smoke_profiles import ACCOUNT_TOOLS, ASSIST_TOOLS, COMPACT_TOOLS, FUNCTION_TOOLS, PRIMARY_PROFILE_TOOLS
 else:
     from smoke_profiles import (  # type: ignore[import-not-found,no-redef]
+        ACCOUNT_TOOLS,
         ASSIST_TOOLS,
         COMPACT_TOOLS,
+        FUNCTION_TOOLS,
         PRIMARY_PROFILE_TOOLS,
     )
 
@@ -44,13 +46,20 @@ def _resolve_executable(command: str) -> str:
     return resolved
 
 
-def _safe_environment(profile: str) -> dict[str, str]:
+def _safe_environment(profile: str | None, state_directory: Path | None = None) -> dict[str, str]:
     environment = os.environ.copy()
     environment.pop("PYTHONPATH", None)
     for name in ("GEMINI_PSID", "GEMINI_PSIDTS", "GEMINI_PSIDCC"):
         environment.pop(name, None)
     environment["GEMINI_AUTO_REFRESH"] = "false"
-    environment["GEMINI_TOOLS"] = profile
+    environment["GEMINI_BROWSER_AUTO_LOAD"] = "false"
+    if profile is None:
+        environment.pop("GEMINI_TOOLS", None)
+    else:
+        environment["GEMINI_TOOLS"] = profile
+    if state_directory is not None:
+        environment["GEMINI_OPERATION_DB_PATH"] = str(state_directory / "operations.sqlite3")
+        environment["GEMINI_CLEANUP_DB_PATH"] = str(state_directory / "cleanup.sqlite3")
     return environment
 
 
@@ -84,7 +93,7 @@ def _structured_domain_result(structured: object) -> dict[str, Any] | None:
 async def _handshake(
     command: str,
     *,
-    profile: str,
+    profile: str | None,
     expected_tools: frozenset[str],
     cwd: Path,
     mode: str,
@@ -92,7 +101,7 @@ async def _handshake(
     executable = _resolve_executable(command)
     parameters = StdioServerParameters(
         command=executable,
-        env=_safe_environment(profile),
+        env=_safe_environment(profile, cwd),
         cwd=cwd,
     )
     async with asyncio.timeout(30):
@@ -105,6 +114,15 @@ async def _handshake(
             elif "account" in actual_tools:
                 representative_name = "account"
                 representative_arguments = {"action": "manifest"}
+            elif "create" in actual_tools:
+                representative_name = "create"
+                representative_arguments = {"prompt": ""}
+            elif "gemini_ask" in actual_tools:
+                representative_name = "gemini_ask"
+                representative_arguments = {"prompt": ""}
+            elif "gemini_cleanup" in actual_tools:
+                representative_name = "gemini_cleanup"
+                representative_arguments = {"action": "list"}
             else:
                 raise RuntimeError(f"{command} exposes no auth-free static representative tool")
             representative = await client.call_tool(representative_name, representative_arguments)
@@ -119,10 +137,16 @@ async def _handshake(
         )
     if not isinstance(representative.structured_content, dict):
         raise RuntimeError(f"{command} did not return MCP v2 structured content in {mode} mode")
+    if representative_name in {"create", "gemini_ask", "gemini_cleanup"}:
+        domain = _structured_domain_result(representative.structured_content)
+        error = domain.get("error") if domain else None
+        expected_code = "AUTH_REQUIRED" if representative_name == "gemini_cleanup" else "INVALID_ARGUMENT"
+        if not domain or domain.get("ok") is not False or not isinstance(error, dict) or error.get("code") != expected_code:
+            raise RuntimeError(f"{command} did not return typed {expected_code} rejection in {mode} mode")
     return {
         "command": command,
         "mode": mode,
-        "profile": profile,
+        "profile": profile if profile is not None else "default",
         "protocol_version": protocol_version,
         "server_name": server_name,
         "representative_tool": representative_name,
@@ -148,7 +172,7 @@ async def _assist_handshake(
     executable = _resolve_executable(command)
     parameters = StdioServerParameters(
         command=executable,
-        env=_safe_environment(profile),
+        env=_safe_environment(profile, cwd),
         cwd=cwd,
     )
     async with asyncio.timeout(30):
@@ -194,6 +218,8 @@ async def _run(
     compact_command: str,
     assist_command: str,
     profile: str,
+    function_command: str = "gemini-mcp-function",
+    account_command: str = "gemini-mcp-account",
 ) -> list[dict[str, object]]:
     with tempfile.TemporaryDirectory(prefix="gemini-protocol-smoke-") as directory:
         cwd = Path(directory)
@@ -221,6 +247,15 @@ async def _run(
                         cwd=cwd,
                         mode=mode,
                     ),
+                    await _handshake(
+                        function_command, profile="function", expected_tools=FUNCTION_TOOLS, cwd=cwd, mode=mode,
+                    ),
+                    await _handshake(
+                        account_command, profile="function", expected_tools=ACCOUNT_TOOLS, cwd=cwd, mode=mode,
+                    ),
+                    await _handshake(
+                        primary_command, profile=None, expected_tools=FUNCTION_TOOLS, cwd=cwd, mode=mode,
+                    ),
                 ]
             )
         return results
@@ -231,11 +266,14 @@ def main() -> None:
     parser.add_argument("--primary-command", default="gemini-mcp-server")
     parser.add_argument("--compact-command", default="gemini-mcp-skill-server")
     parser.add_argument("--assist-command", default="gemini-mcp-assist")
+    parser.add_argument("--function-command", default="gemini-mcp-function")
+    parser.add_argument("--account-command", default="gemini-mcp-account")
     parser.add_argument("--profile", choices=sorted(PRIMARY_PROFILE_TOOLS), default="model")
     args = parser.parse_args()
 
     results = asyncio.run(
-        _run(args.primary_command, args.compact_command, args.assist_command, args.profile)
+        _run(args.primary_command, args.compact_command, args.assist_command, args.profile,
+             args.function_command, args.account_command)
     )
     print(json.dumps({"handshakes": results, "status": "ok"}, sort_keys=True))
 

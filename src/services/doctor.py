@@ -112,7 +112,7 @@ def _collect_profiles(
     try:
         raw_profiles = profile_provider(browser, validate=validate_browser)
     except Exception as exc:
-        return [{"browser": browser, "error": f"{type(exc).__name__}: {exc}"}]
+        return [{"browser": browser, "error": type(exc).__name__}]
     return _sanitize_profiles(browser, raw_profiles)
 
 

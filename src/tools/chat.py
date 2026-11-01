@@ -7,10 +7,11 @@ from typing import Optional
 
 from ..adapters.mcp_sdk import MCPServer, TextContent
 
-from ..adapters import attach_domain_result, domain_error_boundary, domain_text
+from ..adapters import attach_domain_result, domain_error_boundary, domain_failure_text, domain_text
 from ..client_wrapper import (
     cleanup_due_remote_chats,
     create_session,
+    finalize_remote_chat_cleanup_from_response,
     get_gemini_client,
     initialize_client,
     list_sessions,
@@ -66,6 +67,9 @@ def _build_chat_service() -> ChatService:
             schedule_chat_cleanup=lambda *args, **kwargs: schedule_remote_chat_cleanup(*args, **kwargs),
             normalize_model=lambda model: model,
             resolve_model=lambda model: resolve_model_name(model),
+            finalize_response_cleanup=lambda *args, **kwargs: finalize_remote_chat_cleanup_from_response(
+                *args, **kwargs,
+            ),
         )
     )
 
@@ -107,7 +111,8 @@ def _register_conversation_tools(mcp: MCPServer, chat_service) -> None:
                 include_gem_argument=True,
             )
         )
-        assert result.data is not None
+        if not result.ok or result.data is None:
+            return domain_text(result, domain_failure_text(result))
         logger.info(f"正在使用 {result.data.effective_model} 生成响应...")
         return attach_domain_result(
             parse_response(result.data.response, model),
@@ -145,7 +150,7 @@ def _register_conversation_tools(mcp: MCPServer, chat_service) -> None:
             )
         )
         if not result.ok or result.data is None:
-            return domain_text(result, "❌ 会话创建失败")
+            return domain_text(result, domain_failure_text(result))
         session_id = result.data.session_id or ""
         return domain_text(
             result,
@@ -162,14 +167,18 @@ def _register_conversation_tools(mcp: MCPServer, chat_service) -> None:
     @domain_error_boundary("gemini_send_message", logger)
     async def gemini_send_message(
         session_id: str,
-        message: str,
+        message: str = "",
         image_paths: Optional[list[str]] = None,
         learning_mode: Optional[str] = None,
         temporary: Optional[bool] = None,
         retain_chat: Optional[bool] = None,
         delete_after_seconds: Optional[int] = None,
+        recover_only: bool = False,
     ) -> list[TextContent]:
-        """向现有共享会话发送消息；未知 ID 明确返回 SESSION_NOT_FOUND。"""
+        """Send one message, or use recover_only to read the previous unverified turn without resending."""
+        if (not recover_only and not message.strip()) or (recover_only and (message.strip() or image_paths)):
+            return domain_text(_invalid_argument("Provide a message, or recover_only without a message or images."),
+                               "Invalid session request.")
         valid_images, safe_image_paths, image_error = validate_image_paths(image_paths)
         if not valid_images:
             return domain_text(
@@ -181,6 +190,7 @@ def _register_conversation_tools(mcp: MCPServer, chat_service) -> None:
             SessionMessageRequest(
                 session_id=session_id,
                 message=message,
+                recover_only=recover_only,
                 files=tuple(safe_image_paths or ()),
                 learning_mode=learning_mode,
                 temporary=temporary,
@@ -196,7 +206,8 @@ def _register_conversation_tools(mcp: MCPServer, chat_service) -> None:
         if not result.ok or result.data is None:
             return domain_text(
                 result,
-                f"❌ SESSION_NOT_FOUND: 会话 {session_id} 不存在",
+                (f"❌ SESSION_NOT_FOUND: 会话 {session_id} 不存在"
+                 if result.error and result.error.code is DomainErrorCode.SESSION_NOT_FOUND else domain_failure_text(result)),
             )
         return domain_text(
             result,
@@ -297,7 +308,8 @@ def _register_streaming_tools(mcp: MCPServer, chat_service) -> None:
                 include_gem_argument=True,
             ),
         )
-        assert result.data is not None
+        if not result.ok or result.data is None:
+            return domain_text(result, domain_failure_text(result))
         if result.data.response is not None:
             return attach_domain_result(
                 parse_response(
@@ -364,7 +376,8 @@ def _register_streaming_tools(mcp: MCPServer, chat_service) -> None:
         if not result.ok or result.data is None:
             return domain_text(
                 result,
-                f"❌ SESSION_NOT_FOUND: 会话 {session_id} 不存在",
+                (f"❌ SESSION_NOT_FOUND: 会话 {session_id} 不存在"
+                 if result.error and result.error.code is DomainErrorCode.SESSION_NOT_FOUND else domain_failure_text(result)),
             )
         return domain_text(
             result,

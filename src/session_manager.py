@@ -7,11 +7,13 @@ import logging
 import threading
 import time
 import uuid
+import weakref
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
-from .constants import DEFAULT_CHAT_RETENTION_SECONDS
+from .constants import DEFAULT_SESSION_MAX_AGE_SECONDS
+from .infrastructure.account_identity import current_account_key
 from .domain import (
     CleanupObservation,
     ConversationLifecycleMetadata,
@@ -25,6 +27,8 @@ from .domain import (
 )
 
 logger = logging.getLogger(__name__)
+_session_guard_states: weakref.WeakValueDictionary[int, Any] = weakref.WeakValueDictionary()
+_session_guard_lock = threading.RLock()
 
 SESSION_NOT_FOUND = DomainErrorCode.SESSION_NOT_FOUND.value
 
@@ -42,6 +46,9 @@ class SessionState:
     created_at: float = field(default_factory=time.time)
     updated_at: float = field(default_factory=time.time)
     upstream_chat_id: str | None = None
+    unverified_chat_ids: set[str] = field(default_factory=set, repr=False, metadata={"domain_exclude": True})
+    pending_turn: tuple[str, str, str | None] | None = field(default=None, repr=False, metadata={"domain_exclude": True})
+    account_key: str | None = field(default_factory=current_account_key, repr=False, metadata={"domain_exclude": True})
     retain_chat: bool = False
     delete_after_seconds: int | None = None
     lifecycle_state: SessionLifecycleState = SessionLifecycleState.ACTIVE
@@ -51,6 +58,43 @@ class SessionState:
         compare=False,
         metadata={"domain_exclude": True},
     )
+    _policy_lock: asyncio.Lock = field(
+        default_factory=asyncio.Lock,
+        repr=False,
+        compare=False,
+        metadata={"domain_exclude": True},
+    )
+
+    def __post_init__(self) -> None:
+        # Weak references neither keep reset sessions nor their responses alive.
+        # A late frame can still protect its original owner while its state is
+        # held by the in-flight send or pending session.
+        with _session_guard_lock:
+            _session_guard_states[id(self)] = self
+
+
+def session_cleanup_protected(cid: str, *, account_key: str | None = None) -> bool:
+    """Protect same-account in-flight or unverified sessions from automatic deletion."""
+    owner = account_key or current_account_key()
+    if not owner:
+        return False
+    with _session_guard_lock:
+        states = tuple(_session_guard_states.values())
+    for state in states:
+        if state.account_key != owner:
+            continue
+        pending = state.pending_turn
+        identities = {value for value in (state.upstream_chat_id, getattr(state.session, "cid", None))
+                      if isinstance(value, str)}
+        if pending:
+            identities.add(pending[0])
+        identities.update(state.unverified_chat_ids)
+        if cid not in identities:
+            continue
+        if (state._policy_lock.locked() or state._send_lock.locked()
+                or cid in state.unverified_chat_ids or (pending and pending[0] == cid)):
+            return True
+    return False
 
 
 # Public target names plus the existing import name used by older callers.
@@ -93,7 +137,8 @@ class SessionOperationResult(DomainResult[SessionOperationData]):
         lifecycle = ConversationLifecycleMetadata(
             session_id=session.session_id if session is not None else None,
             upstream_chat_id=(
-                getattr(session.session, "cid", None) or session.upstream_chat_id if session is not None else None
+                (getattr(session.session, "cid", None) or session.upstream_chat_id or None)
+                if session is not None else None
             ),
             session_state=observed_state,
             retain_chat=session.retain_chat if session is not None else False,
@@ -152,7 +197,7 @@ class SessionService:
 
     def __init__(
         self,
-        max_age: int = DEFAULT_CHAT_RETENTION_SECONDS,
+        max_age: int = DEFAULT_SESSION_MAX_AGE_SECONDS,
         id_factory: Callable[[], str] | None = None,
     ):
         self._sessions: dict[str, SessionData] = {}
@@ -302,13 +347,14 @@ class SessionService:
             return lookup
         data = lookup.session
 
-        async with data._send_lock:
-            with self._lock:
-                self._clean_expired_sessions()
-                if self._sessions.get(session_id) is not data:
-                    return SessionOperationResult.not_found(session_id)
-                self._sessions.pop(session_id)
-                data.lifecycle_state = SessionLifecycleState.REMOVED
+        async with data._policy_lock:
+            async with data._send_lock:
+                with self._lock:
+                    self._clean_expired_sessions()
+                    if self._sessions.get(session_id) is not data:
+                        return SessionOperationResult.not_found(session_id)
+                    self._sessions.pop(session_id)
+                    data.lifecycle_state = SessionLifecycleState.REMOVED
             return SessionOperationResult.success(
                 data,
                 verification_status="local_state_removed",
@@ -345,13 +391,14 @@ class SessionService:
 
         removed: list[SessionData] = []
         for data in snapshot:
-            async with data._send_lock:
-                with self._lock:
-                    if self._sessions.get(data.session_id) is not data:
-                        continue
-                    self._sessions.pop(data.session_id)
-                    data.lifecycle_state = SessionLifecycleState.REMOVED
-                    removed.append(data)
+            async with data._policy_lock:
+                async with data._send_lock:
+                    with self._lock:
+                        if self._sessions.get(data.session_id) is not data:
+                            continue
+                        self._sessions.pop(data.session_id)
+                        data.lifecycle_state = SessionLifecycleState.REMOVED
+                        removed.append(data)
         return removed
 
     def list_sessions(self) -> dict[str, SessionData]:
@@ -379,7 +426,10 @@ class SessionService:
     def _clean_expired_sessions(self) -> None:
         """清理过期会话（内部函数，需在锁内调用）"""
         now = time.time()
-        expired = [sid for sid, data in self._sessions.items() if now - data.created_at > self._max_age]
+        expired = [
+            sid for sid, data in self._sessions.items()
+            if now - data.created_at > self._max_age and not data._policy_lock.locked() and not data._send_lock.locked()
+        ]
         for sid in expired:
             data = self._sessions.pop(sid)
             data.lifecycle_state = SessionLifecycleState.EXPIRED

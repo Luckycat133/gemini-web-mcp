@@ -15,6 +15,7 @@ def _run(awaitable):
 
 
 def _patch_client(monkeypatch, client) -> None:
+    monkeypatch.setenv("GEMINI_PSID", "synthetic-test-account")
     monkeypatch.setattr(client_wrapper._client_manager, "get_client", lambda: client)
     monkeypatch.setattr(skill_server, "initialize_client", AsyncMock())
 

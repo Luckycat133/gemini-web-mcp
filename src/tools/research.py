@@ -9,15 +9,17 @@ import json
 import logging
 import os
 import re
+from dataclasses import replace
 from types import SimpleNamespace
 from typing import Any, Literal
 from urllib.parse import unquote, urlsplit, urlunsplit
 
 from ..adapters.mcp_sdk import MCPServer, TextContent
 
-from ..adapters import append_artifact_block, attach_domain_result, domain_text
+from ..adapters import append_artifact_block, attach_domain_result, domain_failure_text, domain_text
 from ..client_wrapper import (
     cleanup_due_remote_chats,
+    finalize_remote_chat_cleanup,
     get_gemini_client,
     initialize_client,
     schedule_remote_chat_cleanup,
@@ -28,9 +30,17 @@ from ..domain import (
     ArtifactKind,
     ArtifactResultData,
     ArtifactState,
+    CleanupObservation,
+    CleanupState,
+    DomainErrorCode,
+    DomainResult,
+    DomainWarning,
     LongOperationData,
     OperationState,
+    new_operation_id,
 )
+from ..infrastructure.operation_store import OperationStore
+from ..infrastructure.account_identity import operation_account_matches
 from ..services import (
     artifact_exception_result,
     artifact_from_local_path,
@@ -38,16 +48,24 @@ from ..services import (
     artifact_save_failure_result,
 )
 from ..services.research import (
+    RESEARCH_DEFERRED_CLEANUP_SECONDS,
+    ResearchRequest,
     await_before_deadline as _await_before_deadline,
     format_research_query as _format_research_query,
     has_native_research_api as _has_native_research_api,
+    _failure_from_exception as _research_failure_from_exception,
     operation_state_from_upstream as _operation_state_from_upstream,
     research_domain_result as _research_domain_result,
     research_operation_data as _research_operation_data,
+    make_research_cleanup_checkpoints,
+    research_chat_id as _research_chat_id,
     research_timed_out_result as _research_timed_out_result,
+    research_start_outcome_unknown as _research_start_outcome_unknown,
+    research_unknown_result as _research_unknown_result,
     resolve_deep_research_transport_model as _resolve_deep_research_transport_model,
     run_deep_research_start_phase as _run_deep_research_start_phase,
 )
+from ..services.research_reports import resolve_research_report
 from .annotations import MUTATES_LOCAL, MUTATES_REMOTE, READS_PRIVATE_REMOTE
 
 logger = logging.getLogger(__name__)
@@ -79,6 +97,22 @@ def register_research_tools(mcp: MCPServer):
         delete_after_seconds: int | None,
     ) -> list[TextContent]:
         """Run Deep Research via the client's native plan/start/wait API."""
+        operation_id = new_operation_id()
+        store = OperationStore()
+        store.create(operation_id, "gemini_deep_research", retain_chat=retain_chat,
+                     delete_after_seconds=delete_after_seconds, requested_model=model,
+                     thinking_level=thinking_level)
+        record = store.get(operation_id)
+        if record is None or not operation_account_matches(record):
+            return domain_text(DomainResult.failure(DomainErrorCode.CAPABILITY_UNAVAILABLE,
+                                                   "Operation account could not be verified."),
+                               "无法验证研究账号。")
+
+        checkpoints = make_research_cleanup_checkpoints(
+            store, record, retain_chat=retain_chat, delete_after_seconds=delete_after_seconds,
+            source="gemini_deep_research", schedule_chat_cleanup=schedule_remote_chat_cleanup,
+        )
+
         start = await _run_deep_research_start_phase(
             client,
             query=query,
@@ -89,26 +123,61 @@ def register_research_tools(mcp: MCPServer):
             thinking_level=thinking_level,
             timeout_seconds=timeout_seconds,
             operation="gemini_deep_research",
-            operation_id=None,
+            operation_id=operation_id,
             schedule_chat_cleanup=schedule_remote_chat_cleanup,
             retain_chat=retain_chat,
             delete_after_seconds=delete_after_seconds,
             cleanup_source="gemini_deep_research",
+            checkpoint=checkpoints.checkpoint,
+            late_checkpoint=checkpoints.late_checkpoint,
+            early_checkpoint=checkpoints.early_checkpoint,
+            claim_confirmation=lambda: operation_account_matches(record)
+                and store.claim_research_confirmation(operation_id, expected_phase="plan_created"),
         )
+        if not operation_account_matches(record):
+            result = _research_unknown_result("gemini_deep_research", operation_id, start.plan, start.chat)
+            return domain_text(result, "研究账号已更改；原任务状态尚未确认。", use_result_data=True)
         if start.timed_out is not None:
+            timeout_data = start.timed_out.data
+            store.update(operation_id, state="timed_out",
+                         phase="plan_outcome_unverified" if start.failure_phase == "plan" else "start_returned",
+                         upstream_chat_id=timeout_data.upstream_chat_id if timeout_data else None,
+                         upstream_operation_id=timeout_data.upstream_operation_id if timeout_data else None,
+                         verification_status="completion_not_observed")
             return domain_text(
                 start.timed_out,
                 _deep_research_timeout_error(timeout_seconds).text,
                 use_result_data=True,
             )
         if start.error is not None:
-            raise start.error
+            cid = _research_chat_id(plan=start.plan, chat=start.chat, response=start.start_output)
+            if _research_start_outcome_unknown(start):
+                store.update(operation_id, state="partial", phase="plan_outcome_unverified", upstream_chat_id=cid,
+                             verification_status="start_outcome_unverified")
+                result = _research_unknown_result("gemini_deep_research", operation_id, start.plan, start.chat)
+                return domain_text(result, "研究请求结果尚未确认；请保留句柄并稍后检查，勿重复启动。",
+                                   use_result_data=True)
+            store.update(operation_id, state="failed", phase="start_returned", upstream_chat_id=cid,
+                         verification_status="start_failed")
+            if not start.start_attempted and not retain_chat:
+                store.release_cleanup(operation_id)
+                if cid:
+                    await finalize_remote_chat_cleanup(
+                        cid, retain_chat=False, delete_after_seconds=delete_after_seconds,
+                        source="gemini_deep_research",
+                    )
+            failure = _research_failure_from_exception(
+                start.error, ResearchRequest(query=query, operation="gemini_deep_research"),
+                operation_id=operation_id, plan=start.plan, chat=start.chat, failure_phase=start.failure_phase,
+            )
+            return domain_text(failure, _deep_research_generic_error(start.error).text, use_result_data=True)
         chat, plan, start_output = start.chat, start.plan, start.start_output
 
         if not wait_for_completion:
-            state = _operation_state_from_upstream(
-                getattr(start_output, "state", None),
-            )
+            state = (OperationState.COMPLETED if _has_ready_research_report(start_output)
+                     else _operation_state_from_upstream(getattr(start_output, "state", None)))
+            if state is OperationState.COMPLETED and not _has_ready_research_report(start_output):
+                state = OperationState.PARTIAL
             status = SimpleNamespace(
                 state=state.value,
                 done=state is OperationState.COMPLETED,
@@ -117,19 +186,38 @@ def register_research_tools(mcp: MCPServer):
             upstream_result = SimpleNamespace(
                 plan=plan,
                 start_output=start_output,
-                final_output=None,
+                final_output=start_output if state is OperationState.COMPLETED else None,
                 statuses=[status],
                 done=state is OperationState.COMPLETED,
                 poll_count=0,
             )
             data = _research_operation_data(
                 state,
+                operation_id=operation_id,
                 plan=plan,
                 chat=chat,
                 upstream_result=upstream_result,
                 latest_upstream_state=state.value,
                 poll_count=0,
             )
+            store.update(operation_id, state=state.value, phase="start_returned",
+                         upstream_chat_id=data.upstream_chat_id, upstream_operation_id=data.upstream_operation_id,
+                         verification_status="start_outcome_observed")
+            if state is OperationState.COMPLETED:
+                return await _save_and_present_research(
+                    store, operation_id, upstream_result, query, model, research_model, model_note,
+                    waited_for_completion=False,
+                )
+            if state in {OperationState.FAILED, OperationState.CANCELLED} and not retain_chat:
+                store.release_cleanup(operation_id)
+                if data.upstream_chat_id:
+                    cleanup = await finalize_remote_chat_cleanup(
+                        data.upstream_chat_id, retain_chat=False, delete_after_seconds=delete_after_seconds,
+                        source="gemini_deep_research",
+                    )
+                    if cleanup is not None:
+                        store.update_cleanup(operation_id, cleanup.state.value)
+                        data = replace(data, cleanup=cleanup)
             operation_result = _research_domain_result(data)
             content = _format_deep_research_result(
                 query,
@@ -147,7 +235,12 @@ def register_research_tools(mcp: MCPServer):
             )
 
         try:
-            if getattr(plan, "research_id", None):
+            if _has_ready_research_report(start_output):
+                upstream_result = SimpleNamespace(
+                    plan=plan, start_output=start_output, final_output=start_output,
+                    statuses=[], done=True, poll_count=0,
+                )
+            elif getattr(plan, "research_id", None):
                 upstream_result = await _await_before_deadline(
                     client.wait_for_deep_research(
                         plan,
@@ -166,23 +259,40 @@ def register_research_tools(mcp: MCPServer):
                     timeout=timeout_seconds,
                 )
         except asyncio.TimeoutError:
+            store.update(operation_id, state="timed_out", phase="report_wait_timed_out",
+                         verification_status="completion_not_observed")
             return domain_text(
-                _research_timed_out_result(plan=plan, chat=chat, start_output=start_output),
+                _research_timed_out_result(operation_id=operation_id, plan=plan, chat=chat, start_output=start_output),
                 _deep_research_timeout_error(timeout_seconds).text,
                 use_result_data=True,
             )
+        if not operation_account_matches(record):
+            result = _research_unknown_result("gemini_deep_research", operation_id, plan, chat)
+            return domain_text(result, "研究账号已更改；原任务状态尚未确认。", use_result_data=True)
         upstream_result.start_output = start_output
+        report_ready = _has_ready_research_report(getattr(upstream_result, "final_output", None))
         state = (
-            OperationState.COMPLETED
-            if getattr(upstream_result, "done", False)
-            else OperationState.TIMED_OUT
+            OperationState.COMPLETED if report_ready else
+            OperationState.PARTIAL if getattr(upstream_result, "done", False) else
+            OperationState.TIMED_OUT
         )
+        # Rendering must follow the same document evidence as the typed result.
+        upstream_result.done = report_ready
         data = _research_operation_data(
             state,
+            operation_id=operation_id,
             plan=plan,
             chat=chat,
             upstream_result=upstream_result,
         )
+        store.update(operation_id, state=state.value, phase="report_readback",
+                     upstream_chat_id=data.upstream_chat_id, upstream_operation_id=data.upstream_operation_id,
+                     verification_status="report_observed" if data.report_available else "report_not_observed")
+        if data.report_available:
+            return await _save_and_present_research(
+                store, operation_id, upstream_result, query, model, research_model, model_note,
+                waited_for_completion=True,
+            )
         operation_result = _research_domain_result(data)
         content = _format_deep_research_result(
             query,
@@ -221,26 +331,51 @@ def register_research_tools(mcp: MCPServer):
             ),
             timeout=timeout_seconds,
         )
-        schedule_remote_chat_cleanup_from_response(
-            response,
-            retain_chat=retain_chat,
-            delete_after_seconds=delete_after_seconds,
-            source="gemini_deep_research:fallback",
-        )
+        cid = _research_chat_id(response=response)
+        operation_id = None
+        if cid:
+            operation_id = new_operation_id()
+            store = OperationStore()
+            store.create(operation_id, "gemini_deep_research", retain_chat=retain_chat,
+                         delete_after_seconds=delete_after_seconds)
+            store.update(operation_id, state="accepted", phase="fallback_response_observed",
+                         upstream_chat_id=cid, verification_status="start_outcome_unverified")
+        scheduled = None
+        try:
+            scheduled = schedule_remote_chat_cleanup_from_response(
+                response,
+                retain_chat=retain_chat,
+                delete_after_seconds=(delete_after_seconds if retain_chat else
+                                      max(RESEARCH_DEFERRED_CLEANUP_SECONDS, delete_after_seconds or 0)),
+                source="gemini_deep_research:fallback",
+            )
+        except Exception:
+            logger.exception("Fallback research cleanup could not be registered")
         data = _research_operation_data(
-            OperationState.RUNNING,
+            OperationState.ACCEPTED,
+            operation_id=operation_id,
             response=response,
-            latest_upstream_state="running",
         )
         operation_result = _research_domain_result(data)
+        cleanup = getattr(scheduled, "cleanup_observation", None)
+        if isinstance(cleanup, CleanupObservation):
+            data = replace(data, cleanup=cleanup)
+            operation_result = replace(operation_result, data=data)
+        if cid and (not isinstance(cleanup, CleanupObservation) or cleanup.state in {
+                CleanupState.FAILED, CleanupState.INVALID_ID}):
+            operation_result = replace(operation_result, warnings=(*operation_result.warnings, DomainWarning(
+                code="cleanup_unverified", message="Research chat cleanup was not verified.",
+            )))
         text = (
             f"# 📚 Deep Research 计划: {query}\n\n"
             f"- 请求模型: {model}\n"
             f"- 实际研究传输: {model_note}\n\n"
             f"{response.text}\n\n"
             "⚠️ 当前 gemini-webapi 客户端没有暴露完整研究轮询 API，"
-            "这里只能返回研究计划。"
+            "这里只能返回已收到的回复，研究运行状态尚未验证。"
         )
+        if operation_id:
+            text += f"\n\nOperation handle: {operation_id}"
         return domain_text(operation_result, text, use_result_data=True)
 
     def _deep_research_timeout_error(timeout_seconds: int) -> TextContent:
@@ -252,10 +387,10 @@ def register_research_tools(mcp: MCPServer):
             "3. 研究主题是否适合在较短超时时间内完成？"
         )
 
-    def _deep_research_generic_error(e: Exception) -> TextContent:
+    def _deep_research_generic_error(e: BaseException) -> TextContent:
         return TextContent(
             type="text",
-            text=f"❌ Deep Research 失败: {str(e)}\n\n"
+            text=f"❌ Deep Research 失败（{type(e).__name__}）。\n\n"
             "请确认：\n1. 您的账户是否有 AI Plus 订阅？\n"
             "2. 该功能在您所在的区域是否可用？"
         )
@@ -264,12 +399,14 @@ def register_research_tools(mcp: MCPServer):
     async def gemini_deep_research(
         query: str,
         model: str = "flash",
-        thinking_level: str = "extended",
+        thinking_level: str = "standard",
         timeout_seconds: int = 600,
         poll_interval_seconds: int = 10,
-        wait_for_completion: bool = True,
+        wait_for_completion: bool = False,
         retain_chat: bool = False,
         delete_after_seconds: int | None = None,
+        background: bool = True,
+        operation_id: str | None = None,
     ) -> list[TextContent]:
         """
         启动 Deep Research 深度研究。
@@ -281,21 +418,39 @@ def register_research_tools(mcp: MCPServer):
         - model: 模型选择 (thinking/pro)
         - timeout_seconds: 超时时间（默认10分钟）
         - poll_interval_seconds: 研究状态轮询间隔（默认10秒）
-        - wait_for_completion: 是否等待最终报告；False 时返回 queued/running 状态与上游 ID
+        - background: 默认 True，提交后台任务并用返回的 operation_id 查询状态与结果
+        - wait_for_completion: True 时显式等待最终报告；该选择优先于后台默认值
+        - operation_id: 后台模式可指定句柄；同步模式不接受该参数
 
         工作流程:
         1. 创建研究计划
         2. 多轮搜索和分析
         3. 生成完整报告（含引用来源）
         """
+        if not query.strip():
+            return domain_text(DomainResult.failure(DomainErrorCode.INVALID_ARGUMENT, "query must not be blank."),
+                               "研究主题不能为空。")
+        if (not background or wait_for_completion) and operation_id is not None:
+            return domain_text(DomainResult.failure(DomainErrorCode.INVALID_ARGUMENT,
+                                                     "operation_id requires background execution."),
+                               "同步研究不接受 operation_id。")
+        if background and not wait_for_completion:
+            from ..services.background import submit_research
+            result = await submit_research(ResearchRequest(
+                query=query, model=model, thinking_level=thinking_level, timeout_seconds=timeout_seconds,
+                retain_chat=retain_chat, delete_after_seconds=delete_after_seconds,
+                operation="gemini_deep_research", operation_id=operation_id,
+            ))
+            return domain_text(result, "研究任务已提交。" if result.ok else "研究任务提交失败。",
+                               use_result_data=True)
         client = get_gemini_client()
         await initialize_client()
         await cleanup_due_remote_chats(client)
         model_name = resolve_model_name(model)
-        research_model, model_note = _resolve_deep_research_transport_model(model)
+        research_model, model_note = _resolve_deep_research_transport_model(model, client)
 
         try:
-            logger.info(f"正在启动 Deep Research: {query[:50]}...")
+            logger.info("正在启动 Deep Research")
             poll_interval = max(3, poll_interval_seconds)
 
             if _has_native_research_api(client):
@@ -321,21 +476,22 @@ def register_research_tools(mcp: MCPServer):
                 use_result_data=True,
             )
         except Exception as e:
-            logger.error(f"Deep Research 失败: {e}")
+            logger.error("Deep Research 失败: error_type=%s", type(e).__name__)
             data = LongOperationData(
                 operation="gemini_deep_research",
                 state=OperationState.FAILED,
             )
             return domain_text(
-                _research_domain_result(data, message=str(e)),
+                _research_domain_result(data),
                 _deep_research_generic_error(e).text,
                 use_result_data=True,
             )
 
     @mcp.tool(annotations=READS_PRIVATE_REMOTE)
     async def gemini_list_research_report_actions(
-        chat_id: str,
+        chat_id: str | None = None,
         response_format: Literal["markdown", "json"] = "markdown",
+        operation_id: str | None = None,
     ) -> list[TextContent]:
         """
         列出已完成 Deep Research 报告可用于“从报告创建”的动作。
@@ -344,20 +500,33 @@ def register_research_tools(mcp: MCPServer):
         但没有观测到网页下拉菜单的稳定私有 mutation RPC。因此这里返回 MCP 侧
         支持的等价创建动作，并标明 native_web_menu_observed=false。
         """
-        client = get_gemini_client()
-        await initialize_client()
-        report_output = await _fetch_deep_research_immersive_report(client, chat_id)
-        if not report_output:
-            return [TextContent(type="text", text=f"❌ 未能在聊天 {chat_id} 中读取 Deep Research 沉浸式报告。")]
-
-        payload = _research_report_actions_payload(report_output, chat_id)
+        source, unavailable = await resolve_research_report(
+            chat_id=chat_id, operation_id=operation_id, client_provider=get_gemini_client,
+            client_initializer=initialize_client, fetch_report=_fetch_deep_research_immersive_report,
+        )
+        if source is None:
+            assert unavailable is not None
+            return domain_text(unavailable,
+                domain_failure_text(unavailable) if not unavailable.ok else
+                f"❌ 未能在聊天 {chat_id} 中读取 Deep Research 沉浸式报告。" if chat_id else
+                "原 operation_id 尚无可验证的本地报告；请先读取同一句柄的 gemini_get_operation_result。",
+                use_result_data=True)
+        if not source.account_matches():
+            return domain_text(DomainResult.failure(DomainErrorCode.CAPABILITY_UNAVAILABLE,
+                "Report account changed."), "报告账号已更改。")
+        payload = _research_report_actions_payload(source.output, source.chat_id)
+        if source.operation_id:
+            payload.update(operation_id=source.operation_id, report_source="verified_local_artifact")
+        result = DomainResult.success(payload, verification_status=(
+            "research_artifact_verified" if source.operation_id else "research_document_readback"))
         if response_format == "json":
-            return [TextContent(type="text", text=json.dumps(payload, ensure_ascii=False, indent=2))]
-        return [TextContent(type="text", text=_format_research_report_actions(payload))]
+            return attach_domain_result([TextContent(type="text", text=json.dumps(payload, ensure_ascii=False, indent=2))],
+                                        result, use_result_data=True)
+        return domain_text(result, _format_research_report_actions(payload), use_result_data=True)
 
     @mcp.tool(annotations=MUTATES_LOCAL)
     async def gemini_create_from_research_report(
-        chat_id: str,
+        chat_id: str | None = None,
         artifact_type: Literal[
             "webpage",
             "infographic",
@@ -368,6 +537,7 @@ def register_research_tools(mcp: MCPServer):
         ] = "webpage",
         output_dir: str = "generated_media/research_artifacts",
         response_format: Literal["markdown", "json"] = "markdown",
+        operation_id: str | None = None,
     ) -> list[TextContent]:
         """
         从已完成 Deep Research 报告创建后续产物。
@@ -376,29 +546,32 @@ def register_research_tools(mcp: MCPServer):
         和来源，生成本地 artifact。菜单项来自 2026-06-21 网页实测；它不会调用
         未稳定观测到的 Gemini 私有菜单 mutation。
         """
-        client = get_gemini_client()
-        await initialize_client()
-        report_output = await _fetch_deep_research_immersive_report(client, chat_id)
-        if not report_output:
-            data = ArtifactResultData(
-                state=ArtifactState.EMPTY,
-                effective_backend="MCP local renderer",
-                source_chat_id=chat_id,
-                media_type="research_report",
-            )
+        source, unavailable = await resolve_research_report(
+            chat_id=chat_id, operation_id=operation_id, client_provider=get_gemini_client,
+            client_initializer=initialize_client, fetch_report=_fetch_deep_research_immersive_report,
+        )
+        if source is None:
+            assert unavailable is not None
             return domain_text(
-                artifact_result(data),
-                f"❌ 未能在聊天 {chat_id} 中读取 Deep Research 沉浸式报告。",
+                unavailable,
+                domain_failure_text(unavailable) if not unavailable.ok else
+                f"❌ 未能在聊天 {chat_id} 中读取 Deep Research 沉浸式报告。" if chat_id else
+                "原 operation_id 尚无可验证的本地报告；请先读取同一句柄的 gemini_get_operation_result。",
                 use_result_data=True,
             )
-
+        if not source.account_matches():
+            return domain_text(DomainResult.failure(DomainErrorCode.CAPABILITY_UNAVAILABLE,
+                "Report account changed."), "报告账号已更改。")
+        chat_id = source.chat_id
         try:
             artifact = _create_research_report_artifact(
-                report_output=report_output,
+                report_output=source.output,
                 artifact_type=artifact_type,
                 chat_id=chat_id,
                 output_dir=output_dir,
             )
+            if source.operation_id:
+                artifact.update(operation_id=source.operation_id, report_source="verified_local_artifact")
         except OSError as error:
             data = ArtifactResultData(
                 state=ArtifactState.FAILED,
@@ -439,6 +612,9 @@ def register_research_tools(mcp: MCPServer):
                 use_result_data=True,
             )
 
+        if not source.account_matches():
+            return domain_text(DomainResult.failure(DomainErrorCode.CAPABILITY_UNAVAILABLE,
+                "Report account changed."), "报告账号已更改。")
         typed_artifact = artifact_from_local_path(
             _research_artifact_kind(artifact["path"]),
             artifact["path"],
@@ -472,6 +648,30 @@ def register_research_tools(mcp: MCPServer):
         return attach_domain_result(content, result, use_result_data=True)
 
 
+async def _save_and_present_research(
+    store: OperationStore, operation_id: str, upstream: Any, query: str,
+    model: str, research_model: Any, model_note: str, *, waited_for_completion: bool,
+) -> list[TextContent]:
+    from ..services.operations import OperationService
+
+    record = store.get(operation_id)
+    if record is None:
+        return domain_text(DomainResult.failure(DomainErrorCode.INTERNAL_ERROR,
+            "Research metadata could not be read back."), "研究元数据尚未验证。")
+    result = await OperationService(store, get_gemini_client, initialize_client,
+        finalize_remote_chat_cleanup).save_report(record, upstream.final_output.deep_research_document)
+    data = result.data
+    if data is None:
+        return domain_text(result, "无法验证研究报告或其账号。", use_result_data=True)
+    preview = SimpleNamespace(ready=True, content=data.report or "", markdown=data.report or "")
+    rendered = SimpleNamespace(plan=upstream.plan, statuses=getattr(upstream, "statuses", ()),
+        start_output=getattr(upstream, "start_output", None), done=data.report_available,
+        final_output=SimpleNamespace(deep_research_document=preview) if data.report_available else None)
+    content = _format_deep_research_result(query, rendered, model, research_model, model_note,
+        operation_state=data.state, waited_for_completion=waited_for_completion)
+    return append_artifact_block(attach_domain_result([content], result, use_result_data=True), data.artifacts)
+
+
 async def _wait_for_deep_research_by_chat(
     client,
     plan,
@@ -481,7 +681,6 @@ async def _wait_for_deep_research_by_chat(
     timeout: int,
 ):
     """Fallback for Gemini Web responses that omit research_id in the plan."""
-    start_text = (getattr(start_output, "text", "") or "").strip()
     cid = getattr(chat, "cid", "") or getattr(plan, "cid", "")
     started = asyncio.get_running_loop().time()
     checks = 0
@@ -489,44 +688,8 @@ async def _wait_for_deep_research_by_chat(
 
     while (asyncio.get_running_loop().time() - started) < timeout:
         if cid and hasattr(client, "fetch_latest_chat_response"):
-            latest_output = await client.fetch_latest_chat_response(cid)
-            latest_text = (getattr(latest_output, "text", "") or "").strip()
-            if latest_text and _is_research_completion_message(latest_text):
-                report_output = await _fetch_deep_research_immersive_report(client, cid)
-                report_text = (getattr(report_output, "text", "") or "").strip() if report_output else ""
-                if report_text:
-                    return SimpleNamespace(
-                        plan=plan,
-                        start_output=start_output,
-                        final_output=report_output,
-                        statuses=[
-                            SimpleNamespace(
-                                state="completed",
-                                done=True,
-                                notes=[f"retrieved immersive report from raw chat payload after {checks + 1} checks"],
-                            )
-                        ],
-                        done=True,
-                        poll_count=checks + 1,
-                    )
-                report_output = await _request_completed_research_report(chat)
-                report_text = (getattr(report_output, "text", "") or "").strip() if report_output else ""
-                if report_text and not _is_research_start_message(report_text):
-                    return SimpleNamespace(
-                        plan=plan,
-                        start_output=start_output,
-                        final_output=report_output,
-                        statuses=[
-                            SimpleNamespace(
-                                state="completed",
-                                done=True,
-                                notes=[f"retrieved completed report by follow-up after {checks + 1} checks"],
-                            )
-                        ],
-                        done=True,
-                        poll_count=checks + 1,
-                    )
-            if latest_text and latest_text != start_text and not _is_research_start_message(latest_text):
+            latest_output = await client.fetch_latest_chat_response(cid, limit=100, match=_has_ready_research_report)
+            if _has_ready_research_report(latest_output):
                 return SimpleNamespace(
                     plan=plan,
                     start_output=start_output,
@@ -535,7 +698,7 @@ async def _wait_for_deep_research_by_chat(
                         SimpleNamespace(
                             state="completed",
                             done=True,
-                            notes=[f"chat history produced final output after {checks + 1} checks"],
+                            notes=[f"chat history contained a ready research document after {checks + 1} checks"],
                         )
                     ],
                     done=True,
@@ -552,7 +715,7 @@ async def _wait_for_deep_research_by_chat(
         final_output=None,
         statuses=[
             SimpleNamespace(
-                state="running",
+                state="unknown",
                 done=False,
                 notes=[
                     (
@@ -565,6 +728,12 @@ async def _wait_for_deep_research_by_chat(
         done=False,
         poll_count=checks,
     )
+
+
+def _has_ready_research_report(response: Any) -> bool:
+    document = getattr(response, "deep_research_document", None)
+    content = getattr(document, "content", "")
+    return bool(getattr(document, "ready", False)) and isinstance(content, str) and bool(content.strip())
 
 
 def _is_research_start_message(text: str) -> bool:
@@ -609,83 +778,57 @@ async def _request_completed_research_report(chat):
     try:
         return await _await_before_deadline(chat.send_message(prompt), timeout=180)
     except Exception as e:
-        logger.warning("Failed to retrieve completed Deep Research report by follow-up: %s", e)
+        logger.warning("Failed to retrieve completed Deep Research report by follow-up: error_type=%s", type(e).__name__)
         return None
 
 
 async def _fetch_deep_research_immersive_report(client, cid: str):
-    if not cid or not hasattr(client, "_batch_execute"):
+    """Read only a ready SDK research document from the specified chat."""
+    fetch = getattr(client, "fetch_latest_chat_response", None)
+    if not cid or not callable(fetch):
         return None
     try:
-        from gemini_webapi.constants import GRPC
-        from gemini_webapi.types import RPCData
-        from gemini_webapi.utils import extract_json_from_response
-    except ImportError:
+        response = await fetch(cid, limit=100, match=_has_ready_research_report)
+    except Exception as error:
+        logger.warning("Failed to read Deep Research report: error_type=%s", type(error).__name__)
         return None
-
-    try:
-        response = await client._batch_execute(
-            [
-                RPCData(
-                    rpcid=GRPC.READ_CHAT,
-                    payload=json.dumps([cid, 20, None, 1, [1], [4], None, 1]),
-                )
-            ]
-        )
-        parsed = extract_json_from_response(response.text)
-    except Exception as e:
-        logger.warning("Failed to fetch raw Deep Research chat payload: %s", e)
+    if not _has_ready_research_report(response):
         return None
-
-    extracted = _extract_deep_research_immersive_report(parsed)
-    if not extracted:
-        return None
-
-    text = extracted["report"].strip()
-    sources = extracted.get("sources", [])
-    if sources:
-        text += "\n\n## 来源链接\n"
-        for idx, source in enumerate(sources, 1):
-            title = source.get("title") or source["url"]
-            text += f"{idx}. [{title}]({source['url']})\n"
+    document = response.deep_research_document
+    report = document.content.strip()
+    sources = []
+    source_numbers = []
+    for source in getattr(document, "sources", None) or ():
+        url = getattr(source, "url", None)
+        title = getattr(source, "title", None)
+        if not isinstance(url, str):
+            continue
+        try:
+            parsed = urlsplit(url)
+            if parsed.scheme.lower() not in {"http", "https"} or not parsed.hostname:
+                continue
+        except ValueError:
+            continue
+        sources.append({"url": url, "title": title if isinstance(title, str) and title.strip() else url})
+        source_id = getattr(source, "id", None)
+        source_numbers.append(source_id if isinstance(source_id, int) and source_id > 0 else None)
+    markdown = getattr(document, "markdown", None)
+    text = markdown.strip() if isinstance(markdown, str) and markdown.strip() else report
+    if text == report and sources:
+        source_lines = [
+            f"{number}. [{source['title']}]({source['url']})"
+            for number, source in zip(source_numbers, sources, strict=True) if number is not None
+        ]
+        if source_lines:
+            text += "\n\n## 来源链接\n" + "\n".join(source_lines)
     return SimpleNamespace(
         text=text,
-        report=extracted["report"].strip(),
+        report=report,
         sources=sources,
-        title=extracted.get("title", ""),
-        immersive_id=extracted.get("immersive_id", ""),
+        title=getattr(document, "title", None) or _title_from_markdown(report),
+        immersive_id=getattr(document, "id", None) or "",
         native_web_menu_observed=False,
     )
-
-
-def _extract_deep_research_immersive_report(payload: Any) -> dict[str, Any] | None:
-    best_report = ""
-    best_sources: list[dict[str, str]] = []
-    best_title = ""
-    best_immersive_id = ""
-
-    for _path, node in _walk_nested_json(payload):
-        if not isinstance(node, list) or len(node) < 5:
-            continue
-        report = node[4]
-        if not isinstance(report, str) or len(report) < 1000:
-            continue
-        if not ("[cite:" in report or "##" in report):
-            continue
-        if len(report) > len(best_report):
-            best_report = report
-            best_sources = _extract_sources_from_node(node)
-            best_title = node[2] if len(node) > 2 and isinstance(node[2], str) else _title_from_markdown(report)
-            best_immersive_id = node[0] if node and isinstance(node[0], str) else ""
-
-    if not best_report:
-        return None
-    return {
-        "report": best_report,
-        "sources": best_sources,
-        "title": best_title,
-        "immersive_id": best_immersive_id,
-    }
 
 
 def _walk_nested_json(obj: Any, path: tuple[Any, ...] = ()):
@@ -762,32 +905,32 @@ RESEARCH_REPORT_ACTIONS: list[dict[str, str]] = [
     {
         "type": "webpage",
         "label": "网页",
-        "description": "Observed Gemini Web create-menu item: create a webpage from the report.",
+        "description": "Create a local HTML webpage from the ready research report.",
     },
     {
         "type": "infographic",
         "label": "信息图",
-        "description": "Observed Gemini Web create-menu item: create an infographic from the report.",
+        "description": "Create a local HTML infographic from the ready research report.",
     },
     {
         "type": "quiz",
         "label": "测验",
-        "description": "Observed Gemini Web create-menu item: create a quiz from the report.",
+        "description": "Create a local Markdown quiz from the ready research report.",
     },
     {
         "type": "flashcards",
         "label": "抽认卡",
-        "description": "Observed Gemini Web create-menu item: create flashcards from the report.",
+        "description": "Create local Markdown flashcards from the ready research report.",
     },
     {
         "type": "audio_overview",
         "label": "音频概览",
-        "description": "Observed Gemini Web create-menu item: create an audio overview from the report.",
+        "description": "Create a local Markdown narration script for an audio overview.",
     },
     {
         "type": "custom_app",
         "label": "描述你自己的应用",
-        "description": "Observed Gemini Web create-menu custom text field for describing a custom app.",
+        "description": "Create a local Markdown application specification from the report.",
     },
 ]
 
@@ -797,7 +940,7 @@ def _research_report_actions_payload(report_output, chat_id: str = "") -> dict[s
         "chat_id": chat_id,
         "title": getattr(report_output, "title", "") or _title_from_markdown(getattr(report_output, "report", "")),
         "immersive_id": getattr(report_output, "immersive_id", ""),
-        "native_web_menu_observed": True,
+        "native_web_menu_observed": bool(getattr(report_output, "native_web_menu_observed", False)),
         "native_web_menu_note": (
             "Observed in Gemini Web on 2026-06-21: 创建 -> 网页, 信息图, 测验, 抽认卡, 音频概览, "
             "plus a custom app description field. READ_CHAT still does not expose a stable private "
@@ -812,7 +955,7 @@ def _format_research_report_actions(payload: dict[str, Any]) -> str:
         "## Deep Research 报告创建动作",
         f"- 标题: {payload.get('title') or '(unknown)'}",
         f"- 沉浸式报告 ID: {payload.get('immersive_id') or '(unknown)'}",
-        f"- 原生网页下拉菜单 RPC 已观测: {'是' if payload.get('native_web_menu_observed') else '否'}",
+        f"- 原生网页创建菜单项已观测: {'是' if payload.get('native_web_menu_observed') else '否'}",
         "",
         "### MCP 可用动作",
     ]
@@ -850,7 +993,7 @@ def _create_research_report_artifact(
         "path": path,
         "bytes": len(content.encode("utf-8")),
         "source_count": len(sources),
-        "native_web_menu_observed": True,
+        "native_web_menu_observed": bool(getattr(report_output, "native_web_menu_observed", False)),
         "native_web_menu_note": (
             "Created by the MCP-side report action matching the observed Gemini Web create menu. "
             "No stable native Gemini private mutation RPC was present in the captured READ_CHAT payload."
@@ -887,7 +1030,7 @@ def _format_research_report_artifact(artifact: dict[str, Any]) -> str:
         f"- 标题: {artifact['title']}\n"
         f"- 文件: {artifact['path']}\n"
         f"- 来源数: {artifact['source_count']}\n"
-        f"- 原生网页下拉菜单 RPC 已观测: {'是' if artifact['native_web_menu_observed'] else '否'}\n\n"
+        f"- 原生网页创建菜单项已观测: {'是' if artifact['native_web_menu_observed'] else '否'}\n\n"
         f"{artifact['native_web_menu_note']}"
     )
 
@@ -1214,9 +1357,11 @@ def _format_deep_research_result(
         if notes:
             lines.append(f"- 最新进度: {notes[-1]}")
 
-    report_text = getattr(final_output, "text", "") if final_output else ""
-    if not done and _is_research_start_message(report_text):
-        report_text = ""
+    document = getattr(final_output, "deep_research_document", None)
+    content = getattr(document, "content", "")
+    report_text = ""
+    if getattr(document, "ready", False) and isinstance(content, str) and content.strip():
+        report_text = getattr(document, "markdown", None) or content
     if report_text.strip():
         lines.extend(["", "## 报告", report_text.strip()])
     else:
@@ -1224,12 +1369,15 @@ def _format_deep_research_result(
         plan_text = getattr(plan, "response_text", "") or start_text
         if not done:
             if not waited_for_completion:
-                state_text = "研究已排队" if operation_state is OperationState.QUEUED else "研究已启动"
+                if operation_state is OperationState.ACCEPTED:
+                    state_text = "研究确认已发送，运行状态尚未验证"
+                else:
+                    state_text = "研究已排队" if operation_state is OperationState.QUEUED else "研究已启动"
                 prefix = f"{state_text}；本次调用未等待最终报告。"
             elif operation_state is OperationState.TIMED_OUT:
-                prefix = "研究已启动，但超时时间内还没有可读取的最终报告。"
+                prefix = "等待已超时，尚未观察到可读取的最终报告。"
             else:
-                prefix = "研究仍在进行，尚未读取到最终报告。"
+                prefix = "尚未观察到可读取的最终报告。"
             plan_text = prefix + "\n\n" + plan_text
         lines.extend(
             [

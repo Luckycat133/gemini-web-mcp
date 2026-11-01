@@ -1,0 +1,8 @@
+{
+  "notebook_admin_created":{"contract_key":"notebook_admin.create","cases":{
+    "success":{"body":["fixture-notebook"]},"empty":{"body":[]},"rejected":{"body":[],"reject_code":403},"changed_shape":{"body":[{}]}}},
+  "notebook_admin_project":{"contract_key":"notebook_admin.get","cases":{
+    "success":{"body":[["fixture-notebook",["Synthetic notebook"]]],"arguments":{"notebook_id":"fixture-notebook"}},
+    "empty":{"body":[],"arguments":{"notebook_id":"fixture-notebook"}},"rejected":{"body":[],"reject_code":403},
+    "changed_shape":{"body":[{}],"arguments":{"notebook_id":"fixture-notebook"}}}}
+}

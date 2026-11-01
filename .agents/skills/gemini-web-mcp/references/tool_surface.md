@@ -1,11 +1,14 @@
 # Gemini Web Tool Surface Reference
 
-Compact safety/group map of the Gemini Web MCP tools. Load this only when you need
-to pick tools by safety tier or group. The connected server's source of truth is
-`gemini_get_tool_manifest` (primary server) and `account(action="manifest")`
-(low-token server) — re-check those at runtime because `GEMINI_TOOLS` controls
-which primary tools are registered in the current process. The focused
-`gemini-mcp-assist` server exposes only its fixed five-tool catalog.
+`gemini-mcp-function` exposes the 17-tool function catalog; `gemini-mcp-account` exposes the 17-tool explicit account catalog. Use `gemini_ask` for chat and current-web questions; `gemini_search` remains on the five-tool assist compatibility surface. Use the connected server's tool list and annotations as the source of truth. The following compatibility safety map also describes tools available only in explicit legacy profiles; it is not the default catalog. `gemini_cleanup` is restricted to MCP-owned ledger entries and never matches titles. Cookie, Doctor and local Prompts stay outside both business catalogs.
+
+On the account surface, `gemini_history` defaults to compact metadata with pagination; text reads are explicit and bounded. `gemini_manage_chat` is an idempotent, non-destructive metadata mutation for rename/pin/unpin on one exact chat ID. It reads no conversation text and requires fresh read-back before reporting completion; `mutation_sent=true, changed=null` is unverified. `gemini_delete_chat` remains destructive and separate. `gemini_notebooks` defaults to Notebook source-picker metadata; `source="gemini"` is the same integrated product's project view for chat listing and moves. A move target must be freshly resolved in that view, without guessing ID conversion.
+
+Function `gemini_ask(notebook_ids=...)` starts background ordinary Chat; `gemini_run_task` explicitly starts Task. Both preserve an operation handle and save a verified full-answer Artifact before owned-chat cleanup. The assist compatibility server retains its five-tool catalog and does not expose Notebook attachment arguments.
+
+Account `gemini_preferences` manages saved browser/action preferences using returned handles and optional revisions. Writes have independent read-back; their verification scope is `stored_preference`, with `behavior_verified=false`. `permission_preference` is the saved value; `effective_permission` remains unknown. Native cards may still appear. Its annotation is mutating, non-destructive and non-idempotent.
+
+`gemini_skills` manages native Gemini Skills; list metadata first, read one exact instruction body only with explicit intent. `gemini_manage_notebook` creates and manages exact Notebooks and plaintext sources; deletion includes the Notebook's conversations. Both are account-only destructive unions. Notebook reads use bounded local limit/offset pages.
 
 ## Annotation legend
 
@@ -20,10 +23,16 @@ which primary tools are registered in the current process. The focused
 | Tool | Group | Purpose |
 |---|---|---|
 | `gemini_reset_session` | core | Clear one MCP/Gemini session and its configured remote-chat lifecycle; never changes agent memory or agent instructions |
-| `gemini_cleanup_test_artifacts` | history | Find and optionally delete test chats/scheduled actions by marker |
+| `gemini_run_task` | tasks | Send user-requested Task and explicit Notebook context; connected-app requests may mutate data (`sends_user_requested_task_and_explicit_notebook_context`) |
+| `gemini_tasks` | account | Task metadata, bounded progress, schedules, or explicit exact-ID deletion with read-back; union annotation is destructive |
+| `gemini_task_browser` | account | Verified screenshot or explicit one-shot browser input; union annotation is destructive |
+| `gemini_cleanup` | account | Clean MCP-owned ledger entries under the requested scope |
+| `gemini_cleanup_test_artifacts` | explicit legacy history | Find and optionally delete test chats/scheduled actions by marker |
 | `gemini_delete_chat` | history | Request remote chat deletion and report read-back evidence |
 | `gemini_delete_scheduled_action` | account | Delete a scheduled action by id |
 | `gemini_manage_gems` | gems | List/create/update/delete Gems; use an explicit account request for mutation |
+| `gemini_skills` | account | Native Skills metadata, explicit instruction reads and verified create/update/enable/delete |
+| `gemini_manage_notebook` | account | Native Notebook and source management; Notebook deletion includes conversations |
 
 ### Reads private chat text (require explicit user intent)
 
@@ -78,6 +87,8 @@ which primary tools are registered in the current process. The focused
 | `gemini_create_scheduled_action` | account | `creates_private_scheduled_action` (mutates) |
 | `gemini_get_tool_mode_status` | account | `reads_mode_status_only` |
 
+`gemini_tasks` list/get read metadata only and do not return full answer text; delete is not a cancellation API. Task schedules are distinct from Chat scheduled actions and are not managed by the scheduled-action tools. Notebook metadata and sources are not MCP-owned temporary chats.
+
 ### Authentication and local state
 
 | Tool | Group | Effect |
@@ -95,7 +106,7 @@ Fewer, broader tools with `action` parameters. Same safety tiers apply.
 | `account` | `READS_PRIVATE_REMOTE` | `action="manifest\|capabilities"` are auth-free; other actions read private inventory |
 | `history` | `DESTRUCTIVE_REMOTE` | `action="list\|search\|read\|export"` read-only; `action="delete"` destructive |
 | `scheduled` | `DESTRUCTIVE_REMOTE` | `action="list\|get"` read-only; `action="create\|delete"` mutate/destroy |
-| `create` | `MUTATES_REMOTE` | image/music generation; video argument is compatibility-only, not a verified Gemini Omni route |
+| `create` | `MUTATES_REMOTE` | image/video/music generation; previews do not substitute for playable media artifacts |
 | `edit` | `MUTATES_REMOTE` | image editing |
 | `session` | `DESTRUCTIVE_REMOTE` | create/send/list/reset actions; reset affects Gemini conversation state |
 | `prompts` | `DESTRUCTIVE_LOCAL` | local prompt list/get/create/delete |

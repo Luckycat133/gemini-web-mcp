@@ -171,7 +171,7 @@ mcp dev src/server.py
 5. `meta.request_id` / `meta.diagnostic_id`：用来关联服务端日志。
 
 参数校验、未知会话等已知失败通常只有 `request_id`；捕获到上游或内部异常时会同时生成
-`diag_<uuid>`。原始异常和两个 ID 会写入服务端日志，结构化错误只保留可公开的分类和说明。
+`diag_<uuid>`。服务端日志保留操作名、异常类型、稳定错误分类和两个 ID；不记录异常原文或 traceback，避免其中的 Cookie、签名下载地址或对话内容进入日志。结构化错误同样只保留可公开的分类和说明。
 compact 入口的旧 `Error: ...` 正文为兼容现有客户端暂时保留，可能仍含上游消息，因此不要把
 兼容正文当成稳定接口或公开转发。提交 issue 时请附工具名、错误码和 diagnostic ID，不要附
 Cookie。若 MCP 客户端暂不显示 `_meta`，仍可用兼容正文和 stderr 日志排查。

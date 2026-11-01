@@ -4,6 +4,10 @@
 
 ---
 
+默认使用 `gemini-mcp-function`；显式账号操作连接 `gemini-mcp-account`。`gemini-mcp-server` 在未设置 `GEMINI_TOOLS` 时使用功能面，只有显式设置该变量才选择兼容 profile。
+
+浏览器自动读取需要安装 `browser` extra；完整桌面功能使用 `[all]`，包含 Cookie、图片校验和 Task 浏览器依赖。采用自动读取时省略 Cookie 占位值；显式 PSID 会绑定账号并限制刷新范围。完整配置见[客户端示例](client-examples.md)。
+
 ## 📋 环境变量列表
 
 | 变量名 | 必填 | 说明 | 默认值 |
@@ -13,11 +17,16 @@
 | GEMINI_PSIDCC | ❌ | Cookie __Secure-1PSIDCC，附加到客户端的 extra cookies | - |
 | GEMINI_PROXY | ❌ | 代理地址 | - |
 | GEMINI_AUTO_REFRESH | ❌ | 自动刷新 Cookie | true |
+| GEMINI_BROWSER_AUTO_LOAD | ❌ | 启动时无 Cookie 则尝试读取浏览器；设为 false 可禁用 | true |
+| GEMINI_OPERATION_DB_PATH | ❌ | 研究与媒体任务元数据 SQLite 文件；assist、compact 与主服务需使用同一路径；普通记录保留七天，仍受清理保护且有上游对话 ID 的过期研究仍可恢复 | `$XDG_STATE_HOME/gemini-web-mcp/operations.sqlite3`，未设置时为 `~/.local/state/gemini-web-mcp/operations.sqlite3` |
 | GEMINI_BROWSER_COOKIE_TIMEOUT_SECONDS | ❌ | macOS 浏览器 Cookie 读取等待 Keychain 的单次超时（秒，范围 0.01–120） | 15 |
-| GEMINI_TOOLS | ❌ | 加载的工具组 | core |
-| GEMINI_CHAT_RETENTION_SECONDS | ❌ | 默认远端对话保留时间，0 表示尽快删除 | 1800 |
+| GEMINI_TOOLS | ❌ | 加载的工具组 | 未设置时为功能面；显式值保持原有 profile 语义 |
+| GEMINI_CHAT_RETENTION_SECONDS | ❌ | 一次性请求完成后的清理延迟；0 表示返回前尝试删除并验证，失败或无法验证时留在持久队列中重试 | 0 |
+| GEMINI_CLEANUP_DB_PATH | ❌ | 绑定原账号的清理队列 SQLite 文件；只存 ID、期限和执行状态 | `$XDG_STATE_HOME/gemini-web-mcp/cleanup.sqlite3`，未设置时为 `~/.local/state/gemini-web-mcp/cleanup.sqlite3` |
 | GEMINI_CONFIG_DIR | ❌ | skill_server 读取的本地 prompt 库目录（`prompts.json` 所在） | `.gemini` |
 | GEMINI_COOKIE_PATH | ❌ | gemini_webapi cookie cache 目录；浏览器刷新 Cookie 时由 `client_manager` 写入临时目录隔离 | 系统临时目录下的 `gemini_web_mcp_webapi_cookie_cache` |
+
+操作和清理记录通过原账号的不可逆标识分区。请求中切换账号时，迟到的对话 ID 仍登记到原账号；不会用新账号继续会话、读回旧任务或删除旧对话。旧版操作库迁移后无法确认归属的记录不会被当前登录账号自动接管；新建任务只允许持有该任务租约的 worker 在首次鉴权后绑定一次。Cookie 和对话正文不写入这两个数据库。
 
 ---
 
@@ -165,6 +174,8 @@ GEMINI_TOOLS=core
 
 ## 🔍 验证配置
 
+图片、图片编辑、视频、音乐和研究默认后台执行；工具返回 `operation_id` 后可关闭原连接，再用同一句柄查询。未指定媒体 `output_dir` 时，文件保存到操作数据库同级的 `artifacts/<operation_id>/`，默认位于 `~/.local/state/gemini-web-mcp/` 下；`GEMINI_OPERATION_DB_PATH` 或 `XDG_STATE_HOME` 会影响该位置。`background=false` 可选择等待本次调用的结果。
+
 使用 Cookie 状态工具验证配置：
 
 ```
@@ -190,3 +201,5 @@ gemini_get_cookie_status
 1. 检查 `GEMINI_TOOLS` 配置
 2. 确保加载了需要的工具组
 3. 重启服务器使配置生效
+
+Task 浏览器截图与显式输入需要可选依赖 `gemini-web-mcp[browser-control]`（aiortc 与 Pillow）；`gemini-web-mcp[all]` 也包含它们。操作库记录浏览器动作的账号、身份、帧摘要和状态，不记录输入文本、坐标、截图或 WebRTC 凭据。截图作为单独的本地 PNG Artifact 保存。

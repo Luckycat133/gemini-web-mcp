@@ -4,310 +4,69 @@
 
 import asyncio
 import logging
-import re
-import shutil
-import subprocess
-from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Literal, Optional, cast
 
 from ..adapters.mcp_sdk import MCPServer, TextContent
 
-from gemini_webapi.types.video import GeneratedMedia
-
-from ..adapters import append_artifact_block, attach_domain_result, domain_text
+from ..adapters import append_artifact_block, attach_domain_result, domain_failure_text, domain_text
 from ..client_wrapper import (
     cleanup_due_remote_chats,
     get_gemini_client,
     initialize_client,
+    finalize_remote_chat_cleanup_from_response,
     schedule_remote_chat_cleanup_from_response,
 )
 from ..constants import resolve_media_request
 from ..domain import Artifact, ArtifactKind, ArtifactResultData, ArtifactState, DomainErrorCode, DomainResult
-from ..infrastructure.rpc_contracts import execute_contract, get_contract
-from ..infrastructure.rpc_parsers import parse_contract_body, parse_rpc_envelope
+from ..services.music_recovery import (
+    fetch_music_media_from_chat as _fetch_music_media_from_chat,
+    media_from_music_card as _media_from_music_card,  # noqa: F401 - compatibility import
+    music_response_identity,
+)
+from ..services.media_generation import (
+    MediaGenerationProgress, add_media_cleanup_evidence, compose_media_prompt, generate_media_response, media_timeout_scope,
+    media_timeout as _media_timeout,
+)
 from ..services import (
     artifact_exception_result,
     artifact_from_local_path,
     artifact_result,
-    classify_artifact_state,
-    detect_image_mime_type,
+    probe_playable_av_tracks,
     extract_response_artifacts,
+    is_response_queued,
     merge_artifacts,
     observed_backend_from_response,
     response_chat_id,
+    response_image_items,
 )
 from .annotations import MUTATES_REMOTE
 from .utils import parse_response, validate_optional_image_path
+from ..services.media_storage import (
+    _MediaSaveOutcome,
+    _normalize_saved_image_extension as _normalize_saved_image_extension,
+    _normalize_saved_paths as _normalize_saved_paths,
+    _probe_duration,
+    _response_media_items as _response_media_items,
+    _safe_media_filename as _safe_media_filename,
+    _saved_artifact_kind as _saved_artifact_kind,
+    _saved_artifact_uri as _saved_artifact_uri,
+    _unused_media_filename as _unused_media_filename,
+    _valid_media_filename,
+    _save_generated_media as _shared_save_generated_media,
+    reconcile_remote_media_types,
+    classify_generated_media,
+)
 
 logger = logging.getLogger(__name__)
 
 
-def _safe_media_filename(prompt: str, media_type: str) -> str:
-    stem = re.sub(r"[^A-Za-z0-9._-]+", "_", prompt.strip())[:48].strip("._-")
-    return stem or media_type
-
-
-def _valid_media_filename(filename: str | None) -> bool:
-    """A caller may name a file, but cannot escape the requested directory."""
-    if filename is None:
-        return True
-    return bool(
-        filename.strip()
-        and filename not in {".", ".."}
-        and Path(filename).name == filename
-        and not any(character in filename for character in ("/", "\\", "\x00"))
-        and not any(ord(character) < 32 for character in filename)
+async def _save_generated_media(*args, **kwargs):
+    return await _shared_save_generated_media(
+        *args, **kwargs, duration_probe=_probe_duration, track_probe=probe_playable_av_tracks,
     )
-
-
-def _unused_media_filename(destination: Path, filename: str) -> str:
-    """Avoid overwriting an existing named artifact on repeated requests."""
-    candidate = Path(filename)
-    if not (destination / candidate).exists():
-        return filename
-    suffix = candidate.suffix
-    stem = candidate.stem if suffix else candidate.name
-    index = 2
-    while (destination / f"{stem}_{index}{suffix}").exists():
-        index += 1
-    return f"{stem}_{index}{suffix}"
-
-
-def _normalize_saved_image_extension(path: str) -> str:
-    """Keep a saved image's filename consistent with its actual bytes."""
-    source = Path(path)
-    mime_type = detect_image_mime_type(source)
-    suffixes = {
-        "image/jpeg": (".jpg", ".jpeg"),
-        "image/png": (".png",),
-        "image/gif": (".gif",),
-        "image/webp": (".webp",),
-    }.get(mime_type or "")
-    if suffixes is None or source.suffix.lower() in suffixes:
-        return path
-    candidate = source.with_suffix(suffixes[0])
-    counter = 2
-    while candidate.exists():
-        candidate = source.with_name(f"{source.stem}_{counter}{suffixes[0]}")
-        counter += 1
-    try:
-        source.rename(candidate)
-    except OSError as error:
-        logger.warning("Could not align saved image extension with MIME: %r", error)
-        return path
-    return str(candidate)
-
-
-def _probe_duration(path: str) -> Optional[float]:
-    if not shutil.which("ffprobe"):
-        return None
-    try:
-        completed = subprocess.run(
-            [
-                "ffprobe",
-                "-v",
-                "error",
-                "-show_entries",
-                "format=duration",
-                "-of",
-                "default=noprint_wrappers=1:nokey=1",
-                path,
-            ],
-            check=True,
-            capture_output=True,
-            text=True,
-            timeout=15,
-        )
-        return float(completed.stdout.strip())
-    except (OSError, subprocess.SubprocessError, ValueError):
-        return None
-
-
-async def _save_generated_media(
-    response,
-    *,
-    media_type: str,
-    output_dir: Optional[str],
-    filename: Optional[str],
-    prompt: str,
-    media_items: Optional[list] = None,
-    requested_model: str,
-    request_model: str,
-    effective_backend: str,
-    observed_backend: str | None,
-    source_chat_id: str | None,
-) -> "_MediaSaveOutcome":
-    media_items = media_items if media_items is not None else _response_media_items(response, media_type)
-    if not media_items:
-        return _MediaSaveOutcome()
-
-    destination = Path(output_dir or "generated_media").expanduser()
-    saved_lines: list[str] = []
-    saved_artifacts: list[Artifact] = []
-    failures: list[str] = []
-    for index, media in enumerate(media_items, 1):
-        base_name = filename or _safe_media_filename(prompt, media_type)
-        if len(media_items) > 1:
-            name_path = Path(base_name)
-            base_name = (
-                f"{name_path.stem}_{index}{name_path.suffix}"
-                if name_path.suffix
-                else f"{base_name}_{index}"
-            )
-        base_name = _unused_media_filename(destination, base_name)
-
-        save_kwargs = {"path": str(destination), "filename": base_name, "verbose": False}
-        if media_type == "music":
-            save_kwargs["download_type"] = "both"
-        try:
-            raw_saved = await media.save(**save_kwargs)
-        except Exception as error:
-            logger.error(
-                "artifact save failed media_type=%s index=%s error=%r",
-                media_type,
-                index,
-                error,
-                exc_info=True,
-            )
-            failures.append(f"{type(error).__name__}:save")
-            continue
-        saved = _normalize_saved_paths(raw_saved, media_type)
-        if saved is None:
-            failures.append(f"item_{index}:unsupported_save_result")
-            continue
-        for kind, path in sorted(saved.items()):
-            if not path:
-                failures.append(f"{kind}:no_saved_path")
-                continue
-            artifact_kind = _saved_artifact_kind(media_type, kind)
-            if artifact_kind == ArtifactKind.IMAGE:
-                path = _normalize_saved_image_extension(path)
-            uri = _saved_artifact_uri(media, artifact_kind)
-            artifact = artifact_from_local_path(
-                artifact_kind,
-                path,
-                title=getattr(media, "title", None),
-                uri=uri,
-                source_chat_id=source_chat_id,
-                requested_backend=requested_model,
-                request_model=request_model,
-                effective_backend=effective_backend,
-                observed_backend=observed_backend,
-                duration_probe=_probe_duration,
-            )
-            saved_artifacts.append(artifact)
-            if artifact.state == ArtifactState.FAILED:
-                failures.append(f"{kind}:verification")
-            else:
-                line = f"{kind}: {path}"
-                duration = artifact.duration_seconds
-                if duration is not None:
-                    line += f" ({duration:.2f}s)"
-                saved_lines.append(line)
-        if not saved:
-            failures.append(f"item_{index}:no_saved_path")
-    return _MediaSaveOutcome(
-        lines=tuple(saved_lines),
-        artifacts=tuple(saved_artifacts),
-        failures=tuple(failures),
-    )
-
-
-def _response_media_items(response, media_type: str) -> list:
-    if media_type == "image":
-        return list(getattr(response, "images", None) or getattr(response, "media", None) or [])
-    if media_type == "video":
-        return list(getattr(response, "videos", None) or getattr(response, "media", None) or [])
-    return list(getattr(response, "media", None) or [])
-
-
-def _normalize_saved_paths(saved, media_type: str) -> dict[str, str | None] | None:
-    if isinstance(saved, (str, Path)):
-        return {media_type: str(saved)}
-    if isinstance(saved, Mapping):
-        normalized: dict[str, str | None] = {}
-        for kind, path in saved.items():
-            if path is None:
-                normalized[str(kind)] = None
-            elif isinstance(path, (str, Path)):
-                normalized[str(kind)] = str(path)
-            else:
-                return None
-        return normalized
-    return None
-
-
-@dataclass(frozen=True)
-class _MediaSaveOutcome:
-    lines: tuple[str, ...] = ()
-    artifacts: tuple[Artifact, ...] = ()
-    failures: tuple[str, ...] = ()
-
-
-def _saved_artifact_kind(media_type: str, saved_kind: str) -> ArtifactKind:
-    normalized = saved_kind.lower()
-    if normalized in {"video", "mp4", "webm"}:
-        return ArtifactKind.VIDEO
-    if normalized in {"audio", "mp3", "music", "wav", "m4a"}:
-        return ArtifactKind.AUDIO
-    if normalized in {"image", "png", "jpg", "jpeg", "webp"}:
-        return ArtifactKind.IMAGE
-    if media_type == "music":
-        return ArtifactKind.AUDIO
-    if media_type == "image":
-        return ArtifactKind.IMAGE
-    return ArtifactKind.VIDEO
-
-
-def _saved_artifact_uri(media, kind: ArtifactKind) -> str | None:
-    if kind == ArtifactKind.AUDIO:
-        return getattr(media, "mp3_url", None) or getattr(media, "url", None)
-    return getattr(media, "url", None)
-
-
-def _media_from_music_card(card_data: Mapping[str, str], *, client, cid: str) -> Optional[GeneratedMedia]:
-    title = card_data.get("title") or "[Media]"
-    is_mp4 = title.endswith(".mp4")
-    media_url = card_data.get("url", "")
-    mp3_url = "" if is_mp4 else media_url
-    mp4_url = media_url if is_mp4 else ""
-    if not (mp3_url or mp4_url):
-        return None
-    return GeneratedMedia(
-        url=mp4_url,
-        thumbnail="",
-        mp3_url=mp3_url,
-        mp3_thumbnail="",
-        title=title,
-        cid=cid,
-        rid=card_data.get("rid", ""),
-        rcid=card_data.get("rcid", ""),
-        client_ref=client,
-        proxy=getattr(client, "proxy", None),
-    )
-
-
-async def _fetch_music_media_from_chat(client, cid: str) -> list[GeneratedMedia]:
-    if not cid or not hasattr(client, "_batch_execute"):
-        return []
-
-    contract = get_contract("media.music_chat")
-    response = await execute_contract(client, contract.key, chat_id=cid)
-    envelope = parse_rpc_envelope(response.text, contract.rpc_id)
-    media_items: list[GeneratedMedia] = []
-    for body in envelope.bodies:
-        parsed = parse_contract_body(contract, body, reject_code=envelope.reject_code)
-        if parsed.status not in {"success", "empty"}:
-            logger.warning("music read-back shape=%s for contract=%s", parsed.status, contract.key)
-            continue
-        for card_data in parsed.value or ():
-            media = _media_from_music_card(card_data, client=client, cid=cid)
-            if media:
-                media_items.append(media)
-    return media_items
 
 
 def _prepend_backend_note(parsed: list[TextContent], note_lines: list[str]) -> list[TextContent]:
@@ -318,38 +77,6 @@ def _prepend_backend_note(parsed: list[TextContent], note_lines: list[str]) -> l
     if not prefix:
         return parsed
     return [TextContent(type="text", text=f"{prefix}\n\n{first.text}".strip()), *parsed[1:]]
-
-
-def _media_timeout(media_type: str, timeout_seconds: Optional[int]) -> int:
-    if timeout_seconds and timeout_seconds > 0:
-        return timeout_seconds
-    if media_type == "image":
-        return 180
-    return 600
-
-
-def _set_client_timeouts(client, timeout_seconds: int) -> tuple[Optional[float], Optional[float]]:
-    previous_timeout = getattr(client, "timeout", None)
-    previous_watchdog_timeout = getattr(client, "watchdog_timeout", None)
-    if previous_timeout is not None:
-        client.timeout = max(float(previous_timeout), float(timeout_seconds))
-    if previous_watchdog_timeout is not None:
-        client.watchdog_timeout = min(
-            max(float(previous_watchdog_timeout), 120.0),
-            max(float(timeout_seconds), 120.0),
-        )
-    return previous_timeout, previous_watchdog_timeout
-
-
-def _restore_client_timeouts(
-    client,
-    previous_timeout: Optional[float],
-    previous_watchdog_timeout: Optional[float],
-) -> None:
-    if previous_timeout is not None:
-        client.timeout = previous_timeout
-    if previous_watchdog_timeout is not None:
-        client.watchdog_timeout = previous_watchdog_timeout
 
 
 @dataclass(frozen=True)
@@ -369,18 +96,13 @@ class _MediaJob:
     timeout_seconds: int
 
 
-_GENERATION_PROMPTS = {
-    "image": "Generate an image. Prompt: {prompt}",
-    "video": "Generate a video using Gemini's video generation capability. Prompt: {prompt}",
-    "music": "Create music/audio using Gemini's music generation capability. Prompt: {prompt}",
-}
-
-
 def _generation_prompt(job: _MediaJob) -> str:
-    return _GENERATION_PROMPTS[job.media_type].format(prompt=job.prompt)
+    return compose_media_prompt(job.media_type, job.prompt)
 
 
-def _media_failure_response(error: Exception, job: _MediaJob, message: str) -> list[TextContent]:
+def _media_failure_response(
+    error: Exception, job: _MediaJob, message: str, progress: MediaGenerationProgress | None = None,
+) -> list[TextContent]:
     failure_data = ArtifactResultData(
         state=ArtifactState.FAILED,
         requested_model=job.requested_model,
@@ -388,6 +110,7 @@ def _media_failure_response(error: Exception, job: _MediaJob, message: str) -> l
         effective_backend=job.backend_label,
         input_artifacts=job.input_artifacts,
         media_type=job.media_type,
+        source_chat_id=progress.last_chat_id if progress else None,
     )
     result = artifact_exception_result(
         error,
@@ -395,17 +118,21 @@ def _media_failure_response(error: Exception, job: _MediaJob, message: str) -> l
         logger=logger,
         operation=f"gemini_generate_media:{job.media_type}",
     )
+    if progress is not None:
+        result = add_media_cleanup_evidence(result, progress)
     return attach_domain_result([TextContent(type="text", text=message)], result, use_result_data=True)
 
 
 async def _recover_music_media(client: object, response: object, job: _MediaJob) -> tuple[list, tuple[Artifact, ...]]:
     if job.media_type != "music" or (getattr(response, "media", None) or []):
         return [], ()
-    remote_chat_id = response_chat_id(response)
+    remote_chat_id, rid, rcid = music_response_identity(response)
+    if not rid:
+        return [], ()
     try:
-        recovered_media = await _fetch_music_media_from_chat(client, remote_chat_id or "")
+        recovered_media = await _fetch_music_media_from_chat(client, remote_chat_id, rid=rid, rcid=rcid)
     except Exception as e:
-        logger.warning("无法从远端 chat 恢复音乐媒体 URL: %s", e)
+        logger.warning("无法从远端 chat 恢复音乐媒体 error_type=%s", type(e).__name__)
         return [], ()
     recovered_artifacts = extract_response_artifacts(
         SimpleNamespace(
@@ -438,7 +165,11 @@ async def _build_media_outcome(
     output_dir: Optional[str],
     filename: Optional[str],
 ) -> _MediaOutcome:
-    parsed = parse_response(response, job.effective_alias)
+    parsed = parse_response(
+        response,
+        job.effective_alias,
+        image_items=response_image_items(response, generated_only=True) if job.media_type == "image" else None,
+    )
     remote_chat_id = response_chat_id(response)
     observed_backend = observed_backend_from_response(response)
     remote_artifacts = extract_response_artifacts(
@@ -466,8 +197,8 @@ async def _build_media_outcome(
     if save_outcome.lines:
         parsed[0].text = f"{parsed[0].text}\n\nSaved files:\n" + "\n".join(save_outcome.lines)
     artifacts = merge_artifacts(
-        remote_artifacts,
-        recovered_artifacts,
+        reconcile_remote_media_types(remote_artifacts, save_outcome.artifacts),
+        reconcile_remote_media_types(recovered_artifacts, save_outcome.artifacts),
         save_outcome.artifacts,
     )
     input_artifacts = job.input_artifacts
@@ -484,9 +215,7 @@ async def _build_media_outcome(
                 source_chat_id=remote_chat_id,
             ),
         )
-    artifact_state = classify_artifact_state(response, artifacts)
-    if artifact_state == ArtifactState.EMPTY and save_outcome.failures:
-        artifact_state = ArtifactState.FAILED
+    artifact_state = classify_generated_media(response, artifacts, job.media_type, save_outcome.failures)
     data = ArtifactResultData(
         state=artifact_state,
         artifacts=artifacts,
@@ -499,10 +228,8 @@ async def _build_media_outcome(
         media_type=job.media_type,
     )
     video_empty_action = (
-        ("Inspect the retained upstream chat. " if remote_chat_id else "No upstream chat ID was observed. ")
-        + "Gemini Omni video mode is available at https://gemini.google.com/videos; "
-        "a generic chat prompt does not prove that mode was selected. "
-        "Do not duplicate the request until its state is known."
+        ("Review the cleanup status before retrying. " if remote_chat_id else "No upstream chat ID was observed. ")
+        + "No usable video was returned. Do not duplicate the request until its state is known."
         if job.media_type == "video" and artifact_state == ArtifactState.EMPTY
         else None
     )
@@ -546,11 +273,11 @@ def _finalize_media_content(
             else f"⚠️ {job.media_type} 请求已完成，但没有返回文本、图片、视频或音乐资源。"
         )
         next_step = (
-            "当前通用聊天请求未证实进入 Gemini Omni 视频模式。"
-            + ("请先检查已保留的上游聊天；" if data.source_chat_id else "未取得上游聊天 ID；")
-            + "如需生成视频，可使用网页专用视频入口 https://gemini.google.com/videos。"
+            "尚未取得可验证的视频产物。"
+            + ("请先检查清理状态；" if data.source_chat_id else "未取得上游聊天 ID；")
+            + "确认任务状态后再决定是否重试。"
             if job.media_type == "video"
-            else "请检查上游聊天状态，再决定是否重试。"
+            else "请检查清理状态，再决定是否重试。"
         )
         content[0].text = f"{content[0].text}\n\n{empty_message}{next_step}"
         return content
@@ -621,8 +348,16 @@ def register_media_tools(mcp: MCPServer):
         delete_after_seconds: Optional[int] = None,
         output_dir: Optional[str] = None,
         filename: Optional[str] = None,
+        background: bool = True,
+        operation_id: Optional[str] = None,
     ) -> list[TextContent]:
-        """媒体生成"""
+        """生成媒体；默认后台运行，以 operation_id 查询任务状态和结果。
+
+        使用 gemini_get_operation_status / gemini_get_operation_result 查询；
+        background=false 显式选择同步模式，不接受 operation_id。
+        """
+        if not background and operation_id is not None:
+            return _invalid_media_argument("operation_id requires background=true.")
         if not prompt.strip():
             return _invalid_media_argument("prompt must not be blank.")
         if not _valid_media_filename(filename):
@@ -630,6 +365,17 @@ def register_media_tools(mcp: MCPServer):
         valid_image, safe_image_path, image_error = validate_optional_image_path(image_path)
         if not valid_image:
             return _invalid_image_response(image_error)
+
+        if background:
+            from ..services.background import submit_media
+            result = await submit_media({
+                "prompt": prompt, "media_type": media_type, "model": model, "thinking_level": thinking_level,
+                "image_path": safe_image_path, "output_dir": output_dir, "filename": filename,
+                "timeout_seconds": timeout_seconds, "retain_chat": retain_chat,
+                "delete_after_seconds": delete_after_seconds, "edit": False,
+            }, operation="gemini_generate_media", operation_id=operation_id)
+            return domain_text(result, "媒体任务已提交，可用任务句柄查询状态和结果。" if result.ok
+                               else domain_failure_text(result), use_result_data=True)
 
         media_request = resolve_media_request(model, media_type, thinking_level)
         effective_timeout = _media_timeout(media_type, timeout_seconds)
@@ -658,30 +404,24 @@ def register_media_tools(mcp: MCPServer):
             media_request["effective_alias"],
             media_request["backend_label"],
         )
+        progress = MediaGenerationProgress()
         try:
             client = get_gemini_client()
             await initialize_client()
             await cleanup_due_remote_chats(client)
-            previous_timeout, previous_watchdog_timeout = _set_client_timeouts(
-                client,
-                effective_timeout,
-            )
-            try:
+            with media_timeout_scope(client, effective_timeout):
                 response = await asyncio.wait_for(
-                    client.generate_content(
-                        prompt=_generation_prompt(job),
-                        files=job.files,
-                        model=job.request_model,
-                        thinking_level=thinking_level,
-                        timeout=effective_timeout,
+                    generate_media_response(
+                        client,
+                        arguments=dict(prompt=_generation_prompt(job), files=job.files, model=job.request_model,
+                                       thinking_level=thinking_level, timeout=effective_timeout),
+                        schedule_cleanup=schedule_remote_chat_cleanup_from_response,
+                        retain_chat=retain_chat, delete_after_seconds=delete_after_seconds,
+                        source=f"gemini_generate_media:{job.media_type}",
+                        media_type=job.media_type,
+                        progress=progress,
                     ),
                     timeout=effective_timeout,
-                )
-            finally:
-                _restore_client_timeouts(
-                    client,
-                    previous_timeout,
-                    previous_watchdog_timeout,
                 )
         except asyncio.TimeoutError as error:
             return _media_failure_response(
@@ -693,6 +433,7 @@ def register_media_tools(mcp: MCPServer):
                     "视频/音乐通常需要更长时间或会被 Gemini Web 上游排队；"
                     "可增大 timeout_seconds 后重试。"
                 ),
+                progress,
             )
         except Exception as e:
             return _media_failure_response(
@@ -700,33 +441,57 @@ def register_media_tools(mcp: MCPServer):
                 job,
                 (
                     f"后端: {job.backend_label}\n"
-                    f"❌ {job.media_type} 生成失败: {str(e)}\n"
-                    "说明: 当前封装通过 Gemini Web 的通用 generate_content 触发媒体能力，"
-                    "视频/音乐可能被上游静默中止或长时间排队。"
+                    f"❌ {job.media_type} 生成失败，请查看结构化错误详情。\n"
+                    "说明: 上游可能中止请求或长时间排队；请检查清理状态再决定是否重试。"
                 ),
+                progress,
             )
-        outcome = await _build_media_outcome(client, response, job, output_dir, filename)
-        schedule_remote_chat_cleanup_from_response(
-            response,
-            retain_chat=retain_chat or outcome.artifacts_data.state in {ArtifactState.QUEUED, ArtifactState.EMPTY},
-            delete_after_seconds=delete_after_seconds,
-            source=f"gemini_generate_media:{job.media_type}",
-        )
-        content = _finalize_media_content(outcome.parsed, job, outcome.artifacts_data, response, outcome.save_outcome)
-        return attach_domain_result(content, outcome.result, use_result_data=True)
+        cleanup_finalized = False
+        try:
+            outcome = await _build_media_outcome(client, response, job, output_dir, filename)
+            content = _finalize_media_content(outcome.parsed, job, outcome.artifacts_data, response, outcome.save_outcome)
+            deferred = outcome.artifacts_data.state == ArtifactState.QUEUED and not retain_chat
+            cleanup = await finalize_remote_chat_cleanup_from_response(
+                response,
+                retain_chat=retain_chat,
+                delete_after_seconds=(1800 if deferred and delete_after_seconds is None else delete_after_seconds),
+                source=f"gemini_generate_media:{job.media_type}" + (":deferred" if deferred else ""),
+            )
+            result = replace(outcome.result, meta=replace(outcome.result.meta, details={**outcome.result.meta.details, "cleanup": cleanup}))
+            result = add_media_cleanup_evidence(result, progress, cleanup)
+            finalized = attach_domain_result(content, result, use_result_data=True)
+            cleanup_finalized = True
+            return finalized
+        finally:
+            if not cleanup_finalized:
+                try:
+                    deferred = is_response_queued(response) and not retain_chat
+                    schedule_remote_chat_cleanup_from_response(
+                        response, retain_chat=retain_chat,
+                        delete_after_seconds=(1800 if deferred and delete_after_seconds is None else delete_after_seconds),
+                        source=f"gemini_generate_media:{job.media_type}:interrupted" + (":deferred" if deferred else ""),
+                    )
+                except Exception as cleanup_error:
+                    logger.warning("Could not persist interrupted media cleanup error_type=%s", type(cleanup_error).__name__)
 
     @mcp.tool(annotations=MUTATES_REMOTE)
     async def gemini_generate_music(
         prompt: str,
         model: str = "flash",
-        thinking_level: str = "extended",
+        thinking_level: str = "standard",
         timeout_seconds: Optional[int] = None,
         retain_chat: bool = False,
         delete_after_seconds: Optional[int] = None,
         output_dir: Optional[str] = None,
         filename: Optional[str] = None,
+        background: bool = True,
+        operation_id: Optional[str] = None,
     ) -> list[TextContent]:
-        """音乐生成"""
+        """生成音乐；默认后台运行，以操作句柄查询状态和结果。
+
+        使用 gemini_get_operation_status / gemini_get_operation_result 查询；
+        background=false 显式选择同步模式，不接受 operation_id。
+        """
         result = await gemini_generate_media(
             prompt=prompt,
             media_type="music",
@@ -737,5 +502,7 @@ def register_media_tools(mcp: MCPServer):
             delete_after_seconds=delete_after_seconds,
             output_dir=output_dir,
             filename=filename,
+            background=background,
+            operation_id=operation_id,
         )
         return cast(list[TextContent], result)

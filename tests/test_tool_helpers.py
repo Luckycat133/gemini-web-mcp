@@ -7,8 +7,8 @@
   / `parse_response` / `get_stream_text_piece`：零直接覆盖
 - `constants.resolve_model_name` / `normalize_model_alias` / `resolve_media_request`
   / `describe_model_name` / `supported_learning_modes`：纯查表函数零覆盖
-- `media._safe_media_filename` / `_media_timeout` / `_set_client_timeouts`
-  / `_restore_client_timeouts` / `_prepend_backend_note` / `_media_from_music_card`：零覆盖
+- `media._safe_media_filename` / `_media_timeout` / `media_timeout_scope`
+  / `_prepend_backend_note` / `_media_from_music_card`：边界行为覆盖
 - `file._validate_url`：4 分支纯函数零覆盖；`_validate_file_path`：纯转发壳
 
 本文件以纯输入输出断言为主，仅在 `_media_from_music_card` 用 SimpleNamespace fake client。
@@ -30,10 +30,9 @@ from src.tools.media import (
     _media_from_music_card,
     _media_timeout,
     _prepend_backend_note,
-    _restore_client_timeouts,
     _safe_media_filename,
-    _set_client_timeouts,
 )
+from src.services.media_generation import media_timeout_scope
 from src.tools.utils import (
     extract_remote_chat_id,
     get_stream_text_piece,
@@ -420,12 +419,12 @@ def test_resolve_media_request_music_thinking_level_does_not_claim_backend():
     assert out["effective_alias"] == "pro"
 
 
-def test_resolve_media_request_video_does_not_claim_omni_mode():
-    """通用聊天的视频参数不能冒充 Omni 视频模式。"""
+def test_resolve_media_request_video_uses_the_observed_mode_without_claiming_backend_version():
+    """专用视频请求模式与上游实际模型版本分开报告。"""
     out = resolve_media_request("flash", "video")
-    assert out["backend_label"] == "Gemini Web generic chat"
+    assert out["backend_label"] == "Gemini Web video mode"
     assert out["effective_alias"] == "flash"
-    assert "未证实" in out["note"]
+    assert "视频轨道验证" in out["note"]
 
 
 # ---------------------------------------------------------------------------
@@ -489,69 +488,37 @@ def test_media_timeout_non_image_default_600():
 
 
 # ---------------------------------------------------------------------------
-# media._set_client_timeouts / _restore_client_timeouts
+# media timeout lease
 # ---------------------------------------------------------------------------
 
 
-def test_set_client_timeouts_no_previous_attributes_returns_none_pair():
-    """client 无 timeout/watchdog_timeout 属性 → 返回 (None, None)，不设置。"""
+def test_media_timeout_scope_does_not_create_missing_attributes():
     client = SimpleNamespace()
-    prev = _set_client_timeouts(client, 300)
-    assert prev == (None, None)
+    with media_timeout_scope(client, 300):
+        assert not hasattr(client, "timeout")
     assert not hasattr(client, "timeout")
     assert not hasattr(client, "watchdog_timeout")
 
 
-def test_set_client_timeouts_takes_max_of_previous_and_requested():
-    """previous_timeout=100, requested=300 → 设为 300（取 max）。"""
+def test_media_timeout_scope_raises_timeout_and_restores_baseline():
     client = SimpleNamespace(timeout=100.0, watchdog_timeout=200.0)
-    prev = _set_client_timeouts(client, 300)
-    assert prev == (100.0, 200.0)
-    assert client.timeout == 300.0
-    # watchdog = min(max(200, 120), max(300, 120)) = min(200, 300) = 200
-    assert client.watchdog_timeout == 200.0
+    with media_timeout_scope(client, 300):
+        assert client.timeout == 300.0
+        assert client.watchdog_timeout == 300.0
+    assert (client.timeout, client.watchdog_timeout) == (100.0, 200.0)
 
 
-def test_set_client_timeouts_keeps_smaller_previous_when_requested_smaller():
-    """previous=400, requested=200 → 设为 400（取 max，不降低）。"""
+def test_media_timeout_scope_does_not_lower_existing_values():
     client = SimpleNamespace(timeout=400.0, watchdog_timeout=400.0)
-    _set_client_timeouts(client, 200)
-    assert client.timeout == 400.0
-    # watchdog = min(max(400, 120), max(200, 120)) = min(400, 200) = 200
-    assert client.watchdog_timeout == 200.0
+    with media_timeout_scope(client, 200):
+        assert (client.timeout, client.watchdog_timeout) == (400.0, 400.0)
 
 
-def test_set_client_timeouts_watchdog_floored_at_120():
-    """watchdog 计算下限 120（即使 requested < 120）。"""
+def test_media_timeout_scope_preserves_larger_watchdog_baseline():
     client = SimpleNamespace(timeout=50.0, watchdog_timeout=50.0)
-    _set_client_timeouts(client, 30)
-    # watchdog = min(max(50, 120), max(30, 120)) = min(120, 120) = 120
-    assert client.watchdog_timeout == 120.0
-
-
-def test_restore_client_timeouts_writes_back_previous_values():
-    """restore 把 prev 值写回 client 属性。"""
-    client = SimpleNamespace(timeout=999.0, watchdog_timeout=999.0)
-    _restore_client_timeouts(client, 100.0, 200.0)
-    assert client.timeout == 100.0
-    assert client.watchdog_timeout == 200.0
-
-
-def test_restore_client_timeouts_skips_none_prev():
-    """prev 为 None → 不写回（保持 client 当前值）。"""
-    client = SimpleNamespace(timeout=999.0, watchdog_timeout=999.0)
-    _restore_client_timeouts(client, None, None)
-    assert client.timeout == 999.0
-    assert client.watchdog_timeout == 999.0
-
-
-def test_set_then_restore_roundtrip_restores_original():
-    """set → restore 完整往返恢复原值。"""
-    client = SimpleNamespace(timeout=100.0, watchdog_timeout=200.0)
-    prev = _set_client_timeouts(client, 500)
-    _restore_client_timeouts(client, *prev)
-    assert client.timeout == 100.0
-    assert client.watchdog_timeout == 200.0
+    with media_timeout_scope(client, 30):
+        assert client.watchdog_timeout == 50.0
+    assert client.watchdog_timeout == 50.0
 
 
 # ---------------------------------------------------------------------------
@@ -676,8 +643,13 @@ def test_validate_url_valid_returns_url_unchanged():
     assert value == url
 
 
+def test_validate_url_accepts_single_label_hostnames():
+    for url in ("https://x", "http://localhost:8080/path"):
+        assert _validate_url(url) == (True, url)
+
+
 def test_validate_url_handles_urlparse_exception():
-    """urlparse 抛异常 → 返回失败 + 异常信息。
+    """Malformed URLs have a stable failure without exposing parser details.
 
     用 monkeypatch 替换 urlparse 触发异常路径。
     """
@@ -692,10 +664,15 @@ def test_validate_url_handles_urlparse_exception():
     try:
         ok, msg = _validate_url("https://x")
         assert ok is False
-        assert "URL 验证失败" in msg
-        assert "boom" in msg
+        assert msg == "URL 格式无效"
+        assert "boom" not in msg
     finally:
         file_module.urlparse = original  # type: ignore[assignment]
+
+
+def test_validate_url_rejects_malformed_ipv6_and_port():
+    assert _validate_url("https://[invalid") == (False, "URL 格式无效")
+    assert _validate_url("https://example.test:bad") == (False, "URL 格式无效")
 
 
 # ---------------------------------------------------------------------------

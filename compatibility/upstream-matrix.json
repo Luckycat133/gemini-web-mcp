@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "reviewed_at": "2026-08-03",
+  "reviewed_at": "2026-10-31",
   "python": {
     "supported": ">=3.11",
     "offline_ci": [
@@ -16,8 +16,8 @@
       "live_verified": false
     },
     "gemini-webapi": {
-      "requirement": "gemini-webapi>=2.0.0,<3",
-      "fixture_verified": "2.0.0",
+      "requirement": "gemini-webapi>=2.1.1,<3",
+      "fixture_verified": "2.1.1",
       "live_verified": false
     },
     "mcp": {

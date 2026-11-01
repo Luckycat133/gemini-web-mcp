@@ -5,12 +5,11 @@ command = "uvx"
 args = [
   "--from",
   "git+https://github.com/Luckycat133/gemini-web-mcp@main",
-  "gemini-mcp-server",
+  "gemini-mcp-function",
 ]
 env_vars = ["GEMINI_PSID", "GEMINI_PSIDTS", "GEMINI_PSIDCC"]
 startup_timeout_sec = 60
 tool_timeout_sec = 720
 
 [mcp_servers.gemini.env]
-GEMINI_TOOLS = "model"
 GEMINI_AUTO_REFRESH = "false"

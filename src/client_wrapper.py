@@ -4,11 +4,16 @@ Gemini 客户端封装 - 门面模式
 """
 
 import inspect
+import asyncio
+import time
+from contextlib import asynccontextmanager, suppress
 import logging
 import os
 from collections.abc import Mapping
 from functools import wraps
 from typing import Any, Dict, Optional, Self
+
+import anyio
 
 from .client_manager import (
     ClientManager,
@@ -23,6 +28,7 @@ from .domain import (
     CleanupObservation,
     CleanupState,
     DomainResult,
+    new_diagnostic_id,
     is_valid_remote_chat_id,
 )
 from .remote_chat_cleanup_manager import RemoteChatCleanupManager
@@ -314,13 +320,21 @@ def schedule_remote_chat_cleanup(
     retain_chat: bool = False,
     delete_after_seconds: Optional[int] = None,
     source: str = "",
+    reschedule_pending: bool = False,
+    _owner_account: str | None = None,
 ) -> CleanupObservation:
     """登记远端 Gemini chat 的自动删除任务。"""
+    if _owner_account is not None:
+        return _cleanup_manager.schedule_cleanup_result(
+            cid, retain_chat=retain_chat, delete_after_seconds=delete_after_seconds,
+            source=source, reschedule_pending=reschedule_pending, _owner_account=_owner_account,
+        )
     return _lifecycle_service.schedule_cleanup(
         cid,
         retain_chat=retain_chat,
         delete_after_seconds=delete_after_seconds,
         source=source,
+        reschedule_pending=reschedule_pending,
     )
 
 
@@ -336,6 +350,60 @@ async def delete_remote_chat(cid: Optional[str], client: Any = None) -> bool:
         CleanupState.COMPLETED,
         CleanupState.ALREADY_COMPLETED,
     }
+
+
+async def finalize_remote_chat_cleanup(
+    cid: Optional[str],
+    retain_chat: bool = False,
+    delete_after_seconds: Optional[int] = None,
+    source: str = "",
+    client: Any = None,
+) -> CleanupObservation:
+    """Apply explicit retention or await the default immediate verified deletion."""
+    delay = get_default_chat_retention_seconds() if delete_after_seconds is None else max(0, delete_after_seconds)
+    try:
+        if retain_chat or delay > 0 or not is_valid_remote_chat_id(cid):
+            return schedule_remote_chat_cleanup(
+                cid, retain_chat=retain_chat, delete_after_seconds=delete_after_seconds, source=source,
+                reschedule_pending=True,
+            )
+        # Apply the latest explicit policy synchronously without launching a
+        # competing delete task that might use a different client instance.
+        observation = _cleanup_manager.schedule_cleanup_result(
+            cid, retain_chat=False, delete_after_seconds=0, source=source, dispatch=False,
+            reschedule_pending=True,
+        )
+        if observation.state in {CleanupState.COMPLETED, CleanupState.ALREADY_COMPLETED, CleanupState.FAILED}:
+            return observation
+        if client is None:
+            client = get_gemini_client()
+            await initialize_client()
+        return await _lifecycle_service.delete_chat_result(cid, client=client)
+    except Exception as error:
+        try:
+            return _cleanup_manager.record_cleanup_failure(cid, error, source=source)
+        except Exception as persistence_error:
+            diagnostic = new_diagnostic_id()
+            logger.warning("Cleanup metadata not persisted diagnostic_id=%s error_type=%s",
+                           diagnostic, type(persistence_error).__name__)
+            return CleanupObservation(state=CleanupState.FAILED, upstream_chat_id=cid,
+                                      attempts=1, diagnostic_id=diagnostic, source=source)
+
+
+async def finalize_remote_chat_cleanup_from_response(
+    response: Any,
+    retain_chat: bool = False,
+    delete_after_seconds: Optional[int] = None,
+    source: str = "",
+    client: Any = None,
+) -> CleanupObservation:
+    """Finish a one-shot workflow only after its artifacts have been consumed."""
+    from .remote_chat_cleanup_manager import extract_remote_chat_id
+
+    return await finalize_remote_chat_cleanup(
+        extract_remote_chat_id(response), retain_chat=retain_chat,
+        delete_after_seconds=delete_after_seconds, source=source, client=client,
+    )
 
 
 async def delete_remote_chat_result(
@@ -373,6 +441,81 @@ def list_pending_remote_chat_cleanup() -> Dict[str, Dict[str, Any]]:
         }
         for cid, data in pending.items()
     }
+
+
+async def _drain_due_cleanup() -> None:
+    cleanup_expired_sessions()
+    pending = _cleanup_manager.list_pending_cleanup()
+    if not any(task.delete_at <= time.time() for task in pending.values()):
+        return
+    try:
+        await cleanup_due_remote_chats()
+    except Exception as error:
+        logger.warning("Deferred cleanup could not run error_type=%s", type(error).__name__)
+
+
+@asynccontextmanager
+async def server_lifespan(_server: Any):
+    """Resume durable cleanup while serving and finish active sessions on exit."""
+    async def maintain() -> None:
+        while True:
+            try:
+                from .infrastructure.operation_store import OperationStore
+                from .services.background import maintain_background_operations, repair_operation_cleanup
+                await maintain_background_operations()
+                repair_operation_cleanup(
+                    OperationStore(), _cleanup_manager.get_cleanup_observation, schedule_remote_chat_cleanup,
+                )
+                await _drain_due_cleanup()
+            except Exception as error:
+                logger.warning("Cleanup queue remains unverified error_type=%s", type(error).__name__)
+            await asyncio.sleep(15)
+
+    maintenance = asyncio.create_task(maintain())
+    try:
+        yield {}
+    finally:
+        maintenance.cancel()
+        # Stdio EOF normally cancels the serving scope; shield finalization so
+        # a short-lived caller cannot discard its non-retained conversations.
+        with anyio.CancelScope(shield=True):
+            deadline = asyncio.get_running_loop().time() + 30
+            try:
+                with suppress(asyncio.CancelledError):
+                    await _await_shutdown_step(maintenance, deadline)
+                if asyncio.get_running_loop().time() < deadline:
+                    from .services.task_browser_sessions import close_task_browser_sessions
+                    await _await_shutdown_step(close_task_browser_sessions(), deadline)
+                if asyncio.get_running_loop().time() < deadline:
+                    await _await_shutdown_step(
+                        _lifecycle_service.reset_all(delete_callback=delete_remote_chat_result), deadline,
+                    )
+                if asyncio.get_running_loop().time() < deadline:
+                    await _await_shutdown_step(_drain_due_cleanup(), deadline)
+            except Exception as error:
+                logger.warning("Shutdown cleanup remains unverified error_type=%s", type(error).__name__)
+            finally:
+                if asyncio.get_running_loop().time() < deadline:
+                    await _await_shutdown_step(_client_manager.reset_async(), deadline)
+
+
+async def _await_shutdown_step(awaitable: Any, deadline: float) -> bool:
+    """Honor one shared deadline even if an upstream coroutine ignores cancel."""
+    task = asyncio.ensure_future(awaitable)
+    remaining = max(0.0, deadline - asyncio.get_running_loop().time())
+    done, _ = await asyncio.wait({task}, timeout=remaining)
+    if done:
+        await task
+        return True
+    task.cancel()
+
+    def consume(finished: asyncio.Future) -> None:
+        with suppress(BaseException):
+            finished.result()
+
+    task.add_done_callback(consume)
+    logger.warning("Shutdown deadline reached; cleanup remains in the durable queue")
+    return False
 
 
 # ============ Cookie 管理接口 ============
@@ -447,7 +590,8 @@ def init_startup_infrastructure() -> None:
     init_cookie_manager_integration()
 
     cookie_status = get_cookie_status()
-    if not cookie_status.get("has_cookie"):
+    browser_autoload = os.environ.get("GEMINI_BROWSER_AUTO_LOAD", "true").lower() == "true"
+    if browser_autoload and not cookie_status.get("has_cookie"):
         logger.info("🍪 环境变量未设置 Cookie，尝试从 Chrome 自动获取...")
         get_cookie_from_browser(browser="chrome", profile="")
 

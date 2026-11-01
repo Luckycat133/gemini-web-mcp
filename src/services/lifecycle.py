@@ -23,6 +23,8 @@ from ..remote_chat_cleanup_manager import (
     RemoteChatCleanupManager,
     extract_remote_chat_id,
 )
+from ..infrastructure.account_identity import current_account_key
+from ..constants import DEFAULT_SESSION_MAX_AGE_SECONDS
 from ..session_manager import (
     SessionData,
     SessionOperationResult,
@@ -150,6 +152,7 @@ class ConversationLifecycleService:
         lifecycles = []
         warnings = []
         failures = 0
+        pending = 0
         for state in detached or ():
             cleanup = await self._cleanup_detached_state(
                 state,
@@ -165,6 +168,9 @@ class ConversationLifecycleService:
             if cleanup.state in {CleanupState.FAILED, CleanupState.INVALID_ID}:
                 failures += 1
                 warnings.append(self._cleanup_warning(cleanup))
+            elif cleanup.state is CleanupState.PENDING:
+                pending += 1
+                warnings.append(self._cleanup_warning(cleanup))
 
         data = LifecycleResetAllData(
             removed_count=len(lifecycles),
@@ -173,10 +179,11 @@ class ConversationLifecycleService:
         )
         return DomainResult.success(
             data,
-            operation_state=(OperationState.PARTIAL if failures else OperationState.COMPLETED),
+            operation_state=(OperationState.PARTIAL if failures or pending else OperationState.COMPLETED),
             warnings=tuple(warnings),
             verification_status=(
-                "local_state_removed_cleanup_failed" if failures else "local_state_removed_cleanup_observed"
+                "local_state_removed_cleanup_failed" if failures else
+                "local_state_removed_cleanup_pending" if pending else "local_state_removed_cleanup_observed"
             ),
             details={
                 "lifecycle": {
@@ -264,6 +271,7 @@ class ConversationLifecycleService:
         retain_chat: bool = False,
         delete_after_seconds: int | None = None,
         source: str = "",
+        reschedule_pending: bool = False,
     ) -> CleanupObservation:
         cleanup = self._cleanup()
         if isinstance(cleanup, RemoteChatCleanupManager):
@@ -272,6 +280,7 @@ class ConversationLifecycleService:
                 retain_chat=retain_chat,
                 delete_after_seconds=delete_after_seconds,
                 source=source,
+                reschedule_pending=reschedule_pending,
             )
         cleanup.schedule_cleanup(
             cid,
@@ -323,7 +332,7 @@ class ConversationLifecycleService:
     ) -> ConversationLifecycleMetadata:
         return ConversationLifecycleMetadata(
             session_id=state.session_id,
-            upstream_chat_id=(extract_remote_chat_id(state.session) or state.upstream_chat_id),
+            upstream_chat_id=(extract_remote_chat_id(state.session) or state.upstream_chat_id or None),
             session_state=session_state or state.lifecycle_state,
             retain_chat=state.retain_chat,
             delete_after_seconds=state.delete_after_seconds,
@@ -337,26 +346,34 @@ class ConversationLifecycleService:
         delete_callback: DeleteCallback,
         source: str,
     ) -> CleanupObservation:
+        if state.unverified_chat_ids or state.pending_turn is not None:
+            return self._schedule_unverified_state(state, source=source)
         cid = extract_remote_chat_id(state.session) or state.upstream_chat_id
-        if cid is None:
+        if cid is None or cid == "":
             return CleanupObservation(source=source)
-        if state.retain_chat:
-            return self.schedule_cleanup(
-                cid,
-                retain_chat=True,
-                delete_after_seconds=state.delete_after_seconds,
-                source=source,
-            )
         if not is_valid_remote_chat_id(cid):
-            return CleanupObservation(
-                state=CleanupState.INVALID_ID,
-                source=source,
-            )
+            return CleanupObservation(state=CleanupState.INVALID_ID, source=source)
+        if not state.account_key:
+            return CleanupObservation(state=CleanupState.FAILED, upstream_chat_id=cid, source=source)
+        cleanup = self._cleanup()
+        current = cleanup._account() if isinstance(cleanup, RemoteChatCleanupManager) else current_account_key()
+        if current != state.account_key:
+            if isinstance(cleanup, RemoteChatCleanupManager):
+                return cleanup.schedule_cleanup_result(
+                    cid, retain_chat=state.retain_chat, delete_after_seconds=state.delete_after_seconds,
+                    source=source, _owner_account=state.account_key,
+                )
+            return CleanupObservation(state=CleanupState.FAILED, upstream_chat_id=cid, source=source)
+        if state.retain_chat:
+            return self._schedule_detached_state(state, source=source)
 
         try:
             deleted = await delete_callback(cid)
         except Exception as error:  # noqa: BLE001 - preserve cleanup evidence from adapter failures
             cleanup = self._cleanup()
+            current = cleanup._account() if isinstance(cleanup, RemoteChatCleanupManager) else current_account_key()
+            if current != state.account_key:
+                return self._schedule_detached_state(state, source=source)
             if isinstance(cleanup, RemoteChatCleanupManager):
                 return cleanup.record_cleanup_failure(
                     cid,
@@ -378,6 +395,10 @@ class ConversationLifecycleService:
                 diagnostic_id=diagnostic_id,
                 source=source,
             )
+        cleanup = self._cleanup()
+        current = cleanup._account() if isinstance(cleanup, RemoteChatCleanupManager) else current_account_key()
+        if current != state.account_key:
+            return self._schedule_detached_state(state, source=source)
         if isinstance(deleted, CleanupObservation):
             return deleted
         observed = self.observe_cleanup(cid)
@@ -410,13 +431,7 @@ class ConversationLifecycleService:
         if not isinstance(sessions, SessionService):
             return
         for state in sessions.drain_expired_sessions():
-            cid = extract_remote_chat_id(state.session) or state.upstream_chat_id
-            self.schedule_cleanup(
-                cid,
-                retain_chat=state.retain_chat,
-                delete_after_seconds=state.delete_after_seconds,
-                source="session_expired",
-            )
+            self._schedule_detached_state(state, source="session_expired")
 
     def _schedule_detached_state(
         self,
@@ -424,7 +439,23 @@ class ConversationLifecycleService:
         *,
         source: str,
     ) -> CleanupObservation:
+        if state.unverified_chat_ids or state.pending_turn is not None:
+            return self._schedule_unverified_state(state, source=source)
         cid = extract_remote_chat_id(state.session) or state.upstream_chat_id
+        if cid is None or cid == "":
+            return CleanupObservation(source=source)
+        if not is_valid_remote_chat_id(cid):
+            return CleanupObservation(state=CleanupState.INVALID_ID, source=source)
+        if not state.account_key:
+            return CleanupObservation(state=CleanupState.FAILED, upstream_chat_id=cid, source=source)
+        cleanup = self._cleanup()
+        if isinstance(cleanup, RemoteChatCleanupManager):
+            return cleanup.schedule_cleanup_result(
+                cid, retain_chat=state.retain_chat, delete_after_seconds=state.delete_after_seconds,
+                source=source, _owner_account=state.account_key,
+            )
+        if current_account_key() != state.account_key:
+            return CleanupObservation(state=CleanupState.FAILED, upstream_chat_id=cid, source=source)
         return self.schedule_cleanup(
             cid,
             retain_chat=state.retain_chat,
@@ -432,18 +463,49 @@ class ConversationLifecycleService:
             source=source,
         )
 
+    def _schedule_unverified_state(self, state: SessionData, *, source: str) -> CleanupObservation:
+        """Keep uncertain in-flight turns queued rather than deleting them at reset."""
+        results: list[CleanupObservation] = []
+        identities = set(state.unverified_chat_ids)
+        if state.pending_turn and is_valid_remote_chat_id(state.pending_turn[0]):
+            identities.add(state.pending_turn[0])
+        for cid in sorted(identities):
+            if not state.account_key:
+                results.append(CleanupObservation(state=CleanupState.FAILED, upstream_chat_id=cid, source=source))
+                continue
+            cleanup = self._cleanup()
+            delay = state.delete_after_seconds if state.retain_chat else max(
+                DEFAULT_SESSION_MAX_AGE_SECONDS, state.delete_after_seconds or 0,
+            )
+            if isinstance(cleanup, RemoteChatCleanupManager):
+                result = cleanup.schedule_cleanup_result(
+                    cid, retain_chat=state.retain_chat, delete_after_seconds=delay,
+                    source=source, _owner_account=state.account_key, reschedule_pending=True,
+                )
+            elif current_account_key() == state.account_key:
+                result = self.schedule_cleanup(cid, retain_chat=state.retain_chat,
+                                               delete_after_seconds=delay, source=source, reschedule_pending=True)
+            else:
+                result = CleanupObservation(state=CleanupState.FAILED, upstream_chat_id=cid, source=source)
+            results.append(result)
+        for status in (CleanupState.FAILED, CleanupState.INVALID_ID, CleanupState.PENDING, CleanupState.RETAINED):
+            for result in results:
+                if result.state is status:
+                    return result
+        return results[0] if results else CleanupObservation(state=CleanupState.PENDING, source=source)
+
     @staticmethod
     def _cleanup_summary(
         cleanup: CleanupObservation,
         *,
         success_status: str,
     ) -> tuple[OperationState, tuple[DomainWarning, ...], str]:
-        if cleanup.state not in {CleanupState.FAILED, CleanupState.INVALID_ID}:
+        if cleanup.state not in {CleanupState.FAILED, CleanupState.INVALID_ID, CleanupState.PENDING}:
             return OperationState.COMPLETED, (), success_status
         return (
             OperationState.PARTIAL,
             (ConversationLifecycleService._cleanup_warning(cleanup),),
-            "local_state_removed_cleanup_failed",
+            "local_state_removed_cleanup_pending" if cleanup.state is CleanupState.PENDING else "local_state_removed_cleanup_failed",
         )
 
     @staticmethod

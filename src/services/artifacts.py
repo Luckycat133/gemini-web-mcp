@@ -5,6 +5,10 @@ from __future__ import annotations
 import hashlib
 import logging
 import mimetypes
+import json
+import shutil
+import subprocess
+import sys
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import replace
 from pathlib import Path
@@ -235,9 +239,15 @@ def artifact_from_local_path(
         dimensions_probe,
     )
 
-    detected_image_mime = detect_image_mime_type(file_path) if kind == ArtifactKind.IMAGE else None
+    detected_image_mime = detect_image_mime_type(file_path) if kind in {
+        ArtifactKind.IMAGE, ArtifactKind.AUDIO, ArtifactKind.VIDEO
+    } else None
     if detected_image_mime:
         methods.append("image_mime_signature")
+        if kind in {ArtifactKind.AUDIO, ArtifactKind.VIDEO}:
+            state = ArtifactState.FAILED
+            status = ArtifactVerificationStatus.FAILED
+            methods.append("media_type_mismatch")
 
     return Artifact(
         id=identity,
@@ -260,6 +270,23 @@ def artifact_from_local_path(
     )
 
 
+def response_image_items(response: Any, *, generated_only: bool = False) -> list[Any]:
+    """Select generated images when the upstream exposes candidate provenance.
+
+    Older adapters and test doubles expose only ``images``; preserve that
+    compatibility when candidate provenance is unavailable.
+    """
+    candidates = getattr(response, "candidates", None)
+    if generated_only and candidates is not None:
+        chosen = getattr(response, "chosen", 0)
+        if not isinstance(chosen, int) or chosen < 0 or chosen >= len(candidates):
+            return []
+        candidate = candidates[chosen]
+        if hasattr(candidate, "generated_images"):
+            return list(candidate.generated_images or ())
+    return list(getattr(response, "images", None) or ())
+
+
 def extract_response_artifacts(
     response: Any,
     *,
@@ -273,7 +300,8 @@ def extract_response_artifacts(
     observed_backend = observed_backend or observed_backend_from_response(response)
     artifacts: list[Artifact] = []
 
-    for item in getattr(response, "images", None) or ():
+    image_items = response_image_items(response, generated_only=media_type in {"image", "image_edit"})
+    for item in image_items if media_type in {None, "image", "image_edit"} else ():
         uri = _string_attr(item, "url")
         if uri:
             artifacts.append(
@@ -288,7 +316,7 @@ def extract_response_artifacts(
                     observed_backend=observed_backend,
                 )
             )
-    for item in getattr(response, "videos", None) or ():
+    for item in (getattr(response, "videos", None) or ()) if media_type in {None, "video"} else ():
         uri = _string_attr(item, "url")
         if uri:
             artifacts.append(
@@ -303,7 +331,7 @@ def extract_response_artifacts(
                     observed_backend=observed_backend,
                 )
             )
-    for item in getattr(response, "media", None) or ():
+    for item in (getattr(response, "media", None) or ()) if media_type in {None, "music"} else ():
         for attribute in ("mp3_url", "url"):
             uri = _string_attr(item, attribute)
             if uri:
@@ -325,6 +353,10 @@ def extract_response_artifacts(
         ("video_url", ArtifactKind.VIDEO),
         ("audio_url", ArtifactKind.AUDIO),
     ):
+        allowed = {"image_url": {None, "image", "image_edit"}, "video_url": {None, "video"},
+                   "audio_url": {None, "music"}}
+        if media_type not in allowed[attribute]:
+            continue
         uri = _string_attr(response, attribute)
         if uri:
             artifacts.append(
@@ -588,6 +620,60 @@ def detect_image_mime_type(path: str | Path) -> str | None:
         return "image/gif"
     if header.startswith(b"RIFF") and header[8:12] == b"WEBP":
         return "image/webp"
+    return None
+
+
+def detect_av_mime_type(path: str | Path) -> str | None:
+    """Recognize MP3 frames or an ISO BMFF container from local bytes."""
+    try:
+        with Path(path).open("rb") as stream:
+            head = stream.read(10)
+            if len(head) >= 8 and head[4:8] == b"ftyp" and int.from_bytes(head[:4], "big") >= 8:
+                return "video/mp4"
+            if len(head) >= 10 and head[:3] == b"ID3":
+                sizes = head[6:10]
+                if any(size & 0x80 for size in sizes):
+                    return None
+                offset = 10 + sum(byte << shift for byte, shift in zip(sizes, (21, 14, 7, 0)))
+                stream.seek(offset)
+                head = stream.read(4)
+            if len(head) >= 4 and head[0] == 0xff and (head[1] & 0xe0) == 0xe0:
+                version, layer, bitrate, sample_rate = (head[1] >> 3) & 3, (head[1] >> 1) & 3, head[2] >> 4, (head[2] >> 2) & 3
+                if version != 1 and layer != 0 and bitrate not in {0, 15} and sample_rate != 3:
+                    return "audio/mpeg"
+    except (OSError, ValueError):
+        return None
+    return None
+
+
+def probe_playable_av_tracks(path: str | Path) -> frozenset[str] | None:
+    """Inspect playable tracks with an available platform tool, if any."""
+    ffprobe = shutil.which("ffprobe")
+    if ffprobe:
+        command = [ffprobe, "-v", "error", "-show_entries", "stream=codec_type", "-of", "json", str(path)]
+        try:
+            result = subprocess.run(command, check=True, capture_output=True, text=True, timeout=20)
+            payload = json.loads(result.stdout)
+            return frozenset(item.get("codec_type") for item in payload.get("streams", [])
+                             if item.get("codec_type") in {"audio", "video"})
+        except (OSError, subprocess.SubprocessError, ValueError, TypeError, AttributeError):
+            return None
+    swift = shutil.which("swift") if sys.platform == "darwin" else None
+    if swift:
+        script = (
+            'import Foundation; import AVFoundation; '
+            'let a = AVURLAsset(url: URL(fileURLWithPath: CommandLine.arguments[1])); '
+            'let x = try await a.loadTracks(withMediaType: .audio); '
+            'let y = try await a.loadTracks(withMediaType: .video); '
+            'print("\\(x.count),\\(y.count)")'
+        )
+        try:
+            result = subprocess.run([swift, "-e", script, str(path)], check=True, capture_output=True,
+                                    text=True, timeout=20)
+            audio, video = (int(item) for item in result.stdout.strip().split(","))
+            return frozenset(name for name, count in (("audio", audio), ("video", video)) if count > 0)
+        except (OSError, subprocess.SubprocessError, ValueError):
+            return None
     return None
 
 

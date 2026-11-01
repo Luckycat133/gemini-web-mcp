@@ -21,7 +21,35 @@ from src.infrastructure.rpc_parsers import PARSER_FUNCTIONS, parse_contract_body
 
 FIXTURE_PATH = Path(__file__).parent / "fixtures" / "rpc_management_cases.json"
 PARSER_FIXTURES = json.loads(FIXTURE_PATH.read_text(encoding="utf-8"))
+for _fixture_path in sorted((FIXTURE_PATH.parent / "rpc_contracts").glob("*.json")):
+    _extra = json.loads(_fixture_path.read_text(encoding="utf-8"))
+    assert not set(PARSER_FIXTURES).intersection(_extra), "Duplicate parser fixture names"
+    PARSER_FIXTURES.update(_extra)
 EXPECTED_CASES = {"success", "empty", "rejected", "changed_shape"}
+
+
+def test_music_turn_evidence_requires_unique_completed_exact_candidate():
+    from src.infrastructure.rpc_parsers import parse_music_chat_turn_evidence
+
+    candidate = [None] * 13
+    candidate[0], candidate[8], candidate[12] = "rc_target", [2], [{}]
+    turn = [[None, "r_target"], None, None, [[candidate]]]
+    body = [[turn]]
+    def parse(value):
+        return parse_music_chat_turn_evidence(value, rid="r_target", rcid="rc_target")
+    assert parse(body).status == "empty"
+    card = [None, [None] * 8]
+    card[1][7] = [None, "https://example.test/audio"]
+    candidate[12][0]["87"] = [card]
+    assert parse(body).status == "success"
+    card[1][7] = None
+    assert parse(body).status == "changed_shape"
+    candidate[12][0]["87"] = []
+    candidate[8] = [1]
+    assert parse(body).status == "changed_shape"
+    candidate[8] = [2]
+    assert parse([[turn, turn]]).status == "changed_shape"
+    assert parse([[]]).status == "changed_shape"
 
 
 def test_every_registered_parser_has_four_shape_fixtures():
@@ -45,6 +73,7 @@ def test_registered_parser_fixture_status(parser_name: str, case_name: str):
         fixture["contract_key"],
         case["body"],
         reject_code=case.get("reject_code"),
+        **case.get("arguments", {}),
     )
     assert result.status == case_name
 
@@ -138,3 +167,54 @@ def test_rpc_ids_do_not_reappear_in_handlers_or_services():
             if f'"{rpc_id}"' in source or f"'{rpc_id}'" in source:
                 offenders.append(f"{path.relative_to(source_root)}:{rpc_id}")
     assert offenders == []
+
+
+def test_research_plan_recovers_only_completed_selected_candidate_with_identity():
+    import copy
+
+    fixture = PARSER_FIXTURES["research_chat_plan"]["cases"]["success"]
+    body = copy.deepcopy(fixture["body"])
+    result = parse_contract_body("research.chat_plan", body, chat_id="c_fixture")
+    assert result.status == "success"
+    assert result.value["metadata"] == ["c_fixture", "r_fixture", "rc_fixture"]
+    assert result.value["plan"]["title"] == "Synthetic plan"
+    assert result.value["plan"]["confirm_prompt"] == "Start research"
+    assert json.loads(get_contract("research.chat_plan").build_payload(chat_id="c_fixture"))[1] == 100
+
+    assert parse_contract_body("research.chat_plan", body).status == "changed_shape"
+    missing_rid = copy.deepcopy(body)
+    missing_rid[0][0][0][1] = None
+    assert parse_contract_body("research.chat_plan", missing_rid, chat_id="c_fixture").status == "changed_shape"
+    missing_rcid = copy.deepcopy(body)
+    missing_rcid[0][0][3][0][0][0] = None
+    assert parse_contract_body("research.chat_plan", missing_rcid, chat_id="c_fixture").status == "changed_shape"
+    incomplete = copy.deepcopy(body)
+    incomplete[0][0][3][0][0][8] = [1]
+    assert parse_contract_body("research.chat_plan", incomplete, chat_id="c_fixture").status == "empty"
+
+    older = copy.deepcopy(body[0][0])
+    newest = copy.deepcopy(older)
+    selected = newest[3][0][0]
+    selected[12] = []
+    newest[3][0].append(copy.deepcopy(older[3][0][0]))
+    assert parse_contract_body("research.chat_plan", [[newest, older]], chat_id="c_fixture").status == "empty"
+
+
+def test_research_rejection_requires_exact_completed_selected_candidate_without_document(monkeypatch):
+    import copy
+
+    body = copy.deepcopy(PARSER_FIXTURES["research_chat_plan"]["cases"]["success"]["body"])
+    candidate = body[0][0][3][0][0]
+    candidate[12] = []
+    candidate[1] = ["我是一个语言模型，这超出了我的设计用途。"]
+    result = parse_contract_body("research.chat_plan", body, chat_id="c_fixture")
+    assert result.status == "rejected" and result.value["metadata"] == ["c_fixture", "r_fixture", "rc_fixture"]
+    candidate[8] = [1]
+    assert parse_contract_body("research.chat_plan", body, chat_id="c_fixture").status == "empty"
+    candidate[8] = [2]
+    candidate[1] = ["我是一个语言模型，这超出了我的设计用途。其他文本"]
+    assert parse_contract_body("research.chat_plan", body, chat_id="c_fixture").status == "empty"
+    candidate[1] = ["我是一个语言模型，这超出了我的设计用途。"]
+    from src.infrastructure import rpc_parsers
+    monkeypatch.setattr(rpc_parsers._upstream_utils, "extract_deep_research_document", lambda _: {"content": "report"})
+    assert parse_contract_body("research.chat_plan", body, chat_id="c_fixture").status == "empty"

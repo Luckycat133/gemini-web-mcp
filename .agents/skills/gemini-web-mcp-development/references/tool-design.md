@@ -10,36 +10,15 @@ A large tool catalog, a successful raw RPC, or response prose alone is not produ
 
 ## Product Lanes
 
-### `gemini-assist`
+### Function surface
 
-Use for:
+Use `gemini-mcp-function` for assistance, understanding, session chat, Task, media generation, research, report derivatives and operation recovery. Use `gemini_ask` for ordinary and current-web questions and natural-language app requests; it defaults to Flash and retains observed source evidence. Function Ask with `notebook_ids` starts background ordinary Chat, while `gemini_run_task` explicitly starts Task; preserve `execution_mode="chat"|"task"`. Both default to a 600-second phase timeout and return a persistent handle. The five-tool assist compatibility schema retains `gemini_search` and does not expose the function-only Notebook arguments. Function media starts are also always background operations. Propagate structured source and Artifact evidence; app mutations require resource read-back.
 
-- second opinions and critique;
-- code/design review;
-- current-web search with sources;
-- image/screenshot understanding;
-- file/URL/mixed-input understanding;
-- Deep Research.
+### Account surface
 
-Do not trigger for a pure generation request or Gemini account administration.
+Use `gemini-mcp-account` only for explicit requests about history, Notebooks, Task metadata, Chat scheduled actions, Gems, account inventory or MCP-owned cleanup. Notebook metadata defaults to the source-picker view; `source="gemini"` is the same integrated product's project view. Moves require fresh target resolution in that view without guessed ID conversion. `gemini_tasks` provides metadata-only list/get, bounded progress, Task schedules and explicit exact-ID deletion with independent absence verification; `gemini_task_browser` supports verified frames and explicit one-shot input; its union annotation is destructive. The cleanup tool only operates on the MCP-owned ledger, never on title matches, and does not delete Notebook objects or sources. Cookie, Doctor and local Prompts are outside both business catalogs.
 
-### `gemini-create`
-
-Use for:
-
-- image generation;
-- image editing;
-- video generation;
-- music generation;
-- recovering creation operations.
-
-Do not trigger when the user only wants to understand an existing image or inspect account data.
-
-### `gemini-account`
-
-Use only for explicit requests about Gemini history, Notebooks, Scheduled Actions, Gems, Prompts, account inventory, or cleanup.
-
-Do not trigger merely because an assistance or creation workflow uses a Gemini account internally.
+Task schedules and Chat scheduled actions need separate contracts. Rich Task permission prompts, browser handoff, step control, schedules and export are not all exposed. A visible app or public rendering field does not establish a complete execution contract.
 
 ## Skill Trigger Design
 
@@ -153,7 +132,7 @@ Keep `gemini_ask` separate from `gemini_understand` because pure text second-opi
 
 Keep `gemini_understand_image` separate from `gemini_understand` because single-image tasks are frequent and deserve a simple schema.
 
-Use one shared operation service, but expose explicit status/result/cancel tools on primary dedicated surfaces. The compatibility low-token server may use an action facade while it remains supported.
+Use one shared operation service, but expose explicit status/result tools on primary dedicated surfaces. The compatibility low-token server may use an action facade while it remains supported.
 
 ## Assistance Tool Contracts
 
@@ -165,6 +144,7 @@ Input:
 prompt
 optional context
 model / thinking controls
+function-only optional notebook_ids / timeout_seconds / operation_id
 ```
 
 Output:
@@ -177,7 +157,13 @@ source conversation/lifecycle metadata when relevant
 
 The calling agent compares or incorporates the answer; it should not merely quote it without completing the task.
 
-### `gemini_search`
+With Notebook IDs, Ask returns a background operation handle instead of a direct answer. Keep ordinary Chat semantics; do not set Task flags. The worker verifies the exact completed original reply, saves and verifies its full local answer Artifact before owned-chat cleanup, and allows restart result retrieval. Status reads metadata only. Without Notebook IDs, Ask preserves its direct-response behavior, and a function-only `operation_id` is invalid.
+
+### `gemini_run_task`
+
+Use this separate tool for explicit Task execution, with optional Notebook context and a persistent operation handle. Preserve the selected model, thinking level and retention across recovery. The tool is destructive because connected-app requests may change account data. Result completion needs exact reply evidence and the Task's completed metadata, plus a verified full local answer Artifact before chat cleanup. Account mutation claims still require resource read-back. Do not advertise Task deletion as cancellation or reuse Chat scheduled-action tools for Task schedules.
+
+### `gemini_search` (assist compatibility)
 
 Input:
 
@@ -198,7 +184,7 @@ observed_at
 grounding_state
 ```
 
-`grounding_state=grounded` requires observed source evidence. No-source responses are `answer_only`.
+`grounding_state = grounded | answer_only | unavailable | failed`. Grounded requires a structured citation or verified source-attribution span; `retrieved_only` evidence does not prove answer support.
 
 ### `gemini_understand_image`
 
@@ -287,9 +273,9 @@ Start returns immediately:
 }
 ```
 
-Status/result/cancel accept only explicit handles. Unknown and expired IDs return stable errors. Do not auto-start another job after a lookup failure.
+Status/result accept only explicit handles; cancellation is not implemented. Unknown and expired IDs return stable errors. Do not auto-start another job after a lookup failure.
 
-Do not expose a global unbounded operation list to ordinary assist/create agents. Account/maintenance diagnostics may expose a paginated owner-scoped list.
+Do not expose a global unbounded operation list to ordinary function agents. Account/maintenance diagnostics may expose a paginated owner-scoped list.
 
 ## Compatibility Router
 

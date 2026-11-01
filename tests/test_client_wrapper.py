@@ -225,6 +225,7 @@ def test_reset_session_deletes_unretained_remote_chat(monkeypatch):
         session=SimpleNamespace(cid="c_remote"),
         session_id="sess_x",
         retain_chat=False,
+        account_key=cw._cleanup_manager._account(),
     )
     expected = SessionOperationResult.success(data)
     fake = _RecordingFake(reset_one_async=expected, _async_methods={"reset_one_async"})
@@ -588,6 +589,30 @@ def test_init_cookie_manager_integration_auto_refresh_false_when_env_disabled(mo
 # ---------------------------------------------------------------------------
 # get_cookie_from_browser
 # ---------------------------------------------------------------------------
+
+
+def test_startup_skips_browser_when_autoload_disabled(monkeypatch):
+    monkeypatch.setenv("GEMINI_BROWSER_AUTO_LOAD", "false")
+    calls = []
+    monkeypatch.setattr(cw, "init_cookie_manager_integration", lambda: calls.append("init"))
+    monkeypatch.setattr(cw, "get_cookie_status", lambda: {"has_cookie": False})
+    monkeypatch.setattr(cw, "get_cookie_from_browser", lambda **kwargs: calls.append("browser"))
+
+    cw.init_startup_infrastructure()
+
+    assert calls == ["init"]
+
+
+def test_startup_falls_back_to_browser_when_enabled_and_no_cookie(monkeypatch):
+    monkeypatch.setenv("GEMINI_BROWSER_AUTO_LOAD", "true")
+    calls = []
+    monkeypatch.setattr(cw, "init_cookie_manager_integration", lambda: calls.append("init"))
+    monkeypatch.setattr(cw, "get_cookie_status", lambda: {"has_cookie": False})
+    monkeypatch.setattr(cw, "get_cookie_from_browser", lambda **kwargs: calls.append(kwargs))
+
+    cw.init_startup_infrastructure()
+
+    assert calls == ["init", {"browser": "chrome", "profile": ""}]
 
 
 def test_get_cookie_from_browser_returns_false_when_unavailable(monkeypatch):

@@ -17,8 +17,10 @@ from ..domain import (
     OperationState,
     result_from_exception,
 )
+from ..infrastructure.rpc_parsers import CandidateSourceEvidence, attribution_matches_answer
 from .artifacts import observed_backend_from_response
 from .chat import ChatRequest, ChatService
+from .model_policy import ModelSelection
 
 logger = logging.getLogger(__name__)
 
@@ -44,10 +46,11 @@ class GroundingState(str, Enum):
 
 @dataclass(frozen=True)
 class ObservedSource:
-    """One observed source URL that backed the answer."""
+    """A source URL with its observed attribution or retrieval evidence role."""
 
     url: str
     title: str | None = None
+    role: str = "citation"
 
 
 @dataclass(frozen=True)
@@ -73,6 +76,24 @@ class SearchOperationData:
     effective_model: str | None = None
     observed_backend: str | None = None
     lifecycle: ConversationLifecycleMetadata | None = None
+    model_selection: ModelSelection | None = None
+
+
+@dataclass(frozen=True)
+class ResponseEvidence:
+    answer: str
+    grounding_state: GroundingState
+    sources: tuple[ObservedSource, ...]
+    observed_source_count: int
+    observed_at: str | None
+
+
+def response_evidence(responses: Sequence[Any], response: Any, *, stream_text: str = "",
+                      observed_at: str | None = None) -> ResponseEvidence:
+    """Describe answer and structured sources observed for the selected reply."""
+    answer = (_answer_text(response) or stream_text).strip()
+    sources = observed_sources_from_frames(responses, response)
+    return ResponseEvidence(answer, _classify_grounding(answer, sources), sources, len(sources), observed_at)
 
 
 class SearchService:
@@ -99,7 +120,7 @@ class SearchService:
 
         domains = _normalize_domains(request.domains)
         try:
-            chat_result = await self._chat_service.generate(
+            chat_result = await self._chat_service.generate_stream(
                 ChatRequest(
                     message=_compose_search_message(query, request, domains),
                     model=request.model,
@@ -130,10 +151,12 @@ class SearchService:
         chat_data = chat_result.data
         assert chat_data is not None
         response = chat_data.response
-        answer = _answer_text(response).strip()
-        observed = observed_sources_from_response(response)
+        evidence = response_evidence(chat_data.responses, response, stream_text=chat_data.stream_text,
+                                     observed_at=chat_result.meta.observed_at)
+        answer = evidence.answer
+        observed = evidence.sources
         sources = observed[: request.max_results]
-        warnings: list[DomainWarning] = []
+        warnings: list[DomainWarning] = list(chat_result.warnings)
         if len(observed) > len(sources):
             warnings.append(
                 DomainWarning(
@@ -146,6 +169,11 @@ class SearchService:
                 )
             )
         grounding_state = _classify_grounding(answer, sources)
+        if any(source.role == "retrieved_only" for source in sources):
+            warnings.append(DomainWarning(
+                code="retrieved_sources_unverified",
+                message="Retrieved sources were observed, but their support for the answer is unverified.",
+            ))
         return DomainResult.success(
             SearchOperationData(
                 query=query,
@@ -158,6 +186,7 @@ class SearchService:
                 effective_model=chat_data.effective_model,
                 observed_backend=observed_backend_from_response(response),
                 lifecycle=chat_data.lifecycle,
+                model_selection=chat_data.model_selection,
             ),
             warnings=warnings,
             request_id=chat_result.meta.request_id,
@@ -188,7 +217,7 @@ class SearchService:
         )
 
 
-def observed_sources_from_response(response: Any) -> tuple[ObservedSource, ...]:
+def observed_sources_from_response(response: Any, *, final_answer: str | None = None) -> tuple[ObservedSource, ...]:
     """Collect structured citations, never treating model-written links as grounding."""
     sources: list[ObservedSource] = []
     seen: set[str] = set()
@@ -203,13 +232,68 @@ def observed_sources_from_response(response: Any) -> tuple[ObservedSource, ...]:
         title = _citation_field(citation, "title")
         title_text = title.strip() if isinstance(title, str) else ""
         sources.append(ObservedSource(url=url, title=title_text or None))
+    candidates = getattr(response, "candidates", ())
+    chosen = getattr(response, "chosen", 0)
+    if isinstance(candidates, (list, tuple)) and isinstance(chosen, int) and 0 <= chosen < len(candidates):
+        for item in getattr(candidates[chosen], "_retrieved_sources", ()):
+            if not isinstance(item, CandidateSourceEvidence):
+                continue
+            if not _is_http_url(item.url) or item.url in seen:
+                continue
+            seen.add(item.url)
+            current_answer = _answer_text(response) or ""
+            target_answer = current_answer if final_answer is None else final_answer
+            verified = attribution_matches_answer(item, current_answer) and attribution_matches_answer(item, target_answer)
+            role = "source_attribution" if verified else "retrieved_only"
+            sources.append(ObservedSource(url=item.url, title=item.title, role=role))
     return tuple(sources)
+
+
+def observed_sources_from_frames(responses: Sequence[Any], final_response: Any) -> tuple[ObservedSource, ...]:
+    """Preserve structured citations for the same selected reply across stream frames.
+
+    The SDK rebuilds candidates independently per frame and its non-streaming
+    helper returns only the last frame. Earlier evidence is accepted only when
+    both upstream conversation/turn identity and selected candidate identity
+    match the final response. Missing identity never broadens attribution.
+    """
+    anchor = _reply_identity(final_response)
+    if anchor is None:
+        return observed_sources_from_response(final_response)
+    sources: list[ObservedSource] = []
+    seen: set[str] = set()
+    for frame in (*responses, final_response):
+        if _reply_identity(frame) != anchor:
+            continue
+        for source in observed_sources_from_response(frame, final_answer=_answer_text(final_response) or ""):
+            if source.url not in seen:
+                seen.add(source.url)
+                sources.append(source)
+            elif source.role in {"citation", "source_attribution"}:
+                for index, previous in enumerate(sources):
+                    if previous.url == source.url and previous.role == "retrieved_only":
+                        sources[index] = source
+                        break
+    return tuple(sources)
+
+
+def _reply_identity(response: Any) -> tuple[str, str, str] | None:
+    metadata = getattr(response, "metadata", None)
+    if not isinstance(metadata, (list, tuple)) or len(metadata) < 2:
+        return None
+    cid, rid = metadata[:2]
+    rcid = getattr(response, "rcid", None)
+    if not isinstance(cid, str) or not isinstance(rid, str) or not isinstance(rcid, str):
+        return None
+    if not cid.strip() or not rid.strip() or not rcid.strip():
+        return None
+    return cid, rid, rcid
 
 
 def _classify_grounding(answer: str, sources: Sequence[ObservedSource]) -> GroundingState:
     if not answer.strip():
         return GroundingState.UNAVAILABLE
-    if sources:
+    if any(source.role in {"citation", "source_attribution"} for source in sources):
         return GroundingState.GROUNDED
     return GroundingState.ANSWER_ONLY
 

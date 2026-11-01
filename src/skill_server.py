@@ -9,6 +9,7 @@ import json
 import logging
 import os
 import threading
+from dataclasses import replace
 from pathlib import Path
 from typing import Any, Awaitable, Callable, Literal, Optional
 
@@ -19,7 +20,7 @@ except ImportError:
     exit(1)
 
 from . import __version__
-from .adapters import append_artifact_block, attach_domain_result, domain_text, exception_text
+from .adapters import append_artifact_block, attach_domain_result, domain_failure_text, domain_text, exception_text
 from .client_wrapper import (
     cleanup_due_remote_chats,
     create_session,
@@ -28,6 +29,8 @@ from .client_wrapper import (
     get_gemini_client,
     init_startup_infrastructure,
     initialize_client,
+    finalize_remote_chat_cleanup_from_response,
+    finalize_remote_chat_cleanup,
     list_browser_cookie_profiles,
     list_sessions,
     lookup_session,
@@ -37,6 +40,7 @@ from .client_wrapper import (
     schedule_remote_chat_cleanup_from_response,
     send_session_message,
     send_session_message_stream,
+    server_lifespan,
 )
 from .constants import resolve_media_request, resolve_model_name
 from .domain import (
@@ -60,11 +64,23 @@ from .services import (
     artifact_exception_result,
     artifact_from_local_path,
     artifact_result,
-    classify_artifact_state,
     extract_response_artifacts,
+    is_response_queued,
+    response_image_items,
     observed_backend_from_response,
     response_chat_id,
+    merge_artifacts,
 )
+from .services.music_recovery import fetch_music_media_from_chat, music_response_identity
+from .services.media_generation import (
+    MediaGenerationProgress, add_media_cleanup_evidence, compose_media_prompt, generate_media_response,
+    media_timeout, media_timeout_scope,
+)
+from .services.media_storage import (
+    _MediaSaveOutcome, _save_generated_media, _valid_media_filename, reconcile_remote_media_types,
+    classify_generated_media,
+)
+from types import SimpleNamespace
 from .tools.annotations import (
     DESTRUCTIVE_LOCAL,
     DESTRUCTIVE_REMOTE,
@@ -91,7 +107,9 @@ from .services.doctor import (
     doctor_payload as _doctor_payload,
     format_doctor_markdown as _format_doctor_markdown,
 )
+from .infrastructure.account_identity import current_account_key
 from .services.history import (
+    account_read_scope, bind_account_read_client, check_account_read,
     _format_chat_export_markdown,
     delete_chat_result as _delete_chat_result,
     export_chat_result as _export_chat_result,
@@ -139,6 +157,7 @@ MODEL_ALIASES = {
 MEDIA_TYPES = {"img": "image", "picture": "image", "photo": "image"}
 
 mcp = MCPServer(
+    lifespan=server_lifespan,
     name="Gemini",
     version=__version__,
     instructions=f"""
@@ -158,13 +177,14 @@ mcp = MCPServer(
 - **cleanup**: dry-run or delete test artifacts by marker
 
 ## Models
-- flash-lite, flash (default), pro
-- thinking_level: standard or extended
+- flash (default for search and multimodal work), argon (writing and particularly difficult reasoning), pro (explicit needs)
+- flash-lite requires fresh same-account basic Flash quota exhaustion and has no selectable thinking strength
+- thinking_level: low, medium or high; standard/extended remain low/high aliases
 
 ## Media behavior
 - image: Flash-Lite -> Nano Banana 2 Lite; Flash / Pro -> Nano Banana 2
 - music: Lyria; upstream responses may not expose the exact version
-- video: a generic chat prompt may return text only; require a verified video artifact
+- video: uses the dedicated Gemini Web video mode; completion requires a verified video file
 
 ## Quick
 chat(message="hi")
@@ -361,6 +381,8 @@ def _schedule_compact_chat_cleanup(
     retain_chat: bool,
     delete_after_seconds: int | None,
     source: str,
+    reschedule_pending: bool = False,
+    _owner_account: str | None = None,
 ) -> CleanupObservation | None:
     """Apply the same retention policy as the primary adapter."""
     return schedule_remote_chat_cleanup(
@@ -368,6 +390,8 @@ def _schedule_compact_chat_cleanup(
         retain_chat=retain_chat,
         delete_after_seconds=delete_after_seconds,
         source=source,
+        reschedule_pending=reschedule_pending,
+        _owner_account=_owner_account,
     )
 
 
@@ -390,6 +414,9 @@ def _build_chat_service() -> ChatService:
             ),
             schedule_response_cleanup=_schedule_compact_response_cleanup,
             schedule_chat_cleanup=_schedule_compact_chat_cleanup,
+            finalize_response_cleanup=lambda *args, **kwargs: finalize_remote_chat_cleanup_from_response(
+                *args, **kwargs
+            ),
             normalize_model=lambda model: _normalize_model(model),
             resolve_model=lambda model: resolve_model_name(model),
         )
@@ -407,6 +434,8 @@ async def chat(
     learning_mode: Optional[str] = None,
     image_path: Optional[str] = None,
     session_id: Optional[str] = None,
+    retain_chat: Optional[bool] = None,
+    delete_after_seconds: Optional[int] = None,
 ) -> list[TextContent]:
     """Chat with Gemini - supports images and sessions."""
     try:
@@ -432,12 +461,15 @@ async def chat(
                     fallback_empty_thinking_level=True,
                     cleanup_strategy=CleanupStrategy.RESPONSE_THEN_SESSION,
                     cleanup_source="skill_chat:session",
+                    retain_chat=retain_chat,
+                    delete_after_seconds=delete_after_seconds,
                 )
             )
             if not result.ok or result.data is None:
                 return domain_text(
                     result,
-                    f"SESSION_NOT_FOUND: Invalid session: {session_id}",
+                    (f"SESSION_NOT_FOUND: Invalid session: {session_id}"
+                     if result.error and result.error.code is DomainErrorCode.SESSION_NOT_FOUND else domain_failure_text(result)),
                 )
         else:
             result = await _chat_service.generate(
@@ -447,13 +479,16 @@ async def chat(
                     thinking_level=thinking_level,
                     learning_mode=learning_mode,
                     files=files,
+                    retain_chat=bool(retain_chat),
+                    delete_after_seconds=delete_after_seconds,
                     cleanup_source="skill_chat",
                     include_gem_argument=False,
                     include_temporary_argument=False,
                 )
             )
 
-        assert result.data is not None
+        if not result.ok or result.data is None:
+            return domain_text(result, domain_failure_text(result))
 
         return attach_domain_result(
             _format_response(result.data.response),
@@ -598,7 +633,8 @@ async def _history_delete_text(client: object, chat_id: Optional[str]) -> list[T
             return domain_text(result, "chat_id required")
         if result.error_code == DomainErrorCode.CAPABILITY_UNAVAILABLE.value:
             return domain_text(result, "delete_chat unavailable")
-        assert result.data is not None
+        if result.data is None:
+            return domain_text(result, domain_failure_text(result))
         status = result.data["verification"]["status"]
         if status == "still_present":
             return domain_text(result, f"Delete not verified: {result.data['chat_id']} is still present", use_result_data=True)
@@ -625,10 +661,37 @@ async def history(
     scan_turns: bool = False,
 ) -> list[TextContent]:
     """Manage remote Gemini Web chat history."""
+    if action in {"read", "export", "delete"} and not str(chat_id or "").strip():
+        result: DomainResult[Any] = DomainResult.failure(DomainErrorCode.INVALID_ARGUMENT, "chat_id is required.")
+        return domain_text(result, "chat_id required")
+    if action == "search" and not str(query or "").strip():
+        result = DomainResult.failure(DomainErrorCode.INVALID_ARGUMENT, "query is required.")
+        return domain_text(result, "query required")
+    owner = current_account_key()
     try:
-        client = get_gemini_client()
         await initialize_client()
+        current_owner = current_account_key()
+        if not current_owner or (owner and owner != current_owner):
+            result = DomainResult.failure(DomainErrorCode.AUTH_REQUIRED, "Gemini account changed or is unavailable.")
+            return domain_text(result, "Gemini account changed or is unavailable.")
+        owner = current_owner
+        with account_read_scope(owner):
+            client = bind_account_read_client(get_gemini_client())
+            output = await _history_dispatch(client, action, chat_id, query, limit, offset, scan_turns)
+            check_account_read()
+            return output
+    except PermissionError:
+        result = DomainResult.failure(DomainErrorCode.AUTH_REQUIRED, "Gemini account changed or is unavailable.")
+        return domain_text(result, "Gemini account changed or is unavailable.")
+    except Exception as e:
+        if owner and current_account_key() != owner:
+            result = DomainResult.failure(DomainErrorCode.AUTH_REQUIRED, "Gemini account changed or is unavailable.")
+            return domain_text(result, "Gemini account changed or is unavailable.")
+        return _error_text(e, "History")
 
+
+async def _history_dispatch(client: object, action: str, chat_id: Optional[str], query: Optional[str],
+                            limit: int, offset: int, scan_turns: bool) -> list[TextContent]:
         if action == "list":
             return await _history_list_text(client, limit, offset)
         if action == "search":
@@ -642,8 +705,6 @@ async def history(
 
         return [TextContent(type="text", text="Invalid action")]
 
-    except Exception as e:
-        return _error_text(e, "History")
 
 
 async def _account_capabilities() -> list[TextContent]:
@@ -803,10 +864,12 @@ async def _account_modes(client: Any) -> list[TextContent]:
 
 
 async def _account_status(client: Any) -> list[TextContent]:
-    if not hasattr(client, "inspect_account_status"):
+    from .services.account import inspect_account_status_compat
+
+    status = await inspect_account_status_compat(client)
+    if status is None:
         return [TextContent(type="text", text="account inspection unavailable")]
-    status = await client.inspect_account_status()
-    summary = status.get("summary", {}) if isinstance(status, dict) else {}
+    summary = status.get("summary", {})
     if not summary:
         return [TextContent(type="text", text="Account status loaded")]
     lines = [f"{key}: {value}" for key, value in summary.items()]
@@ -1008,6 +1071,8 @@ def _skill_media_result(
     request_model: Optional[str],
     effective_backend: Optional[str],
     media_type: str,
+    recovered_media: Optional[list] = None,
+    saved_media: Optional[_MediaSaveOutcome] = None,
 ) -> tuple[ArtifactResultData, Any]:
     observed_backend = observed_backend_from_response(response)
     artifacts = extract_response_artifacts(
@@ -1018,8 +1083,16 @@ def _skill_media_result(
         effective_backend=effective_backend,
         observed_backend=observed_backend,
     )
+    if recovered_media:
+        artifacts = merge_artifacts(artifacts, extract_response_artifacts(
+            SimpleNamespace(media=recovered_media, metadata=getattr(response, "metadata", [])),
+            media_type=media_type, requested_backend=requested_model, request_model=request_model,
+            effective_backend=effective_backend, observed_backend=observed_backend,
+        ))
+    if saved_media:
+        artifacts = merge_artifacts(reconcile_remote_media_types(artifacts, saved_media.artifacts), saved_media.artifacts)
     data = ArtifactResultData(
-        state=classify_artifact_state(response, artifacts),
+        state=classify_generated_media(response, artifacts, media_type, saved_media.failures if saved_media else ()),
         artifacts=artifacts,
         input_artifacts=input_artifacts,
         requested_model=requested_model,
@@ -1031,17 +1104,17 @@ def _skill_media_result(
     )
     video_empty_action = (
         (
-            "Inspect the retained upstream chat. "
+            "Review the cleanup status before retrying. "
             if data.source_chat_id
             else "No upstream chat ID was observed. "
         )
-        + "Generic chat has not been verified to enter Gemini Omni video mode. "
-        "Use https://gemini.google.com/videos in an authorized browser."
+        + "No usable video was returned. Do not duplicate the request until its state is known."
         if media_type == "video" and data.state == ArtifactState.EMPTY
         else None
     )
     return data, artifact_result(
         data,
+        save_failures=saved_media.failures if saved_media else (),
         empty_suggested_action=video_empty_action,
         empty_retryable=media_type != "video",
     )
@@ -1054,15 +1127,34 @@ async def create(
     model: str = "flash",
     thinking_level: str = "standard",
     image_path: Optional[str] = None,
+    retain_chat: bool = False,
+    delete_after_seconds: Optional[int] = None,
+    output_dir: Optional[str] = None,
+    filename: Optional[str] = None,
+    background: bool = True,
+    operation_id: Optional[str] = None,
 ) -> list[TextContent]:
-    """Generate image/video/music."""
+    """Generate image/video/music in the background by default.
+
+    Use session(action="operation_status" or "operation_result", session_id=handle)
+    to check the returned handle. Synchronous mode does not accept operation_id.
+    """
+    if not background and operation_id is not None:
+        return domain_text(_invalid_argument_result("operation_id requires background=true."),
+                           "operation_id requires background=true.")
     if not prompt.strip():
         return domain_text(_invalid_argument_result("prompt must not be blank."), "Error: prompt must not be blank.")
+    if not _valid_media_filename(filename):
+        return domain_text(_invalid_argument_result("filename must be a single non-empty file name."),
+                           "Error: filename must be a single non-empty file name.")
     requested_model = model
     media_type = _normalize_media_type(type)
     request_model: str | None = None
     effective_backend: str | None = None
     input_artifacts: tuple[Artifact, ...] = ()
+    response = None
+    cleanup_finalized = False
+    progress = MediaGenerationProgress()
     try:
         valid_image, safe_image_path, image_error = validate_optional_image_path(image_path)
         if not valid_image:
@@ -1070,6 +1162,17 @@ async def create(
                 _invalid_argument_result(image_error or "Invalid image path."),
                 f"Error: {image_error}",
             )
+
+        if background:
+            from .services.background import submit_media
+            submission = await submit_media({
+                "prompt": prompt, "media_type": media_type, "model": model, "thinking_level": thinking_level,
+                "image_path": safe_image_path, "output_dir": output_dir, "filename": filename,
+                "timeout_seconds": None, "retain_chat": retain_chat,
+                "delete_after_seconds": delete_after_seconds, "edit": False,
+            }, operation="create", operation_id=operation_id)
+            return domain_text(submission, "Media task submitted." if submission.ok else "Media task submission failed.",
+                               use_result_data=True)
 
         client = get_gemini_client()
         await initialize_client()
@@ -1080,27 +1183,42 @@ async def create(
         request_model = media_request["request_model"]
         effective_backend = media_request["backend_label"]
 
-        prefixes = {
-            "image": "Generate image: ",
-            "video": "Generate video: ",
-            "music": "Create music: ",
-        }
-        media_prompt = prefixes.get(media_type, "") + prompt
+        media_prompt = compose_media_prompt(media_type, prompt)
         files = [safe_image_path] if safe_image_path else None
         input_artifacts = _skill_input_artifacts(safe_image_path, requested_model, request_model, effective_backend)
 
-        response = await client.generate_content(
-            prompt=media_prompt,
-            files=files,
-            model=request_model,
-            thinking_level=thinking_level,
-        )
+        effective_timeout = media_timeout(media_type)
+        with media_timeout_scope(client, effective_timeout):
+            response = await asyncio.wait_for(generate_media_response(
+                client,
+                arguments=dict(prompt=media_prompt, files=files, model=request_model, thinking_level=thinking_level,
+                               timeout=effective_timeout),
+                schedule_cleanup=schedule_remote_chat_cleanup_from_response,
+                retain_chat=retain_chat, delete_after_seconds=delete_after_seconds,
+                source=f"skill_create:{media_type}",
+                media_type=media_type,
+                progress=progress,
+            ), timeout=effective_timeout)
         input_artifacts = _skill_input_artifacts(
             safe_image_path,
             requested_model,
             request_model,
             effective_backend,
             observed_backend=observed_backend_from_response(response),
+            source_chat_id=response_chat_id(response),
+        )
+        recovered_media = []
+        if media_type == "music" and not getattr(response, "media", None):
+            cid, rid, rcid = music_response_identity(response)
+            if rid:
+                try:
+                    recovered_media = await fetch_music_media_from_chat(client, cid, rid=rid, rcid=rcid)
+                except Exception:
+                    logger.warning("Music read-back failed")
+        saved_media = await _save_generated_media(
+            response, media_type=media_type, output_dir=output_dir, filename=filename, prompt=prompt,
+            media_items=recovered_media or None, requested_model=requested_model, request_model=request_model,
+            effective_backend=effective_backend, observed_backend=observed_backend_from_response(response),
             source_chat_id=response_chat_id(response),
         )
         data, result = _skill_media_result(
@@ -1110,15 +1228,9 @@ async def create(
             request_model=request_model,
             effective_backend=effective_backend,
             media_type=media_type,
+            recovered_media=recovered_media,
+            saved_media=saved_media,
         )
-        if data.state in {ArtifactState.QUEUED, ArtifactState.EMPTY}:
-            schedule_remote_chat_cleanup_from_response(
-                response,
-                retain_chat=True,
-                source=f"skill_create:{media_type}",
-            )
-        else:
-            _schedule_skill_response_cleanup(response, f"skill_create:{media_type}")
         content = _format_response(
             response,
             media_type,
@@ -1128,11 +1240,23 @@ async def create(
         if data.state == ArtifactState.EMPTY:
             content[0].text += "\n\nArtifact state: empty (no usable media URI was returned)."
             if media_type == "video":
-                content[0].text += " Use the dedicated Gemini Videos page after inspecting this chat."
+                content[0].text += " Review cleanup status before retrying."
         elif data.state == ArtifactState.QUEUED:
             content[0].text += "\n\nArtifact state: queued (no completed media is available yet)."
         content = append_artifact_block(content, data.artifacts)
-        return attach_domain_result(content, result, use_result_data=True)
+        if saved_media.lines:
+            content[0].text += "\n\nSaved files:\n" + "\n".join(saved_media.lines)
+        deferred = data.state == ArtifactState.QUEUED and not retain_chat
+        cleanup = await finalize_remote_chat_cleanup_from_response(
+            response, retain_chat=retain_chat,
+            delete_after_seconds=(1800 if deferred and delete_after_seconds is None else delete_after_seconds),
+            source=f"skill_create:{media_type}" + (":deferred" if deferred else ""),
+        )
+        result = replace(result, meta=replace(result.meta, details={**result.meta.details, "cleanup": cleanup}))
+        result = add_media_cleanup_evidence(result, progress, cleanup)
+        finalized = attach_domain_result(content, result, use_result_data=True)
+        cleanup_finalized = True
+        return finalized
 
     except Exception as e:
         data = ArtifactResultData(
@@ -1142,6 +1266,7 @@ async def create(
             effective_backend=effective_backend,
             input_artifacts=input_artifacts,
             media_type=media_type,
+            source_chat_id=progress.last_chat_id,
         )
         result = artifact_exception_result(
             e,
@@ -1149,11 +1274,23 @@ async def create(
             logger=logger,
             operation=f"skill_create:{media_type}",
         )
+        result = add_media_cleanup_evidence(result, progress)
         return attach_domain_result(
             _error_text(e, "Create"),
             result,
             use_result_data=True,
         )
+    finally:
+        if response is not None and not cleanup_finalized:
+            try:
+                deferred = is_response_queued(response) and not retain_chat
+                schedule_remote_chat_cleanup_from_response(
+                    response, retain_chat=retain_chat,
+                    delete_after_seconds=(1800 if deferred and delete_after_seconds is None else delete_after_seconds),
+                    source=f"skill_create:{media_type}:interrupted" + (":deferred" if deferred else ""),
+                )
+            except Exception:
+                logger.exception("Could not persist interrupted compact create cleanup")
 
 
 @_tool_if("edit", annotations=MUTATES_REMOTE)
@@ -1162,16 +1299,35 @@ async def edit(
     prompt: str,
     model: str = "flash",
     thinking_level: str = "standard",
+    retain_chat: bool = False,
+    delete_after_seconds: Optional[int] = None,
+    output_dir: Optional[str] = None,
+    filename: Optional[str] = None,
+    background: bool = True,
+    operation_id: Optional[str] = None,
 ) -> list[TextContent]:
-    """Edit existing image."""
+    """Edit an image in the background by default.
+
+    Use session(action="operation_status" or "operation_result", session_id=handle)
+    to check the returned handle. Synchronous mode does not accept operation_id.
+    """
+    if not background and operation_id is not None:
+        return domain_text(_invalid_argument_result("operation_id requires background=true."),
+                           "operation_id requires background=true.")
     if not prompt.strip():
         return domain_text(_invalid_argument_result("prompt must not be blank."), "Error: prompt must not be blank.")
     if not image_path.strip():
         return domain_text(_invalid_argument_result("image_path must not be blank."), "Error: image_path must not be blank.")
+    if not _valid_media_filename(filename):
+        return domain_text(_invalid_argument_result("filename must be a single non-empty file name."),
+                           "Error: filename must be a single non-empty file name.")
     requested_model = model
     request_model: str | None = None
     effective_backend: str | None = None
     input_artifacts: tuple[Artifact, ...] = ()
+    response = None
+    cleanup_finalized = False
+    progress = MediaGenerationProgress()
     try:
         valid_image, safe_image_path, image_error = validate_optional_image_path(image_path)
         if not valid_image:
@@ -1179,6 +1335,17 @@ async def edit(
                 _invalid_argument_result(image_error or "Invalid image path."),
                 f"Error: {image_error}",
             )
+
+        if background:
+            from .services.background import submit_media
+            submission = await submit_media({
+                "prompt": prompt, "media_type": "image", "model": model, "thinking_level": thinking_level,
+                "image_path": safe_image_path, "output_dir": output_dir, "filename": filename,
+                "timeout_seconds": None, "retain_chat": retain_chat,
+                "delete_after_seconds": delete_after_seconds, "edit": True,
+            }, operation="edit", operation_id=operation_id)
+            return domain_text(submission, "Media edit submitted." if submission.ok else "Media edit submission failed.",
+                               use_result_data=True)
 
         client = get_gemini_client()
         await initialize_client()
@@ -1195,12 +1362,17 @@ async def edit(
             effective_backend,
         )
 
-        response = await client.generate_content(
-            prompt=f"Edit this image: {prompt}",
-            files=[safe_image_path],
-            model=request_model,
-            thinking_level=thinking_level,
-        )
+        effective_timeout = media_timeout("image")
+        with media_timeout_scope(client, effective_timeout):
+            response = await asyncio.wait_for(generate_media_response(
+                client,
+                arguments=dict(prompt=f"Edit this image: {prompt}", files=[safe_image_path], model=request_model,
+                               thinking_level=thinking_level, timeout=effective_timeout),
+                schedule_cleanup=schedule_remote_chat_cleanup_from_response,
+                retain_chat=retain_chat, delete_after_seconds=delete_after_seconds,
+                source="skill_edit",
+                progress=progress,
+            ), timeout=effective_timeout)
         input_artifacts = _skill_input_artifacts(
             safe_image_path or image_path,
             requested_model,
@@ -1209,6 +1381,11 @@ async def edit(
             observed_backend=observed_backend_from_response(response),
             source_chat_id=response_chat_id(response),
         )
+        saved_media = await _save_generated_media(
+            response, media_type="image", output_dir=output_dir, filename=filename, prompt=prompt,
+            requested_model=requested_model, request_model=request_model, effective_backend=effective_backend,
+            observed_backend=observed_backend_from_response(response), source_chat_id=response_chat_id(response),
+        )
         data, result = _skill_media_result(
             response,
             input_artifacts,
@@ -1216,11 +1393,8 @@ async def edit(
             request_model=request_model,
             effective_backend=effective_backend,
             media_type="image_edit",
+            saved_media=saved_media,
         )
-        if data.state in {ArtifactState.QUEUED, ArtifactState.EMPTY}:
-            schedule_remote_chat_cleanup_from_response(response, retain_chat=True, source="skill_edit")
-        else:
-            _schedule_skill_response_cleanup(response, "skill_edit")
         content = _format_response(
             response,
             "image",
@@ -1228,7 +1402,19 @@ async def edit(
             backend_note=media_request["note"],
         )
         content = append_artifact_block(content, data.artifacts)
-        return attach_domain_result(content, result, use_result_data=True)
+        if saved_media.lines:
+            content[0].text += "\n\nSaved files:\n" + "\n".join(saved_media.lines)
+        deferred = data.state == ArtifactState.QUEUED and not retain_chat
+        cleanup = await finalize_remote_chat_cleanup_from_response(
+            response, retain_chat=retain_chat,
+            delete_after_seconds=(1800 if deferred and delete_after_seconds is None else delete_after_seconds),
+            source="skill_edit" + (":deferred" if deferred else ""),
+        )
+        result = replace(result, meta=replace(result.meta, details={**result.meta.details, "cleanup": cleanup}))
+        result = add_media_cleanup_evidence(result, progress, cleanup)
+        finalized = attach_domain_result(content, result, use_result_data=True)
+        cleanup_finalized = True
+        return finalized
 
     except Exception as e:
         data = ArtifactResultData(
@@ -1238,6 +1424,7 @@ async def edit(
             effective_backend=effective_backend,
             input_artifacts=input_artifacts,
             media_type="image_edit",
+            source_chat_id=progress.last_chat_id,
         )
         result = artifact_exception_result(
             e,
@@ -1245,11 +1432,23 @@ async def edit(
             logger=logger,
             operation="skill_edit",
         )
+        result = add_media_cleanup_evidence(result, progress)
         return attach_domain_result(
             _error_text(e, "Edit"),
             result,
             use_result_data=True,
         )
+    finally:
+        if response is not None and not cleanup_finalized:
+            try:
+                deferred = is_response_queued(response) and not retain_chat
+                schedule_remote_chat_cleanup_from_response(
+                    response, retain_chat=retain_chat,
+                    delete_after_seconds=(1800 if deferred and delete_after_seconds is None else delete_after_seconds),
+                    source="skill_edit:interrupted" + (":deferred" if deferred else ""),
+                )
+            except Exception:
+                logger.exception("Could not persist interrupted compact edit cleanup")
 
 
 async def _session_create(
@@ -1265,6 +1464,8 @@ async def _session_create(
             include_gem_argument=False,
         )
     )
+    if not result.ok or result.data is None:
+        return domain_text(result, domain_failure_text(result))
     sid = result.data.session_id if result.data is not None else ""
     normalized_model = result.data.normalized_model if result.data is not None else _normalize_model(model)
     effective_model = (
@@ -1314,7 +1515,8 @@ async def _session_send(
     if not result.ok or result.data is None:
         return domain_text(
             result,
-            f"SESSION_NOT_FOUND: Invalid session: {session_id}",
+            (f"SESSION_NOT_FOUND: Invalid session: {session_id}"
+             if result.error and result.error.code is DomainErrorCode.SESSION_NOT_FOUND else domain_failure_text(result)),
         )
     return attach_domain_result(
         _format_response(result.data.response),
@@ -1387,7 +1589,7 @@ async def _session_reset(session_id: Optional[str], *, reset_all: bool = False) 
 
 @_tool_if("session", annotations=DESTRUCTIVE_REMOTE)
 async def session(
-    action: Literal["create", "send", "list", "reset", "reset_one", "reset_all"],
+    action: Literal["create", "send", "list", "reset", "reset_one", "reset_all", "operation_status", "operation_result"],
     session_id: Optional[str] = None,
     message: Optional[str] = None,
     model: str = "flash",
@@ -1395,8 +1597,28 @@ async def session(
     learning_mode: Optional[str] = None,
     image_path: Optional[str] = None,
 ) -> list[TextContent]:
-    """Manage shared sessions; reset/reset_one need an ID and only reset_all clears all."""
+    """Manage sessions and background operations.
+
+    For operation_status or operation_result, pass the operation handle as
+    session_id. reset/reset_one need a session ID; only reset_all clears all.
+    """
     try:
+        if action in {"operation_status", "operation_result"}:
+            if not session_id or not session_id.strip():
+                return domain_text(_invalid_argument_result("session_id must contain an operation handle."),
+                                   "An operation handle is required.")
+            from .infrastructure.operation_store import OperationStore
+            from .services.operations import OperationService
+            service = OperationService(OperationStore(), get_gemini_client, initialize_client,
+                                       finalize_remote_chat_cleanup)
+            result = await (service.get_status(session_id) if action == "operation_status"
+                            else service.get_result(session_id))
+            data = result.data
+            text = f"Operation {data.operation_id}: {data.state.value}." if result.ok and data else "Operation lookup failed."
+            if data and data.report:
+                text += f"\n\n{data.report}"
+            content = domain_text(result, text, use_result_data=True)
+            return append_artifact_block(content, data.artifacts) if data and data.artifacts else content
         valid_image, safe_image_path, image_error = validate_optional_image_path(image_path)
         if not valid_image:
             return domain_text(
@@ -1582,8 +1804,9 @@ def _format_response(
     if response.text:
         parts.append(response.text)
 
-    if hasattr(response, "images") and response.images:
-        for i, img in enumerate(response.images, 1):
+    images = response_image_items(response, generated_only=media_type == "image")
+    if images:
+        for i, img in enumerate(images, 1):
             if hasattr(img, "url") and img.url:
                 parts.append(f"[Image {i}]: {img.url}")
 

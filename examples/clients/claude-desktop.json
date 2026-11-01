@@ -6,12 +6,11 @@
       "args": [
         "--from",
         "git+https://github.com/Luckycat133/gemini-web-mcp@main",
-        "gemini-mcp-server"
+        "gemini-mcp-function"
       ],
       "env": {
         "GEMINI_PSID": "REPLACE_WITH_SECURE_1PSID",
         "GEMINI_PSIDTS": "REPLACE_OR_REMOVE_IF_UNAVAILABLE",
-        "GEMINI_TOOLS": "model",
         "GEMINI_AUTO_REFRESH": "false"
       }
     }

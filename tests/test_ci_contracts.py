@@ -10,7 +10,7 @@ import tomllib
 from pathlib import Path
 
 from scripts.run_contract_checklist import CONTRACT_TESTS
-from scripts.smoke_profiles import ASSIST_TOOLS, COMPACT_TOOLS, PRIMARY_PROFILE_TOOLS
+from scripts.smoke_profiles import ACCOUNT_TOOLS, ASSIST_TOOLS, COMPACT_TOOLS, FUNCTION_TOOLS, PRIMARY_PROFILE_TOOLS
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 CI_WORKFLOW = PROJECT_ROOT / ".github" / "workflows" / "ci.yml"
@@ -42,13 +42,79 @@ def test_targeted_contract_checklist_covers_stable_architecture_boundaries() -> 
         "tests/test_mcp_sdk_v2.py",
         "tests/test_conversation_lifecycle.py",
         "tests/test_chat_service.py",
+        "tests/test_chat_timeouts.py",
+        "tests/test_session_sdk_recovery.py",
+        "tests/test_session_cleanup_guards.py",
+        "tests/test_model_policy.py",
+        "tests/test_model_policy_integration.py",
+        "tests/test_chat_management_service.py",
+        "tests/test_chat_metadata.py",
+        "tests/test_chat_management_tools.py",
+        "tests/test_history_compact.py",
+        "tests/test_cleanup_store.py",
+        "tests/test_cleanup_runtime.py",
+        "tests/test_remote_chat_cleanup_manager.py",
+        "tests/test_owned_cleanup.py",
+        "tests/test_operations.py",
+        "tests/test_operation_store.py",
+        "tests/test_research_identity.py",
+        "tests/test_research_legacy_identity.py",
+        "tests/test_research_result_storage.py",
+        "tests/test_saved_research_derivatives.py",
+        "tests/test_research_worker_recovery.py",
+        "tests/test_background_operations.py",
+        "tests/test_media_jobs.py",
+        "tests/test_task_jobs.py",
+        "tests/test_task_inputs.py",
+        "tests/test_task_confirmation.py",
+        "tests/test_task_setup.py",
+        "tests/test_task_files.py",
+        "tests/test_managed_skills.py",
+        "tests/test_managed_skill_transport.py",
+        "tests/test_notebook_admin.py",
+        "tests/test_notebooklm_service.py",
+        "tests/test_web_tasks_service.py",
+        "tests/test_web_context_transport.py",
+        "tests/test_task_progress.py",
+        "tests/test_task_schedules_service.py",
+        "tests/test_task_schedule_transport.py",
+        "tests/test_remy_schedule_contracts.py",
+        "tests/test_task_schedule_guards.py",
+        "tests/test_task_schedule_lifecycle.py",
+        "tests/test_task_schedule_timestamps.py",
+        "tests/test_task_schedule_bounds.py",
+        "tests/test_task_browser_service.py",
+        "tests/test_task_browser_sessions.py",
+        "tests/test_task_browser_turn.py",
+        "tests/test_task_browser_retries.py",
+        "tests/test_task_account_lifecycle.py",
+        "tests/test_task_delete_readback.py",
+        "tests/test_task_browser_transport.py",
+        "tests/test_task_browser_tools.py",
+        "tests/test_preference_transport.py",
+        "tests/test_preferences_service.py",
+        "tests/test_preference_tools.py",
+        "tests/test_browser_action_store.py",
+        "tests/test_rfb.py",
+        "tests/test_rfb_regressions.py",
+        "tests/test_operation_tools.py",
         "tests/test_compact_history_contract.py",
         "tests/test_artifacts.py",
         "tests/test_manage_gem_verification_contract.py",
+        "tests/test_gem_custom_catalog.py",
+        "tests/test_gem_mutation_retry_scope.py",
+        "tests/test_history_mutation_fencing.py",
+        "tests/test_account_read_fencing.py",
+        "tests/test_notebook_move_fencing.py",
+        "tests/test_scheduled_mutation_evidence.py",
         "tests/test_rpc_contracts.py",
+        "tests/test_candidate_attribution.py",
         "tests/test_upstream_compatibility.py",
         "tests/test_live_canary.py",
         "tests/test_package_integrity.py",
+        "tests/test_function_surface.py",
+        "tests/test_account_surface.py",
+        "tests/test_protocol_smoke.py",
         "tests/test_onboarding.py",
         "tests/test_onboarding_distribution.py",
         "tests/test_version_consistency.py",
@@ -61,8 +127,15 @@ def test_targeted_contract_checklist_covers_stable_architecture_boundaries() -> 
 
 
 def test_representative_profile_snapshots_are_explicit_and_exhaustive() -> None:
+    from src.surfaces import catalogs
+
+    assert FUNCTION_TOOLS == catalogs.FUNCTION_TOOLS
+    assert ACCOUNT_TOOLS == catalogs.ACCOUNT_TOOLS
+    assert len(FUNCTION_TOOLS) == 17 and len(ACCOUNT_TOOLS) == 17
+    assert not FUNCTION_TOOLS & ACCOUNT_TOOLS
     assert set(PRIMARY_PROFILE_TOOLS) == {
         "core",
+        "media",
         "model",
         "history",
         "history-organize",
@@ -71,7 +144,8 @@ def test_representative_profile_snapshots_are_explicit_and_exhaustive() -> None:
         "all",
     }
     assert all(PRIMARY_PROFILE_TOOLS.values())
-    assert len(PRIMARY_PROFILE_TOOLS["all"]) == 45
+    assert len(PRIMARY_PROFILE_TOOLS["all"]) == 48
+    assert {"gemini_get_operation_status", "gemini_get_operation_result"} <= PRIMARY_PROFILE_TOOLS["all"]
     assert COMPACT_TOOLS == {
         "chat",
         "create",
@@ -107,7 +181,7 @@ def test_profile_snapshot_smoke_passes_from_the_installed_environment() -> None:
 def test_ci_workflow_has_separate_diagnostic_offline_gates() -> None:
     workflow = CI_WORKFLOW.read_text(encoding="utf-8")
 
-    assert 'branches: [main, "agent/**"]' in workflow
+    assert 'branches: [main, "agent/**", "codex/**"]' in workflow
     assert "concurrency:" in workflow
     assert "group: ${{ github.workflow }}-${{ github.ref }}" in workflow
     assert "cancel-in-progress: true" in workflow
@@ -128,6 +202,7 @@ def test_ci_workflow_has_separate_diagnostic_offline_gates() -> None:
         assert command in workflow
     assert workflow.count("cache: pip") == 7
     assert 'GEMINI_AUTO_REFRESH: "false"' in workflow
+    assert 'GEMINI_BROWSER_AUTO_LOAD: "false"' in workflow
 
 
 def test_ci_pins_reference_skill_validator_and_checks_single_public_sources() -> None:

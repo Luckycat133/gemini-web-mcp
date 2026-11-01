@@ -3,11 +3,21 @@
 from __future__ import annotations
 
 import asyncio
+import pytest
 from types import SimpleNamespace
 
 from src.services.gems import create_gem, delete_gem, update_gem
 from src.services.notebooks import move_chat_to_notebook
 
+
+
+@pytest.fixture(autouse=True)
+def _synthetic_gem_account_and_catalog(monkeypatch):
+    monkeypatch.setenv("GEMINI_PSID", "synthetic-test-account")
+    async def read_catalog(client, **_kwargs):
+        return await client.fetch_gems()
+    monkeypatch.setattr("src.services.gems.read_custom_gems", read_catalog)
+    monkeypatch.setattr("src.tools.manage.read_custom_gems", read_catalog)
 
 def test_gem_mutations_report_verified_read_back():
     class Client:
@@ -61,7 +71,7 @@ def test_gem_mutations_report_verified_read_back():
 
 def test_notebook_move_reports_verified_read_back():
     class Client:
-        async def _batch_execute(self, payloads, *, source_path, close_on_error):
+        async def _batch_execute(self, payloads, *, source_path, close_on_error, current_retry=None):
             assert payloads[0].rpcid
             assert source_path == "/app"
             assert close_on_error is False
@@ -91,7 +101,7 @@ def test_notebook_move_reports_verified_read_back():
 
 def test_notebook_move_changed_rpc_shape_without_read_back_is_not_accepted():
     class Client:
-        async def _batch_execute(self, payloads, *, source_path, close_on_error):
+        async def _batch_execute(self, payloads, *, source_path, close_on_error, current_retry=None):
             return SimpleNamespace(status_code=200, text="response")
 
     async def fetch_notebooks(_client, _locale):
@@ -116,7 +126,7 @@ def test_notebook_move_changed_rpc_shape_without_read_back_is_not_accepted():
 
 def test_notebook_move_acceptance_without_read_back_is_not_success():
     class Client:
-        async def _batch_execute(self, payloads, *, source_path, close_on_error):
+        async def _batch_execute(self, payloads, *, source_path, close_on_error, current_retry=None):
             return SimpleNamespace(status_code=200, text="response")
 
     async def fetch_notebooks(_client, _locale):

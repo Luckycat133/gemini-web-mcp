@@ -45,6 +45,7 @@ def _safe_environment(profile: str) -> dict[str, str]:
     for name in ("GEMINI_PSID", "GEMINI_PSIDTS", "GEMINI_PSIDCC", "GEMINI_SKILL_MODE"):
         environment.pop(name, None)
     environment["GEMINI_AUTO_REFRESH"] = "false"
+    environment["GEMINI_BROWSER_AUTO_LOAD"] = "false"
     environment["GEMINI_TOOLS"] = profile
     return environment
 
@@ -74,6 +75,9 @@ def build_snapshot() -> dict[str, object]:
         "surfaces": {
             "primary:model": _probe("src.server", "model"),
             "compact": _probe("src.skill_server", "model"),
+            "account": _probe("src.surfaces.account", "function"),
+            "function": _probe("src.surfaces.function", "function"),
+            "assist": _probe("src.surfaces.assist", "function"),
         },
     }
 

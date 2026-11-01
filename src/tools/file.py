@@ -1,5 +1,5 @@
 import asyncio
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import logging
 from pathlib import Path
 from typing import Any, Optional
@@ -12,7 +12,8 @@ from ..client_wrapper import (
     cleanup_due_remote_chats,
     get_gemini_client,
     initialize_client,
-    schedule_remote_chat_cleanup_from_response,
+    finalize_remote_chat_cleanup_from_response,
+    schedule_remote_chat_cleanup,
 )
 from ..constants import resolve_model_name
 from ..domain import (
@@ -20,8 +21,11 @@ from ..domain import (
     ArtifactKind,
     ArtifactResultData,
     ArtifactState,
+    CleanupObservation,
+    CleanupState,
     DomainErrorCode,
     DomainResult,
+    DomainWarning,
 )
 from ..services import (
     artifact_exception_result,
@@ -35,8 +39,56 @@ from ..services import (
 )
 from .annotations import MUTATES_REMOTE
 from .utils import validate_local_file_path
+from ..infrastructure.account_identity import current_account_key
+from ..services.cleanup_scope import observe_cleanup_frames
 
 logger = logging.getLogger(__name__)
+
+
+class _AnalysisCleanupObserver:
+    """Register only request-owned SDK identities without ending the request."""
+
+    def __init__(self, *, owner: str, retain_chat: bool, delay: int | None, source: str):
+        self.owner = owner
+        self.retain_chat = retain_chat
+        self.delay = delay if retain_chat else max(1800, delay or 0)
+        self.source = source
+        self.registered: set[str] = set()
+        self.failed: set[str] = set()
+
+    def observe(self, value: Any) -> None:
+        cid = response_chat_id(value)
+        if not cid or cid in self.registered:
+            return
+        try:
+            result = schedule_remote_chat_cleanup(
+                cid, retain_chat=self.retain_chat, delete_after_seconds=self.delay,
+                source=f"{self.source}:in_progress", _owner_account=self.owner,
+            )
+            if not isinstance(result, CleanupObservation) or result.state in {
+                CleanupState.FAILED, CleanupState.INVALID_ID, CleanupState.NOT_APPLICABLE,
+            }:
+                self.failed.add(cid)
+                return
+            self.failed.discard(cid)
+            self.registered.add(cid)
+        except Exception:
+            self.failed.add(cid)
+
+
+async def _generate_analysis(client: Any, prompt: str, *, observer: _AnalysisCleanupObserver,
+                             **kwargs: Any) -> Any:
+    """Observe early SDK identities and preserve any CID if metadata rolls back."""
+    factory = getattr(type(client), "create_cleanup_chat", None)
+    chat = factory(client) if callable(factory) else None
+    if chat is not None:
+        kwargs["chat"] = chat
+    try:
+        with observe_cleanup_frames(observer.observe):
+            return await asyncio.wait_for(client.generate_content(prompt, **kwargs), timeout=60)
+    finally:
+        if chat is not None:
+            observer.observe(chat)
 
 
 def _validate_file_path(file_path: str) -> tuple[bool, str]:
@@ -58,12 +110,14 @@ def _validate_url(url: str) -> tuple[bool, str]:
 
     try:
         result = urlparse(url)
-        if not result.scheme or not result.netloc:
+        if (result.scheme.lower() not in {"http", "https"} or not result.hostname
+                or result.username is not None or result.password is not None):
             return False, "URL 格式无效"
+        _ = result.port
 
         return True, url
-    except Exception as e:
-        return False, f"URL 验证失败: {str(e)}"
+    except ValueError:
+        return False, "URL 格式无效"
 
 
 def _analysis_state(response, outputs: tuple[Artifact, ...], source: Artifact) -> ArtifactState:
@@ -108,7 +162,8 @@ class _AnalysisContext:
     source_artifact: Artifact
 
 
-def _analysis_failure_response(error: Exception, context: _AnalysisContext, message: str) -> list[TextContent]:
+def _analysis_failure_response(error: Exception, context: _AnalysisContext, message: str,
+                               observer: _AnalysisCleanupObserver | None = None) -> list[TextContent]:
     data = ArtifactResultData(
         state=ArtifactState.FAILED,
         input_artifacts=(context.source_artifact,),
@@ -123,11 +178,27 @@ def _analysis_failure_response(error: Exception, context: _AnalysisContext, mess
         logger=logger,
         operation=context.operation,
     )
+    result = _with_cleanup_registration_warning(result, observer)
     return attach_domain_result(
         [TextContent(type="text", text=message)],
         result,
         use_result_data=True,
     )
+
+
+def _with_cleanup_registration_warning(result: DomainResult[Any], observer: _AnalysisCleanupObserver | None,
+                                       cleanup: Any = None) -> DomainResult[Any]:
+    if observer is None:
+        return result
+    failed = set(observer.failed)
+    if (isinstance(cleanup, CleanupObservation) and cleanup.upstream_chat_id
+            and cleanup.state not in {CleanupState.FAILED, CleanupState.INVALID_ID, CleanupState.NOT_APPLICABLE}):
+        failed.discard(cleanup.upstream_chat_id)
+    if not failed:
+        return result
+    return replace(result, warnings=(*result.warnings, DomainWarning(
+        code="cleanup_registration_unverified", message="A request-owned chat could not be registered for cleanup.",
+    )), meta=replace(result.meta, details={**result.meta.details, "cleanup_registration_failed_chat_ids": tuple(sorted(failed))}))
 
 
 def _invalid_analysis_input_response(
@@ -235,7 +306,6 @@ def register_file_tools(mcp: MCPServer) -> None:
             )
         safe_file_path = safe_path_or_error
 
-        client = await _init_analysis_client()
         model_name = resolve_model_name(model)
         source_artifact = artifact_from_local_path(
             ArtifactKind.FILE,
@@ -256,28 +326,25 @@ def register_file_tools(mcp: MCPServer) -> None:
 
         logger.info(f"上传文件: {safe_file_path}")
 
+        response = None
+        cleanup_finalized = False
+        observer: _AnalysisCleanupObserver | None = None
         try:
+            client = await _init_analysis_client()
+            owner = current_account_key()
+            if not owner:
+                raise PermissionError("Conversation account could not be verified")
+            observer = _AnalysisCleanupObserver(owner=owner, retain_chat=retain_chat, delay=delete_after_seconds,
+                                                source="gemini_upload_file")
             prompt = analysis_prompt or "Please analyze this file and tell me what you see."
 
-            response = await asyncio.wait_for(
-                client.generate_content(
-                    prompt,
-                    files=[safe_file_path],
-                    model=model_name,
-                    thinking_level=thinking_level,
-                    timeout=60,
-                ),
-                timeout=60,
-            )
+            response = await _generate_analysis(client, prompt, observer=observer, files=[safe_file_path],
+                                                model=model_name, thinking_level=thinking_level, timeout=60)
+            observer.observe(response)
+            if current_account_key() != owner:
+                raise PermissionError("Conversation account changed")
 
             result_text = _response_result_text(response)
-            schedule_remote_chat_cleanup_from_response(
-                response,
-                retain_chat=retain_chat,
-                delete_after_seconds=delete_after_seconds,
-                source="gemini_upload_file",
-            )
-
             source_artifact = artifact_from_local_path(
                 ArtifactKind.FILE,
                 safe_file_path,
@@ -293,11 +360,30 @@ def register_file_tools(mcp: MCPServer) -> None:
                 f"✅ Successfully analyzed {Path(safe_file_path).name}\n\n{result_text}",
                 data,
             )
-            return attach_domain_result(content, result, use_result_data=True)
+            if current_account_key() != owner:
+                raise PermissionError("Conversation account changed")
+            cleanup = await finalize_remote_chat_cleanup_from_response(
+                response, retain_chat=retain_chat, delete_after_seconds=delete_after_seconds,
+                source="gemini_upload_file",
+            )
+            if current_account_key() != owner:
+                raise PermissionError("Conversation account changed")
+            result = replace(result, meta=replace(result.meta, details={**result.meta.details, "cleanup": cleanup}))
+            result = _with_cleanup_registration_warning(result, observer, cleanup)
+            finalized = attach_domain_result(content, result, use_result_data=True)
+            cleanup_finalized = True
+            return finalized
         except asyncio.TimeoutError as error:
-            return _analysis_failure_response(error, context, "❌ Error: 文件分析超时，请检查认证状态或稍后重试。")
+            return _analysis_failure_response(error, context, "❌ Error: 文件分析超时，请检查认证状态或稍后重试。", observer)
         except Exception as e:
-            return _analysis_failure_response(e, context, f"❌ Error: {str(e)}")
+            return _analysis_failure_response(e, context, "❌ Error: 文件分析失败，请查看结构化错误详情。", observer)
+        finally:
+            if response is not None and not cleanup_finalized:
+                try:
+                    if observer is not None:
+                        observer.observe(response)
+                except Exception as cleanup_error:
+                    logger.warning("Could not persist interrupted file cleanup error_type=%s", type(cleanup_error).__name__)
 
     @mcp.tool(annotations=MUTATES_REMOTE)
     async def gemini_analyze_url(
@@ -327,7 +413,6 @@ def register_file_tools(mcp: MCPServer) -> None:
             )
         valid_url = valid_url_or_error
 
-        client = await _init_analysis_client()
         model_name = resolve_model_name(model)
         source_artifact = artifact_from_remote(
             ArtifactKind.WEBPAGE,
@@ -349,7 +434,7 @@ def register_file_tools(mcp: MCPServer) -> None:
 
         prompt = _url_analysis_prompt(analysis_prompt, valid_url)
 
-        logger.info(f"分析 URL: {valid_url}")
+        logger.info("开始 URL 分析")
 
         context = _AnalysisContext(
             requested_model=model,
@@ -360,25 +445,23 @@ def register_file_tools(mcp: MCPServer) -> None:
             source_artifact=source_artifact,
         )
 
+        response = None
+        cleanup_finalized = False
+        observer: _AnalysisCleanupObserver | None = None
         try:
-            response = await asyncio.wait_for(
-                client.generate_content(
-                    prompt,
-                    model=model_name,
-                    thinking_level=thinking_level,
-                    timeout=60,
-                ),
-                timeout=60,
-            )
+            client = await _init_analysis_client()
+            owner = current_account_key()
+            if not owner:
+                raise PermissionError("Conversation account could not be verified")
+            observer = _AnalysisCleanupObserver(owner=owner, retain_chat=retain_chat, delay=delete_after_seconds,
+                                                source="gemini_analyze_url")
+            response = await _generate_analysis(client, prompt, observer=observer, model=model_name,
+                                                thinking_level=thinking_level, timeout=60)
+            observer.observe(response)
+            if current_account_key() != owner:
+                raise PermissionError("Conversation account changed")
 
             result_text = _response_result_text(response)
-            schedule_remote_chat_cleanup_from_response(
-                response,
-                retain_chat=retain_chat,
-                delete_after_seconds=delete_after_seconds,
-                source="gemini_analyze_url",
-            )
-
             source_artifact = artifact_from_remote(
                 ArtifactKind.WEBPAGE,
                 valid_url,
@@ -391,12 +474,28 @@ def register_file_tools(mcp: MCPServer) -> None:
                 verification_method="input_uri_provided",
             )
             data, result = _analysis_success_result(response, source_artifact, model, model_name, "url_analysis")
-            return attach_domain_result(
-                _analysis_content(result_text, data),
-                result,
-                use_result_data=True,
+            content = _analysis_content(result_text, data)
+            if current_account_key() != owner:
+                raise PermissionError("Conversation account changed")
+            cleanup = await finalize_remote_chat_cleanup_from_response(
+                response, retain_chat=retain_chat, delete_after_seconds=delete_after_seconds,
+                source="gemini_analyze_url",
             )
+            if current_account_key() != owner:
+                raise PermissionError("Conversation account changed")
+            result = replace(result, meta=replace(result.meta, details={**result.meta.details, "cleanup": cleanup}))
+            result = _with_cleanup_registration_warning(result, observer, cleanup)
+            finalized = attach_domain_result(content, result, use_result_data=True)
+            cleanup_finalized = True
+            return finalized
         except asyncio.TimeoutError as error:
-            return _analysis_failure_response(error, context, "❌ Error: URL 分析超时，请稍后重试。")
+            return _analysis_failure_response(error, context, "❌ Error: URL 分析超时，请稍后重试。", observer)
         except Exception as e:
-            return _analysis_failure_response(e, context, f"❌ Error: {str(e)}")
+            return _analysis_failure_response(e, context, "❌ Error: URL 分析失败，请查看结构化错误详情。", observer)
+        finally:
+            if response is not None and not cleanup_finalized:
+                try:
+                    if observer is not None:
+                        observer.observe(response)
+                except Exception as cleanup_error:
+                    logger.warning("Could not persist interrupted URL cleanup error_type=%s", type(cleanup_error).__name__)

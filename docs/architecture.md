@@ -4,6 +4,14 @@
 
 ---
 
+## 两类业务工具面
+
+`gemini-mcp-function` 提供 17 个功能工具；`gemini-mcp-account` 提供 17 个显式账号工具。普通问答、联网和自然语言应用请求使用默认 Flash 的 `gemini_ask`，不暴露联网或工具启用开关。带 `notebook_ids` 的 Ask 是后台普通聊天；`gemini_run_task` 明确启动 Gemini Task，两者通过共享持久句柄读取状态和完整回答产物。Task 完成不替代应用侧修改核验，Task 计划也不等同于聊天 scheduled actions。五工具 assist、compact 和显式 profile 保持兼容。
+
+账号 `gemini_notebooks` 默认返回 NotebookLM／Gemini Notebook 来源目录，`source="gemini"` 保留同一产品的项目投影；移动聊天要在该投影中精确解析目标。`gemini_tasks` 提供紧凑 Task 元数据、有限进度、独立 Task 计划管理与经核验的显式删除；`gemini_task_browser` 提供截图和显式浏览器输入。Cookie、Doctor、本地 Prompts 不进入业务面；`gemini_cleanup` 只处理登记的 MCP 自有聊天。
+
+[Notebook、聊天与 Task 工作流](notebook-task-workflows.md)说明完整回答保存、后台恢复、自动清理和未适配的丰富控制。生产请求合同集中在 registry；ProcessSession 仍是实验，不作为这些路径的完成依据。
+
 ## 🏗️ 系统架构
 
 ```
@@ -201,7 +209,10 @@ MODEL_CONFIG = {
 #### Management Services and Adapter
 - `services/history.py`：历史 list/search/read/export/delete 的共享规范化、分页、typed result，以及基于完整 fresh recent/pinned 元数据分页的删除回读验证；`read_chat(None)` 不被当作缺失证据
 - `services/account.py`：账号 inventory parser 与只读 feature probe
-- `services/notebooks.py`：原生 Notebook 读取及带读回校验的 chat move
+- `services/notebooks.py`：Gemini Notebook 项目视图读取及带读回校验的 chat move
+- `services/notebooklm.py`：同一 Notebook 产品的来源目录与准确 ID 解析
+- `services/web_tasks.py`：Task 元数据 list/get/delete、账号约束和删除核验
+- Task／Notebook 后台操作：共享 operation store、完整回答产物、精确原回复读取及产物保存后的自有线程清理
 - `services/scheduled.py`：定时操作读取、创建、删除与 registry/GetTask 双读回
 - `services/gems.py`：Gem CRUD 与 mutation 后读回比较
 - `services/manifest.py` / `services/doctor.py`：工具清单、Web 能力和本地预检
@@ -333,6 +344,8 @@ delivery=collected                   queued/running/completed/timed_out
 `*_stream` 名称为兼容性保留，当前适配器不会声称 MCP 增量推送。`StreamTextAccumulator`
 按状态归一化显式 delta、累计全文和混合片段，忽略重复或过时的累计 chunk；公开元数据只描述
 观测到的语义与计数。
+
+图片、视频、音乐和 Deep Research 默认后台运行；功能面媒体、Task 和带 Notebook 的 Ask 始终后台启动。使用同一持久 `operation_id` 查询状态并取回经验证的本地产物或报告。Task／Notebook Chat worker 核验原 CID/RID/候选回复已完成，保存并验证完整回答文件后自动清理自有线程；Task 还要求同 CID 目标已完成。调用者无需先取结果，重启后仍可读取已保存产物。仅暴露该参数的兼容工具可用 `background=false` 选择等待路径。compact 使用 session 的 operation_status / operation_result，assist 使用 gemini_research 的 status / result。取消功能尚未实现。
 
 Deep Research 使用 `LongOperationData` 保存上游 research/chat ID、最新状态、轮询次数和报告
 可用性。超时是本次等待的终态，不会被取消后迟到的协程结果改写；如果已经拿到上游 ID，
@@ -524,7 +537,8 @@ workflow 不引用这些 secrets，也不调用 live canary。
 | Python | >= 3.11 | 开发语言（受 `pyproject.toml` 约束） |
 | MCPServer | mcp >= 2, < 3 | MCP SDK v2 服务器框架（`@mcp.tool(annotations=...)` 注册工具） |
 | mcp-types | >= 2, < 3 | 独立协议模型、snake_case Python 字段与 wire alias |
-| gemini-webapi | >= 2.0.0, < 3 | Gemini Web API 封装（依赖 `types.RPCData`、`constants.GRPC` 等 2.x API） |
+| gemini-webapi | >= 2.1.1, < 3 | Gemini Web API 封装，含当前研究计划、报告与媒体读回接口 |
+| loguru | >= 0.7.3, < 1 | 定向抑制 SDK 认证日志，避免缓存文件名中的凭据外泄 |
 | orjson | >= 3.11.7, < 4 | 媒体和 Thinking 请求的直接 JSON 编解码依赖 |
 
 ---
@@ -534,3 +548,9 @@ workflow 不引用这些 secrets，也不调用 live canary。
 - 遵循代码风格与规范
 - 更新文档与示例
 - 测试功能完整性
+
+### 研究和媒体的完成证据
+
+研究通过持久句柄跨进程读回；只有最新轮次的上游运行证据才标为 running，只有 ready 且正文非空的文档才标为报告完成。获取报告后按策略清理，删除前已组装但若返回途中断开则正文可能无法重取。视频使用专用请求模式；视频文件和缩略图独立归类，只有预览不代表视频成功。
+
+Task 进度解析位于 infrastructure，返回有界标签、工具名和数量，精确绑定账号与回合，未知状态不推断成功。Task 计划独立于 Chat scheduled actions；只读回证据可确认写入，关联计划保护 MCP 自有线程。浏览器通过可选 WebRTC/RFB 依赖保存并校验 PNG；输入前核对精确回合、帧摘要和新 action ID，SQLite 只保存动作元数据。同一 action ID 不重放，截图不能证明网站效果，也不建立独占暂停。

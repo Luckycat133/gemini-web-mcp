@@ -33,6 +33,7 @@ TOOL_GROUP_MODULES = {
     "chat": {"core"},
     "invoke": {"core"},
     "media": {"media"},
+    "image": {"media"},
     "advanced": {"prompts", "research"},
     "manage": {"history", "account", "gems"},
     "history": {"history"},
@@ -41,6 +42,7 @@ TOOL_GROUP_MODULES = {
     "account-read": {"account"},
     "scheduled-read": {"account"},
     "scheduled-admin": {"account"},
+    "gems": {"gems"},
     "admin": {"history", "account", "gems"},
     "file": {"files"},
     "files": {"files"},
@@ -69,6 +71,7 @@ CHAT_TOOL_NAMES = {
     "gemini_list_sessions",
     "gemini_reset_session",
 }
+OPERATION_TOOL_NAMES = {"gemini_get_operation_status", "gemini_get_operation_result"}
 HISTORY_READ_TOOL_NAMES = {
     "gemini_list_chats",
     "gemini_scan_chat_history_sources",
@@ -268,6 +271,7 @@ def _configured_manage_layers(configured: list[str]) -> set[str]:
         "account-read": {"account-read"},
         "scheduled-read": {"scheduled-read"},
         "scheduled-admin": {"scheduled-read", "scheduled-write"},
+        "gems": {"gems"},
     }
     for group in configured:
         if group.startswith("manage:"):
@@ -279,6 +283,8 @@ def _configured_manage_layers(configured: list[str]) -> set[str]:
 
 def _enabled_manifest_tool_names(configured: list[str], enabled_groups: set[str]) -> set[str]:
     enabled_tools = set(MANIFEST_TOOL_NAMES) | set(COOKIE_TOOL_NAMES)
+    if enabled_groups & {"media", "research"}:
+        enabled_tools.update(OPERATION_TOOL_NAMES)
     manage_layers = _configured_manage_layers(configured)
     if manage_layers:
         enabled_tools.update(resolve_manage_tool_names(manage_layers))
@@ -302,10 +308,17 @@ def _enabled_manifest_tool_names(configured: list[str], enabled_groups: set[str]
 
 
 def _tool_availability(tool: dict[str, Any]) -> list[str]:
+    if tool["name"] in {"gemini_manage_chat", "gemini_tasks", "gemini_task_browser", "gemini_preferences",
+                        "gemini_skills", "gemini_manage_notebook"}:
+        return ["gemini-mcp-account"]
+    if tool["name"] == "gemini_run_task":
+        return ["gemini-mcp-function"]
     if tool["name"] == "gemini_get_tool_manifest":
         return ["always"]
     name = tool["name"]
     group = tool["group"]
+    if name in OPERATION_TOOL_NAMES:
+        return ["media", "image", "research", "core", "all"]
     if name in CHAT_TOOL_NAMES:
         return ["model", "chat", "core", "all"]
     if group in {"media", "files", "research"}:
@@ -361,6 +374,7 @@ def tool_manifest_payload(scope: ManifestScope = "all") -> dict[str, Any]:
         for item in TOOL_MANIFEST
         if filter_scope == "all"
         or item["group"] == filter_scope
+        or (filter_scope == "media" and item["name"] in OPERATION_TOOL_NAMES)
         or (filter_scope == "core" and item["group"] == "core")
         or (filter_scope == "notebooks" and item["name"] in NOTEBOOKS_READ_TOOL_NAMES | NOTEBOOKS_WRITE_TOOL_NAMES)
         or (filter_scope == "scheduled" and item["name"] in SCHEDULED_READ_TOOL_NAMES | SCHEDULED_WRITE_TOOL_NAMES)
@@ -455,6 +469,12 @@ def web_capabilities_payload() -> dict[str, Any]:
             "gemini_delete_chat",
         ],
         "account": [
+            "gemini_skills",
+            "gemini_manage_notebook",
+            "gemini_manage_chat",
+            "gemini_tasks",
+            "gemini_task_browser",
+            "gemini_preferences",
             "gemini_account_inventory",
             "gemini_inspect_account",
             "gemini_get_tool_manifest",
@@ -474,10 +494,12 @@ def web_capabilities_payload() -> dict[str, Any]:
             "gemini_get_tool_mode_status",
             "gemini_list_models",
         ],
-        "media": ["gemini_generate_media", "gemini_generate_music"],
+        "media": ["gemini_generate_media", "gemini_generate_music", *sorted(OPERATION_TOOL_NAMES)],
         "files": ["gemini_upload_file", "gemini_analyze_url"],
         "research": [
             "gemini_deep_research",
+            "gemini_get_operation_status",
+            "gemini_get_operation_result",
             "gemini_list_research_report_actions",
             "gemini_create_from_research_report",
         ],

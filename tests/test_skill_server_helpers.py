@@ -38,6 +38,8 @@ import json
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
+import pytest
+
 import src.skill_server as skill_server
 from src.session_manager import SessionService
 from src.skill_server import (
@@ -66,6 +68,11 @@ from src.skill_server import (
     _truncate_text,
     get_prompts,
 )
+
+
+@pytest.fixture(autouse=True)
+def _synthetic_chat_account(monkeypatch):
+    monkeypatch.setenv("GEMINI_PSID", "synthetic-chat-test-account")
 
 
 def _run(coro):
@@ -211,7 +218,7 @@ def test_compact_video_empty_result_points_to_dedicated_mode():
     assert data.state.value == "empty"
     assert result.error is not None
     assert result.error.retryable is False
-    assert "https://gemini.google.com/videos" in result.error.suggested_action
+    assert "No usable video was returned" in result.error.suggested_action
 
 
 def test_format_response_text_only():
@@ -496,6 +503,7 @@ def _patch_client_seams(monkeypatch, client=None):
     monkeypatch.setattr(skill_server, "get_gemini_client", lambda: client)
     monkeypatch.setattr(skill_server, "initialize_client", AsyncMock(return_value=None))
     monkeypatch.setattr(skill_server, "cleanup_due_remote_chats", AsyncMock(return_value=None))
+    monkeypatch.setattr(skill_server, "finalize_remote_chat_cleanup_from_response", AsyncMock(return_value=None))
 
 
 def test_chat_returns_error_when_image_path_invalid(monkeypatch):
@@ -617,7 +625,9 @@ def test_chat_top_level_exception_returns_error_text(monkeypatch):
     monkeypatch.setattr(skill_server, "schedule_remote_chat_cleanup_from_response",
                         lambda _r, source: None)
     result = _run(skill_server.chat(message="hi"))
-    assert result[0].text == "Error: network down"
+    assert result[0].text.startswith("Error: NETWORK_ERROR:")
+    assert "network down" not in result[0].text
+    assert result[0].meta["domain_result"]["error"]["code"] == "NETWORK_ERROR"
 
 
 # ---------------------------------------------------------------------------
@@ -950,6 +960,16 @@ def test_account_status_returns_unavailable_without_inspect(monkeypatch):
     client = SimpleNamespace()
     result = _run(_account_status(client))
     assert result[0].text == "account inspection unavailable"
+
+
+def test_account_status_shows_limited_unverified_sdk_status(monkeypatch):
+    from gemini_webapi.constants import AccountStatus
+
+    result = _run(_account_status(SimpleNamespace(account_status=AccountStatus.AVAILABLE)))
+    assert "account_status: AVAILABLE" in result[0].text
+    assert "account_status_code: 1000" in result[0].text
+    assert "status_evidence: sdk_cached_unverified" in result[0].text
+    assert "tier:" not in result[0].text
 
 
 def test_account_status_returns_loaded_when_summary_empty(monkeypatch):
@@ -1295,7 +1315,7 @@ def test_scheduled_main_top_level_exception(monkeypatch):
 def test_create_returns_error_when_image_invalid(monkeypatch):
     monkeypatch.setattr(skill_server, "validate_optional_image_path",
                         lambda _p: (False, None, "bad image"))
-    result = _run(skill_server.create(prompt="x"))
+    result = _run(skill_server.create(background=False, prompt="x"))
     assert result[0].text == "Error: bad image"
 
 
@@ -1306,29 +1326,62 @@ def test_compact_creation_rejects_blank_prompt_and_edit_path_before_client(monke
         lambda: (_ for _ in ()).throw(AssertionError("client must not be accessed")),
     )
     for result in (
-        _run(skill_server.create(prompt="  ")),
-        _run(skill_server.edit(image_path="reference.png", prompt="  ")),
-        _run(skill_server.edit(image_path="  ", prompt="make it blue")),
+        _run(skill_server.create(background=False, prompt="  ")),
+        _run(skill_server.edit(background=False, image_path="reference.png", prompt="  ")),
+        _run(skill_server.edit(background=False, image_path="  ", prompt="make it blue")),
     ):
         assert result[0].meta["domain_result"]["error"]["code"] == "INVALID_ARGUMENT"
 
 
-def test_compact_creation_retains_unfinished_chat(monkeypatch):
+def test_compact_creation_defers_unfinished_chat_cleanup(monkeypatch):
+    from contextlib import nullcontext
+
     response = _ns(text="queued", images=[], videos=[], media=[], status="processing", metadata=["c_pending"])
     client = SimpleNamespace(generate_content=AsyncMock(return_value=response))
+    client.video_generation_scope = nullcontext
     _patch_client_seams(monkeypatch, client)
     scheduled = []
     monkeypatch.setattr(skill_server, "validate_optional_image_path", lambda _path: (True, None, None))
     monkeypatch.setattr(
         skill_server,
-        "schedule_remote_chat_cleanup_from_response",
-        lambda _response, **kwargs: scheduled.append(kwargs),
+        "finalize_remote_chat_cleanup_from_response",
+        AsyncMock(side_effect=lambda _response, **kwargs: scheduled.append(kwargs)),
     )
 
-    result = _run(skill_server.create(prompt="a short video", type="video"))
+    result = _run(skill_server.create(background=False, prompt="a short video", type="video"))
 
     assert result[0].meta["domain_result"]["data"]["state"] == "queued"
-    assert scheduled == [{"retain_chat": True, "source": "skill_create:video"}]
+    assert scheduled == [{"retain_chat": False, "delete_after_seconds": 1800, "source": "skill_create:video:deferred"}]
+
+
+def test_compact_creation_respects_explicit_retention(monkeypatch):
+    response = _ns(text="none", images=[], videos=[], media=[], metadata=["c_a"])
+    _patch_client_seams(monkeypatch, SimpleNamespace(generate_content=AsyncMock(return_value=response)))
+    result = _run(skill_server.create(background=False, prompt="image", type="image", retain_chat=True))
+    assert result[0].meta["domain_result"]["data"]["state"] == "empty"
+    kwargs = skill_server.finalize_remote_chat_cleanup_from_response.await_args.kwargs
+    assert kwargs == {"retain_chat": True, "delete_after_seconds": None, "source": "skill_create:image"}
+
+
+def test_compact_music_uses_and_restores_primary_timeout_settings(monkeypatch):
+    captured = {}
+    client = SimpleNamespace(timeout=30.0, watchdog_timeout=90.0)
+
+    async def generate_content(**kwargs):
+        captured.update(kwargs)
+        captured["client_timeout"] = client.timeout
+        captured["watchdog"] = client.watchdog_timeout
+        return _ns(text="none", images=[], videos=[], media=[], metadata=[])
+
+    client.generate_content = generate_content
+    _patch_client_seams(monkeypatch, client)
+    _run(skill_server.create(background=False, prompt="piano", type="music"))
+    assert captured["timeout"] == 600
+    assert captured["client_timeout"] == 600
+    assert captured["watchdog"] == 600
+    assert captured["prompt"] == "Create music/audio using Gemini's music generation capability. Prompt: piano"
+    assert client.timeout == 30.0
+    assert client.watchdog_timeout == 90.0
 
 
 def test_create_top_level_exception(monkeypatch):
@@ -1338,14 +1391,14 @@ def test_create_top_level_exception(monkeypatch):
     monkeypatch.setattr(skill_server, "resolve_media_request",
                         lambda *a: (_ for _ in ()).throw(ValueError("bad media")))
     _patch_client_seams(monkeypatch, SimpleNamespace())
-    result = _run(skill_server.create(prompt="x"))
+    result = _run(skill_server.create(background=False, prompt="x"))
     assert result[0].text == "Error: bad media"
 
 
 def test_edit_returns_error_when_image_invalid(monkeypatch):
     monkeypatch.setattr(skill_server, "validate_optional_image_path",
                         lambda _p: (False, None, "bad image"))
-    result = _run(skill_server.edit(image_path="x", prompt="y"))
+    result = _run(skill_server.edit(background=False, image_path="x", prompt="y"))
     assert result[0].text == "Error: bad image"
 
 
@@ -1356,7 +1409,7 @@ def test_edit_top_level_exception(monkeypatch):
     monkeypatch.setattr(skill_server, "resolve_media_request",
                         lambda *a: (_ for _ in ()).throw(ValueError("bad model")))
     _patch_client_seams(monkeypatch, SimpleNamespace())
-    result = _run(skill_server.edit(image_path="x", prompt="y"))
+    result = _run(skill_server.edit(background=False, image_path="x", prompt="y"))
     assert result[0].text == "Error: bad model"
 
 
@@ -1437,7 +1490,9 @@ def test_session_top_level_exception(monkeypatch):
     monkeypatch.setattr(skill_server, "validate_optional_image_path",
                         lambda _p: (_ for _ in ()).throw(RuntimeError("img err")))
     result = _run(skill_server.session(action="list"))
-    assert result[0].text == "Error: img err"
+    assert result[0].text.startswith("Error: INTERNAL_ERROR:")
+    assert "img err" not in result[0].text
+    assert result[0].meta["domain_result"]["error"]["code"] == "INTERNAL_ERROR"
 
 
 # ---------------------------------------------------------------------------
@@ -1576,18 +1631,18 @@ def test_create_image_happy_path(monkeypatch):
                         })
     monkeypatch.setattr(skill_server, "schedule_remote_chat_cleanup_from_response",
                         lambda _r, source: None)
-    result = _run(skill_server.create(prompt="a cat", type="image"))
+    result = _run(skill_server.create(background=False, prompt="a cat", type="image"))
     text = result[0].text
     assert "Backend: Nano Banana 2" in text
     assert "image generated" in text
     assert "[Image 1]: http://img" in text
     kwargs = client.generate_content.call_args.kwargs
-    assert kwargs["prompt"] == "Generate image: a cat"
+    assert kwargs["prompt"] == "Generate an image. Prompt: a cat"
     assert kwargs["model"] == "gemini-3-flash"
 
 
 def test_create_music_happy_path(monkeypatch):
-    """create 生成 music：prompt 前缀为 'Create music: '。"""
+    """create 生成 music：使用与主面一致的请求提示。"""
     response = _ns(text="music done", audio_url="http://audio")
     client = SimpleNamespace(generate_content=AsyncMock(return_value=response))
     _patch_client_seams(monkeypatch, client)
@@ -1600,10 +1655,10 @@ def test_create_music_happy_path(monkeypatch):
                         })
     monkeypatch.setattr(skill_server, "schedule_remote_chat_cleanup_from_response",
                         lambda _r, source: None)
-    result = _run(skill_server.create(prompt="jazz", type="music", model="pro",
+    result = _run(skill_server.create(background=False, prompt="jazz", type="music", model="pro",
                                        thinking_level="extended"))
     kwargs = client.generate_content.call_args.kwargs
-    assert kwargs["prompt"] == "Create music: jazz"
+    assert kwargs["prompt"] == "Create music/audio using Gemini's music generation capability. Prompt: jazz"
     assert "[Audio]: http://audio" in result[0].text
 
 
@@ -1622,7 +1677,7 @@ def test_edit_happy_path(monkeypatch):
                         })
     monkeypatch.setattr(skill_server, "schedule_remote_chat_cleanup_from_response",
                         lambda _r, source: None)
-    result = _run(skill_server.edit(image_path="/tmp/x.png", prompt="make it blue"))
+    result = _run(skill_server.edit(background=False, image_path="/tmp/x.png", prompt="make it blue"))
     assert "edited" in result[0].text
     kwargs = client.generate_content.call_args.kwargs
     assert kwargs["files"] == ["/safe/path.png"]
@@ -1898,3 +1953,16 @@ def test_session_main_dispatches_send(monkeypatch):
                         lambda _cid, source, **_kwargs: None)
     result = _run(skill_server.session(action="send", session_id="s1", message="hello"))
     assert "sent" in result[0].text
+
+
+@pytest.mark.parametrize("action", ["chat", "session_create"])
+def test_compact_no_account_surfaces_auth_required_without_sending(monkeypatch, action):
+    monkeypatch.delenv("GEMINI_PSID", raising=False)
+    client = SimpleNamespace(generate_content=AsyncMock(), start_chat=lambda **kwargs: SimpleNamespace(cid=""))
+    _patch_client_seams(monkeypatch, client)
+    _patch_shared_sessions(monkeypatch)
+    monkeypatch.setattr(skill_server, "validate_optional_image_path", lambda _path: (True, None, None))
+    result = _run(skill_server.chat(message="hello") if action == "chat" else skill_server.session(action="create"))
+    assert result[0].meta["domain_result"]["error"]["code"] == "AUTH_REQUIRED"
+    assert "AUTH_REQUIRED" in result[0].text
+    client.generate_content.assert_not_awaited()

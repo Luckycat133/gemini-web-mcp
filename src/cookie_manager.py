@@ -17,6 +17,8 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterator, Optional, Tuple
 
+from .sdk_auth_logging import suppress_sdk_auth_logs
+
 logger = logging.getLogger(__name__)
 _BROWSER_COOKIE_ACCESS_LOCK = threading.Lock()
 
@@ -222,11 +224,13 @@ class CookieManager:
             "brave": browser_cookie3.brave,
         }
 
+        if browser not in cookie_functions:
+            logger.warning("不支持的浏览器: %s", browser)
+            return {}
+
         # 构建尝试列表：先指定的浏览器，再按 fallback_order 追加其余
-        tried: set[str] = set()
-        if browser in cookie_functions:
-            tried.add(browser)
-        attempt_browsers = [b for b in ([browser] if browser in cookie_functions else [])]
+        tried = {browser}
+        attempt_browsers = [browser]
         attempt_browsers += [b for b in fallback_order if b not in tried]
 
         last_error: Optional[str] = None
@@ -271,8 +275,8 @@ class CookieManager:
                 logger.warning(f"⚠️ {last_error}，Keychain 为系统级锁定，停止浏览器回退")
                 break
             except Exception as e:
-                last_error = f"{attempt_browser}: {e}"
-                logger.debug("从 %s 获取 Cookie 失败: %s", attempt_browser, e)
+                last_error = f"{attempt_browser}: {type(e).__name__}"
+                logger.debug("从 %s 获取 Cookie 失败 error_type=%s", attempt_browser, type(e).__name__)
                 continue
 
         # 所有浏览器都失败，给出明确的用户引导
@@ -333,7 +337,7 @@ class CookieManager:
                 }
             ]
         except Exception as e:
-            return [{"browser": browser, "error": str(e)}]
+            return [{"browser": browser, "error": "Browser Cookie access failed.", "error_code": "BROWSER_COOKIE_ACCESS_FAILED", "error_type": type(e).__name__}]
 
         selected_profile = CookieManager._chrome_selected_profile_directory() if browser == "chrome" else ""
         profiles = [
@@ -457,7 +461,7 @@ class CookieManager:
                         seen_profiles.add(key)
                         candidates.append((key, cookies))
             except Exception as e:
-                logger.debug("跳过 %s 自动 Cookie: %s", browser, e)
+                logger.debug("跳过 %s 自动 Cookie error_type=%s", browser, type(e).__name__)
 
             # Chrome 族浏览器：枚举 Profile 目录
             if browser in ("chrome", "chrome-beta", "edge", "brave", "opera"):
@@ -475,7 +479,7 @@ class CookieManager:
                         )
                     except Exception as e:
                         logger.debug(
-                            "跳过 %s profile %s Cookie: %s", browser, profile_name, e
+                            "跳过 %s profile %s Cookie error_type=%s", browser, profile_name, type(e).__name__
                         )
                         continue
                     if profile_cookies.get("__Secure-1PSID") or not require_psid:
@@ -509,7 +513,7 @@ class CookieManager:
                         finally:
                             conn.close()
                     except Exception as e:
-                        logger.debug("跳过 Firefox profile %s Cookie: %s", profile_name, e)
+                        logger.debug("跳过 Firefox profile %s Cookie error_type=%s", profile_name, type(e).__name__)
                         continue
                     if profile_cookies.get("__Secure-1PSID") or not require_psid:
                         seen_profiles.add(profile_name)
@@ -517,6 +521,10 @@ class CookieManager:
 
         if not candidates:
             return []
+        if browser == "chrome":
+            selected = CookieManager._chrome_selected_profile_directory()
+            if selected:
+                candidates.sort(key=lambda candidate: candidate[0] != selected)
         return candidates
 
     @staticmethod
@@ -528,7 +536,7 @@ class CookieManager:
         try:
             data = json.loads(local_state.read_text())
         except (OSError, json.JSONDecodeError) as e:
-            logger.debug("无法读取 Chrome Local State %s: %s", local_state, e)
+            logger.debug("无法读取 Chrome Local State error_type=%s", type(e).__name__)
             return ""
         profile_info = data.get("profile") if isinstance(data, dict) else {}
         if not isinstance(profile_info, dict):
@@ -588,35 +596,28 @@ class CookieManager:
             from gemini_webapi import GeminiClient
             from gemini_webapi.constants import AccountStatus
         except ImportError as e:
-            logger.warning("gemini_webapi 不可用，跳过 Chrome profile Cookie 验证: %s", e)
+            logger.warning("gemini_webapi 不可用，跳过 Chrome profile Cookie 验证 error_type=%s", type(e).__name__)
             return {}
 
-        first_available: Dict[str, str] = {}
         for profile_name, cookies in candidates:
             client = GeminiClient(cookies.get("__Secure-1PSID"), cookies.get("__Secure-1PSIDTS", ""))
             client.cookies = cookies
             try:
-                await client.init(timeout=15, auto_close=False, auto_refresh=False)
+                suppress_sdk_auth_logs()
+                await client.init(timeout=15, auto_close=False, auto_refresh=False, verbose=False)
                 if getattr(client, "account_status", None) != AccountStatus.AVAILABLE:
                     logger.debug("Chrome profile %s 的 Gemini 账号状态不可用", profile_name)
                     continue
-                if not first_available:
-                    first_available = cookies
-                scheduled_count = await CookieManager._probe_scheduled_registry_count(client)
-                if scheduled_count > 0:
-                    logger.info("✅ Chrome profile %s 的 Gemini Cookie 验证通过，定时操作 %s 条", profile_name, scheduled_count)
-                    return cookies
-                logger.debug("Chrome profile %s 可用，但定时操作 registry 为空", profile_name)
+                logger.info("✅ 浏览器 profile %s 的 Gemini Cookie 验证通过", profile_name)
+                return cookies
             except Exception as e:
-                logger.debug("Chrome profile %s 的 Gemini Cookie 验证失败: %s", profile_name, e)
+                logger.debug("Chrome profile %s 的 Gemini Cookie 验证失败 error_type=%s", profile_name, type(e).__name__)
             finally:
                 try:
                     await client.close()
                 except Exception as close_err:
-                    logger.debug("关闭验证用 client 失败: %s", close_err)
-        if first_available:
-            logger.info("✅ Chrome profile Cookie 验证通过，但未发现定时操作 registry，使用首个可用账号")
-        return first_available
+                    logger.debug("关闭验证用 client 失败 error_type=%s", type(close_err).__name__)
+        return {}
 
     @staticmethod
     async def _validate_cookie_candidate_profiles_async(candidates: list[tuple[str, Dict[str, str]]]) -> list[dict[str, object]]:
@@ -624,7 +625,7 @@ class CookieManager:
             from gemini_webapi import GeminiClient
             from gemini_webapi.constants import AccountStatus
         except Exception as e:
-            return [{"profile": profile_name, "validation_error": str(e)} for profile_name, _ in candidates]
+            return [{"profile": profile_name, "validation_error": "Cookie validation is unavailable.", "error_type": type(e).__name__} for profile_name, _ in candidates]
 
         profiles: list[dict[str, object]] = []
         for profile_name, cookies in candidates:
@@ -636,7 +637,8 @@ class CookieManager:
             client = GeminiClient(cookies.get("__Secure-1PSID"), cookies.get("__Secure-1PSIDTS", ""))
             client.cookies = cookies
             try:
-                await client.init(timeout=15, auto_close=False, auto_refresh=False)
+                suppress_sdk_auth_logs()
+                await client.init(timeout=15, auto_close=False, auto_refresh=False, verbose=False)
                 status = getattr(client, "account_status", None)
                 info["account_status"] = str(status)
                 info["account_available"] = status == AccountStatus.AVAILABLE
@@ -645,12 +647,13 @@ class CookieManager:
                     info["language"] = getattr(client, "language", "")
                     info["build_label"] = getattr(client, "build_label", "")
             except Exception as e:
-                info["validation_error"] = str(e)
+                info["validation_error"] = "Cookie validation failed."
+                info["error_type"] = type(e).__name__
             finally:
                 try:
                     await client.close()
                 except Exception as close_err:
-                    logger.debug("关闭 profile 验证 client 失败: %s", close_err)
+                    logger.debug("关闭 profile 验证 client 失败 error_type=%s", type(close_err).__name__)
             profiles.append(info)
         return profiles
 
@@ -661,7 +664,7 @@ class CookieManager:
             from .infrastructure.rpc_contracts import get_contract
             from .infrastructure.rpc_parsers import extract_rpc_bodies, parse_contract_body
         except ImportError as e:
-            logger.warning("gemini_webapi 不可用，无法探测定时操作 registry: %s", e)
+            logger.warning("gemini_webapi 不可用，无法探测定时操作 registry error_type=%s", type(e).__name__)
             return 0
 
         previous_language = getattr(client, "language", None)
@@ -677,7 +680,7 @@ class CookieManager:
             parsed = parse_contract_body(contract, bodies[0] if bodies else [])
             return len(parsed.value) if isinstance(parsed.value, list) else 0
         except Exception as e:
-            logger.debug("Chrome profile 定时操作 registry 探测失败: %s", e)
+            logger.debug("Chrome profile 定时操作 registry 探测失败 error_type=%s", type(e).__name__)
         finally:
             if previous_language:
                 client.language = previous_language
@@ -703,6 +706,8 @@ class CookieManager:
         psidts: str = "",
         source: str = "manual",
         extra_cookies: Optional[Dict[str, str]] = None,
+        notify: bool = True,
+        guard: Optional[Callable[[], bool]] = None,
     ) -> bool:
         """
         更新 Cookie
@@ -716,6 +721,8 @@ class CookieManager:
             是否更新成功
         """
         with self._lock:
+            if guard is not None and not guard():
+                return False
             if not psid:
                 logger.error("❌ PSID 不能为空")
                 return False
@@ -730,11 +737,11 @@ class CookieManager:
             
             logger.info(f"✅ Cookie 已更新 (来源: {source})")
             
-            if self.on_cookie_update:
+            if notify and self.on_cookie_update:
                 try:
                     self.on_cookie_update(self._cookie_data)
                 except Exception as e:
-                    logger.error(f"❌ Cookie 更新回调失败: {e}")
+                    logger.error("❌ Cookie 更新回调失败 error_type=%s", type(e).__name__)
             
             return True
 
@@ -841,7 +848,7 @@ class CookieManager:
                 time.sleep(self._monitor_interval)
                 
             except Exception as e:
-                logger.error(f"❌ Cookie 监控出错: {e}")
+                logger.error("❌ Cookie 监控出错 error_type=%s", type(e).__name__)
                 time.sleep(60)
 
     def start_monitor(self, interval: int = 3600) -> None:

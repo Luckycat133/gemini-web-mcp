@@ -2,30 +2,270 @@
   "format": 1,
   "sdk_major": 2,
   "surfaces": {
+    "account": [
+      {
+        "annotations_sha256": "139076388a98d13d07bb3df5c31e17088f4e37e0af35e2d89a7d5b112ee0e214",
+        "input_schema_sha256": "3cf97d3d9dc88752509068966bef60ada58fc3077b63cdd124a2b4e819479c4b",
+        "name": "gemini_account_inventory",
+        "output_schema_sha256": "274d003ce7c561cac760aedd99896871d4f66f06c5564d93bd42b9f1474e2803"
+      },
+      {
+        "annotations_sha256": "bbca3f90a8f37a2e09188309470b131134c395dbc4eccad15de06d2c2f94f06a",
+        "input_schema_sha256": "dba22d160f68e26fa0183da59bcb17ba6d9c8f1e73111da281cda07974bd779d",
+        "name": "gemini_cleanup",
+        "output_schema_sha256": "161e14bafc0891e82eb511090158d53989d73e947cf78b41d36a330d09c91b07"
+      },
+      {
+        "annotations_sha256": "99300d9e2937ba92c763822593cb3ba8ec634d1813f3ab37fad3d6d0432268f9",
+        "input_schema_sha256": "1359978ee2cba7d21640df52028e1b7e4cdd11f160ac2d96b5fc30cb00dd80f3",
+        "name": "gemini_create_scheduled_action",
+        "output_schema_sha256": "b6486fec0c8833369a3739525c933df63680389c174478f7ce028846144ff4df"
+      },
+      {
+        "annotations_sha256": "bbca3f90a8f37a2e09188309470b131134c395dbc4eccad15de06d2c2f94f06a",
+        "input_schema_sha256": "0c348280bfc08aeed67989d5d2611d00b578d298180dc4073f7093d2fabe7024",
+        "name": "gemini_delete_chat",
+        "output_schema_sha256": "a9b19c3585bf47d7b452e17ba6b1dee629657ded5e97d9a4738e93085854f3f2"
+      },
+      {
+        "annotations_sha256": "bbca3f90a8f37a2e09188309470b131134c395dbc4eccad15de06d2c2f94f06a",
+        "input_schema_sha256": "fca54d4e0823bac7d112908654c3c781f0ff9a61f94da6ca89d572c0895eebbb",
+        "name": "gemini_delete_scheduled_action",
+        "output_schema_sha256": "6ee70032a1275ac610020c8175f0791aff0e2db62b1e525a39ea38e7b8f714eb"
+      },
+      {
+        "annotations_sha256": "139076388a98d13d07bb3df5c31e17088f4e37e0af35e2d89a7d5b112ee0e214",
+        "input_schema_sha256": "9a8296d36acda269fbef8fd921eb470bfb62787d19ded44ff8ddf3ccbfe2f29a",
+        "name": "gemini_get_scheduled_action",
+        "output_schema_sha256": "6d91a258138c5b652689805354eae72773eb42e9e629ea15dd26cc7fa7f85411"
+      },
+      {
+        "annotations_sha256": "139076388a98d13d07bb3df5c31e17088f4e37e0af35e2d89a7d5b112ee0e214",
+        "input_schema_sha256": "5d0d7a5e6811825e3a0ece5afa4c33692d541b79f63a280323ab2674e7a74112",
+        "name": "gemini_history",
+        "output_schema_sha256": "2c1aae12a89642cb0b0e936a0040db170172d859a598b4a5a34489ec999e1e4f"
+      },
+      {
+        "annotations_sha256": "139076388a98d13d07bb3df5c31e17088f4e37e0af35e2d89a7d5b112ee0e214",
+        "input_schema_sha256": "ec2171cc474c46a9737e58351c1e58fe63f8595f2191c3a1ec64fc7220e86504",
+        "name": "gemini_list_scheduled_actions",
+        "output_schema_sha256": "3b1b32c3c93e1cca364acdac1f142011a69c1a0e857ee1b17b6642a4fd7ed949"
+      },
+      {
+        "annotations_sha256": "dcaac5a4c621d25a66775ac4a0115d8c69a9742eb7c877a25fdf67ae14871828",
+        "input_schema_sha256": "60886c3af747c5fc0242cab035994921fb24d45e0067ca3897eed37c6d26221b",
+        "name": "gemini_manage_chat",
+        "output_schema_sha256": "b5938074b9dd981f3882d89a07eb12fe3ad9290bfbe22c4d4989dd9d3a8d4d39"
+      },
+      {
+        "annotations_sha256": "bbca3f90a8f37a2e09188309470b131134c395dbc4eccad15de06d2c2f94f06a",
+        "input_schema_sha256": "479307d106d1373934ac66d672e9ba7829b12dee33e151ec487122b0a0f029c9",
+        "name": "gemini_manage_gems",
+        "output_schema_sha256": "f9c808eef450920e9060ce620c528483c2330068eaabf819ab5d3c4a120539e7"
+      },
+      {
+        "annotations_sha256": "bbca3f90a8f37a2e09188309470b131134c395dbc4eccad15de06d2c2f94f06a",
+        "input_schema_sha256": "39582f20f9701ae6c6af7346cdb50132857a22b781d8260d57c484a0c3afb5b0",
+        "name": "gemini_manage_notebook",
+        "output_schema_sha256": "9cc3e026eb3ba17a96813056194f99de06f1fe31c0e0dfca66899761c5341b0f"
+      },
+      {
+        "annotations_sha256": "99300d9e2937ba92c763822593cb3ba8ec634d1813f3ab37fad3d6d0432268f9",
+        "input_schema_sha256": "48c2535aa29f607c5bf723b2d0f04ea8b2d8d0f560a8cefedcb914c891d03a7b",
+        "name": "gemini_move_chat_to_notebook",
+        "output_schema_sha256": "627dbd0d389ac2d65159d99a5418f4e2fed62dda65a1129ebebac664e0e235a0"
+      },
+      {
+        "annotations_sha256": "139076388a98d13d07bb3df5c31e17088f4e37e0af35e2d89a7d5b112ee0e214",
+        "input_schema_sha256": "f39cf61d6d62deac5d5720b2ebae6bf54e6eac2ab68c92070654f5c7b19dd32b",
+        "name": "gemini_notebooks",
+        "output_schema_sha256": "9e9402e867b60c84a7b633a4f3fc4053f7f35ed4de6eafc2ae47b160b904d06d"
+      },
+      {
+        "annotations_sha256": "99300d9e2937ba92c763822593cb3ba8ec634d1813f3ab37fad3d6d0432268f9",
+        "input_schema_sha256": "7f98bfa0b28be9e5a82497d58f49179c1583f212a544b9811b190a0d707bb61d",
+        "name": "gemini_preferences",
+        "output_schema_sha256": "4ae266acc0d2027e23e4b4827d692ba00325c0d8a4ef2e6087d2a9df9e5888da"
+      },
+      {
+        "annotations_sha256": "bbca3f90a8f37a2e09188309470b131134c395dbc4eccad15de06d2c2f94f06a",
+        "input_schema_sha256": "c83d24778e0b6b59df2ce480eb710a1df01a6f12c23b27ec4f53c5ea280c5006",
+        "name": "gemini_skills",
+        "output_schema_sha256": "b3af3adc91c209789f4c36b140712956936ad551a2f7ee65b96207a29f3449bf"
+      },
+      {
+        "annotations_sha256": "bbca3f90a8f37a2e09188309470b131134c395dbc4eccad15de06d2c2f94f06a",
+        "input_schema_sha256": "21e199c02c3dd6bfcbd994290a87df087c1ef6a4e1ddce6d957cd68691c49eb0",
+        "name": "gemini_task_browser",
+        "output_schema_sha256": "4e478311090bed893e683cd07872c1b7d2abc8df201cbc5c8b2e243e52a8e8ba"
+      },
+      {
+        "annotations_sha256": "bbca3f90a8f37a2e09188309470b131134c395dbc4eccad15de06d2c2f94f06a",
+        "input_schema_sha256": "362c586c153d4c4b3d864cf025869fee169ed03f42b160439269ee08b417bec6",
+        "name": "gemini_tasks",
+        "output_schema_sha256": "8151bbc57a0292ad7708478bc0da3e7ff2c1e9462167a831c437be3d4e491590"
+      }
+    ],
+    "assist": [
+      {
+        "annotations_sha256": "99300d9e2937ba92c763822593cb3ba8ec634d1813f3ab37fad3d6d0432268f9",
+        "input_schema_sha256": "15aaf2a984692a305158ef12281451c52580cf0fc43b3928560e50d85461fef4",
+        "name": "gemini_ask",
+        "output_schema_sha256": "be68ce03fb96679d72b227c30eabbee2c0035b13c225556c9c9eb59ea03663c8"
+      },
+      {
+        "annotations_sha256": "bbca3f90a8f37a2e09188309470b131134c395dbc4eccad15de06d2c2f94f06a",
+        "input_schema_sha256": "14c955598c272d370c74c0171dae329db34465c72842964420f608940bb5cce2",
+        "name": "gemini_research",
+        "output_schema_sha256": "58d1366f703631472120011283d76743a595309ff03cfbfd12d651aaba0d123f"
+      },
+      {
+        "annotations_sha256": "99300d9e2937ba92c763822593cb3ba8ec634d1813f3ab37fad3d6d0432268f9",
+        "input_schema_sha256": "68f461cd48eb749097b89f0d58a54b481f632ee8c001ef8b01d3d465a08fce88",
+        "name": "gemini_search",
+        "output_schema_sha256": "d3534859fde2c3dd9df7eecabd081e228c6a11fe67190edbf3a6d8df184f07c8"
+      },
+      {
+        "annotations_sha256": "99300d9e2937ba92c763822593cb3ba8ec634d1813f3ab37fad3d6d0432268f9",
+        "input_schema_sha256": "6465b18d66ad9e30e6d595dda7bb1ad98094f87370fc59caa408fba2c1806f93",
+        "name": "gemini_understand",
+        "output_schema_sha256": "37a38e5f0b607863c11947a36ab6a8cef5432a73c977b66852f6d020cad8027a"
+      },
+      {
+        "annotations_sha256": "99300d9e2937ba92c763822593cb3ba8ec634d1813f3ab37fad3d6d0432268f9",
+        "input_schema_sha256": "19781fcc08ae6f7eaf8d903383c1683cc34748d32e96900f571783e2853a5e13",
+        "name": "gemini_understand_image",
+        "output_schema_sha256": "6e05dd12886a800f2d0852af30e2c4fe7402490cb5a1fb5764be348da6b02ab5"
+      }
+    ],
     "compact": [
       {
         "annotations_sha256": "99300d9e2937ba92c763822593cb3ba8ec634d1813f3ab37fad3d6d0432268f9",
-        "input_schema_sha256": "091d749a3352818ffb2eb309b3391e0553d0b7a9e49fafe79f859a276a7da9a2",
+        "input_schema_sha256": "62d8dc5b811091734a112808b7e5d87fedda085f2e9ee116aca86401aec772dc",
         "name": "chat",
         "output_schema_sha256": "193fff0ccd6623bb7c0c4609e4a150dae6290d0a52df2bf7a060617db64046ef"
       },
       {
         "annotations_sha256": "99300d9e2937ba92c763822593cb3ba8ec634d1813f3ab37fad3d6d0432268f9",
-        "input_schema_sha256": "310882a3a9183ac5608445c6aba4dee56c5aebd8f9a878222587af55aadf272b",
+        "input_schema_sha256": "ce3f9ceeabef6ab11902836516f092c3d9c9780f718fd4bbb991b2d19eb7bde9",
         "name": "create",
         "output_schema_sha256": "c40a6fff545524312dd4e529c51ac7cd310d11ca071bfceb8a39cd55c889e265"
       },
       {
         "annotations_sha256": "99300d9e2937ba92c763822593cb3ba8ec634d1813f3ab37fad3d6d0432268f9",
-        "input_schema_sha256": "68ad131c3ad8ba5f97f25bf1adf88425e88fdaebc14d9b1d15f24ffe409803ee",
+        "input_schema_sha256": "68d3c6820ec1456bedb383d7de54a3620dffbb0ee95f48c630811a6e07b69954",
         "name": "edit",
         "output_schema_sha256": "776d3e93fe436d056231d4ef9b7a3f550af7bb6c26b7140eac5fba6db522265b"
       },
       {
         "annotations_sha256": "bbca3f90a8f37a2e09188309470b131134c395dbc4eccad15de06d2c2f94f06a",
-        "input_schema_sha256": "9432b28adfc5e7246152b3fc12ad489db7c90c3e599a1a2ee65227b179c9c4d1",
+        "input_schema_sha256": "8c3a5c0078f860535ebda4737add005ce533035ec467e9fa719fc4c8bfc86c21",
         "name": "session",
         "output_schema_sha256": "c3805d4d99092e9f4a1bb69def3c63b8146b38554d51f041b2a7026e3164eb45"
+      }
+    ],
+    "function": [
+      {
+        "annotations_sha256": "99300d9e2937ba92c763822593cb3ba8ec634d1813f3ab37fad3d6d0432268f9",
+        "input_schema_sha256": "ddb2a0af3494788a3d44d6f0ea5ad6c6e9a02eb461a4d929e3250b7dfb9d7c58",
+        "name": "gemini_ask",
+        "output_schema_sha256": "6515907fc0042812e45160fd9a674ed4b10f839527d7de7880178edd9b46c96c"
+      },
+      {
+        "annotations_sha256": "d72d3cb182e3d7fcf0b1c6782251eee772cdf2a99470e1a4bd6a006b5c8f4e25",
+        "input_schema_sha256": "19b9a020857931e73b299e0fdf9cbc9faba6f20b7fc8f400734fca7744387fa2",
+        "name": "gemini_create_from_research_report",
+        "output_schema_sha256": "9052088a35c9bdf3c71225d2d0ab22c6191b5e31f0d7aeef4ff98907008d3f01"
+      },
+      {
+        "annotations_sha256": "99300d9e2937ba92c763822593cb3ba8ec634d1813f3ab37fad3d6d0432268f9",
+        "input_schema_sha256": "8402710be54e69abc65c7dc77e06ebe4eb3d6af4f769951df999e5f885f80ee7",
+        "name": "gemini_edit_image",
+        "output_schema_sha256": "afe08f19c707219f6551d7c89a4bb4524416cef9b6584817e701ccaee9aca5fb"
+      },
+      {
+        "annotations_sha256": "99300d9e2937ba92c763822593cb3ba8ec634d1813f3ab37fad3d6d0432268f9",
+        "input_schema_sha256": "46312840eaf911f7647d74741f166e828d76b2f76333e7a0adf5facc6e8f119d",
+        "name": "gemini_generate_image",
+        "output_schema_sha256": "09f03a09317c4abeab0c19e0c4de6f2b023c59032169df08b4a325f317f0b25a"
+      },
+      {
+        "annotations_sha256": "99300d9e2937ba92c763822593cb3ba8ec634d1813f3ab37fad3d6d0432268f9",
+        "input_schema_sha256": "4131a72a01936c39e40fb78beea100f170bdf6538063baed1d682736f762917c",
+        "name": "gemini_generate_music",
+        "output_schema_sha256": "0d009c26a4e72338fb4419a2f50055499a98dc7480ccaed283b17a6c830a5df5"
+      },
+      {
+        "annotations_sha256": "99300d9e2937ba92c763822593cb3ba8ec634d1813f3ab37fad3d6d0432268f9",
+        "input_schema_sha256": "327cf3d29b0fc22c5a255aaec3f96788b10f6e497cc540494ba519c60238c97a",
+        "name": "gemini_generate_video",
+        "output_schema_sha256": "d9f153dc1fecce17d30172cd51b3927c1c5c9165c6c08c718549b07788ab1af5"
+      },
+      {
+        "annotations_sha256": "bbca3f90a8f37a2e09188309470b131134c395dbc4eccad15de06d2c2f94f06a",
+        "input_schema_sha256": "f8560301a00ecacb4261385bdda0f0e4cbc3d5fce9d28fd4ea2c9ebf25fe357c",
+        "name": "gemini_get_operation_result",
+        "output_schema_sha256": "34b093b77503792b636581b07c8bcd1a213f8698c6415e717469b0c2f1a91811"
+      },
+      {
+        "annotations_sha256": "139076388a98d13d07bb3df5c31e17088f4e37e0af35e2d89a7d5b112ee0e214",
+        "input_schema_sha256": "4a39c82afc874dc284a35d69e9adbf534b6f1654eaf6cd444b73358206abd657",
+        "name": "gemini_get_operation_status",
+        "output_schema_sha256": "e9553f96ddbbcec2ee83dd2b95873797f8cb4d1dbfb2184a7b24e3a37e53fcec"
+      },
+      {
+        "annotations_sha256": "139076388a98d13d07bb3df5c31e17088f4e37e0af35e2d89a7d5b112ee0e214",
+        "input_schema_sha256": "848ebaf3a1561d190cf19df23a7dfd14483e7f6009fd5b35f73d76b05e9f111b",
+        "name": "gemini_list_research_report_actions",
+        "output_schema_sha256": "5d2a13058e75cb2972f181b599022a0b8890b7762dd8afef4a0956bdee25572e"
+      },
+      {
+        "annotations_sha256": "ae78503371695cf7d7b89784165a967b2135219ecf6527f06a2c1c73d05c6ae6",
+        "input_schema_sha256": "70ae73cc2e269428a9aac8cb33a3dfb143c183769f10110762f373abb1f56959",
+        "name": "gemini_list_sessions",
+        "output_schema_sha256": "54badddf73e42cf3e3d8c3f4fb8f4ef58b1262ef9115e8ccfeb0a3c1cceecb1a"
+      },
+      {
+        "annotations_sha256": "bbca3f90a8f37a2e09188309470b131134c395dbc4eccad15de06d2c2f94f06a",
+        "input_schema_sha256": "14c955598c272d370c74c0171dae329db34465c72842964420f608940bb5cce2",
+        "name": "gemini_research",
+        "output_schema_sha256": "58d1366f703631472120011283d76743a595309ff03cfbfd12d651aaba0d123f"
+      },
+      {
+        "annotations_sha256": "bbca3f90a8f37a2e09188309470b131134c395dbc4eccad15de06d2c2f94f06a",
+        "input_schema_sha256": "a1924294b00786bd68867a084327a36eaff5ee231b3faa9d68b7a79252ce8c1a",
+        "name": "gemini_reset_session",
+        "output_schema_sha256": "d77c3d1a7d4a7268c704877077abf6eb4182173d7368bad956805ebf3eeaaad9"
+      },
+      {
+        "annotations_sha256": "bbca3f90a8f37a2e09188309470b131134c395dbc4eccad15de06d2c2f94f06a",
+        "input_schema_sha256": "4fbe29b418006a904c78f7a201a5ee255a3fe8411bfc3aebf9689fceb7d886ca",
+        "name": "gemini_run_task",
+        "output_schema_sha256": "bfd19632af367c90e1a03975fe2fdb67e1e44c2d390d1cf3639bf24d89c9dd68"
+      },
+      {
+        "annotations_sha256": "99300d9e2937ba92c763822593cb3ba8ec634d1813f3ab37fad3d6d0432268f9",
+        "input_schema_sha256": "63ba0d388b1c06ff4eabbc9d34602429170f37d6bb0286eb82df98df7d990365",
+        "name": "gemini_send_message",
+        "output_schema_sha256": "a3fd971094c2d88cb29d61983f649706801b18b6a0540772901099cd3754783e"
+      },
+      {
+        "annotations_sha256": "99300d9e2937ba92c763822593cb3ba8ec634d1813f3ab37fad3d6d0432268f9",
+        "input_schema_sha256": "575d603c87087bfaefc9bc0503af0c8b7bd5f3e004b1a3c8269f320909a5b895",
+        "name": "gemini_start_chat",
+        "output_schema_sha256": "2829e0fa10e205b81f8959594c234c41bfaaefeaca02dd94c665915f110c632c"
+      },
+      {
+        "annotations_sha256": "99300d9e2937ba92c763822593cb3ba8ec634d1813f3ab37fad3d6d0432268f9",
+        "input_schema_sha256": "6465b18d66ad9e30e6d595dda7bb1ad98094f87370fc59caa408fba2c1806f93",
+        "name": "gemini_understand",
+        "output_schema_sha256": "37a38e5f0b607863c11947a36ab6a8cef5432a73c977b66852f6d020cad8027a"
+      },
+      {
+        "annotations_sha256": "99300d9e2937ba92c763822593cb3ba8ec634d1813f3ab37fad3d6d0432268f9",
+        "input_schema_sha256": "19781fcc08ae6f7eaf8d903383c1683cc34748d32e96900f571783e2853a5e13",
+        "name": "gemini_understand_image",
+        "output_schema_sha256": "6e05dd12886a800f2d0852af30e2c4fe7402490cb5a1fb5764be348da6b02ab5"
       }
     ],
     "primary:model": [
@@ -91,7 +331,7 @@
       },
       {
         "annotations_sha256": "99300d9e2937ba92c763822593cb3ba8ec634d1813f3ab37fad3d6d0432268f9",
-        "input_schema_sha256": "25911a23ebd4a3fb5e68595c9920d5152ccaa223e4e1298628ed62aabae66f0a",
+        "input_schema_sha256": "63ba0d388b1c06ff4eabbc9d34602429170f37d6bb0286eb82df98df7d990365",
         "name": "gemini_send_message",
         "output_schema_sha256": "a3fd971094c2d88cb29d61983f649706801b18b6a0540772901099cd3754783e"
       },

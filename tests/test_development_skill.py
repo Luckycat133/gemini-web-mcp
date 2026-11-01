@@ -46,7 +46,7 @@ def test_development_skill_frontmatter_and_progressive_disclosure() -> None:
 
     assert re.search(r"^name: gemini-web-mcp-development$", frontmatter, re.MULTILINE)
     assert re.search(r"^description: .+Use for .+$", frontmatter, re.MULTILINE)
-    assert "three focused agent capability products" in frontmatter
+    assert "two focused business tool surfaces" in frontmatter
     assert "scope: development" in frontmatter
     assert 'version: "0.2.1"' in frontmatter
     assert len(lines) < 500
@@ -73,34 +73,15 @@ def test_development_skill_defines_focused_products_and_tool_catalogs() -> None:
     text = _all_text(PUBLIC_SKILL)
 
     for required in (
-        "gemini-assist",
-        "gemini-create",
-        "gemini-account",
-        "gemini-mcp-assist",
-        "gemini-mcp-create",
-        "gemini-mcp-account",
-        "gemini_assist_mcp",
-        "gemini_create_mcp",
-        "gemini_account_mcp",
-        "gemini_ask",
-        "gemini_search",
-        "gemini_understand_image",
-        "gemini_understand",
-        "gemini_research",
-        "gemini_generate_image",
-        "gemini_edit_image",
-        "gemini_generate_video",
-        "gemini_generate_music",
-        "gemini_get_operation_status",
-        "gemini_get_operation_result",
-        "gemini_cancel_operation",
-        "gemini_history",
-        "gemini_notebooks",
-        "gemini_scheduled",
-        "gemini_gems",
-        "gemini_prompts",
-        "gemini_account",
-        "gemini_cleanup",
+        "gemini-mcp-function", "gemini-mcp-account", "gemini-mcp-assist",
+        "gemini_ask", "gemini_search", "gemini_understand_image", "gemini_understand", "gemini_research",
+        "gemini_start_chat", "gemini_send_message", "gemini_list_sessions", "gemini_reset_session",
+        "gemini_generate_image", "gemini_edit_image", "gemini_generate_video", "gemini_generate_music",
+        "gemini_get_operation_status", "gemini_get_operation_result",
+        "gemini_list_research_report_actions", "gemini_create_from_research_report",
+        "gemini_history", "gemini_delete_chat", "gemini_notebooks", "gemini_move_chat_to_notebook",
+        "gemini_account_inventory", "gemini_list_scheduled_actions", "gemini_get_scheduled_action",
+        "gemini_create_scheduled_action", "gemini_delete_scheduled_action", "gemini_manage_gems", "gemini_cleanup",
     ):
         assert required in text
 
@@ -143,11 +124,9 @@ def test_development_skill_keeps_settled_decisions_out_of_owner_questions() -> N
     roadmap = (PUBLIC_SKILL / "references" / "roadmap.md").read_text(encoding="utf-8")
 
     assert "Settled Product Decisions" in skill
-    assert "Package A — Task-First Compatibility Skill" in roadmap
-    assert "Package B — `gemini-assist`" in roadmap
-    assert "Package C — `gemini-create` Image Vertical Slice" in roadmap
-    assert "Package D — Shared SQLite OperationService" in roadmap
-    assert "Package F — `gemini-account`" in roadmap
+    assert "gemini-mcp-function" in roadmap
+    assert "gemini-mcp-account" in roadmap
+    assert "MCP-owned ledger" in roadmap
     assert "Remaining Owner Choice" in roadmap
     assert "The remaining owner-level choice is the first officially supported client/OS/distribution matrix" in skill
     assert "Next Monotonic Python Package Release" not in roadmap

@@ -20,10 +20,20 @@ timeout 关键字），FakeClient 用 *args + **kwargs 捕获。包在 asyncio.w
 
 import asyncio
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
+import pytest
 from src.adapters.mcp_sdk import MCPServer
 
 import src.tools.file as file_tools
+from src.domain import CleanupObservation, CleanupState
+
+
+@pytest.fixture(autouse=True)
+def synthetic_cleanup_seams(monkeypatch):
+    monkeypatch.setattr(file_tools, 'current_account_key', lambda: 'test-account')
+    monkeypatch.setattr(file_tools, 'schedule_remote_chat_cleanup',
+                        lambda cid, **_kwargs: CleanupObservation(state=CleanupState.PENDING, upstream_chat_id=cid))
 
 
 # ---------------------------------------------------------------------------
@@ -75,7 +85,7 @@ def _patch_file_client_env(monkeypatch, client, *, captured_schedule=None,
             captured_cleanup.append(client_arg)
     monkeypatch.setattr(file_tools, "cleanup_due_remote_chats", fake_cleanup)
 
-    def fake_schedule(response, *, retain_chat, delete_after_seconds, source):
+    async def fake_schedule(response, *, retain_chat, delete_after_seconds, source):
         if captured_schedule is not None:
             captured_schedule.append({
                 "response": response,
@@ -83,13 +93,60 @@ def _patch_file_client_env(monkeypatch, client, *, captured_schedule=None,
                 "delete_after_seconds": delete_after_seconds,
                 "source": source,
             })
-    monkeypatch.setattr(file_tools, "schedule_remote_chat_cleanup_from_response", fake_schedule)
+    monkeypatch.setattr(file_tools, "finalize_remote_chat_cleanup_from_response", fake_schedule)
 
 
 def _make_mcp():
     mcp = MCPServer("test")
     file_tools.register_file_tools(mcp)
     return mcp
+
+
+@pytest.mark.parametrize("tool", ["gemini_upload_file", "gemini_analyze_url"])
+@pytest.mark.parametrize("failure", [RuntimeError, asyncio.CancelledError])
+def test_file_response_interruption_persists_cleanup(monkeypatch, tmp_path, tool, failure):
+    source = tmp_path / "input.txt"
+    source.write_text("test")
+    client = _FakeFileClient()
+    _patch_file_client_env(monkeypatch, client)
+    scheduled = []
+    monkeypatch.setattr(file_tools, "_response_result_text", lambda _response: (_ for _ in ()).throw(failure()))
+    def schedule(cid, **kwargs):
+        scheduled.append((cid, kwargs))
+        return CleanupObservation(state=CleanupState.PENDING, upstream_chat_id=cid)
+    monkeypatch.setattr(file_tools, "schedule_remote_chat_cleanup", schedule)
+    mcp = _make_mcp()
+    args = {"file_path": str(source)} if tool == "gemini_upload_file" else {"url": "https://example.com"}
+
+    async def run():
+        return await _call_tool(mcp, tool, **args)
+
+    if failure is asyncio.CancelledError:
+        with pytest.raises(asyncio.CancelledError):
+            asyncio.run(run())
+    else:
+        asyncio.run(run())
+    assert scheduled == [("c_file1", {"retain_chat": False, "delete_after_seconds": 1800,
+                                      "source": f"{tool}:in_progress", "_owner_account": "test-account"})]
+
+
+def test_cancelled_file_result_leaves_durable_cleanup_after_loop_exit(monkeypatch, tmp_path):
+    from src.remote_chat_cleanup_manager import RemoteChatCleanupManager
+
+    db = tmp_path / "interrupted.sqlite3"
+    manager = RemoteChatCleanupManager(store_path=db, account_key_provider=lambda: "test-account")
+    source = tmp_path / "input.txt"
+    source.write_text("test")
+    _patch_file_client_env(monkeypatch, _FakeFileClient())
+    monkeypatch.setattr(file_tools, "_response_result_text",
+                        lambda _response: (_ for _ in ()).throw(asyncio.CancelledError()))
+    monkeypatch.setattr(file_tools, "schedule_remote_chat_cleanup", manager.schedule_cleanup_result)
+    mcp = _make_mcp()
+    with pytest.raises(asyncio.CancelledError):
+        asyncio.run(_call_tool(mcp, "gemini_upload_file", file_path=str(source), delete_after_seconds=60))
+
+    restarted = RemoteChatCleanupManager(store_path=db, account_key_provider=lambda: "test-account")
+    assert "c_file1" in restarted.list_pending_cleanup()
 
 
 # ---------------------------------------------------------------------------
@@ -102,7 +159,7 @@ def test_upload_file_invalid_path_short_circuits_before_client(monkeypatch):
     def explode():
         raise AssertionError("get_gemini_client should not be called on invalid path")
     monkeypatch.setattr(file_tools, "get_gemini_client", explode)
-    monkeypatch.setattr(file_tools, "schedule_remote_chat_cleanup_from_response",
+    monkeypatch.setattr(file_tools, "finalize_remote_chat_cleanup_from_response",
                         lambda *a, **kw: None)
 
     mcp = _make_mcp()
@@ -331,7 +388,7 @@ def test_upload_file_timeout_keeps_failed_artifact_contract(monkeypatch, tmp_pat
 
 
 def test_upload_file_generic_exception_returns_error_message(monkeypatch, tmp_path):
-    """generate_content 抛通用异常 → 返回 '❌ Error: {e}'。"""
+    """Raw upstream exception details do not appear in tool text."""
     target = tmp_path / "f.txt"
     target.write_bytes(b"x")
     client = _FakeFileClient(raise_exc=RuntimeError("network down"))
@@ -343,7 +400,7 @@ def test_upload_file_generic_exception_returns_error_message(monkeypatch, tmp_pa
         return await _call_tool(mcp, "gemini_upload_file", file_path=str(target))
 
     result = asyncio.run(run())
-    assert "❌ Error: network down" in result[0].text
+    assert "文件分析失败" in result[0].text and "network down" not in result[0].text
 
 
 def test_upload_file_exception_skips_schedule_cleanup(monkeypatch, tmp_path):
@@ -373,7 +430,7 @@ def test_analyze_url_invalid_url_short_circuits_before_client(monkeypatch):
     def explode():
         raise AssertionError("get_gemini_client should not be called on invalid url")
     monkeypatch.setattr(file_tools, "get_gemini_client", explode)
-    monkeypatch.setattr(file_tools, "schedule_remote_chat_cleanup_from_response",
+    monkeypatch.setattr(file_tools, "finalize_remote_chat_cleanup_from_response",
                         lambda *a, **kw: None)
 
     mcp = _make_mcp()
@@ -563,7 +620,7 @@ def test_analyze_url_timeout_returns_timeout_message(monkeypatch):
 
 
 def test_analyze_url_generic_exception_returns_error_message(monkeypatch):
-    """generate_content 抛通用异常 → 返回 '❌ Error: {e}'。"""
+    """Raw upstream exception details do not appear in tool text."""
     client = _FakeFileClient(raise_exc=ValueError("bad url response"))
     _patch_file_client_env(monkeypatch, client)
 
@@ -573,4 +630,117 @@ def test_analyze_url_generic_exception_returns_error_message(monkeypatch):
         return await _call_tool(mcp, "gemini_analyze_url", url="https://x.com")
 
     result = asyncio.run(run())
-    assert "❌ Error: bad url response" in result[0].text
+    assert "URL 分析失败" in result[0].text and "bad url response" not in result[0].text
+
+
+@pytest.mark.parametrize('url', ['ftp://example.test/file', 'file://example.test/path',
+                                  'https://user:secret@example.test/', 'https://example.test:bad/'])
+def test_analyze_url_rejects_unsupported_or_invalid_urls_before_client(monkeypatch, url):
+    monkeypatch.setattr(file_tools, 'get_gemini_client', lambda: (_ for _ in ()).throw(AssertionError('no init')))
+    mcp = _make_mcp()
+    result = asyncio.run(_call_tool(mcp, 'gemini_analyze_url', url=url))
+    assert result[0].meta['domain_result']['error']['code'] == 'INVALID_ARGUMENT'
+
+
+@pytest.mark.parametrize('tool', ['gemini_upload_file', 'gemini_analyze_url'])
+def test_file_tools_initializer_error_is_typed(monkeypatch, tmp_path, tool):
+    target = tmp_path / 'input.txt'
+    target.write_text('synthetic')
+    monkeypatch.setattr(file_tools, 'get_gemini_client', lambda: object())
+    monkeypatch.setattr(file_tools, 'initialize_client', AsyncMock(side_effect=PermissionError('synthetic credential')))
+    mcp = _make_mcp()
+    kwargs = {'file_path': str(target)} if tool == 'gemini_upload_file' else {'url': 'https://example.test/'}
+    result = asyncio.run(_call_tool(mcp, tool, **kwargs))
+    domain = result[0].meta['domain_result']
+    assert domain['ok'] is False and domain['error']['code'] == 'AUTH_REQUIRED'
+    assert 'synthetic credential' not in result[0].text
+
+
+@pytest.mark.parametrize('tool', ['gemini_upload_file', 'gemini_analyze_url'])
+@pytest.mark.parametrize('failure', [RuntimeError, asyncio.CancelledError])
+@pytest.mark.parametrize('retain', [False, True])
+def test_early_identity_survives_sdk_rollback_and_failure(monkeypatch, tmp_path, tool, failure, retain):
+    from src.remote_chat_cleanup_manager import RemoteChatCleanupManager
+    from src.thinking_client import _ObservedChatSession
+    db = tmp_path / 'early.sqlite3'
+    manager = RemoteChatCleanupManager(store_path=db, account_key_provider=lambda: 'test-account')
+    target = tmp_path / 'input.txt'
+    target.write_text('synthetic')
+    calls = []
+    class Client:
+        def create_cleanup_chat(self):
+            return _ObservedChatSession(geminiclient=self)
+        async def generate_content(self, _prompt, **kwargs):
+            calls.append('sent')
+            chat = kwargs['chat']
+            chat.cid = 'c_early'
+            chat.cid = ''  # SDK rolls metadata back before propagating.
+            raise failure('synthetic')
+    _patch_file_client_env(monkeypatch, Client())
+    monkeypatch.setattr(file_tools, 'schedule_remote_chat_cleanup', manager.schedule_cleanup_result)
+    finalizer = AsyncMock()
+    monkeypatch.setattr(file_tools, 'finalize_remote_chat_cleanup_from_response', finalizer)
+    args = {'file_path': str(target)} if tool == 'gemini_upload_file' else {'url': 'https://example.test/'}
+    args.update(retain_chat=retain, delete_after_seconds=20)
+    if failure is asyncio.CancelledError:
+        with pytest.raises(asyncio.CancelledError):
+            asyncio.run(_call_tool(_make_mcp(), tool, **args))
+    else:
+        result = asyncio.run(_call_tool(_make_mcp(), tool, **args))
+        assert not result[0].meta['domain_result']['ok']
+    with manager._store._connect() as db:
+        row = db.execute('select state,delete_at from cleanup where chat_id=?', ('c_early',)).fetchone()
+    assert row is not None and row['state'] == ('retained' if retain else 'pending')
+    if not retain:
+        import time
+        assert row['delete_at'] - time.time() > 1700
+    assert calls == ['sent']
+    finalizer.assert_not_awaited()
+
+
+def test_early_identity_remains_bound_to_request_account_after_switch(monkeypatch):
+    from src.services.cleanup_scope import observe_upstream_identity
+    account = ['account-a']
+    records = []
+    class Client:
+        def create_cleanup_chat(self):
+            return SimpleNamespace(cid='', metadata=[])
+        async def generate_content(self, _prompt, **kwargs):
+            chat = kwargs['chat']
+            account[0] = 'account-b'
+            chat.cid, chat.metadata = 'c_late', ['c_late']
+            observe_upstream_identity(chat)
+            return SimpleNamespace(text='answer', images=[], videos=[], media=[], metadata=['c_late'])
+    _patch_file_client_env(monkeypatch, Client())
+    monkeypatch.setattr(file_tools, 'current_account_key', lambda: account[0])
+    def schedule(cid, **kwargs):
+        records.append((cid, kwargs))
+        return CleanupObservation(state=CleanupState.PENDING, upstream_chat_id=cid)
+    monkeypatch.setattr(file_tools, 'schedule_remote_chat_cleanup', schedule)
+    finalizer = AsyncMock()
+    monkeypatch.setattr(file_tools, 'finalize_remote_chat_cleanup_from_response', finalizer)
+    result = asyncio.run(_call_tool(_make_mcp(), 'gemini_analyze_url', url='https://example.test/'))
+    assert result[0].meta['domain_result']['error']['code'] == 'AUTH_REQUIRED'
+    assert len(records) == 1 and records[0][1]['_owner_account'] == 'account-a'
+    finalizer.assert_not_awaited()
+
+
+def test_early_cleanup_registration_failure_is_reported(monkeypatch):
+    from src.services.cleanup_scope import observe_upstream_identity
+    class Client:
+        def create_cleanup_chat(self):
+            return SimpleNamespace(cid='', metadata=[])
+        async def generate_content(self, _prompt, **kwargs):
+            chat = kwargs['chat']
+            chat.cid = 'c_unregistered'
+            observe_upstream_identity(chat)
+            chat.cid = ''
+            raise RuntimeError('synthetic')
+    _patch_file_client_env(monkeypatch, Client())
+    monkeypatch.setattr(file_tools, 'schedule_remote_chat_cleanup', lambda *_a, **_kw:
+                        CleanupObservation(state=CleanupState.FAILED, upstream_chat_id='c_unregistered'))
+    result = asyncio.run(_call_tool(_make_mcp(), 'gemini_analyze_url', url='https://example.test/'))
+    domain = result[0].meta['domain_result']
+    assert not domain['ok']
+    assert any(w['code'] == 'cleanup_registration_unverified' for w in domain['warnings'])
+    assert domain['meta']['details']['cleanup_registration_failed_chat_ids'] == ['c_unregistered']

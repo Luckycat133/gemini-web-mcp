@@ -18,6 +18,7 @@ ON_DEMAND_TOOL_GROUPS: dict[str, list[str]] = {
     "scheduled": ["manage:scheduled-read", "manage:scheduled-write"],
     "notebooks": ["manage:notebooks-read", "manage:notebooks-write"],
     "prompts": ["prompts"],
+    "gems": ["manage:gems"],
 }
 
 # 向后兼容的分组别名
@@ -38,8 +39,8 @@ TOOL_GROUP_ALIASES: dict[str, list[str]] = {
     "account-read": ["account"],
     "scheduled-read": ["scheduled"],
     "scheduled-admin": ["scheduled"],
-    "admin": ["history", "account", "scheduled", "notebooks", "prompts"],
-    "all": ["chat", "media", "file", "research", "history", "account", "scheduled", "notebooks", "prompts"],
+    "admin": ["history", "account", "scheduled", "notebooks", "prompts", "gems"],
+    "all": ["chat", "media", "file", "research", "history", "account", "scheduled", "notebooks", "prompts", "gems"],
 }
 
 # 按需工具组 -> manage 层工具名映射（供 register_tools 过滤，模块级常量避免重复创建）
@@ -115,6 +116,7 @@ def _resolve_tool_selection(groups: list | None = None, mode: str = "default") -
                     "account-read": "account",
                     "scheduled-read": "scheduled",
                     "scheduled-write": "scheduled",
+                    "gems": "gems",
                 }.get(layer)
                 if group_name:
                     selected.add(group_name)
@@ -166,6 +168,11 @@ def register_tools(mcp: MCPServer, groups: list[str] | None = None, mode: str = 
 
         register_research_tools(mcp)
 
+    if selected & {"research", "media"}:
+        from .operations import register_operation_tools
+
+        register_operation_tools(mcp)
+
     if "history" in selected:
         from .manage import register_history_tools
 
@@ -190,3 +197,8 @@ def register_tools(mcp: MCPServer, groups: list[str] | None = None, mode: str = 
         from .prompts import register_prompts_tools
 
         register_prompts_tools(mcp)
+
+    if "gems" in selected:
+        from .manage import _register_gem_tools
+
+        _register_gem_tools(mcp, {"gemini_manage_gems"})

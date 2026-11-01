@@ -14,6 +14,11 @@ import tempfile
 from pathlib import Path
 
 PRIMARY_PROFILE_TOOLS = {
+    "media": frozenset({
+        "gemini_generate_media", "gemini_generate_music", "gemini_get_operation_status", "gemini_get_operation_result",
+        "gemini_doctor", "gemini_get_cookie_from_browser", "gemini_get_cookie_status", "gemini_get_tool_manifest",
+        "gemini_list_browser_cookie_profiles", "gemini_reset",
+    }),
     "core": frozenset(
         {
             "gemini_analyze_url",
@@ -29,6 +34,8 @@ PRIMARY_PROFILE_TOOLS = {
             "gemini_get_tool_manifest",
             "gemini_list_browser_cookie_profiles",
             "gemini_list_research_report_actions",
+            "gemini_get_operation_status",
+            "gemini_get_operation_result",
             "gemini_list_sessions",
             "gemini_reset",
             "gemini_reset_session",
@@ -158,9 +165,12 @@ PRIMARY_PROFILE_TOOLS = {
             "gemini_list_notebooks",
             "gemini_list_public_links",
             "gemini_list_research_report_actions",
+            "gemini_get_operation_status",
+            "gemini_get_operation_result",
             "gemini_list_scheduled_actions",
             "gemini_list_sessions",
             "gemini_manage_prompts",
+            "gemini_manage_gems",
             "gemini_move_chat_to_notebook",
             "gemini_notebooks",
             "gemini_probe_web_features",
@@ -190,6 +200,22 @@ ASSIST_TOOLS = frozenset(
     {"gemini_ask", "gemini_research", "gemini_search", "gemini_understand", "gemini_understand_image"}
 )
 
+FUNCTION_TOOLS = frozenset({
+    "gemini_ask", "gemini_understand_image", "gemini_understand", "gemini_research",
+    "gemini_start_chat", "gemini_send_message", "gemini_list_sessions", "gemini_reset_session",
+    "gemini_generate_image", "gemini_edit_image", "gemini_generate_video", "gemini_generate_music",
+    "gemini_get_operation_status", "gemini_get_operation_result",
+    "gemini_list_research_report_actions", "gemini_create_from_research_report", "gemini_run_task",
+})
+
+ACCOUNT_TOOLS = frozenset({
+    "gemini_history", "gemini_delete_chat", "gemini_notebooks", "gemini_move_chat_to_notebook",
+    "gemini_account_inventory", "gemini_list_scheduled_actions", "gemini_get_scheduled_action",
+    "gemini_create_scheduled_action", "gemini_delete_scheduled_action", "gemini_manage_gems", "gemini_cleanup",
+    "gemini_manage_chat", "gemini_tasks", "gemini_task_browser", "gemini_preferences",
+    "gemini_skills", "gemini_manage_notebook",
+})
+
 
 async def _list_module_tools(module_name: str) -> list[str]:
     module = importlib.import_module(module_name)
@@ -206,6 +232,7 @@ def _safe_environment(profile: str) -> dict[str, str]:
     for name in ("GEMINI_PSID", "GEMINI_PSIDTS", "GEMINI_PSIDCC", "GEMINI_SKILL_MODE"):
         environment.pop(name, None)
     environment["GEMINI_AUTO_REFRESH"] = "false"
+    environment["GEMINI_BROWSER_AUTO_LOAD"] = "false"
     environment["GEMINI_TOOLS"] = profile
     return environment
 
@@ -258,6 +285,8 @@ def main() -> None:
         [
             ("compact", "src.skill_server", "model", COMPACT_TOOLS),
             ("assist", "src.surfaces.assist", "model", ASSIST_TOOLS),
+            ("function", "src.surfaces.function", "function", FUNCTION_TOOLS),
+            ("account", "src.surfaces.account", "function", ACCOUNT_TOOLS),
         ]
     )
     # Profile probes use separate interpreters to preserve import-time tool

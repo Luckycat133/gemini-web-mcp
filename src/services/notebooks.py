@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Awaitable, Callable
 
+from ..infrastructure.account_identity import current_account_key
 from ..infrastructure.rpc_contracts import execute_contract, get_contract
 from ..infrastructure.rpc_parsers import (
     extract_rpc_bodies,
@@ -11,8 +12,17 @@ from ..infrastructure.rpc_parsers import (
     parse_conversation_metadata,
     parse_native_notebook,
     parse_notebook_category,
+    parse_rpc_envelope,
 )
 from .history import clamp_int
+
+
+class NotebookChatReadError(RuntimeError):
+    """A notebook chat listing could not be verified from upstream evidence."""
+
+    def __init__(self, status: str):
+        self.status = status
+        super().__init__(f"Notebook chat read-back unavailable: {status}")
 
 
 def native_notebooks_payload(locale: str = "zh-CN") -> str:
@@ -41,9 +51,18 @@ async def fetch_native_notebooks(
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     contract = get_contract("notebooks.list")
     response = await execute_contract(client, contract.key, locale=locale)
-    bodies = extract_rpc_bodies(response.text, contract.rpc_id)
-    body = bodies[0] if bodies else []
+    envelope = parse_rpc_envelope(getattr(response, "text", "") or "", contract.rpc_id)
+    if getattr(response, "status_code", None) != 200:
+        raise NotebookChatReadError("http_error")
+    if envelope.reject_code is not None:
+        raise NotebookChatReadError("rejected")
+    if not envelope.parsed or len(envelope.bodies) != 1:
+        raise NotebookChatReadError("missing_envelope")
+    bodies = envelope.bodies
+    body = bodies[0]
     parsed = parse_contract_body(contract, body)
+    if not parsed.ok:
+        raise NotebookChatReadError(parsed.status)
     value = parsed.value if isinstance(parsed.value, dict) else {}
     notebooks = value.get("items", []) if isinstance(value.get("items", []), list) else []
     categories = value.get("categories", []) if isinstance(value.get("categories", []), list) else []
@@ -75,6 +94,8 @@ async def fetch_notebook_chats(
     target_count = safe_offset + safe_limit
     page_size = min(max(target_count, 10), 100)
     items: list[dict[str, Any]] = []
+    seen_chat_ids: set[str] = set()
+    seen_page_tokens: set[str] = set()
     next_page_token: str | None = None
     response_length = 0
     page_count = 0
@@ -92,14 +113,39 @@ async def fetch_notebook_chats(
         response_text = getattr(response, "text", "") or ""
         response_length += len(response_text)
         page_count += 1
-        bodies = extract_rpc_bodies(response_text, contract.rpc_id)
-        body = bodies[0] if bodies else []
+        envelope = parse_rpc_envelope(response_text, contract.rpc_id)
+        if envelope.reject_code is not None:
+            raise NotebookChatReadError("rejected")
+        if not envelope.parsed or not envelope.bodies:
+            raise NotebookChatReadError("missing_envelope")
+        status_code = getattr(response, "status_code", None)
+        if status_code != 200:
+            raise NotebookChatReadError("http_error")
+        body = envelope.bodies[0]
         parsed = parse_contract_body(contract, body)
+        if not parsed.ok or not isinstance(parsed.value, list):
+            raise NotebookChatReadError(parsed.status)
         parser_status = parsed.status
         parsed_items = parsed.value if isinstance(parsed.value, list) else []
+        if any(not isinstance(item, dict) or not isinstance(item.get("id"), str) or not item["id"].strip()
+               for item in parsed_items):
+            raise NotebookChatReadError("changed_shape")
+        page_ids = [item["id"] for item in parsed_items]
+        if len(page_ids) != len(set(page_ids)) or any(chat_id in seen_chat_ids for chat_id in page_ids):
+            raise NotebookChatReadError("duplicate_chat_id")
+        token = body[1] if isinstance(body, list) and len(body) > 1 else None
+        if token is not None and not isinstance(token, str):
+            raise NotebookChatReadError("changed_shape")
+        next_page_token = token or None
+        if next_page_token and not parsed_items:
+            raise NotebookChatReadError("incomplete_page")
+        if next_page_token and next_page_token in seen_page_tokens:
+            raise NotebookChatReadError("repeated_page_token")
+        seen_chat_ids.update(page_ids)
+        if next_page_token:
+            seen_page_tokens.add(next_page_token)
         items.extend(parsed_items)
-        next_page_token = body[1] if isinstance(body, list) and len(body) > 1 and isinstance(body[1], str) else None
-        if not next_page_token or not parsed_items:
+        if not next_page_token:
             break
     page = items[safe_offset : safe_offset + safe_limit]
     has_more = bool(next_page_token) or safe_offset + len(page) < len(items)
@@ -160,11 +206,20 @@ async def move_chat_to_notebook(
     fetch_notebooks: FetchNotebooks = fetch_native_notebooks,
     fetch_chats: FetchChats = fetch_notebook_chats,
     extract_bodies: ExtractBodies = extract_rpc_bodies,
+    expected_account: str | None = None,
+    account_key_provider: Callable[[], str | None] = current_account_key,
 ) -> dict[str, Any]:
     """Move a chat and return explicit read-back verification evidence."""
 
+    owner = expected_account or account_key_provider()
+    def fence() -> None:
+        if not owner or account_key_provider() != owner:
+            raise PermissionError("Gemini account changed or is unavailable.")
+
+    fence()
     contract = get_contract("notebooks.move_chat")
     notebooks, list_diagnostic = await fetch_notebooks(client, locale)
+    fence()
     notebook = find_notebook(notebooks, notebook_id, notebook_title)
     if notebook is None:
         return {
@@ -185,7 +240,9 @@ async def move_chat_to_notebook(
         chat_id=chat_id,
         notebook_id=str(notebook["id"]),
         project_type=project_type,
+        retry_count=0,
     )
+    fence()
     bodies = extract_bodies(getattr(response, "text", "") or "", contract.rpc_id)
     body = bodies[0] if bodies else []
     parsed = parse_contract_body(contract, body)
@@ -198,11 +255,15 @@ async def move_chat_to_notebook(
         verification_status = "read_back_not_observed"
         try:
             verify_items, verification = await fetch_chats(client, str(notebook["id"]), 100, 0)
+            fence()
             verified = any(item.get("id") == chat_id for item in verify_items)
             verification_status = "verified" if verified else "read_back_not_observed"
+        except PermissionError:
+            raise
         except Exception as exc:
+            fence()
             verification_status = "read_back_error"
-            verification_error = f"{type(exc).__name__}: {exc}"
+            verification_error = type(exc).__name__
     status_ok = getattr(response, "status_code", None) == 200
     return {
         "ok": status_ok and verified,

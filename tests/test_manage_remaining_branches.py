@@ -118,6 +118,7 @@ class _BatchReadChatClient:
 
 
 def _patch_seams(monkeypatch, client):
+    monkeypatch.setenv("GEMINI_PSID", "synthetic-test-account")
     """统一 patch manage 模块的 client_wrapper 接缝。"""
     monkeypatch.setattr(manage_tools, "get_gemini_client", lambda: client)
 
@@ -410,7 +411,7 @@ def test_export_chat_batch_execute_path_uses_fetch_recent_metadata(monkeypatch):
     mcp = _make_mcp()
     result = _run(_call(mcp, "gemini_export_chat", chat_id="c_1"))
     text = result[0].text
-    assert captured["client"] is client
+    assert captured["client"]._wrapped is client
     assert captured["target"] == 500
     # metadata.title="Found Title" → 渲染在标题行
     assert "## Gemini Chat Export: Found Title" in text
@@ -444,7 +445,7 @@ def test_search_chats_markdown_renders_snippet_error(monkeypatch):
     client = _ReadChatClient([_chat("c_1", "Needle Title")], {})
 
     async def boom(chat_id, limit=20):
-        raise ValueError("boom")
+        raise ValueError("synthetic-private-body")
 
     client.read_chat = boom
     _patch_seams(monkeypatch, client)
@@ -453,7 +454,8 @@ def test_search_chats_markdown_renders_snippet_error(monkeypatch):
     text = result[0].text
     assert "## Gemini 历史搜索" in text
     assert "fields=title" in text  # title 匹配（read error 不影响 title 匹配）
-    assert "read error: ValueError: boom" in text
+    assert "read error: ValueError" in text
+    assert "synthetic-private-body" not in text
 
 
 def test_search_chats_markdown_renders_has_more_footer(monkeypatch):

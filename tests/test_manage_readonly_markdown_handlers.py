@@ -137,6 +137,28 @@ def test_inspect_account_no_inspect_status_short_circuits(monkeypatch):
     assert "❌ 当前 gemini-webapi 不支持 inspect_account_status" in result[0].text
 
 
+def test_inspect_account_sdk_cached_status_is_explicitly_unverified_on_both_primary_tools(monkeypatch):
+    from gemini_webapi.constants import AccountStatus
+
+    client = SimpleNamespace(account_status=AccountStatus.UNAUTHENTICATED)
+    _patch_seams(monkeypatch, client)
+    mcp = _make_mcp()
+    direct = json.loads(_run(_call(mcp, "gemini_inspect_account", response_format="json"))[0].text)
+    inventory = json.loads(_run(_call(mcp, "gemini_account_inventory", surface="status", response_format="json"))[0].text)
+    assert direct == inventory
+    assert direct["summary"]["account_status"] == "UNAUTHENTICATED"
+    assert direct["summary"]["account_status_code"] == 1016
+    assert direct["summary"]["status_evidence"] == "sdk_cached_unverified"
+    assert "tier" not in direct["summary"] and direct["rpc"] == {}
+
+
+def test_inspect_account_does_not_promote_untyped_status_to_verified(monkeypatch):
+    client = SimpleNamespace(account_status="AVAILABLE")
+    _patch_seams(monkeypatch, client)
+    result = _run(_call(_make_mcp(), "gemini_inspect_account"))
+    assert "不支持 inspect_account_status" in result[0].text
+
+
 def test_inspect_account_markdown_with_summary_and_rpc_and_reject_code(monkeypatch):
     """markdown 渲染 summary（key/value 列表）+ rpc（含 HTTP status_code + reject_code 后缀）。
 

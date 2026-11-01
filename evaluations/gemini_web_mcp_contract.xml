@@ -1,10 +1,86 @@
 <evaluation>
   <qa_pair>
+    <question>Can reusing a research operation handle resend the original query or confirm the same saved plan twice?</question>
+    <answer>No. The original query is not resent; an unverified saved plan may be atomically claimed and confirmed once using the original model, thinking level and retention policy.</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>Does a JPEG thumbnail alone prove that a video generation request produced a video?</question>
+    <answer>No. A verified video artifact is required; the thumbnail is a separate preview. The function surface defaults video to Flash, while an explicit model choice is preserved.</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>When Flash and Flash-Lite both appear in the runtime registry, may Flash be selected by a fuzzy match to Flash-Lite?</question>
+    <answer>No. Select the matching Flash model family from the runtime registry.</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>When may research status be reported as running while no report is available?</question>
+    <answer>Only when the latest research turn supplies explicit running evidence; otherwise report that progress is unverified.</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>What is required before a recovered research result is reported complete and its default cleanup can run?</question>
+    <answer>A ready research document with nonempty report content must be assembled; cleanup must report its observed state.</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>Can an SDK account status marked cached_unverified prove the current authenticated state?</question>
+    <answer>No. It is cached SDK state, not a verified live authentication result.</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>Should a completed one-shot tool call keep its Gemini conversation by default, and what explicitly opts into retention?</question>
+    <answer>No. retain_chat=true explicitly opts into retention; default cleanup must report verified deletion or a truthful pending/failure state.</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>After restarting the server, which tool recovers a research report using only the opaque operation_id returned by gemini_research, without starting duplicate research?</question>
+    <answer>gemini_get_operation_result</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>Does a successful source-free Gemini search answer prove grounded web retrieval?</question>
+    <answer>No. grounding_state=answer_only means answer support is unverified; retrieved_only sources may still be present.</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>When may a candidate source attribution establish grounded search evidence?</question>
+    <answer>Only when the observed source record is associated with a text snippet whose offsets exactly match both the selected candidate frame and final answer using Unicode code points or UTF-16 units; otherwise it remains retrieved_only.</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>How should an agent start and recover a long media or Deep Research task by default?</question>
+    <answer>Start it in the background, preserve the returned operation_id, and use status and result with that same handle; music and research default to standard thinking, explicit choices remain intact, and research recovery preserves its original level. Set background=false only on compatibility tools that expose a waiting path.</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>Which compact and assist actions recover an existing operation without starting it again?</question>
+    <answer>Compact uses session operation_status or operation_result with session_id set to the handle; assist uses gemini_research status or result with operation_id and no query. Both facades mark destructiveHint=true because retrieving a result may clean an unretained chat.</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>Which business entrypoints serve ordinary Gemini functionality and explicit account management?</question>
+    <answer>Use gemini-mcp-function for the 17-tool function surface and gemini-mcp-account for the 17-tool account surface; explicit legacy profiles retain their meaning.</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>Which default tool handles ordinary questions, current-web questions and natural-language requests to connected apps?</question>
+    <answer>Use gemini_ask with Flash by default, state the goal and app directly in the prompt, and do not add web or tool enable switches; inspect observed sources and grounding state. gemini_search remains a compatibility assist tool.</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>Does a connected-app menu or a completed text answer prove that an external app action or Gemini Task completed?</question>
+    <answer>No. App availability and prose do not prove execution. Preserve actual upstream action, confirmation and task evidence; scheduled account actions are not Gemini Task mode. gemini_run_task uses its distinct transport and independently verified goal status; app mutations still require read-back evidence.</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>What is the permitted scope of gemini_cleanup on the account surface?</question>
+    <answer>Only chats recorded as MCP-owned in its ledger; do not select chats by matching their titles.</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>May an unbound old operation or another account's conversation be resumed or cleaned up after signing in?</question>
+    <answer>No. Recorded and current account identities must both be verified and match; late conversation IDs remain in the original account's ledger, and an account switch leaves unprocessed cleanup unverified.</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>May a media request silently retry generation after its first conversation ID has been observed?</question>
+    <answer>No. Disable SDK generation retries at the shared client boundary, including Research helper calls; persist the observed identity before the first output in both background and explicit-wait Research entrypoints, and recover only by reading that original conversation, response and candidate. A known completed music error card requires its exact failure notice and target identity before it can become a terminal failure and release cleanup.</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>Does an empty or failed raw music-card read prove that a model refusal can release cleanup protection?</question>
+    <answer>No. A refusal requires exact supported rejection evidence and a successful read proving the matching completed response and candidate contain no playable artifact; changed shapes, failed reads and unmatched turns remain unverified.</answer>
+  </qa_pair>
+  <qa_pair>
     <question>Using only read-only metadata tools, identify the tool that an agent should call first to learn safety, privacy, pagination, availability, and workflow metadata. Answer with the exact tool name.</question>
     <answer>gemini_get_tool_manifest</answer>
   </qa_pair>
   <qa_pair>
-    <question>Inspect the manifest workflows. Which always-available local diagnostic tool should an agent call for tool-surface, cookie, browser-profile, and media-dependency preflight checks? Answer with the exact tool name.</question>
+    <question>In an explicit legacy profile that exposes the manifest, which local diagnostic tool should an agent call for tool-surface, cookie, browser-profile, and media-dependency preflight checks? Answer with the exact tool name.</question>
     <answer>gemini_doctor</answer>
   </qa_pair>
   <qa_pair>
@@ -16,7 +92,7 @@
     <answer>verification.status=verified_absent and data.deleted=true</answer>
   </qa_pair>
   <qa_pair>
-    <question>Inspect the manifest workflows. Which workflow should an agent use to dry-run, review, and then delete marked test chats or scheduled actions? Answer with the workflow name.</question>
+    <question>In an explicitly selected legacy history profile, which workflow can dry-run and review marked test chat or scheduled-action cleanup? Answer with the workflow name.</question>
     <answer>test_artifact_cleanup</answer>
   </qa_pair>
   <qa_pair>
@@ -76,7 +152,151 @@
     <answer>prompts</answer>
   </qa_pair>
   <qa_pair>
+    <question>Which model should an agent normally use for search and multimodal tasks, and when is Argon appropriate?</question>
+    <answer>Default to Flash for search and multimodal work; all models can understand images and reason. Argon is a writing and creative-work preference and an option for especially difficult reasoning. Community reports are task-specific anecdotes, not a universal ranking, and music does not always require Pro or Argon.</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>May a caller choose Flash-Lite merely for speed or after an advanced-thinking, media, authentication or network failure?</question>
+    <answer>No. The client requires fresh same-account basic Flash text-quota exhaustion evidence, expiring after 60 seconds or a successful basic Flash request. Only a new ordinary query may automatically fall back; never replay the original request or replace an explicit Pro or Argon choice.</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>What should the runtime do with a requested thinking level when quota fallback selects Flash-Lite?</question>
+    <answer>Lock Lite to the SDK fixed default level rather than a caller-selected level and return the actual effective model, fallback reason, thinking_selectable=false and effective_thinking_level=null. Enforce this at the shared client boundary instead of relying on the agent to remove its argument.</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>Which account tool renames, pins or unpins one exact Gemini chat without reading conversation text?</question>
+    <answer>gemini_manage_chat</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>Does a successful rename or pin RPC response prove that the chat metadata changed?</question>
+    <answer>No. Verify the requested field on the same chat with a fresh metadata read-back and unchanged account identity; a sent mutation with an unverified outcome has changed=null and must not be automatically replayed.</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>How does the account surface reduce history-management context without losing target identity and pagination?</question>
+    <answer>gemini_history defaults to compact JSON containing chat IDs, titles, pin state and pagination, with bounded explicit text reads; request markdown or json for the compatible detailed presentation. It does not return a full browser DOM.</answer>
+  </qa_pair>
+  <qa_pair>
     <question>Inspect the manifest workflows. Which workflow should an agent use after explicit authorization to create, verify, and clean up a scheduled action? Answer with the workflow name.</question>
     <answer>scheduled_action_create_and_cleanup</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>How should an agent use existing NotebookLM or Gemini Notebook sources without loading browser DOM or private histories?</question>
+    <answer>Use gemini_notebooks on the account surface for compact source-picker metadata, resolve exact notebook_ids, then use gemini_ask for source analysis or gemini_run_task for explicit Task or delegated execution needing its ongoing work, progress or browser. Notebook context alone does not select Task. Keep any returned operation_id; source=gemini does not establish move capability for an unresolved target.</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>What distinguishes a Notebook chat, Gemini Task and Chat scheduled action?</question>
+    <answer>Notebook chat stays in ordinary Chat mode with Notebook sources; gemini_run_task selects Task execution and goal-status recovery. Existing Chat scheduled actions are not Task schedules. Explicit confirmation cards, bounded progress, time schedules and limited browser input are supported; exclusive handoff, automatic permission approval, Task pause/resume, event schedules remain unavailable; persistent browser/action preferences use gemini_preferences.</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>When may the worker automatically delete a completed Notebook chat or Task?</question>
+    <answer>Save and independently verify the full exact CID/RID/candidate answer as a local artifact first, then release cleanup and delete the owned conversation unless retain_chat=true. Background cleanup does not require a caller result read. A preview is bounded; the verified full artifact remains available after restart and remote deletion.</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>May recovery repeat a Notebook question or Task after a timeout or missing reply?</question>
+    <answer>No. Observe only the original CID/RID/candidate and preserve unverified state when identity, completed status or answer evidence is missing. Do not replay generation, substitute an unrelated turn, or fall back to Flash-Lite for Notebook context or Task.</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>Does gemini_tasks list or get read private conversation answers, and what proves deletion?</question>
+    <answer>List and get return bounded goal metadata without conversation answers. Delete dispatches once and independently reads back exact absence; a successful acknowledgement or missing envelope alone is insufficient. The combined tool is marked destructive because delete is exposed.</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>How should an agent answer a Gemini Task confirmation card without replaying it or deleting the unfinished conversation?</question>
+    <answer>Read input_required and the result's input_id, use existing user authorization or obtain missing authorization for the actual change, then call gemini_run_task with the original operation_id, that input_id, the selected input_option_id and exact authorized prompt from input_options. The option binds the original card and native choice; consumed old cards wait for continuation instead of asking again. The same input token dispatches once, preserves original model and retention, and never automatically approves. A completed card is not a final answer artifact.</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>How should Task schedules be managed and verified?</question>
+    <answer>Use gemini_tasks schedule actions for once, daily, weekly, hourly, monthly or yearly schedules, separate from Chat scheduled actions; nested Task schedule objects use timezone, not the Chat tool's timezone_name or an invented cron field. Preserve time windows and nanosecond timestamps, and require independent read-back rather than claiming a sent mutation succeeded.</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>Can automatic cleanup delete a Task thread with an associated schedule?</question>
+    <answer>No. Preserve associated scheduled Tasks; verified deletion of the last plan may release cleanup only for a disposable MCP-owned thread.</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>What is required before explicit Task browser input?</question>
+    <answer>Use gemini_task_browser with exact screenshot response and candidate IDs, the frame hash and a unique action ID, and require Task state 3 or 5 to remain unchanged before dispatch. Never replay a consumed ID or automatically approve permissions or login.</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>Does a browser screenshot or input establish exclusive pause and a successful website action?</question>
+    <answer>No. A verified PNG proves an observed frame; input dispatch and the next frame do not prove an exclusive pause or website effects. Task stop, cancellation, pause and resume are not implemented.</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>How should Task progress be inspected without changing the original operation recovery?</question>
+    <answer>Use gemini_tasks progress for the exact response and candidate or the explicitly requested latest Task; report bounded activity labels, tool names and counts with unknown step status, and do not substitute another turn for the original operation answer.</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>Does a complex Notebook comparison or a direct supported Keep write require Gemini Task?</question>
+    <answer>No. Default to gemini_ask for answers, writing, Notebook analysis and direct app requests supported in Chat, even for complex or multi-step requests. Choose gemini_run_task for explicit Task or delegated work needing ongoing execution, tracked progress or browser operation; Task can also research and generate files.</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>Do shared Notebook context, native Skills, connected apps or background operation handles determine Chat versus Task?</question>
+    <answer>No. Notebook context, native Skills and apps can be used in both modes. Ordinary Ask returns directly; Notebook-backed Chat and Task return background handles. Media and Research background operations do not become Task mode. Choose by user intent and required action availability.</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>How should mode-specific native app support affect routing?</question>
+    <answer>Check the requested connector and action: native GitHub repository import and code questions are currently Chat-only, while Contacts is Task-only; Workspace and Notebook support both. These connector limits do not prohibit separate browser or custom MCP routes, and a menu entry does not prove execution.</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>Which models and thinking settings may a caller select for Task?</question>
+    <answer>Default to Flash or explicitly choose Argon. Task rejects Pro, Lite and unrecognized or conflicting discovered families before generation without silently changing model or mode; Chat Pro remains available. Use thinking_level low, medium or high; request body and model header use the verified 1/4/2 mapping. standard/extended remain low/high aliases and Lite thinking is locked.</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>Are native remote-browser preferences and always-allow permissions per-call MCP switches?</question>
+    <answer>No. Browser choice and ask/allow preferences are saved account settings managed by gemini_preferences, not per-call flags. Do not invent browser_mode or auto_approve. Read-back verifies stored_preference only: permission_preference is saved, effective_permission remains unknown and behavior_verified=false. A real Task can still return a native confirmation; follow the exact authorized card flow.</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>Does a recurring morning digest automatically require Task or expose native event triggers?</question>
+    <answer>No. Use gemini_create_scheduled_action for recurring Chat content; an immediate gemini_ask alone does not establish a schedule. Use gemini_tasks schedule actions for Task execution workflows. Their APIs and identifiers are separate. Task supports six time recurrences, not native event triggers or notification preferences; associated schedules protect the owned Task thread from cleanup.</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>Which account tool reads and explicitly changes persistent Task browser and known action permissions?</question>
+    <answer>gemini_preferences</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>What evidence is required before reporting a persistent browser or permission preference changed?</question>
+    <answer>Resolve a fresh exact returned identity, check the same account and optional expected_revision, compare a fresh preflight snapshot, send once, then independently read back the complete desired global identity and state. Preserve unrelated attributes and settings. Catalog defaults, empty write replies and sent/changed-null observations cannot prove the update; uncertain delivery is read, never replayed. Read comparisons are not server-atomic CAS.</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>Which account tool manages native Gemini Skills rather than local agent Skills or Gems?</question>
+    <answer>gemini_skills</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>Which account tool creates native Notebooks and manages plaintext sources with explicit deletion of their conversations?</question>
+    <answer>gemini_manage_notebook</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>Does successful preference read-back prove a future Task skips permission confirmation?</question>
+    <answer>No. verification_scope=stored_preference proves only the fresh saved identity/state. permission_preference reports that value, effective_permission remains unknown and behavior_verified=false. Do not automatically approve or invent feature availability to force the expected behavior; use real Task observations and preserve native confirmations.</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>How should an agent recover a session message after the upstream response times out?</question>
+    <answer>Use gemini_send_message with the same session_id and recover_only=true, omitting message. Recovery reads the original observed CID/RID/candidate and accepts only completed exact-turn evidence; it sends no generation. Until resolved, another message must not replay the uncertain request, and reset preserves pending cleanup rather than deleting in-flight work.</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>Can default Research cleanup delete the only recoverable report before the caller retrieves it?</question>
+    <answer>No. Save and verify the exact ready nonempty Research report as a local Artifact before releasing cleanup protection. Repeated or restarted reads use the same operation handle and reverify that saved file without regenerating; SQLite contains locators and verification metadata, not report text. Missing or corrupt files remain unverified.</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>How can report derivative tools work after the original Research conversation was cleaned?</question>
+    <answer>Pass the original operation_id instead of chat_id. The two target arguments are mutually exclusive. This branch reads the verified local report without remote authentication, generation or cleanup; an unsaved or corrupt report is not silently replaced. audio_overview remains a narration script and custom_app remains an application specification.</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>May a tool log or return raw exception messages to preserve compatibility error prose?</question>
+    <answer>No. Return the stable classified error and correlate operation, exception type, request ID and diagnostic ID. Cookies, proxy credentials, signed URLs, private response text and exception tracebacks must not leak through diagnostics or a legacy preserve_message hint.</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>May the SDK automatically resend a Gem write, Notebook move or chat deletion after ambiguous delivery?</question>
+    <answer>No. Use a same-account single-dispatch mutation scope or an explicit zero-retry contract. Preserve unknown delivery and independently read back the exact resource; durable cleanup retries have their own ownership, absence verification and backoff, separate from hidden SDK replay.</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>Does a nonempty SDK preset Gem list prove the current user's custom Gem catalog was read completely?</question>
+    <answer>No. gemini_manage_gems lists custom Gems only and requires a strict complete custom-list envelope. A missing, rejected or changed-shape custom response cannot be treated as empty or prove deletion, even if SDK presets were returned.</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>May a Task worker clean its source after saving only the textual answer when native files were returned?</question>
+    <answer>No. Verify the complete recognized native file inventory and every saved attachment before cleanup. Download failures, changed shapes and missing or corrupt files preserve a partial result and available answer. A legacy answer-only cache without an inventory cannot establish that no attachments existed.</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>Can an App connection setup card be approved by fabricating a Task text-confirmation option?</question>
+    <answer>No. Report needs_attention and setup_required and resolve connection or rejection in the original native Task. Text replies cannot complete OAuth. Previously observed setup metadata is not a fresh card or Task-completion proof.</answer>
   </qa_pair>
 </evaluation>

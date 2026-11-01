@@ -7,7 +7,7 @@ keeping a second copy of request construction, parsing, or persistence.
 """
 
 import logging
-from typing import Optional
+from typing import Any, Literal, Optional
 
 from pydantic import Field
 
@@ -15,6 +15,7 @@ from .. import __version__
 from ..adapters import (
     MCPServer,
     TextContent,
+    append_artifact_block,
     attach_domain_result,
     domain_error_boundary,
     domain_failure_text,
@@ -23,6 +24,8 @@ from ..adapters import (
 from ..client_wrapper import (
     cleanup_due_remote_chats,
     create_session,
+    finalize_remote_chat_cleanup_from_response,
+    finalize_remote_chat_cleanup,
     get_gemini_client,
     init_startup_infrastructure,
     initialize_client,
@@ -31,9 +34,11 @@ from ..client_wrapper import (
     schedule_remote_chat_cleanup_from_response,
     send_session_message,
     send_session_message_stream,
+    server_lifespan,
 )
 from ..constants import normalize_model_alias, resolve_model_name
 from ..domain import DomainErrorCode, DomainResult, LongOperationData, OperationState
+from ..services.search import response_evidence
 from ..services import (
     DEFAULT_MAX_RESULTS,
     DEFAULT_RESEARCH_TIMEOUT_SECONDS,
@@ -55,7 +60,7 @@ from ..services import (
     UnderstandService,
     observed_backend_from_response,
 )
-from ..tools.annotations import MUTATES_REMOTE
+from ..tools.annotations import DESTRUCTIVE_REMOTE, MUTATES_REMOTE
 from ..tools.utils import parse_response
 
 logger = logging.getLogger(__name__)
@@ -63,6 +68,7 @@ logger = logging.getLogger(__name__)
 SERVER_NAME = "gemini_assist_mcp"
 
 mcp = MCPServer(
+    lifespan=server_lifespan,
     name=SERVER_NAME,
     version=__version__,
     instructions=f"""
@@ -74,7 +80,7 @@ understanding, and asynchronous Deep Research starts. It deliberately exposes
 no history, Cookie, Scheduled, Gem, Prompt, or cleanup tools.
 
 ## Tools
-- **gemini_ask**: one-shot text question with optional context
+- **gemini_ask**: ask naturally, including requests to use an available app such as Google Maps
 - **gemini_search**: grounded web search with observed source evidence;
   grounding_state is grounded only when source URLs were observed
 - **gemini_understand_image**: understand one image from a local path or
@@ -85,11 +91,14 @@ no history, Cookie, Scheduled, Gem, Prompt, or cleanup tools.
   analyzed means the completed analysis acknowledged that input
 - **gemini_research**: start one Deep Research run asynchronously and return
   an opaque operation handle with the upstream operation/chat IDs preserved;
-  the research chat is retained by default so the report stays recoverable
+  unfinished work gets a finite cleanup grace period; report retrieval cleans
+  the chat unless the caller explicitly selected retain_chat=true
 
 ## Models
-- flash-lite, flash (default), thinking, pro
-- thinking_level: standard or extended (gemini_ask, gemini_research)
+- flash (default), argon for writing or especially difficult reasoning, pro when explicitly needed
+- All models support image understanding and reasoning; start search and multimodal work with Flash
+- flash-lite is runtime-gated to fresh, same-account basic Flash quota exhaustion; it has no selectable thinking level
+- thinking_level: low, medium or high (standard/extended remain low/high aliases)
 """,
 )
 
@@ -112,6 +121,12 @@ def _build_chat_service() -> ChatService:
             schedule_chat_cleanup=lambda *args, **kwargs: schedule_remote_chat_cleanup(*args, **kwargs),
             normalize_model=lambda model: normalize_model_alias(model),
             resolve_model=lambda model: resolve_model_name(model),
+            finalize_response_cleanup=lambda response, *, retain_chat, delete_after_seconds, source: (
+                finalize_remote_chat_cleanup_from_response(
+                    response, retain_chat=retain_chat, delete_after_seconds=delete_after_seconds,
+                    source=source, client=get_gemini_client(),
+                )
+            ),
         )
     )
 
@@ -130,6 +145,7 @@ def _build_research_service() -> ResearchService:
             cleanup_due_remote_chats=lambda client: cleanup_due_remote_chats(client),
             schedule_chat_cleanup=lambda *args, **kwargs: schedule_remote_chat_cleanup(*args, **kwargs),
             resolve_model=lambda model: resolve_model_name(model),
+            finalize_chat_cleanup=lambda *args, **kwargs: finalize_remote_chat_cleanup(*args, **kwargs),
         )
     )
 
@@ -148,7 +164,7 @@ def _invalid_argument(message: str) -> DomainResult[None]:
 
 def _compose_ask_message(prompt: str, context: Optional[str]) -> str:
     """Combine the prompt with optional context for one shared-chat request."""
-    message = prompt.strip()
+    message = prompt
     stripped_context = (context or "").strip()
     if stripped_context:
         message = f"{message}\n\n---\n\nContext:\n{stripped_context}"
@@ -162,13 +178,18 @@ async def gemini_ask(
     context: Optional[str] = None,
     model: str = "flash",
     thinking_level: str = "standard",
+    retain_chat: bool = False,
+    delete_after_seconds: int | None = None,
 ) -> list[TextContent]:
-    """Ask Gemini one focused question and return the answer with backend evidence.
+    """Ask Gemini naturally and return the answer with observed source evidence.
 
-    Use this for second opinions, critique, or code/design review on material
-    supplied in ``prompt`` and optional ``context``. The structured result
-    carries requested/effective/observed model evidence and chat lifecycle
-    metadata alongside the answer text.
+    Default Chat route for answers, writing, analysis and direct connected-app
+    requests, including complex or multi-step questions. Name the app naturally
+    in the prompt, such as "Create a Keep note" or "Find a file in Drive";
+    no separate app-named tool or web/tool enable switch is needed.
+    thinking_level accepts low/medium/high; standard/extended remain low/high
+    compatibility aliases. The structured result includes observed sources and grounding status; it
+    does not infer app execution from prose.
     """
     if not prompt.strip():
         return domain_text(
@@ -176,11 +197,13 @@ async def gemini_ask(
             "Error: prompt must not be blank.",
         )
 
-    result = await _chat_service.generate(
+    result = await _chat_service.generate_stream(
         ChatRequest(
             message=_compose_ask_message(prompt, context),
             model=model,
             thinking_level=thinking_level,
+            retain_chat=retain_chat,
+            delete_after_seconds=delete_after_seconds,
             cleanup_source="gemini_ask",
             include_gem_argument=False,
             include_temporary_argument=False,
@@ -189,14 +212,24 @@ async def gemini_ask(
     if not result.ok:
         return domain_text(result, domain_failure_text(result), use_result_data=True)
     assert result.data is not None
+    evidence = response_evidence(result.data.responses, result.data.response,
+                                 stream_text=result.data.stream_text, observed_at=result.meta.observed_at)
+    final_text = getattr(result.data.response, "text", "")
+    display_text = final_text if isinstance(final_text, str) and final_text else result.data.stream_text
     return attach_domain_result(
-        parse_response(result.data.response, model),
+        parse_response(result.data.response, model, text_override=display_text),
         result,
         data={
             "requested_model": result.data.requested_model,
             "effective_model": result.data.effective_model,
             "observed_backend": observed_backend_from_response(result.data.response),
             "lifecycle": result.data.lifecycle,
+            "answer": evidence.answer,
+            "grounding_state": evidence.grounding_state,
+            "sources": evidence.sources,
+            "observed_source_count": evidence.observed_source_count,
+            "observed_at": evidence.observed_at,
+            "model_selection": result.data.model_selection,
         },
     )
 
@@ -213,7 +246,8 @@ def _render_search_result(data: SearchOperationData) -> list[TextContent]:
         lines = ["Sources:"]
         for index, source in enumerate(data.sources, 1):
             title = (source.title or "").strip()
-            lines.append(f"{index}. {source.url}" + (f" — {title}" if title else ""))
+            role = " [retrieved; support unverified]" if source.role == "retrieved_only" else ""
+            lines.append(f"{index}. {source.url}" + (f" — {title}" if title else "") + role)
         if data.observed_source_count is not None and data.observed_source_count > len(data.sources):
             lines.append(f"({data.observed_source_count - len(data.sources)} more sources observed)")
         sections.append("\n".join(lines))
@@ -363,50 +397,92 @@ def _render_research_start(data: LongOperationData) -> list[TextContent]:
         sections.append(f"Upstream chat ID: {data.upstream_chat_id}")
     if data.state in {OperationState.QUEUED, OperationState.RUNNING}:
         sections.append("This call returned immediately and did not wait for the final report.")
+    elif data.state is OperationState.ACCEPTED:
+        sections.append("The task was accepted; upstream progress has not yet been verified.")
+    elif data.state is OperationState.PARTIAL:
+        sections.append("No ready research report was observed; completion is not verified.")
     elif data.state is OperationState.COMPLETED and not data.report_available:
         sections.append("The upstream run completed, but this start call did not return a report.")
     return [TextContent(type="text", text="\n".join(sections))]
 
 
-@mcp.tool(annotations=MUTATES_REMOTE)
+@mcp.tool(annotations=DESTRUCTIVE_REMOTE)
 @domain_error_boundary("gemini_research", logger)
 async def gemini_research(
-    query: str,
+    query: str = "",
     model: str = "flash",
-    thinking_level: str = "extended",
+    thinking_level: str = "standard",
     timeout_seconds: int = DEFAULT_RESEARCH_TIMEOUT_SECONDS,
-    retain_chat: bool = True,
+    retain_chat: bool = False,
     delete_after_seconds: Optional[int] = None,
+    operation_id: Optional[str] = None,
+    action: Literal["start", "status", "result"] = "start",
+    background: bool = True,
 ) -> list[TextContent]:
     """Start one Deep Research run asynchronously and return its operation handle.
 
     Use this for multi-source investigation that produces a durable report.
-    The run starts on Gemini Web and this call returns immediately after the
-    upstream research has started, with an opaque high-entropy
-    ``operation_id`` — it never waits for the final report.
-    ``timeout_seconds`` (default 600) bounds only the plan and start phases
+    By default this queues a background worker and promptly returns an opaque
+    ``operation_id``. Set ``background=false`` for the compatibility path.
+    Use ``action=status`` or ``action=result`` with that handle to read back.
+    ``timeout_seconds`` (default 600) bounds the plan and start phases
     of that startup: it is clamped to a 30-second floor, and the start phase
     is additionally capped at 120 seconds. It does not bound the report
     itself, which can take several minutes after the call has returned. The
     structured result preserves the upstream operation and chat identifiers
     (``upstream_operation_id``, ``upstream_chat_id``) with a typed ``state``
-    (``queued`` or ``running``) so the report stays recoverable later; the
-    research chat is retained by default (``retain_chat`` is ``true``)
-    precisely so it is not cleaned up before the report is read. The server
-    keeps no connection-local operation state: the returned identifiers are
-    the only continuation handles. Deep Research requires an AI Plus
+    (``accepted`` when progress is unconfirmed, otherwise the observed state)
+    so the report stays recoverable later. By default the chat is scheduled
+    for deletion after a temporary grace period, or after the report is read;
+    set ``retain_chat`` to true to retain it. The local
+    operation metadata database supports recovery through the primary server's
+    gemini_get_operation_status and gemini_get_operation_result tools after restart.
+    For recovery even if this first call disconnects before returning, generate
+    an opaque handle (op_ plus 32 lowercase random hexadecimal characters) and
+    pass it as operation_id. While its seven-day record remains in the same
+    database, reusing that handle ignores the new query and retention settings.
+    If a completed original plan is found for an unverified plan outcome, the
+    server may atomically claim and confirm it once using the saved model and
+    thinking level; an already claimed confirmation is never resent. Otherwise
+    the saved state is returned. Never reuse a pruned handle. If the connection is lost before an
+    upstream chat ID is observed, the saved handle prevents a duplicate start
+    but cannot recover the remote plan or its progress.
+    Deep Research requires an AI Plus
     subscription.
     """
-    result = await _research_service.start(
-        ResearchRequest(
+    if action in {"status", "result"}:
+        result: DomainResult[Any]
+        if not operation_id or not operation_id.strip():
+            result = DomainResult.failure(DomainErrorCode.INVALID_ARGUMENT, "operation_id is required.")
+        else:
+            from ..infrastructure.operation_store import OperationStore
+            from ..services.operations import OperationService
+            service = OperationService(OperationStore(), get_gemini_client, initialize_client,
+                                       finalize_remote_chat_cleanup)
+            result = await (service.get_status(operation_id) if action == "status" else service.get_result(operation_id))
+        data = result.data
+        text = f"Operation {data.operation_id}: {data.state.value}." if result.ok and data else domain_failure_text(result)
+        if data and data.report:
+            text += f"\n\n{data.report}"
+        content = domain_text(result, text, use_result_data=True)
+        return append_artifact_block(content, data.artifacts) if data and data.artifacts else content
+    request = ResearchRequest(
             query=query,
             model=model,
             thinking_level=thinking_level,
             timeout_seconds=timeout_seconds,
             retain_chat=retain_chat,
             delete_after_seconds=delete_after_seconds,
+            operation_id=operation_id,
         )
-    )
+    if not query.strip():
+        result = DomainResult.failure(DomainErrorCode.INVALID_ARGUMENT, "query must not be blank.",
+                                      verification_status="input_rejected")
+    elif background:
+        from ..services.background import submit_research
+        result = await submit_research(request)
+    else:
+        result = await _research_service.start(request)
     if not result.ok or result.data is None:
         return domain_text(result, domain_failure_text(result), use_result_data=True)
     return attach_domain_result(
@@ -414,6 +490,57 @@ async def gemini_research(
         result,
         use_result_data=True,
     )
+
+
+def register_assist_tools(server: MCPServer, *, notebook_context: bool = False) -> None:
+    """Expose the same five handlers on another thin MCP surface."""
+    handlers: tuple[Any, ...]
+    if notebook_context:
+        @server.tool(name="gemini_ask", annotations=MUTATES_REMOTE)
+        @domain_error_boundary("gemini_ask", logger)
+        async def ask_with_notebooks(
+            prompt: str, context: str | None = None, model: str = "flash", thinking_level: str = "standard",
+            notebook_ids: list[str] | None = None, timeout_seconds: int = 600,
+            retain_chat: bool = False, delete_after_seconds: int | None = None,
+            operation_id: str | None = None,
+        ) -> list[TextContent]:
+            """Ask normally, or read explicit NotebookLM/Gemini Notebook sources in chat mode.
+
+            notebook_ids comes from gemini_notebooks. Notebook context starts a
+            background chat and returns its original operation handle for status
+            and result; it does not turn the chat into Gemini Task mode. A full
+            answer artifact is saved before automatic cleanup. Other questions
+            return normally. Chat also handles complex questions, writing and
+            direct app requests supported in Chat. Use gemini_run_task when the
+            user requests Task or delegates ongoing execution, work progress or
+            browser operation. Apps, Notebooks and background work alone do not
+            require Task. Name apps naturally, e.g. "Create a Keep note"; no
+            separate app-named tool or web/tool enable switch is needed.
+            thinking_level accepts low/medium/high (legacy standard/extended
+            aliases still select low/high).
+            """
+            if notebook_ids:
+                from ..services.background import submit_notebook_chat
+                result = await submit_notebook_chat({
+                    "prompt": _compose_ask_message(prompt, context), "model": model,
+                    "thinking_level": thinking_level, "notebook_ids": notebook_ids,
+                    "timeout_seconds": timeout_seconds, "retain_chat": retain_chat,
+                    "delete_after_seconds": delete_after_seconds,
+                }, operation_id=operation_id)
+                text = (f"Notebook chat accepted. Operation handle: {result.data.operation_id}"
+                        if result.ok and result.data else domain_failure_text(result))
+                return domain_text(result, text, use_result_data=True)
+            if operation_id is not None:
+                invalid = _invalid_argument("operation_id requires notebook_ids for a background chat.")
+                return domain_text(invalid, domain_failure_text(invalid), use_result_data=True)
+            return await gemini_ask(prompt, context, model, thinking_level,
+                                    retain_chat=retain_chat, delete_after_seconds=delete_after_seconds)
+        handlers = (gemini_search, gemini_understand_image, gemini_understand)
+    else:
+        handlers = (gemini_ask, gemini_search, gemini_understand_image, gemini_understand)
+    for handler in handlers:
+        server.tool(annotations=MUTATES_REMOTE)(handler)
+    server.tool(annotations=DESTRUCTIVE_REMOTE)(gemini_research)
 
 
 def main() -> None:

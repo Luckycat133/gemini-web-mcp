@@ -1,7 +1,7 @@
 """Public onboarding client for verified Gemini Web MCP installation paths.
 
-The default preflight launches the installed stdio server and calls a static
-text tool without reading Gemini credentials.  Live chat and image examples
+The default preflight launches the function stdio server and verifies its
+typed blank-prompt rejection without reading credentials. Live chat and image examples
 are separately opt-in and keep requested/effective/observed backend evidence
 distinct.
 """
@@ -12,15 +12,19 @@ import argparse
 import asyncio
 import json
 import os
+import secrets
 import shutil
 import sys
 import tempfile
-from collections.abc import Mapping, Sequence
+import time
+from collections.abc import AsyncIterator, Mapping, Sequence
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
 from mcp import Client, StdioServerParameters, stdio_client
 from mcp_types import CallToolResult
+from .surfaces.catalogs import FUNCTION_TOOLS
 
 
 COOKIE_ENVIRONMENT_NAMES = ("GEMINI_PSID", "GEMINI_PSIDTS", "GEMINI_PSIDCC")
@@ -42,13 +46,13 @@ def _resolve_server_command(command: str | None = None) -> str:
             return resolved
         raise OnboardingError(f"Cannot locate MCP server command {command!r}")
 
-    beside_python = Path(sys.executable).parent / "gemini-mcp-server"
+    beside_python = Path(sys.executable).parent / "gemini-mcp-function"
     if beside_python.is_file():
         return str(beside_python)
-    resolved = shutil.which("gemini-mcp-server")
+    resolved = shutil.which("gemini-mcp-function")
     if resolved:
         return resolved
-    raise OnboardingError("Cannot locate the installed gemini-mcp-server entrypoint")
+    raise OnboardingError("Cannot locate the installed gemini-mcp-function entrypoint")
 
 
 def _server_environment(*, profile: str, allow_live_account: bool) -> dict[str, str]:
@@ -59,7 +63,23 @@ def _server_environment(*, profile: str, allow_live_account: bool) -> dict[str, 
         for name in COOKIE_ENVIRONMENT_NAMES:
             environment.pop(name, None)
         environment["GEMINI_AUTO_REFRESH"] = "false"
+        environment["GEMINI_BROWSER_AUTO_LOAD"] = "false"
     return environment
+
+
+@asynccontextmanager
+async def _installed_client(
+    *, profile: str, allow_live_account: bool, server_command: str | None = None,
+) -> AsyncIterator[Client]:
+    executable = _resolve_server_command(server_command)
+    environment = _server_environment(profile=profile, allow_live_account=allow_live_account)
+    with tempfile.TemporaryDirectory(prefix="gemini-onboarding-") as directory:
+        if not allow_live_account:
+            environment["GEMINI_OPERATION_DB_PATH"] = str(Path(directory) / "operations.sqlite3")
+            environment["GEMINI_CLEANUP_DB_PATH"] = str(Path(directory) / "cleanup.sqlite3")
+        parameters = StdioServerParameters(command=executable, env=environment, cwd=Path(directory))
+        async with Client(stdio_client(parameters), mode="auto", cache=None) as client:
+            yield client
 
 
 async def _call_installed_tool(
@@ -70,19 +90,13 @@ async def _call_installed_tool(
     allow_live_account: bool,
     server_command: str | None = None,
 ) -> tuple[CallToolResult, str | None, str | None]:
-    executable = _resolve_server_command(server_command)
-    environment = _server_environment(profile=profile, allow_live_account=allow_live_account)
-    with tempfile.TemporaryDirectory(prefix="gemini-onboarding-") as directory:
-        parameters = StdioServerParameters(
-            command=executable,
-            env=environment,
-            cwd=Path(directory),
-        )
-        async with asyncio.timeout(45 if not allow_live_account else 720):
-            async with Client(stdio_client(parameters), mode="auto", cache=None) as client:
-                result = await client.call_tool(name, dict(arguments))
-                version = client.server_info.version if client.server_info is not None else None
-                return result, client.protocol_version, version
+    async with asyncio.timeout(45 if not allow_live_account else 720):
+        async with _installed_client(
+            profile=profile, allow_live_account=allow_live_account, server_command=server_command,
+        ) as client:
+            result = await client.call_tool(name, dict(arguments))
+            version = client.server_info.version if client.server_info is not None else None
+            return result, client.protocol_version, version
 
 
 def _first_text(result: CallToolResult) -> str:
@@ -163,6 +177,19 @@ def verify_local_image_artifacts(
             raise OnboardingError(
                 "Image dimensions were not verified; install the image or all extra and retry"
             )
+        try:
+            from PIL import Image
+        except ImportError as exc:
+            raise OnboardingError("Install the image or all extra to independently verify image bytes") from exc
+        try:
+            with Image.open(path) as image:
+                actual_dimensions = image.size
+                actual_mime = Image.MIME.get(image.format or "")
+                image.verify()
+        except Exception as exc:
+            raise OnboardingError("Image bytes could not be independently verified") from exc
+        if actual_dimensions != (width, height) or actual_mime != mime_type:
+            raise OnboardingError("Image content does not match its reported MIME type or dimensions")
         verification = candidate.get("verification")
         if not isinstance(verification, Mapping) or verification.get("status") != "verified":
             raise OnboardingError(f"Artifact verification status is not verified: {path}")
@@ -186,34 +213,27 @@ def verify_local_image_artifacts(
 
 
 async def run_preflight(*, server_command: str | None = None) -> dict[str, Any]:
-    result, protocol_version, server_version = await _call_installed_tool(
-        "gemini_get_tool_manifest",
-        {"response_format": "json"},
-        profile="model",
-        allow_live_account=False,
-        server_command=server_command,
-    )
+    async with _installed_client(profile="function", allow_live_account=False, server_command=server_command) as client:
+        listed = await client.list_tools()
+        names = {tool.name for tool in listed.tools}
+        if names != FUNCTION_TOOLS:
+            raise OnboardingError("The function tool catalog did not match its public contract")
+        result = await client.call_tool("gemini_ask", {"prompt": ""})
+        protocol_version = client.protocol_version
+        server_version = client.server_info.version if client.server_info else None
     if result.is_error or result.result_type != "complete":
         raise OnboardingError("The offline text tool call did not complete successfully")
-    try:
-        manifest = json.loads(_first_text(result))
-    except json.JSONDecodeError as exc:
-        raise OnboardingError("The offline text tool returned invalid JSON") from exc
-    if not isinstance(manifest, Mapping) or manifest.get("server") != "gemini_web_mcp":
-        raise OnboardingError("The offline text tool returned an unexpected manifest")
-    groups = manifest.get("current_tool_groups")
-    if groups != ["model"]:
-        raise OnboardingError(f"The onboarding profile drifted: {groups!r}")
-    enabled_count = manifest.get("current_enabled_count")
-    if not isinstance(enabled_count, int) or enabled_count <= 0:
-        raise OnboardingError("The model profile exposed no tools")
+    domain_result = domain_result_from_call(result)
+    error = domain_result.get("error")
+    if domain_result.get("ok") is not False or not isinstance(error, Mapping) or error.get("code") != "INVALID_ARGUMENT":
+        raise OnboardingError("The offline text tool did not return its expected typed input rejection")
     return {
         "status": "ok",
         "mode": "offline",
         "credentials_accessed": False,
-        "text_tool": "gemini_get_tool_manifest",
-        "profile": "model",
-        "enabled_tools": enabled_count,
+        "text_tool": "gemini_ask",
+        "profile": "function",
+        "enabled_tools": len(names),
         "protocol_version": protocol_version,
         "server_version": server_version,
     }
@@ -227,14 +247,13 @@ async def run_chat(
     server_command: str | None = None,
 ) -> dict[str, Any]:
     result, protocol_version, server_version = await _call_installed_tool(
-        "gemini_chat",
+        "gemini_ask",
         {
-            "message": prompt,
+            "prompt": prompt,
             "model": model,
             "thinking_level": thinking_level,
-            "temporary": True,
         },
-        profile="model",
+        profile="function",
         allow_live_account=True,
         server_command=server_command,
     )
@@ -246,7 +265,7 @@ async def run_chat(
     return {
         "status": "ok",
         "mode": "live",
-        "text_tool": "gemini_chat",
+        "text_tool": "gemini_ask",
         "protocol_version": protocol_version,
         "server_version": server_version,
         "text": _first_text(result),
@@ -264,41 +283,88 @@ async def run_image(
 ) -> dict[str, Any]:
     output_root = output_dir.expanduser().resolve()
     output_root.mkdir(parents=True, exist_ok=True)
+    operation_id = "op_" + secrets.token_hex(16)
     arguments: dict[str, Any] = {
         "prompt": prompt,
-        "media_type": "image",
+        "operation_id": operation_id,
         "model": model,
         "output_dir": str(output_root),
     }
     if filename:
         arguments["filename"] = filename
-    result, protocol_version, server_version = await _call_installed_tool(
-        "gemini_generate_media",
-        arguments,
-        profile="core",
-        allow_live_account=True,
-        server_command=server_command,
-    )
-    domain_result = domain_result_from_call(result)
-    verified = verify_local_image_artifacts(domain_result, output_dir=output_root)
-    data = domain_result["data"]
-    assert isinstance(data, Mapping)
-    observed_backend = data.get("observed_backend")
-    return {
-        "status": "ok",
-        "mode": "live",
-        "media_tool": "gemini_generate_media",
-        "protocol_version": protocol_version,
-        "server_version": server_version,
-        "routing": {
-            "requested_model": data.get("requested_model"),
-            "request_model": data.get("request_model"),
-            "effective_backend": data.get("effective_backend"),
-            "observed_backend": observed_backend,
-            "observed_backend_status": "observed" if observed_backend else "not_reported",
-        },
-        "artifacts": verified,
-    }
+    async with _installed_client(profile="function", allow_live_account=True, server_command=server_command) as client:
+        try:
+            async with asyncio.timeout(720):
+                result = await client.call_tool("gemini_generate_image", arguments)
+        except TimeoutError as exc:
+            raise OnboardingError(
+                f"Image start outcome is unverified; resume with operation_id={operation_id}"
+            ) from exc
+        except Exception as exc:
+            raise OnboardingError(
+                f"Image start outcome is unverified ({type(exc).__name__}); operation_id={operation_id}"
+            ) from exc
+        protocol_version = client.protocol_version
+        server_version = client.server_info.version if client.server_info is not None else None
+        domain_result = domain_result_from_call(result)
+        if result.is_error or domain_result.get("ok") is not True:
+            error = domain_result.get("error")
+            code = error.get("code") if isinstance(error, Mapping) else "UNKNOWN"
+            raise OnboardingError(f"Image generation could not be started: {code}; operation_id={operation_id}")
+        start_data = domain_result.get("data")
+        returned_id = start_data.get("operation_id") if isinstance(start_data, Mapping) else None
+        if returned_id != operation_id:
+            raise OnboardingError(f"Image operation handle was not confirmed; operation_id={operation_id}")
+        deadline = time.monotonic() + 720
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise OnboardingError(f"Image operation is still pending; resume with operation_id={operation_id}")
+            try:
+                async with asyncio.timeout(remaining):
+                    result = await client.call_tool(
+                        "gemini_get_operation_result", {"operation_id": operation_id},
+                    )
+            except TimeoutError as exc:
+                raise OnboardingError(
+                    f"Image operation is still pending; resume with operation_id={operation_id}"
+                ) from exc
+            domain_result = domain_result_from_call(result)
+            if result.is_error or domain_result.get("ok") is not True:
+                error = domain_result.get("error")
+                code = error.get("code") if isinstance(error, Mapping) else "UNKNOWN"
+                raise OnboardingError(f"Image operation read failed: {code}; operation_id={operation_id}")
+            data = domain_result.get("data")
+            if not isinstance(data, Mapping):
+                raise OnboardingError(f"Image operation returned no status; operation_id={operation_id}")
+            state = data.get("state")
+            if state == "completed":
+                break
+            if state in {"failed", "cancelled", "timed_out", "unavailable"}:
+                raise OnboardingError(f"Image operation state={state}; operation_id={operation_id}")
+            if state not in {"accepted", "queued", "running", "partial"}:
+                raise OnboardingError(f"Image operation returned an unknown state; operation_id={operation_id}")
+            await asyncio.sleep(min(5, max(0, deadline - time.monotonic())))
+        verified = verify_local_image_artifacts(domain_result, output_dir=output_root)
+        artifacts = data.get("artifacts")
+        first_artifact = next((item for item in artifacts if isinstance(item, Mapping) and item.get("kind") == "image" and item.get("state") == "local"), {}) if isinstance(artifacts, Sequence) else {}
+        observed_backend = first_artifact.get("observed_backend")
+        return {
+            "status": "ok",
+            "mode": "live",
+            "media_tool": "gemini_generate_image",
+            "operation_id": operation_id,
+            "protocol_version": protocol_version,
+            "server_version": server_version,
+            "routing": {
+                "requested_model": first_artifact.get("requested_backend"),
+                "request_model": first_artifact.get("request_model"),
+                "effective_backend": first_artifact.get("effective_backend"),
+                "observed_backend": observed_backend,
+                "observed_backend_status": "observed" if observed_backend else "not_reported",
+            },
+            "artifacts": verified,
+        }
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -314,7 +380,7 @@ def _build_parser() -> argparse.ArgumentParser:
     chat.add_argument("--allow-live-account", action="store_true", required=True)
     chat.add_argument("--prompt", required=True)
     chat.add_argument("--model", default="flash")
-    chat.add_argument("--thinking-level", choices=("standard", "extended"), default="standard")
+    chat.add_argument("--thinking-level", choices=("low", "medium", "high", "standard", "extended"), default="standard")
 
     image = subparsers.add_parser("image", help="Generate and independently verify a local image artifact")
     image.add_argument("--allow-live-account", action="store_true", required=True)

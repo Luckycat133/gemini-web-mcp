@@ -31,6 +31,7 @@ mock 边界：
 """
 
 import asyncio
+import pytest
 import json
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -179,6 +180,15 @@ def _gem(gem_id, name, description="", prompt=""):
 # Section A: _iter_gem_values + _find_gem_by_id + _gem_field
 # ===========================================================================
 
+
+
+@pytest.fixture(autouse=True)
+def _synthetic_gem_account_and_catalog(monkeypatch):
+    monkeypatch.setenv("GEMINI_PSID", "synthetic-test-account")
+    async def read_catalog(client, **_kwargs):
+        return await client.fetch_gems()
+    monkeypatch.setattr("src.services.gems.read_custom_gems", read_catalog)
+    monkeypatch.setattr("src.tools.manage.read_custom_gems", read_catalog)
 
 def test_iter_gem_values_empty_returns_empty_list():
     """空输入（None / 空 dict / 空 list）→ 返回 []。"""
@@ -347,8 +357,8 @@ def test_manage_gems_top_level_exception(monkeypatch):
     _patch_seams(monkeypatch, client)
     mcp = _make_mcp()
     result = _run(_call(mcp, "gemini_manage_gems", action="list"))
-    assert "❌ 失败" in result[0].text
-    assert "gem rpc down" in result[0].text
+    assert "Gem 操作结果未验证" in result[0].text
+    assert "gem rpc down" not in result[0].text
 
 
 def test_manage_gems_happy_path_list(monkeypatch):
@@ -492,7 +502,7 @@ def test_read_chat_top_level_exception(monkeypatch):
     mcp = _make_mcp()
     result = _run(_call(mcp, "gemini_read_chat", chat_id="chat_1"))
     assert "❌ 读取失败" in result[0].text
-    assert "auth expired" in result[0].text
+    assert "auth expired" not in result[0].text
 
 
 def test_export_chat_no_chat_id(monkeypatch):
@@ -534,7 +544,7 @@ def test_export_chat_metadata_warning(monkeypatch):
     _patch_seams(monkeypatch, client)
     monkeypatch.setattr(
         manage_tools, "_fetch_recent_conversation_metadata",
-        AsyncMock(side_effect=RuntimeError("metadata rpc down")),
+        AsyncMock(side_effect=RuntimeError("synthetic-private-body")),
     )
     mcp = _make_mcp()
     result = _run(_call(
@@ -545,7 +555,7 @@ def test_export_chat_metadata_warning(monkeypatch):
     assert payload["metadata"]["id"] == "chat_1"
     assert "metadata_warning" in payload["metadata"]
     assert "RuntimeError" in payload["metadata"]["metadata_warning"]
-    assert "metadata rpc down" in payload["metadata"]["metadata_warning"]
+    assert "synthetic-private-body" not in result[0].text
 
 
 def test_delete_chat_no_chat_id(monkeypatch):
@@ -573,7 +583,7 @@ def test_delete_chat_top_level_exception(monkeypatch):
     mcp = _make_mcp()
     result = _run(_call(mcp, "gemini_delete_chat", chat_id="chat_1"))
     assert "❌ 删除失败" in result[0].text
-    assert "network down" in result[0].text
+    assert "network down" not in result[0].text
 
 
 def test_delete_chat_happy_path(monkeypatch):

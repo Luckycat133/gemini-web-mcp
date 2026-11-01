@@ -9,9 +9,12 @@ import socket
 import tempfile
 import threading
 import logging
+from contextlib import suppress
 from pathlib import Path
 from typing import Optional, Any, Dict
 from urllib.parse import urlparse
+
+from .sdk_auth_logging import suppress_sdk_auth_logs
 
 logger = logging.getLogger(__name__)
 
@@ -30,7 +33,7 @@ def validate_config() -> None:
     required = ["GEMINI_PSID"]
     missing = [var for var in required if not os.environ.get(var)]
     if missing:
-        raise ValueError(f"缺少必需的环境变量: {', '.join(missing)}")
+        raise ClientAuthenticationRequired(f"缺少必需的环境变量: {', '.join(missing)}")
 
 
 def get_configured_proxy() -> Optional[str]:
@@ -47,7 +50,7 @@ def get_configured_proxy() -> Optional[str]:
             with socket.create_connection((host, port), timeout=0.25):
                 pass
         except OSError:
-            logger.warning("GEMINI_PROXY=%s is not reachable; continuing without proxy", proxy)
+            logger.warning("Configured local Gemini proxy is not reachable; continuing without proxy")
             return None
     return proxy
 
@@ -62,7 +65,7 @@ def get_default_chat_retention_seconds() -> int:
         return max(0, int(raw_value))
     except ValueError:
         logger.warning(
-            f"无效的 GEMINI_CHAT_RETENTION_SECONDS={raw_value!r}，"
+            "无效的 GEMINI_CHAT_RETENTION_SECONDS，"
             f"使用 {DEFAULT_CHAT_RETENTION_SECONDS} 秒"
         )
         return DEFAULT_CHAT_RETENTION_SECONDS
@@ -101,13 +104,22 @@ def prepare_browser_cookie_cache(force: bool = False) -> None:
         try:
             cache_file.unlink()
         except OSError as e:
-            logger.debug("无法删除 Gemini WebAPI cookie cache %s: %s", cache_file.name, e)
+            logger.debug("无法删除 Gemini WebAPI cookie cache error_type=%s", type(e).__name__)
 
     os.environ["GEMINI_COOKIE_PATH"] = str(cache_dir)
 
 
 class ClientInitializationResetError(RuntimeError):
     """Raised when a reset supersedes an in-flight client initialization."""
+
+
+class ClientAuthenticationRequired(PermissionError):
+    """Authentication could not be restored before request dispatch."""
+
+
+def _explicitly_unauthenticated(client: Any) -> bool:
+    from gemini_webapi.constants import AccountStatus
+    return bool(getattr(client, "account_status", None) == AccountStatus.UNAUTHENTICATED)
 
 
 class ClientManager:
@@ -139,6 +151,8 @@ class ClientManager:
                 if self._client is not client:
                     continue
                 if self._initialized:
+                    if _explicitly_unauthenticated(client):
+                        raise ClientAuthenticationRequired("Gemini authentication is required.")
                     return client
 
                 generation = self._generation
@@ -161,12 +175,19 @@ class ClientManager:
         """Initialize one client generation without publishing stale state."""
         current_task = asyncio.current_task()
         try:
+            suppress_sdk_auth_logs()
             logger.info("正在调用 client.init()...")
-            await client.init(
-                timeout=30,
-                auto_close=False,
-                auto_refresh=os.environ.get("GEMINI_AUTO_REFRESH", "true").lower() == "true",
-            )
+            from gemini_webapi.exceptions import AuthError
+
+            init_options = dict(timeout=30, verbose=False, auto_close=False,
+                                auto_refresh=os.environ.get("GEMINI_AUTO_REFRESH", "true").lower() == "true")
+            try:
+                await client.init(**init_options)
+                authentication_failed = _explicitly_unauthenticated(client)
+            except AuthError:
+                authentication_failed = True
+            if authentication_failed:
+                await self._restore_browser_authentication(client, generation, init_options)
             with self._lock:
                 if self._generation != generation or self._client is not client:
                     raise ClientInitializationResetError("client reset during initialization")
@@ -174,6 +195,13 @@ class ClientManager:
                 self._client_loop = asyncio.get_running_loop()
             logger.info("✅ GeminiClient 初始化完成！")
             return client
+        except ClientAuthenticationRequired:
+            with self._lock:
+                current = self._generation == generation and self._client is client
+            if current:
+                with suppress(Exception):
+                    await client.close()
+            raise
         except asyncio.CancelledError:
             with self._lock:
                 reset_superseded = self._generation != generation or self._client is not client
@@ -184,6 +212,50 @@ class ClientManager:
             with self._lock:
                 if self._init_task is current_task:
                     self._init_task = None
+
+    async def _restore_browser_authentication(self, client: Any, generation: int, options: dict[str, Any]) -> None:
+        """Reinitialize the same undispatched client once using the bound Chrome account."""
+        from gemini_webapi.exceptions import AuthError
+
+        if not COOKIE_MANAGER_AVAILABLE or os.environ.get("GEMINI_BROWSER_AUTO_LOAD", "true").lower() != "true":
+            raise ClientAuthenticationRequired("Gemini authentication is required.")
+        manager = get_cookie_manager()
+        old_psid = os.environ.get("GEMINI_PSID", "")
+        try:
+            cookies = await asyncio.wait_for(asyncio.to_thread(manager.get_cookies_from_browser, "chrome"), timeout=60)
+        except Exception:
+            raise ClientAuthenticationRequired("Gemini browser authentication is unavailable.") from None
+        psid = cookies.get("__Secure-1PSID") if isinstance(cookies, dict) else None
+        if not old_psid or not psid or psid != old_psid or os.environ.get("GEMINI_PSID", "") != old_psid:
+            raise ClientAuthenticationRequired("The authenticated browser account could not be verified.")
+        with self._lock:
+            if (self._generation != generation or self._client is not client
+                    or os.environ.get("GEMINI_PSID", "") != old_psid):
+                raise ClientInitializationResetError("client reset during initialization")
+        assert client is not None
+        await client.close()
+        with self._lock:
+            if (self._generation != generation or self._client is not client
+                    or os.environ.get("GEMINI_PSID", "") != old_psid):
+                raise ClientInitializationResetError("client reset during initialization")
+        client._cookies.clear()
+        client.cookies = cookies
+        prepare_browser_cookie_cache(force=True)
+        try:
+            await client.init(**options)
+        except AuthError:
+            raise ClientAuthenticationRequired("Gemini browser authentication was rejected.") from None
+        if _explicitly_unauthenticated(client):
+            await client.close()
+            raise ClientAuthenticationRequired("Gemini browser authentication was rejected.")
+        def generation_current() -> bool:
+            with self._lock:
+                return (self._generation == generation and self._client is client
+                        and os.environ.get("GEMINI_PSID", "") == old_psid)
+
+        if not manager.update_cookie(psid, cookies.get("__Secure-1PSIDTS", ""), source="browser_chrome",
+                                     extra_cookies=cookies, notify=False, guard=generation_current):
+            raise ClientInitializationResetError("client reset during initialization")
 
     def _create_client(self) -> None:
         """创建新的客户端实例"""
@@ -279,7 +351,7 @@ class ClientManager:
             return
         error = task.exception()
         if error is not None:
-            logger.warning("关闭旧 GeminiClient 失败: %s", error)
+            logger.warning("关闭旧 GeminiClient 失败 error_type=%s", type(error).__name__)
 
     async def _retire_client(self, client: Any, init_task: Optional[asyncio.Task[Any]]) -> None:
         if init_task is not None and init_task is not asyncio.current_task():
@@ -290,14 +362,14 @@ class ClientManager:
                 except (asyncio.CancelledError, ClientInitializationResetError):
                     pass
                 except Exception as error:
-                    logger.debug("被重置的 GeminiClient 初始化已失败: %s", error)
+                    logger.debug("被重置的 GeminiClient 初始化已失败 error_type=%s", type(error).__name__)
             else:
                 try:
                     init_task.result()
                 except (asyncio.CancelledError, ClientInitializationResetError):
                     pass
                 except Exception as error:
-                    logger.debug("被重置的 GeminiClient 初始化已失败: %s", error)
+                    logger.debug("被重置的 GeminiClient 初始化已失败 error_type=%s", type(error).__name__)
 
         close = getattr(client, "close", None)
         if not callable(close):
@@ -307,4 +379,4 @@ class ClientManager:
             if inspect.isawaitable(result):
                 await result
         except Exception as error:
-            logger.warning("关闭旧 GeminiClient 失败: %s", error)
+            logger.warning("关闭旧 GeminiClient 失败 error_type=%s", type(error).__name__)

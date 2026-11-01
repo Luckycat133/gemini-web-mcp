@@ -15,18 +15,18 @@ uvx --from git+https://github.com/Luckycat133/gemini-web-mcp@main gemini-mcp-onb
 ```
 
 `uvx` 会创建隔离环境并运行 `gemini-mcp-onboarding`。该客户端启动真实
-`gemini-mcp-server`，协商 MCP 协议，然后调用静态文本工具
-`gemini_get_tool_manifest`。预检会移除 `GEMINI_PSID`、`GEMINI_PSIDTS` 和
+`gemini-mcp-function`，核对 17 个工具并验证空提示的 `gemini_ask` 返回
+`INVALID_ARGUMENT`。预检会移除 `GEMINI_PSID`、`GEMINI_PSIDTS` 和
 `GEMINI_PSIDCC`，并输出 `mode=offline`、`credentials_accessed=false`；它不会访问 Gemini。
 
 公开文档使用 `@main` 指向当前已审核源码。生产或可复现实验应把它替换为已审核 commit SHA。
 
 ## 2. 配置实时账号
 
-1. 登录 [gemini.google.com](https://gemini.google.com)。
-2. 在浏览器开发者工具的 Application → Cookies 中复制 `__Secure-1PSID`；
-   `__Secure-1PSIDTS` 可选但推荐。
-3. 把 Cookie 放入客户端的密码输入或宿主环境变量，不要写入命令行、仓库或日志。
+安装 `browser` extra 后，运行时可从用户已授权的本机浏览器自动发现 Cookie；默认开启自动发现与刷新。
+完整桌面功能可使用 `gemini-mcp-server[all]`，其中包含浏览器 Cookie、图像校验和 Task 浏览器依赖。
+本机系统可能要求解锁 Cookie 存储。若改用手动注入，从目标账号的浏览器开发者工具复制
+`__Secure-1PSID` 和匹配的 `__Secure-1PSIDTS`，通过宿主秘密环境提供：
 
 ```bash
 export GEMINI_PSID='your __Secure-1PSID value'
@@ -50,13 +50,11 @@ Claude Desktop 最小配置如下；请仅在本机替换占位符：
       "args": [
         "--from",
         "git+https://github.com/Luckycat133/gemini-web-mcp@main",
-        "gemini-mcp-server"
+        "gemini-mcp-function"
       ],
       "env": {
         "GEMINI_PSID": "REPLACE_WITH_SECURE_1PSID",
-        "GEMINI_PSIDTS": "REPLACE_OR_REMOVE_IF_UNAVAILABLE",
-        "GEMINI_TOOLS": "model",
-        "GEMINI_AUTO_REFRESH": "false"
+        "GEMINI_PSIDTS": "REPLACE_OR_REMOVE_IF_UNAVAILABLE"
       }
     }
   }
@@ -70,10 +68,11 @@ Codex、Claude Desktop、Claude Code 和 VS Code 的逐文件示例见
 
 | 工具面 | 使用场景 |
 | --- | --- |
-| `GEMINI_TOOLS=model` | 文本/模型调用的首选起点 |
-| `GEMINI_TOOLS=core` | 图片、音乐、文件、URL 或 Deep Research；视频暂用 Gemini Web 专用页面 |
-| `gemini-mcp-skill-server` | 需要固定十一工具、低 token facade |
+| `gemini-mcp-function` | 默认 17 个功能工具：问答、理解、会话、Task、图像／视频／音乐及 Research |
+| `gemini-mcp-account` | 显式账号管理：历史、Notebook、Skills、偏好、Task 计划及浏览器 |
+| `gemini-mcp-skill-server` | 固定四工具兼容入口：chat/create/edit/session |
 | `gemini-mcp-assist` | 只需要第二意见、有据搜索、图像/混合输入理解或异步 Deep Research 的专注五工具面 |
+| `GEMINI_TOOLS=model` / `core` | 在 `gemini-mcp-server` 中显式选择旧版模型／完整内容工具组 |
 | `GEMINI_TOOLS=all` | 维护者验证账号、历史和管理能力；不适合作为通用默认 |
 
 ## 5. 显式实时验证
@@ -87,7 +86,7 @@ uvx --from git+https://github.com/Luckycat133/gemini-web-mcp@main \
   --prompt 'Reply with exactly: Gemini MCP is connected'
 ```
 
-图像验证安装 `image` extra，并要求返回位于指定目录内的真实文件、非零大小、
+图像验证安装 `image` extra，通过同一后台句柄取回结果，并要求返回位于指定目录内的真实文件、非零大小、
 `image/*` MIME、正数尺寸和 `verification=verified`：
 
 ```bash

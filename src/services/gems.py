@@ -3,7 +3,12 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import Any
+from typing import Any, Callable
+
+from ..infrastructure.account_identity import current_account_key
+
+from ..infrastructure.rpc_contracts import execute_contract, get_contract
+from ..infrastructure.rpc_parsers import parse_contract_body, parse_rpc_envelope
 
 
 class GemMutationNotVerified(RuntimeError):
@@ -117,11 +122,25 @@ def gem_to_dict(gem: Any) -> dict[str, str]:
     }
 
 
+async def read_custom_gems(client: Any, *, include_instructions_for: str | None = None) -> list[dict[str, Any]]:
+    """Read a complete custom-only catalog; missing/rejected envelopes are not absence."""
+    contract = get_contract("gems.custom_list")
+    response = await execute_contract(client, contract.key, locale=getattr(client, "language", None) or "zh-CN")
+    envelope = parse_rpc_envelope(getattr(response, "text", "") or "", contract.rpc_id)
+    if (getattr(response, "status_code", None) != 200 or not envelope.parsed
+            or envelope.reject_code is not None or len(envelope.bodies) != 1):
+        raise ValueError("Gem custom catalog unavailable")
+    parsed = parse_contract_body(contract, envelope.bodies[0], include_instructions_for=include_instructions_for)
+    if not parsed.ok or not isinstance(parsed.value, list):
+        raise ValueError("Gem custom catalog changed")
+    return parsed.value
+
+
 async def _read_back(client: Any, gem_id: str) -> tuple[Any, str, str]:
     try:
-        gems = await client.fetch_gems()
+        gems = await read_custom_gems(client, include_instructions_for=gem_id)
     except Exception as exc:
-        return None, "read_back_error", f"{type(exc).__name__}: {exc}"
+        return None, "read_back_error", type(exc).__name__
     gem = find_gem_by_id(gems, gem_id)
     return gem, "verified" if gem is not None else "read_back_not_observed", ""
 
@@ -150,12 +169,23 @@ async def create_gem(
     name: str,
     description: str | None,
     instructions: str,
+    expected_account: str | None = None,
+    account_key_provider: Callable[[], str | None] = current_account_key,
 ) -> dict[str, Any]:
+    owner = expected_account or account_key_provider()
+    def fence() -> None:
+        if not owner or owner != account_key_provider():
+            raise PermissionError("Gemini account changed or is unavailable.")
+    fence()
     clean_name = name.strip()
     if not clean_name:
         raise ValueError("Gem name must not be empty.")
 
-    created = await client.create_gem(name=clean_name, prompt=instructions, description=description)
+    from ..thinking_client import gem_mutation_scope
+
+    with gem_mutation_scope():
+        created = await client.create_gem(name=clean_name, prompt=instructions, description=description)
+    fence()
     created_id = gem_field(created, "id", "gem_id")[1].strip()
     observed, verification_status, verification_error = (
         await _read_back(client, created_id)
@@ -166,6 +196,7 @@ async def create_gem(
             "",
         )
     )
+    fence()
     mismatches: list[str] = []
     if observed is not None:
         actual = gem_to_dict(observed)
@@ -196,7 +227,14 @@ async def update_gem(
     name: str | None,
     description: str | None,
     instructions: str | None,
+    expected_account: str | None = None,
+    account_key_provider: Callable[[], str | None] = current_account_key,
 ) -> dict[str, Any]:
+    owner = expected_account or account_key_provider()
+    def fence() -> None:
+        if not owner or owner != account_key_provider():
+            raise PermissionError("Gemini account changed or is unavailable.")
+    fence()
     clean_gem_id = gem_id.strip()
     if not clean_gem_id:
         raise ValueError("Gem ID must not be empty.")
@@ -206,7 +244,8 @@ async def update_gem(
 
     existing = None
     if clean_name is None or instructions is None or description is None:
-        gems = await client.fetch_gems()
+        gems = await read_custom_gems(client, include_instructions_for=clean_gem_id)
+        fence()
         existing = find_gem_by_id(gems, clean_gem_id)
         if existing is None:
             return {
@@ -241,13 +280,18 @@ async def update_gem(
             "missing_fields": missing_fields,
         }
 
-    await client.update_gem(
-        gem=clean_gem_id,
-        name=resolved_name,
-        prompt=resolved_instructions,
-        description=resolved_description,
-    )
+    from ..thinking_client import gem_mutation_scope
+
+    with gem_mutation_scope():
+        await client.update_gem(
+            gem=clean_gem_id,
+            name=resolved_name,
+            prompt=resolved_instructions,
+            description=resolved_description,
+        )
+    fence()
     observed, verification_status, verification_error = await _read_back(client, clean_gem_id)
+    fence()
     mismatches: list[str] = []
     if observed is not None:
         actual = gem_to_dict(observed)
@@ -270,15 +314,27 @@ async def update_gem(
     return _require_verified("update", payload, expected_status="verified")
 
 
-async def delete_gem(client: Any, *, gem_id: str) -> dict[str, Any]:
+async def delete_gem(client: Any, *, gem_id: str, expected_account: str | None = None,
+                     account_key_provider: Callable[[], str | None] = current_account_key) -> dict[str, Any]:
+    owner = expected_account or account_key_provider()
+    def fence() -> None:
+        if not owner or owner != account_key_provider():
+            raise PermissionError("Gemini account changed or is unavailable.")
+    fence()
     clean_gem_id = gem_id.strip()
     if not clean_gem_id:
         raise ValueError("Gem ID must not be empty.")
 
-    await client.delete_gem(clean_gem_id)
+    from ..thinking_client import gem_mutation_scope
+
+    with gem_mutation_scope():
+        await client.delete_gem(clean_gem_id)
+    fence()
     try:
-        gems = await client.fetch_gems()
+        gems = await read_custom_gems(client)
+        fence()
     except Exception:
+        fence()
         payload = {
             "ok": True,
             "id": clean_gem_id,

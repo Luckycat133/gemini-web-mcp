@@ -16,7 +16,8 @@ Python 3.11+, MCP Python SDK v2. `src/server.py` owns the main surface; `src/ski
 ## Commands
 
 - Setup: `python -m venv .venv && . .venv/bin/activate`, then `pip install -e ".[all,dev]"`.
-- Default surface: `GEMINI_TOOLS=core python -m src.server`; use `all` only for tasks requiring broader account tools.
+- Business surfaces: `gemini-mcp-function` for Gemini functionality and `gemini-mcp-account` for explicit account work. `gemini-mcp-server` defaults to the function surface when `GEMINI_TOOLS` is unset.
+- Compatibility profiles: `GEMINI_TOOLS=core python -m src.server`; use `all` only for broader maintenance. The published 0.2.2 interface divergence is documented in `docs/source-update-integration.md`.
 - Static gates: `python -m ruff check src tests scripts` and `python -m mypy src scripts`.
 - Offline suite: `python -m pytest -q`; architecture/distribution gate: `python scripts/run_contract_checklist.py`.
 

@@ -109,6 +109,7 @@ def parse_response(
     response,
     model: str = "flash",
     text_override: Optional[str] = None,
+    image_items: Optional[list] = None,
 ) -> List[TextContent]:
     """解析 Gemini 响应，提取文本、图片、视频、音乐"""
     result_parts = []
@@ -116,8 +117,9 @@ def parse_response(
     if text:
         result_parts.append(text)
 
-    if hasattr(response, "images") and response.images:
-        for i, img in enumerate(response.images, 1):
+    images = image_items if image_items is not None else getattr(response, "images", None)
+    if images:
+        for i, img in enumerate(images, 1):
             info = f"\n\n🖼️ 图片 {i}: {img.title or 'Untitled'}"
             if hasattr(img, "url") and img.url:
                 info += f"\nURL: {img.url}"

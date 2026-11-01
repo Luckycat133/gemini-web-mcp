@@ -3,12 +3,71 @@
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable, Sequence
+from contextlib import contextmanager
+from contextvars import ContextVar
+import inspect
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Iterator
 
 from ..domain import DomainErrorCode, DomainResult, OperationState
+from ..infrastructure.account_identity import current_account_key
 from ..infrastructure.rpc_contracts import RawRPCData, get_contract
 from ..infrastructure.rpc_parsers import parse_contract_body, parse_rpc_envelope
+
+
+_read_account: ContextVar[str | None] = ContextVar("gemini_history_read_account", default=None)
+
+
+def check_account_read() -> None:
+    owner = _read_account.get()
+    if owner and current_account_key() != owner:
+        raise PermissionError("Gemini account changed or is unavailable.")
+
+
+@contextmanager
+def account_read_scope(owner: str) -> Iterator[None]:
+    token = _read_account.set(owner)
+    try:
+        check_account_read()
+        yield
+        check_account_read()
+    finally:
+        _read_account.reset(token)
+
+
+class _AccountReadClient:
+    def __init__(self, client: Any):
+        self._wrapped = client
+
+    def __getattr__(self, name: str) -> Any:
+        value = getattr(self._wrapped, name)
+        if not callable(value):
+            check_account_read()
+            return value
+        def call(*args: Any, **kwargs: Any) -> Any:
+            check_account_read()
+            result = value(*args, **kwargs)
+            if inspect.isawaitable(result):
+                async def checked() -> Any:
+                    try:
+                        check_account_read()
+                    except Exception:
+                        if inspect.iscoroutine(result):
+                            result.close()
+                        raise
+                    try:
+                        output = await result
+                    finally:
+                        check_account_read()
+                    return output
+                return checked()
+            check_account_read()
+            return result
+        return call
+
+
+def bind_account_read_client(client: Any) -> Any:
+    return _AccountReadClient(client) if _read_account.get() else client
 
 
 _DELETION_HISTORY_FILTERS: tuple[tuple[object, ...], ...] = (
@@ -93,6 +152,27 @@ def chat_to_dict(chat: object) -> dict[str, Any]:
         "timestamp": timestamp,
         "time": format_timestamp(timestamp),
     }
+
+
+def compact_history_payload(action: str, payload: dict[str, Any]) -> dict[str, Any]:
+    """Keep actionable identities and pagination; omit repeated metadata prose."""
+    if action not in {"list", "search", "read"}:
+        return payload
+    keys = ("chat_id", "query", "count", "match_count", "scanned_count", "total_count",
+            "offset", "limit", "has_more", "next_offset", "scan_turns", "turns")
+    result = {key: payload[key] for key in keys if key in payload}
+    diagnostic = payload.get("diagnostic")
+    if isinstance(diagnostic, dict):
+        coverage = {key: diagnostic[key] for key in ("source", "source_rpc", "fetched_count", "has_remote_more")
+                    if key in diagnostic}
+        coverage["scope"] = "current_metadata_page" if action == "search" else "fetched_metadata"
+        result["coverage"] = coverage
+    items_key = "matches" if action == "search" else "items"
+    if items_key in payload:
+        fields = ("id", "title", "is_pinned", "matched_fields", "snippets")
+        result[items_key] = [{key: item[key] for key in fields if key in item}
+                             for item in payload[items_key]]
+    return result
 
 
 def normalize_chat_item(chat: object) -> dict[str, Any]:
@@ -252,7 +332,7 @@ async def search_chats_result(
                     safe_chars,
                 )
             except Exception as error:
-                snippets.append({"error": f"{type(error).__name__}: {error}"})
+                snippets.append({"error": type(error).__name__})
                 turns = []
             for index, turn in enumerate(turns, 1):
                 if turn_matches_query(turn, needle):
@@ -358,7 +438,7 @@ async def export_chat_result(
                         metadata = item
                         break
             except Exception as error:
-                metadata["metadata_warning"] = f"{type(error).__name__}: {error}"
+                metadata["metadata_warning"] = type(error).__name__
 
     payload = chat_export_payload(
         normalized_chat_id,
@@ -387,6 +467,9 @@ def _deletion_payload(chat_id: str, deleted: bool | None, status: str, source: s
 async def delete_chat_result(
     client: object,
     chat_id: str,
+    *,
+    expected_account: str | None = None,
+    account_key_provider: Callable[[], str | None] = current_account_key,
 ) -> DomainResult[dict[str, Any]]:
     """Request deletion and distinguish accepted work from positive read-back evidence."""
     normalized_chat_id = str(chat_id or "").strip()
@@ -405,7 +488,22 @@ async def delete_chat_result(
             verification_status="capability_unavailable",
         )
 
-    await client.delete_chat(normalized_chat_id)  # type: ignore[attr-defined]
+    owner = expected_account or account_key_provider()
+    def account_failure() -> DomainResult[dict[str, Any]]:
+        return DomainResult.failure(DomainErrorCode.AUTH_REQUIRED, "Gemini account changed or is unavailable.",
+                                    verification_status="account_mismatch")
+    if not owner or account_key_provider() != owner:
+        return account_failure()
+    from ..thinking_client import mutation_scope
+    try:
+        with mutation_scope(owner=owner, account_key_provider=account_key_provider):
+            await client.delete_chat(normalized_chat_id)  # type: ignore[attr-defined]
+    except Exception:
+        if account_key_provider() != owner:
+            return account_failure()
+        raise
+    if account_key_provider() != owner:
+        return account_failure()
     if not hasattr(client, "_batch_execute"):
         return DomainResult.success(
             _deletion_payload(normalized_chat_id, None, "not_available", None),
@@ -415,8 +513,14 @@ async def delete_chat_result(
         )
 
     try:
-        absent, observation_details = await observe_chat_absence(client, normalized_chat_id)
+        absent, observation_details = await observe_chat_absence(client, normalized_chat_id,
+                                                                  expected_account=owner,
+                                                                  account_key_provider=account_key_provider)
+        if account_key_provider() != owner:
+            return account_failure()
     except Exception as error:
+        if account_key_provider() != owner:
+            return account_failure()
         return DomainResult.failure(
             DomainErrorCode.VERIFICATION_FAILED,
             "The chat deletion request returned, but read-back verification failed.",
@@ -459,6 +563,8 @@ async def observe_chat_absence(
     *,
     page_size: int = 100,
     max_pages_per_source: int = 50,
+    expected_account: str | None = None,
+    account_key_provider: Callable[[], str | None] = current_account_key,
 ) -> tuple[bool | None, dict[str, Any]]:
     """Check the canonical recent/pinned metadata buckets without treating ``read_chat(None)`` as absence."""
     if not hasattr(client, "_batch_execute"):
@@ -471,6 +577,7 @@ async def observe_chat_absence(
 
     for filter_values in _DELETION_HISTORY_FILTERS:
         next_page_token: str | None = None
+        seen_tokens: set[str] = set()
         for _page_index in range(safe_max_pages):
             response = await client._batch_execute(  # type: ignore[attr-defined]
                 [
@@ -486,15 +593,22 @@ async def observe_chat_absence(
                 source_path=contract.source_path,
                 close_on_error=False,
             )
+            if expected_account and account_key_provider() != expected_account:
+                raise PermissionError("Gemini account changed or is unavailable.")
             response_text = str(getattr(response, "text", "") or "")
+            if getattr(response, "status_code", 200) != 200:
+                raise RuntimeError("History metadata read-back failed its HTTP status check.")
             envelope = parse_rpc_envelope(response_text, contract.rpc_id)
-            if not envelope.parsed or envelope.reject_code is not None or not envelope.bodies:
+            if not envelope.parsed or envelope.reject_code is not None or len(envelope.bodies) != 1:
                 raise RuntimeError("History metadata read-back did not return a usable RPC envelope.")
 
             body = envelope.bodies[0]
             parsed = parse_contract_body(contract, body)
             if not parsed.ok or not isinstance(parsed.value, list):
                 raise RuntimeError("History metadata read-back changed shape.")
+            if any(not isinstance(item, dict) or not isinstance(item.get("id"), str)
+                   or not item["id"].startswith("c_") for item in parsed.value):
+                raise RuntimeError("History metadata read-back contained an unrecognized chat identity.")
 
             page_count += 1
             if any(str(item.get("id") or "") == chat_id for item in parsed.value if isinstance(item, dict)):
@@ -512,6 +626,10 @@ async def observe_chat_absence(
             )
             if next_page_token is None:
                 break
+            if next_page_token in seen_tokens:
+                return None, {"source": contract.key, "complete": False, "pages_checked": page_count,
+                              "reason": "repeated_page_token"}
+            seen_tokens.add(next_page_token)
         else:
             return None, {
                 "source": contract.key,

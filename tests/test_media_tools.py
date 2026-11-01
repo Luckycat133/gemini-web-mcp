@@ -2,13 +2,14 @@
 
 覆盖请求路由、超时与清理、产物保存和结构化状态。图片按当前
 Flash-Lite/Flash 路由；音乐只报告上游可验证的 Lyria 信息；视频空产物
-应说明通用聊天请求未证实进入 Gemini Omni 的专用模式。
+应要求真实视频产物并提示检查状态。
 
 测试在 client_wrapper 接缝使用替身，parse_response 走真实实现。
 """
 
 import asyncio
 import base64
+from contextlib import nullcontext
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -24,6 +25,8 @@ import src.tools.media as media_tools
 
 
 async def _call_tool(mcp, name, **kwargs):
+    if name in {"gemini_generate_media", "gemini_generate_music"}:
+        kwargs.setdefault("background", False)
     return (await mcp.call_tool(name, kwargs)).content
 
 
@@ -104,6 +107,9 @@ class _FakeMediaClient:
         self.captured_generate_during_timeout = None
         self.last_response = None
 
+    def video_generation_scope(self):
+        return nullcontext()
+
     async def generate_content(self, **kwargs):
         self.captured_generate_kwargs = dict(kwargs)
         # 捕获调用期间的 client.timeout（验证 _set_client_timeouts 写回）
@@ -128,6 +134,8 @@ def _patch_media_env(monkeypatch, client, *, captured_schedule=None,
                      fetch_music=None):
     """统一 patch media 工具的外部接缝。"""
     monkeypatch.setattr(media_tools, "get_gemini_client", lambda: client)
+    monkeypatch.setattr(media_tools, "probe_playable_av_tracks",
+                        lambda path: frozenset({"audio" if str(path).endswith(".mp3") else "video"}))
 
     async def fake_init():
         return None
@@ -138,7 +146,7 @@ def _patch_media_env(monkeypatch, client, *, captured_schedule=None,
             captured_cleanup.append(client_arg)
     monkeypatch.setattr(media_tools, "cleanup_due_remote_chats", fake_cleanup)
 
-    def fake_schedule(response, *, retain_chat, delete_after_seconds, source):
+    async def fake_schedule(response, *, retain_chat, delete_after_seconds, source):
         if captured_schedule is not None:
             captured_schedule.append({
                 "response": response,
@@ -146,7 +154,7 @@ def _patch_media_env(monkeypatch, client, *, captured_schedule=None,
                 "delete_after_seconds": delete_after_seconds,
                 "source": source,
             })
-    monkeypatch.setattr(media_tools, "schedule_remote_chat_cleanup_from_response",
+    monkeypatch.setattr(media_tools, "finalize_remote_chat_cleanup_from_response",
                         fake_schedule)
 
     if probe_duration is not None:
@@ -160,6 +168,67 @@ def _make_mcp():
     mcp = MCPServer("test")
     media_tools.register_media_tools(mcp)
     return mcp
+
+
+@pytest.mark.parametrize("failure", [RuntimeError, asyncio.CancelledError])
+def test_media_response_interruption_persists_cleanup(monkeypatch, failure):
+    client = _FakeMediaClient()
+    _patch_media_env(monkeypatch, client)
+    scheduled = []
+
+    async def fail_build(*_args, **_kwargs):
+        raise failure()
+
+    monkeypatch.setattr(media_tools, "_build_media_outcome", fail_build)
+    monkeypatch.setattr(media_tools, "schedule_remote_chat_cleanup_from_response",
+                        lambda response, **kwargs: scheduled.append((response.metadata[0], kwargs)))
+    mcp = _make_mcp()
+
+    async def run():
+        return await _call_tool(mcp, "gemini_generate_media", prompt="x", media_type="image")
+
+    if failure is asyncio.CancelledError:
+        with pytest.raises(asyncio.CancelledError):
+            asyncio.run(run())
+    else:
+        with pytest.raises(Exception):
+            asyncio.run(run())
+    assert scheduled == [("c_media1", {"retain_chat": False, "delete_after_seconds": 1800,
+                                       "source": "gemini_generate_media:image:in_progress"}),
+                         ("c_media1", {"retain_chat": False, "delete_after_seconds": None,
+                                       "source": "gemini_generate_media:image:interrupted"})]
+
+
+def test_queued_media_interruption_preserves_existing_grace(monkeypatch):
+    client = _FakeMediaClient(response_status="processing")
+    _patch_media_env(monkeypatch, client)
+    scheduled = []
+
+    async def fail_build(*_args, **_kwargs):
+        raise asyncio.CancelledError()
+
+    monkeypatch.setattr(media_tools, "_build_media_outcome", fail_build)
+    monkeypatch.setattr(media_tools, "schedule_remote_chat_cleanup_from_response",
+                        lambda response, **kwargs: scheduled.append(kwargs))
+    mcp = _make_mcp()
+
+    with pytest.raises(asyncio.CancelledError):
+        asyncio.run(_call_tool(mcp, "gemini_generate_media", prompt="x", media_type="video"))
+    assert scheduled == [{"retain_chat": False, "delete_after_seconds": 1800,
+                          "source": "gemini_generate_media:video:in_progress"},
+                         {"retain_chat": False, "delete_after_seconds": 1800,
+                          "source": "gemini_generate_media:video:interrupted:deferred"}]
+
+
+def test_image_media_fallback_only_without_candidate_provenance():
+    legacy_item = SimpleNamespace(url="https://example.test/legacy-image")
+    legacy_response = SimpleNamespace(images=[], media=[legacy_item])
+    assert media_tools._response_media_items(legacy_response, "image") == [legacy_item]
+
+    candidate_response = SimpleNamespace(
+        images=[], media=[legacy_item], candidates=[SimpleNamespace(generated_images=[])], chosen=0
+    )
+    assert media_tools._response_media_items(candidate_response, "image") == []
 
 
 # ---------------------------------------------------------------------------
@@ -522,8 +591,7 @@ def test_generate_media_music_pro_extended_does_not_invent_backend(monkeypatch):
     assert "Lyria 3 Pro" not in result[0].text
 
 
-def test_generate_media_video_routes_to_default_backend(monkeypatch):
-    """A text-only video response names the dedicated Omni recovery route."""
+def test_generate_media_video_text_only_reports_missing_video(monkeypatch):
     client = _FakeMediaClient(response_text="ok")
     _patch_media_env(monkeypatch, client)
 
@@ -534,12 +602,12 @@ def test_generate_media_video_routes_to_default_backend(monkeypatch):
                                 prompt="x", media_type="video")
 
     result = asyncio.run(run())
-    assert "后端: Gemini Web generic chat" in result[0].text
-    assert "https://gemini.google.com/videos" in result[0].text
+    assert "后端:" in result[0].text
+    assert "尚未取得可验证的视频产物" in result[0].text
     domain = result[0].meta["domain_result"]
     assert domain["error"]["code"] == "ARTIFACT_NOT_RETURNED"
     assert domain["error"]["retryable"] is False
-    assert "https://gemini.google.com/videos" in domain["error"]["suggested_action"]
+    assert "No usable video was returned" in domain["error"]["suggested_action"]
 
 
 # ---------------------------------------------------------------------------
@@ -596,7 +664,7 @@ def test_generate_media_timeout_retains_reference_image_identity(monkeypatch, tm
 
 
 def test_generate_media_generic_exception_returns_error_message_with_backend(monkeypatch):
-    """RuntimeError → 返回含后端标签 + '生成失败' + '通用 generate_content' 说明。"""
+    """RuntimeError → 返回含后端标签、失败和清理状态提示。"""
     client = _FakeMediaClient(raise_exc=RuntimeError("upstream aborted"))
     _patch_media_env(monkeypatch, client)
 
@@ -608,9 +676,9 @@ def test_generate_media_generic_exception_returns_error_message_with_backend(mon
 
     result = asyncio.run(run())
     text = result[0].text
-    assert "后端: Gemini Web generic chat" in text
-    assert "❌ video 生成失败: upstream aborted" in text
-    assert "通用 generate_content" in text
+    assert "后端:" in text
+    assert "❌ video 生成失败" in text and "upstream aborted" not in text
+    assert "检查清理状态" in text
 
 
 def test_generate_media_exception_skips_schedule_cleanup(monkeypatch):
@@ -689,10 +757,12 @@ def test_generate_media_queued_response_is_not_reported_as_empty(monkeypatch):
     assert domain["ok"] is True
     assert domain["data"]["state"] == "queued"
     assert domain["meta"]["operation_state"] == "queued"
-    assert scheduled[0]["retain_chat"] is True
+    assert scheduled[0]["retain_chat"] is False
+    assert scheduled[0]["delete_after_seconds"] == 1800
+    assert scheduled[0]["source"].endswith(":deferred")
 
 
-def test_empty_media_response_retains_chat_for_recovery(monkeypatch):
+def test_empty_media_response_does_not_implicitly_retain_chat(monkeypatch):
     client = _FakeMediaClient(response_text="no media")
     scheduled = []
     _patch_media_env(monkeypatch, client, captured_schedule=scheduled)
@@ -703,7 +773,43 @@ def test_empty_media_response_retains_chat_for_recovery(monkeypatch):
 
     result = asyncio.run(run())
     assert result[0].meta["domain_result"]["data"]["state"] == "empty"
-    assert scheduled[0]["retain_chat"] is True
+    assert scheduled[0]["retain_chat"] is False
+    assert scheduled[0]["delete_after_seconds"] is None
+
+
+def test_queued_media_honors_explicit_cleanup_delay(monkeypatch):
+    client = _FakeMediaClient(response_status="processing")
+    scheduled = []
+    _patch_media_env(monkeypatch, client, captured_schedule=scheduled)
+    mcp = _make_mcp()
+
+    async def run():
+        return await _call_tool(mcp, "gemini_generate_media", prompt="x", media_type="video", delete_after_seconds=65)
+
+    asyncio.run(run())
+    assert scheduled[0]["retain_chat"] is False
+    assert scheduled[0]["delete_after_seconds"] == 65
+    assert scheduled[0]["source"].endswith(":deferred")
+
+
+def test_media_exposes_failed_cleanup_without_hiding_artifact_result(monkeypatch):
+    from src.domain.conversations import CleanupObservation, CleanupState
+
+    client = _FakeMediaClient(response_text="no image")
+    _patch_media_env(monkeypatch, client)
+
+    async def failed_cleanup(*_args, **_kwargs):
+        return CleanupObservation(state=CleanupState.FAILED, attempts=1)
+
+    monkeypatch.setattr(media_tools, "finalize_remote_chat_cleanup_from_response", failed_cleanup)
+    mcp = _make_mcp()
+
+    async def run():
+        return await _call_tool(mcp, "gemini_generate_media", prompt="image", media_type="image")
+
+    result = asyncio.run(run())[0].meta["domain_result"]
+    assert result["error"]["code"] == "ARTIFACT_NOT_RETURNED"
+    assert result["meta"]["details"]["cleanup"]["state"] == "failed"
 
 
 def test_generate_media_remote_uri_includes_backend_evidence(monkeypatch):
@@ -832,15 +938,16 @@ def test_generate_media_music_recovers_media_when_response_media_empty(monkeypat
     """
     client = _FakeMediaClient(response_text="ok", media=[])
     recovered_path = tmp_path / "recovered.mp3"
-    recovered_path.write_bytes(b"audio")
+    recovered_path.write_bytes(b"\xff\xfb\x90\x64" + b"\0" * 16)
     recovered = _FakeMedia(
         title="recovered song",
         save_return={"audio": str(recovered_path)},
     )
 
-    async def fake_fetch(client_arg, cid):
+    async def fake_fetch(client_arg, cid, *, rid, rcid):
         assert client_arg is client
         assert cid == "c_media1"  # 从 response.metadata[0] 提取
+        assert rid == "r_response"
         return [recovered]
     _patch_media_env(monkeypatch, client, fetch_music=fake_fetch)
 
@@ -859,7 +966,7 @@ def test_generate_media_music_recovers_media_when_response_media_empty(monkeypat
 
 def test_generate_media_verifies_saved_file_metadata(monkeypatch, tmp_path):
     saved_path = tmp_path / "saved.mp3"
-    saved_path.write_bytes(b"audio bytes")
+    saved_path.write_bytes(b"\xff\xfb\x90\x64" + b"\0" * 16)
     media = _FakeMedia(
         title="saved song",
         mp3_url="https://cdn.example.test/saved.mp3",
@@ -879,7 +986,7 @@ def test_generate_media_verifies_saved_file_metadata(monkeypatch, tmp_path):
     assert domain["meta"]["verification_status"] == "artifact_saved_and_verified"
     assert artifact["local_path"] == str(saved_path.resolve())
     assert artifact["uri"] == "https://cdn.example.test/saved.mp3"
-    assert artifact["size_bytes"] == len(b"audio bytes")
+    assert artifact["size_bytes"] == saved_path.stat().st_size
     assert artifact["mime_type"] == "audio/mpeg"
     assert artifact["duration_seconds"] == 9.25
     assert artifact["verification"]["status"] == "verified"
@@ -1001,8 +1108,8 @@ def test_multiple_images_insert_index_before_requested_extension(monkeypatch, tm
 def test_generate_music_keeps_audio_and_video_artifacts_distinct(monkeypatch, tmp_path):
     audio_path = tmp_path / "song.mp3"
     video_path = tmp_path / "song.mp4"
-    audio_path.write_bytes(b"audio")
-    video_path.write_bytes(b"video")
+    audio_path.write_bytes(b"\xff\xfb\x90\x64" + b"\0" * 16)
+    video_path.write_bytes(b"\x00\x00\x00\x18ftypisom" + b"\0" * 12)
     media = _FakeMedia(
         title="song",
         mp3_url="https://cdn.example.test/song.mp3",
@@ -1026,6 +1133,117 @@ def test_generate_music_keeps_audio_and_video_artifacts_distinct(monkeypatch, tm
     }
     assert len({artifact["id"] for artifact in artifacts}) == 2
     assert all(artifact["state"] == "local" for artifact in artifacts)
+
+
+def test_music_downloads_streams_separately_without_overwrite_and_ignores_thumbnails(monkeypatch, tmp_path):
+    (tmp_path / "instrumental.mp3").write_bytes(b"existing audio")
+    (tmp_path / "instrumental.mp4").write_bytes(b"existing video")
+    calls = []
+
+    class Media:
+        mp3_url = "https://example.test/audio"
+        url = "https://example.test/video"
+        title = "instrumental"
+
+        async def save(self, *, path, filename, verbose, download_type):
+            calls.append((filename, download_type))
+            output = Path(path) / filename
+            data = (b"\xff\xfb\x90\x64" + b"\0" * 16) if download_type == "audio" else (
+                b"\x00\x00\x00\x18ftypisom" + b"\0" * 12
+            )
+            output.write_bytes(data)
+            thumbnail = Path(str(output) + "_thumb")
+            thumbnail.write_bytes(b"\xff\xd8\xff\xe0" + b"thumbnail")
+            return {download_type: str(output), f"{download_type}_thumbnail": str(thumbnail)}
+
+    monkeypatch.setattr(media_tools, "probe_playable_av_tracks",
+                        lambda path: frozenset({"audio" if str(path).endswith(".mp3") else "video"}))
+    outcome = asyncio.run(media_tools._save_generated_media(
+        SimpleNamespace(), media_type="music", output_dir=str(tmp_path), filename="instrumental.mp3",
+        prompt="piano", media_items=[Media()], requested_model="flash", request_model="flash",
+        effective_backend="Lyria", observed_backend=None, source_chat_id=None,
+    ))
+    assert calls == [("instrumental_2.mp3", "audio"), ("instrumental_2.mp4", "video")]
+    assert (tmp_path / "instrumental.mp3").read_bytes() == b"existing audio"
+    assert (tmp_path / "instrumental.mp4").read_bytes() == b"existing video"
+    assert {a.mime_type for a in outcome.artifacts} == {"audio/mpeg", "video/mp4", "image/jpeg"}
+    assert len(outcome.artifacts) == 4
+    assert sum(a.kind.value == "image" for a in outcome.artifacts) == 2
+    assert not outcome.failures
+
+
+def test_music_audio_mp4_is_saved_as_m4a_and_not_falsely_reported_as_mp3(monkeypatch, tmp_path):
+    class Media:
+        mp3_url = "https://example.test/audio"
+        url = ""
+        title = "audio"
+
+        async def save(self, *, path, filename, verbose, download_type):
+            output = Path(path) / filename
+            output.write_bytes(b"\x00\x00\x00\x18ftypisom" + b"\0" * 12)
+            return {"audio": str(output)}
+
+    monkeypatch.setattr(media_tools, "probe_playable_av_tracks", lambda path: frozenset({"audio"}))
+    outcome = asyncio.run(media_tools._save_generated_media(
+        SimpleNamespace(), media_type="music", output_dir=str(tmp_path), filename="instrumental.mp3",
+        prompt="piano", media_items=[Media()], requested_model="flash", request_model="flash",
+        effective_backend="Lyria", observed_backend=None, source_chat_id=None,
+    ))
+    assert len(outcome.artifacts) == 1
+    assert outcome.artifacts[0].local_path.endswith(".m4a")
+    assert outcome.artifacts[0].mime_type == "audio/mp4"
+    assert not (tmp_path / "instrumental.mp3").exists()
+
+
+def test_music_video_with_only_audio_track_is_not_claimed_as_video(monkeypatch, tmp_path):
+    class Media:
+        mp3_url = ""
+        url = "https://example.test/video"
+        title = "audio only"
+
+        async def save(self, *, path, filename, verbose, download_type):
+            output = Path(path) / filename
+            output.write_bytes(b"\x00\x00\x00\x18ftypisom" + b"\0" * 12)
+            return {"video": str(output)}
+
+    monkeypatch.setattr(media_tools, "probe_playable_av_tracks", lambda path: frozenset({"audio"}))
+    outcome = asyncio.run(media_tools._save_generated_media(
+        SimpleNamespace(), media_type="music", output_dir=str(tmp_path), filename="clip.mp4",
+        prompt="piano", media_items=[Media()], requested_model="flash", request_model="flash",
+        effective_backend="Lyria", observed_backend=None, source_chat_id=None,
+    ))
+    assert len(outcome.artifacts) == 1
+    assert outcome.artifacts[0].kind.value == "audio"
+    assert outcome.artifacts[0].local_path.endswith(".m4a")
+    assert outcome.failures == ("video:track_missing",)
+
+
+def test_audio_endpoint_with_av_container_is_probed_as_mp4_before_classification(monkeypatch, tmp_path):
+    class Media:
+        mp3_url = "https://example.test/audio"
+        url = ""
+        title = "audio"
+
+        async def save(self, *, path, filename, verbose, download_type):
+            output = Path(path) / filename
+            output.write_bytes(b"\x00\x00\x00\x18ftypisom" + b"\0" * 12)
+            return {"audio": str(output)}
+
+    def probe(path):
+        assert str(path).endswith(".mp4")
+        return frozenset({"audio", "video"})
+
+    monkeypatch.setattr(media_tools, "probe_playable_av_tracks", probe)
+    outcome = asyncio.run(media_tools._save_generated_media(
+        SimpleNamespace(), media_type="music", output_dir=str(tmp_path), filename="instrumental.mp3",
+        prompt="piano", media_items=[Media()], requested_model="flash", request_model="flash",
+        effective_backend="Lyria", observed_backend=None, source_chat_id=None,
+    ))
+    assert len(outcome.artifacts) == 1
+    assert outcome.artifacts[0].kind.value == "video"
+    assert outcome.artifacts[0].local_path.endswith(".mp4")
+    assert outcome.artifacts[0].mime_type == "video/mp4"
+    assert outcome.artifacts[0].uri == Media.mp3_url
 
 
 def test_generate_media_save_failure_returns_remote_artifact_with_partial_warning(monkeypatch):
@@ -1132,8 +1350,8 @@ def test_generate_music_delegates_to_generate_media_with_music_prompt(monkeypatc
     )
 
 
-def test_generate_music_default_thinking_level_is_extended(monkeypatch):
-    """The music facade retains its extended thinking default without a backend claim."""
+def test_generate_music_default_thinking_level_is_standard(monkeypatch):
+    """The music facade uses standard thinking without a backend version claim."""
     client = _FakeMediaClient(response_text="ok")
     _patch_media_env(monkeypatch, client)
 
@@ -1144,7 +1362,7 @@ def test_generate_music_default_thinking_level_is_extended(monkeypatch):
                                 prompt="x", model="pro")  # 不传 thinking_level
 
     asyncio.run(run())
-    assert client.captured_generate_kwargs["thinking_level"] == "extended"
+    assert client.captured_generate_kwargs["thinking_level"] == "standard"
 
 
 def test_generate_music_source_string_is_generate_media_music_not_generate_music(monkeypatch):
@@ -1182,3 +1400,163 @@ def test_generate_music_default_thinking_level_does_not_invent_backend(monkeypat
     result = asyncio.run(run())
     assert "后端: Lyria" in result[0].text
     assert "Lyria 3 Pro" not in result[0].text
+
+
+def test_concurrent_image_saves_reserve_distinct_names(tmp_path):
+    from src.services.media_storage import _save_generated_media
+    png = bytes.fromhex('89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c489')
+    async def run():
+        entered = 0
+        ready = asyncio.Event()
+        class Image:
+            url = 'https://example.test/image'
+            title = 'image'
+            async def save(self, *, path, filename, verbose):
+                nonlocal entered
+                entered += 1
+                if entered == 2:
+                    ready.set()
+                await ready.wait()
+                output = Path(path) / filename
+                output.write_bytes(png)
+                return str(output)
+        async def save_one():
+            return await _save_generated_media(SimpleNamespace(), media_type='image', output_dir=str(tmp_path),
+                filename='same.png', prompt='', media_items=[Image()], requested_model='flash',
+                request_model='flash', effective_backend='flash', observed_backend=None, source_chat_id=None)
+        return await asyncio.gather(save_one(), save_one())
+    results = asyncio.run(run())
+    paths = [Path(result.artifacts[0].local_path) for result in results]
+    assert len(set(paths)) == 2 and all(path.read_bytes() == png for path in paths)
+
+
+def test_media_save_failure_does_not_log_signed_url(tmp_path, caplog):
+    from src.services.media_storage import _save_generated_media
+    class Media:
+        async def save(self, **_kwargs):
+            raise RuntimeError('https://example.test/download?secret=synthetic-signature')
+    result = asyncio.run(_save_generated_media(SimpleNamespace(), media_type='image', output_dir=str(tmp_path),
+        filename='image.png', prompt='', media_items=[Media()], requested_model='flash', request_model='flash',
+        effective_backend='flash', observed_backend=None, source_chat_id=None))
+    assert result.failures == ('RuntimeError:save',)
+    assert 'synthetic-signature' not in caplog.text and 'RuntimeError' in caplog.text
+    assert not list(tmp_path.iterdir())
+
+
+def test_failed_media_save_removes_partial_reserved_file(tmp_path):
+    from src.services.media_storage import _save_generated_media
+    class Media:
+        async def save(self, *, path, filename, verbose):
+            (Path(path) / filename).write_bytes(b'partial data')
+            raise ConnectionError('interrupted')
+    result = asyncio.run(_save_generated_media(SimpleNamespace(), media_type='video', output_dir=str(tmp_path),
+        filename='partial.mp4', prompt='', media_items=[Media()], requested_model='flash', request_model='flash',
+        effective_backend='flash', observed_backend=None, source_chat_id=None))
+    assert result.failures == ('ConnectionError:save',) and not list(tmp_path.iterdir())
+
+
+def test_image_extension_correction_preserves_existing_file(tmp_path):
+    from src.services.media_storage import _normalize_saved_image_extension
+    source = tmp_path / 'photo.png'
+    source.write_bytes(b'\xff\xd8\xff\xe0' + b'fake-jpeg')
+    existing = tmp_path / 'photo.jpg'
+    existing.write_bytes(b'previous')
+    corrected = Path(_normalize_saved_image_extension(str(source)))
+    assert corrected != existing and corrected.suffix == '.jpg'
+    assert corrected.read_bytes() == b'\xff\xd8\xff\xe0' + b'fake-jpeg'
+    assert existing.read_bytes() == b'previous'
+
+
+def test_concurrent_video_saves_reserve_distinct_names(tmp_path):
+    from src.services.media_storage import _save_generated_media
+    mp4 = b'\x00\x00\x00\x18ftypisom' + b'\0' * 12
+    async def run():
+        entered = 0
+        ready = asyncio.Event()
+        class Video:
+            url = 'https://example.test/video'
+            title = 'video'
+            async def save(self, *, path, filename, verbose):
+                nonlocal entered
+                entered += 1
+                if entered == 2:
+                    ready.set()
+                await ready.wait()
+                output = Path(path) / filename
+                output.write_bytes(mp4)
+                return {'video': str(output)}
+        async def save_one():
+            return await _save_generated_media(SimpleNamespace(), media_type='video', output_dir=str(tmp_path),
+                filename='same.mp4', prompt='', media_items=[Video()], requested_model='flash',
+                request_model='flash', effective_backend='flash', observed_backend=None, source_chat_id=None,
+                track_probe=lambda _path: frozenset({'video'}))
+        return await asyncio.gather(save_one(), save_one())
+    results = asyncio.run(run())
+    paths = [Path(result.artifacts[0].local_path) for result in results]
+    assert len(set(paths)) == 2 and all(path.read_bytes() == mp4 for path in paths)
+
+
+@pytest.mark.parametrize('shape', ['invalid_video', 'unsupported_result'])
+def test_unusable_media_save_removes_only_own_reserved_file(tmp_path, shape):
+    from src.services.media_storage import _save_generated_media
+    existing = tmp_path / 'same.mp4'
+    existing.write_bytes(b'preexisting')
+    class Video:
+        async def save(self, *, path, filename, verbose):
+            output = Path(path) / filename
+            output.write_bytes(b'invalid media')
+            return {'video': str(output)} if shape == 'invalid_video' else object()
+    result = asyncio.run(_save_generated_media(SimpleNamespace(), media_type='video', output_dir=str(tmp_path),
+        filename='same.mp4', prompt='', media_items=[Video()], requested_model='flash', request_model='flash',
+        effective_backend='flash', observed_backend=None, source_chat_id=None))
+    assert result.failures and not result.artifacts
+    assert existing.read_bytes() == b'preexisting' and sorted(p.name for p in tmp_path.iterdir()) == ['same.mp4']
+
+
+def test_suffix_rename_rolls_back_link_if_original_cannot_be_removed(tmp_path, monkeypatch):
+    from src.services.media_storage import _rename_music_suffix
+    source = tmp_path / 'song.mp3'
+    source.write_bytes(b'original')
+    original_unlink = Path.unlink
+    def unlink(path, *args, **kwargs):
+        if path == source:
+            raise PermissionError('synthetic')
+        return original_unlink(path, *args, **kwargs)
+    monkeypatch.setattr(Path, 'unlink', unlink)
+    with pytest.raises(PermissionError):
+        _rename_music_suffix(str(source), '.mp4')
+    assert source.read_bytes() == b'original' and sorted(p.name for p in tmp_path.iterdir()) == ['song.mp3']
+
+
+def test_invalid_video_removes_main_but_preserves_verified_preview(tmp_path):
+    from src.services.media_storage import _save_generated_media
+    preview = b'\xff\xd8\xff\xe0' + b'preview'
+    class Video:
+        thumbnail = 'https://example.test/thumb'
+        async def save(self, *, path, filename, verbose):
+            main = Path(path) / filename
+            main.write_bytes(b'invalid video')
+            thumb = Path(path) / 'preview.jpg'
+            thumb.write_bytes(preview)
+            return {'video': str(main), 'video_thumbnail': str(thumb)}
+    result = asyncio.run(_save_generated_media(SimpleNamespace(), media_type='video', output_dir=str(tmp_path),
+        filename='video.mp4', prompt='', media_items=[Video()], requested_model='flash', request_model='flash',
+        effective_backend='flash', observed_backend=None, source_chat_id=None))
+    assert result.failures and len(result.artifacts) == 1
+    assert result.artifacts[0].kind.value == 'image' and result.artifacts[0].state.value == 'local'
+    assert (tmp_path / 'preview.jpg').read_bytes() == preview and not (tmp_path / 'video.mp4').exists()
+
+
+def test_invalid_music_after_extension_change_removes_reserved_output(tmp_path):
+    from src.services.media_storage import _save_generated_media
+    class Media:
+        mp3_url = 'https://example.test/audio'
+        url = ''
+        async def save(self, *, path, filename, verbose, download_type):
+            output = Path(path) / filename
+            output.write_bytes(b'\x00\x00\x00\x18ftypisom' + b'\0' * 12)
+            return {'audio': str(output)}
+    result = asyncio.run(_save_generated_media(SimpleNamespace(), media_type='music', output_dir=str(tmp_path),
+        filename='song.mp3', prompt='', media_items=[Media()], requested_model='flash', request_model='flash',
+        effective_backend='flash', observed_backend=None, source_chat_id=None, track_probe=lambda _path: None))
+    assert result.failures and not result.artifacts and not list(tmp_path.iterdir())

@@ -11,7 +11,7 @@ from collections.abc import Callable
 from typing import Any, TypeVar
 
 from mcp.server import MCPServer as SDKMCPServer
-from mcp_types import Icon, TextContent, ToolAnnotations
+from mcp_types import Icon, TextContent, ToolAnnotations, ImageContent
 
 
 _CallableT = TypeVar("_CallableT", bound=Callable[..., Any])
@@ -50,5 +50,6 @@ class MCPServer(SDKMCPServer):
 __all__ = [
     "MCPServer",
     "TextContent",
+    "ImageContent",
     "ToolAnnotations",
 ]

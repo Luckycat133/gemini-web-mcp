@@ -39,6 +39,10 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 from src.adapters.mcp_sdk import MCPServer
+import pytest
+
+from src.services import notebooks as notebooks_service
+from src.infrastructure.rpc_parsers import RPCEnvelope
 from src.services import history as history_service
 
 import src.tools.manage as manage_tools
@@ -106,6 +110,7 @@ class _ReadChatClient(_ListChatsClient):
 
 
 def _patch_seams(monkeypatch, client):
+    monkeypatch.setenv("GEMINI_PSID", "synthetic-test-account")
     """统一 patch manage 模块的 client_wrapper 接缝。"""
     monkeypatch.setattr(manage_tools, "get_gemini_client", lambda: client)
 
@@ -212,7 +217,7 @@ def test_search_chats_empty_query_short_circuits(monkeypatch):
     _patch_seams(monkeypatch, client)
     mcp = _make_mcp()
     result = _run(_call(mcp, "gemini_search_chats", query=""))
-    assert "❌ 搜索聊天需要提供 query" in result[0].text
+    assert "query is required" in result[0].text
 
 
 def test_search_chats_whitespace_query_short_circuits(monkeypatch):
@@ -221,7 +226,7 @@ def test_search_chats_whitespace_query_short_circuits(monkeypatch):
     _patch_seams(monkeypatch, client)
     mcp = _make_mcp()
     result = _run(_call(mcp, "gemini_search_chats", query="   \t  "))
-    assert "❌ 搜索聊天需要提供 query" in result[0].text
+    assert "query is required" in result[0].text
 
 
 def test_search_chats_scan_turns_without_read_chat_short_circuits(monkeypatch):
@@ -313,7 +318,7 @@ def test_search_chats_scan_turns_read_error_becomes_snippet_error(monkeypatch):
     client = _ReadChatClient([_chat("c_1", "Title")], {})
 
     async def boom(chat_id, limit=20):
-        raise ValueError("boom")
+        raise ValueError("synthetic-private-body")
     client.read_chat = boom
     _patch_seams(monkeypatch, client)
     mcp = _make_mcp()
@@ -324,7 +329,8 @@ def test_search_chats_scan_turns_read_error_becomes_snippet_error(monkeypatch):
     assert payload["match_count"] == 1
     match = payload["matches"][0]
     assert match["matched_fields"] == ["title"]  # turn 未匹配
-    assert match["snippets"][0]["error"] == "ValueError: boom"
+    assert match["snippets"][0]["error"] == "ValueError"
+    assert "synthetic-private-body" not in result[0].text
 
 
 def test_search_chats_batch_execute_path_uses_fetch_recent(monkeypatch):
@@ -340,7 +346,7 @@ def test_search_chats_batch_execute_path_uses_fetch_recent(monkeypatch):
     monkeypatch.setattr(manage_tools, "_fetch_recent_conversation_metadata", fake_fetch)
     mcp = _make_mcp()
     result = _run(_call(mcp, "gemini_search_chats", query="alpha", limit=5, offset=0))
-    assert captured["client"] is client
+    assert captured["client"]._wrapped is client
     assert captured["target"] == 5  # safe_limit + safe_offset = 5 + 0
     assert "Alpha" in result[0].text
 
@@ -830,7 +836,7 @@ def test_fetch_notebook_chats_single_page(monkeypatch):
     entries = [["c_1", "Chat 1", False, None, None, None, None, None, None, None, None, None, None, None]]
     # body=[next_page_token, raw_entries, raw_entries_dup?] —— 实际 body[1]=token, body[2]=entries
     body = [None, None, entries]
-    monkeypatch.setattr(manage_tools, "_extract_rpc_bodies", lambda _t, _r: [body])
+    monkeypatch.setattr(notebooks_service, "parse_rpc_envelope", lambda _t, _r: RPCEnvelope(True, 1, (body,)))
     items, page_payload = _run(manage_tools._fetch_notebook_chats(client, "n_1", 20, 0))
     assert client.call_count == 1
     assert len(items) == 1
@@ -852,8 +858,8 @@ def test_fetch_notebook_chats_multi_page_until_no_token(monkeypatch):
     body1 = [None, "tok_next", entries1]  # body[1]=token（str）→ 继续
     body2 = [None, None, entries2]  # body[1]=None → 停止
     pages = [body1, body2]
-    monkeypatch.setattr(manage_tools, "_extract_rpc_bodies",
-                        lambda _t, _r: [pages.pop(0)])
+    monkeypatch.setattr(notebooks_service, "parse_rpc_envelope",
+                        lambda _t, _r: RPCEnvelope(True, 1, (pages.pop(0),)))
     items, page_payload = _run(manage_tools._fetch_notebook_chats(client, "n_1", 20, 0))
     assert client.call_count == 2
     assert len(items) == 2
@@ -861,17 +867,16 @@ def test_fetch_notebook_chats_multi_page_until_no_token(monkeypatch):
     assert page_payload["diagnostic"]["has_remote_more"] is False
 
 
-def test_fetch_notebook_chats_breaks_on_empty_entries(monkeypatch):
-    """raw_entries 为空 → 即使有 token 也 break。"""
+def test_fetch_notebook_chats_rejects_empty_page_with_token(monkeypatch):
+    """空页带继续 token 无法证明结果完整。"""
     client = _FakeBatchClient(responses=["r1"])
     _patch_seams(monkeypatch, client)
     # body[1]=token（str），body[2]=[] 空 entries → break via `not raw_entries`
     body = [None, "tok_next", []]
-    monkeypatch.setattr(manage_tools, "_extract_rpc_bodies", lambda _t, _r: [body])
-    items, page_payload = _run(manage_tools._fetch_notebook_chats(client, "n_1", 20, 0))
+    monkeypatch.setattr(notebooks_service, "parse_rpc_envelope", lambda _t, _r: RPCEnvelope(True, 1, (body,)))
+    with pytest.raises(notebooks_service.NotebookChatReadError, match="incomplete_page"):
+        _run(manage_tools._fetch_notebook_chats(client, "n_1", 20, 0))
     assert client.call_count == 1
-    assert items == []
-    assert page_payload["count"] == 0
 
 
 def test_fetch_notebook_chats_clamps_limit_and_offset(monkeypatch):
@@ -880,7 +885,7 @@ def test_fetch_notebook_chats_clamps_limit_and_offset(monkeypatch):
     _patch_seams(monkeypatch, client)
     entries = [["c_1", "Chat 1"]]
     body = [None, None, entries]
-    monkeypatch.setattr(manage_tools, "_extract_rpc_bodies", lambda _t, _r: [body])
+    monkeypatch.setattr(notebooks_service, "parse_rpc_envelope", lambda _t, _r: RPCEnvelope(True, 1, (body,)))
     items, page_payload = _run(manage_tools._fetch_notebook_chats(
         client, "n_1", limit=-5, offset=99999))
     # limit -5 → clamp 1；offset 99999 → clamp 10000；但 items 只有 1 条 → page 从 offset 10000 切片为空
@@ -1091,3 +1096,20 @@ def test_list_notebook_chats_untitled_when_title_missing(monkeypatch):
     mcp = _make_mcp()
     result = _run(_call(mcp, "gemini_list_notebook_chats", notebook_id="n_1"))
     assert "(untitled)" in result[0].text
+
+
+def test_notebook_readback_error_is_json_unverified_not_empty(monkeypatch):
+    client = _FakeBatchClient()
+    _patch_seams(monkeypatch, client)
+    monkeypatch.setattr(manage_tools, "_fetch_native_notebooks", AsyncMock(return_value=(
+        [{"id": "n_1", "title": "synthetic"}], {"source_rpc": "test"},
+    )))
+    monkeypatch.setattr(manage_tools, "_fetch_notebook_chats", AsyncMock(
+        side_effect=notebooks_service.NotebookChatReadError("changed_shape"),
+    ))
+    result = _run(_call(_make_mcp(), "gemini_list_notebook_chats", notebook_id="n_1", response_format="json"))
+    payload = json.loads(result[0].text)
+    assert payload["ok"] is False
+    assert payload["verification_status"] == "read_back_unverified"
+    assert payload["diagnostic"]["parser_status"] == "changed_shape"
+    assert "items" not in payload

@@ -204,7 +204,7 @@ def test_list_browser_cookie_profiles_response_format_json(monkeypatch):
 def test_list_browser_cookie_profiles_handles_exception(monkeypatch):
     """list_browser_cookie_profiles 抛异常 → handle_error 兜底返回错误响应。"""
     def raise_error(browser, validate=True):
-        raise RuntimeError("browser not found")
+        raise RuntimeError("synthetic-private-body")
 
     monkeypatch.setattr(server, "list_browser_cookie_profiles", raise_error)
 
@@ -214,7 +214,8 @@ def test_list_browser_cookie_profiles_handles_exception(monkeypatch):
     result = asyncio.run(run())
     # handle_error + format_error_response 返回错误文本，不抛异常给调用方
     assert len(result) == 1
-    assert "browser not found" in result[0].text or "error" in result[0].text.lower()
+    assert "错误:" in result[0].text and "请求失败" in result[0].text
+    assert "synthetic-private-body" not in result[0].text
 
 
 # ---------------------------------------------------------------------------

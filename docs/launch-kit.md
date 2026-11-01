@@ -62,7 +62,7 @@ Gemini Web MCP is an agent-first MCP Python SDK v2 gateway and paired skill set 
 
 The runtime skill and development skill are deliberately separate. Shared history services keep primary and compact typed results aligned, destructive results distinguish accepted requests from positive read-back evidence, and media results preserve requested, effective, and observed backend fields while treating a deliverable as local only after file/MIME/size metadata verification.
 
-The three-file ClawHub runtime bundle is MIT-0. The MCP server source and repository-development skill remain AGPL-3.0-only.
+The ClawHub runtime bundle is MIT-0. The MCP server source and repository-development skill remain AGPL-3.0-only.
 
 ## Copy templates
 

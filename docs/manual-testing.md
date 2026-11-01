@@ -101,7 +101,7 @@
 | 4.1 | `gemini_generate_media(prompt="一只橘猫", media_type="image")` | 返回图片，文件落到 `generated_media/`，`Remote chat ID` 可解析 |
 | 4.2 | `media_type="image", model="flash-lite"` | 使用运行时 `Flash-Lite` 路线；返回可验证图片，按网页帮助标注 Nano Banana 2 Lite |
 | 4.3 | `media_type="image", model="pro"` | 首轮仍走 Nano Banana 2；Pro redo 是网页二次操作 |
-| 4.4 | `gemini_generate_media(..., media_type="video")` | 仅在结构化结果包含可验证视频 Artifact 时通过；2026-09-26 通用聊天路线返回 `ARTIFACT_NOT_RETURNED`，当前需要 Gemini Omni 专用网页模式 |
+| 4.4 | `gemini_generate_media(..., media_type="video")` | 仅在结构化结果包含可验证视频 Artifact 时通过；2026-10-31 的专用视频模式已返回 MP4；JPEG 缩略图不能代替视频 |
 | 4.5 | `gemini_generate_music(prompt="轻快钢琴", model="flash")` | 返回可验证音频或封面视频文件；无上游版本证据时只报告 Lyria |
 | 4.6 | `gemini_generate_music(prompt="交响乐", model="pro")` | 返回可验证产物；不要从 `thinking_level` 推断 Lyria 版本或曲长 |
 | 4.7 | `image_path="/abs/ref.jpg"` 作为参考图 | 不崩；如果上游不支持参考图，错误要明确 |
@@ -111,12 +111,12 @@
 | 4.11 | 使用不可写输出目录测试一个仍返回远端 URI 的请求 | 远端 artifact 保留，结果为 `partial` 并带 `ARTIFACT_SAVE_PARTIAL`；不得宣称本地保存成功 |
 | 4.12 | 指定 `filename="image.png"`，上游实际返回 JPEG 字节 | 落盘后缀调整为 `.jpg`，结构化 `mime_type=image/jpeg`，与文件签名一致 |
 | 4.13 | 指定已有文件名或 `filename="../escape.png"` | 已有文件不被覆盖；路径型文件名在请求前返回 `INVALID_ARGUMENT` |
-| 4.14 | 媒体结果为 queued/empty 且含上游聊天 ID | 默认保留聊天供回看，不将其排入自动清理 |
+| 4.14 | 媒体结果为 queued/empty 且含上游聊天 ID | queued 媒体默认暂缓清理；empty/失败不隐式保留，清理结果须如实报告 |
 
 **关键校验**：
 - 图片首轮按 Flash-Lite 与 Flash/Pro 分流；`observed_backend=null` 时，后端标签只是当前网页帮助支持的路由判断
 - 音乐只报告 Lyria 家族，直到响应提供实际版本证据
-- 当前通用 MCP 视频提示未进入 Gemini Omni 专用模式；请保留失败状态，避免重复发起生成
+- 检查视频专用模式的实际视频 Artifact；仅有缩略图或文本时保留失败状态，避免重复发起生成
 - 文件实际落到磁盘，`generated_media/` 目录被 `.gitignore`
 - 远端 URI 只标记 `unverified`；只有本地文件存在且非零才标记 `verified`
 - `requested_model`、`request_model`、`effective_backend`、`observed_backend` 分开记录；没有观测证据时 `observed_backend=null`
@@ -131,7 +131,7 @@
 | 5.1 | `gemini_deep_research(query="2026 年大模型发展趋势", model="flash", timeout_seconds=600)` | 走 `_run_native_deep_research` 路径，返回报告，含 `# Deep Research` 标题、`请求模型` 字段、引用来源 `[cite: N]` |
 | 5.2 | 用 `model="pro"` 重复 | 走 native 路径；如果 `gemini-webapi` 不支持，回落到 `_run_fallback_deep_research`，返回里会写 "当前 gemini-webapi 客户端没有暴露完整研究轮询 API" |
 | 5.3 | 故意设 `timeout_seconds=30` | 返回 `❌ Deep Research 超时（30秒）`，**不能把 start message 当成最终报告**返回（`test_deep_research_timeout_does_not_present_start_message_as_report` 验了形状） |
-| 5.4 | `wait_for_completion=false, retain_chat=true` | 不调用 wait；返回 `queued` 或 `running`，并保留 research/chat ID 与 `continuation_possible=true` |
+| 5.4 | `wait_for_completion=false, retain_chat=true` | 不调用 wait；按观察返回 `accepted` 或 `running`，并保留已观察到的 research/chat ID 和 continuation 状态 |
 | 5.5 | 完成后调 `gemini_list_research_report_actions(chat_id=<上一步 cid>)` | 列出 webpage / infographic / quiz / flashcards / audio_overview / custom_app 等动作 |
 | 5.6 | `gemini_create_from_research_report(chat_id, artifact_type="webpage", output_dir=/tmp/dr-test)` | 在 output_dir 生成 HTML，HTML 含报告正文和来源链接，`rel="noopener noreferrer"` |
 | 5.7 | 检查 5.6 的 `_meta.domain_result.data.artifacts[0]` | `state=local`、`kind=webpage`、path/bytes/MIME 与磁盘一致，backend 为 MCP local renderer / filesystem |
@@ -139,7 +139,7 @@
 **关键校验**：
 - `query` 里要带 `Requested MCP model alias: xxx`（便于事后审计）
 - `domain_result.meta.operation_state` 与 `data.state` 一致；超时仍保留已观测到的上游 ID
-- 完成后 `gemini_history(action="read", chat_id=<cid>)` 能读到同一份报告
+- 显式 `retain_chat=true` 时可用 `gemini_history(action="read", chat_id=<cid>)` 核对报告；默认清理后不能再次远端读取
 - `retain_chat=false` 时，cleanup 后台任务会删掉远端 chat；`retain_chat=true` 时保留
 
 ### 6. 文件上传与 URL 分析
@@ -324,8 +324,8 @@
 
 | # | 步骤 | 预期 |
 |---|---|---|
-| 20.1 | `pytest tests/test_evaluations.py -v` | 2 个测试通过，17 个 QA 答案与 manifest 一致 |
-| 20.2 | 人工读 [evaluations/gemini_web_mcp_contract.xml](../evaluations/gemini_web_mcp_contract.xml) | 17 个 qa_pair，问题/答案与当前工具面一致 |
+| 20.1 | `pytest tests/test_evaluations.py -v` | 检查 QA 答案与当前 manifest 及证据约定一致 |
+| 20.2 | 人工读 [evaluations/gemini_web_mcp_contract.xml](../evaluations/gemini_web_mcp_contract.xml) | 问题/答案与当前工具面及证据边界一致 |
 
 ### 21. 自动 Live Canary（专用账号、显式 opt-in）
 
@@ -422,3 +422,49 @@ P2.2 实现阶段没有可用的专用账号，因此只完成离线 fixture/wor
 - [docs/faq.md](./faq.md) — 概念性问题
 - [evaluations/gemini_web_mcp_contract.xml](../evaluations/gemini_web_mcp_contract.xml) — 只读 QA 评估
 - [AGENTS.md](../AGENTS.md) — 仓库安全与构建规范
+
+## 2026-10-31 授权本地功能观察
+
+Primary 视频返回经验证的 10 秒 1280×720 MP4 和独立 JPEG 预览；primary 音乐返回经验证的 MP3/MP4；compact 图片编辑返回 JPEG。相关测试聊天自动删除。一次 Pro 研究通过同一持久句柄跨进程取回完整报告，核对 artifact 大小和哈希后自动删除并独立确认远端不存在。这些是授权本地定向测试，并非专用账号 canary；不能推断所有账号或后续调用稳定成功。后续 compact 视频已验证 10 秒 1280×720 MP4 及独立预览；compact 音乐已验证 MP3 音频、MP4 音视频及独立预览，两个测试对话自动删除并独立确认不存在。Flash-Lite 文本标记也已通过并完成清理。早期 Flash 与 Pro 搜索均为 `answer_only`。后续 Pro 受控请求观察到结构来源及其片段，片段在回答中与两组 offset 按 Unicode 码点及 UTF-16 均精确匹配；另一请求返回 `retrieved_only`，清理完成。最终修复后的真实 MCP Pro 搜索返回 `grounded`、1 条 `source_attribution`，片段与两组 offset 再次精确匹配，自动清理状态为 `completed`。匹配结果只证明该次响应的来源关联，不能推断每次请求均有来源。39 个只读盘点案例无 MCP/旧文本错误仅证明响应形状，不证明账号修改操作已验证；SDK 缓存状态标记为 `cached_unverified`。
+
+另一次授权本地 Scheduled 合成条目测试完成创建、按 ID 读取和删除：创建后按 ID 可读但注册表为空，删除返回 `deleted_state_by_id` 且 `verified_deleted_state=true`。这只验证该合成条目的路径，不代表全部账号修改操作通过。
+
+授权本地语义抽查：多轮 stream 保留随机标记，直接 read/export 和 history facade 均可读回；reset 后再次 reset 返回 `SESSION_NOT_FOUND`。附件中的随机标记被识别；不含颜色信息的随机文件名图片中左上蓝、右下黄均正确，mixed 输入的两个项目均被分析。URL 检查只验证响应提到 `example.com` 标题，不证明实时抓取。五个核心测试聊天和单独的图片测试聊天均经独立核验已不存在。
+
+另一个唯一合成 Gem 完成创建、局部改名并验证指令/描述保留、指定 Gem 的固定标记对话、删除及新客户端读回确认不存在。只覆盖这个测试条目。
+
+授权本地 Notebook 测试只移动了新建合成对话：移动 accepted 且回读 verified，同一 Notebook 随后确认存在；会话 reset 自动清理后，该 Notebook 再次读回确认条目不存在，独立 canonical 检查也确认远端对话不存在。未更改 Notebook 字段或其他对话。Notebook 列表遇拒绝、缺失或结构变化时应返回未验证，不能当空列表。
+
+另一次授权本地报告测试使用 Gemini Web UI 启动的研究：SDK 从 running 观察到报告就绪，stdio actions 返回六项，六种本地渲染均生成非空、路径和大小经核验的文件，网页 HTML 签名也通过检查。`audio_overview` 是 Markdown 旁白稿，`custom_app` 是 Markdown 应用规格。随后读取报告完成默认清理，并独立确认远端测试对话不存在。此前一次 MCP Pro 启动并恢复报告的成功仍有效；近期五次 MCP 新建尝试出现 `plan_missing`，第六次在新保护逻辑下先返回 `partial`，随后用同一句柄恢复原计划，保持原 Pro、extended 与 `retain_chat=false` 并仅确认一次；再次使用同一句柄未重复确认。研究最终返回就绪报告，六项 actions 和六个本地产物均验证通过，`gemini_get_operation_result` 完成默认清理，独立 canonical 检查确认测试对话不存在。另一项预算研究随后也在原句柄上完成：六项 actions、六个本地产物均通过核验，取回报告时默认清理完成，独立 canonical 检查确认测试对话不存在。以上是授权本地定向证据，不代表 MCP 启动研究稳定可靠，也不是专用账号 canary。
+
+
+### 后台任务与跨连接恢复
+
+后续六次真实媒体提交覆盖图片、视频、音乐和图片编辑，均在一秒内返回操作句柄。每次提交后关闭原 stdio 连接，独立 worker 继续登记进度；新连接可用原句柄查询。五次观察到明确额度限制，另一次音乐返回明确无法提供音频的响应；修复后分别返回 `RATE_LIMITED` 或 `ARTIFACT_NOT_RETURNED`，不再变成参数错误或无限轮询。六个测试会话均自动清理，独立 canonical 检查确认六个全部不存在；未调用删除工具，也未重复发送生成或远端取消请求。
+
+这轮受限调用没有生成新的媒体文件，不能作为后台成功生成的现网证据。离线集成另覆盖独立子进程在调用循环结束、临时工作目录删除后继续保存真实本地图像，SQLite 元数据恢复、过期租约接管、文件哈希变化、明确拒绝、延迟清理与重复取回。当前账号恢复生成额度后仍需补充后台成功生成的现网覆盖。
+
+
+### 两类入口与清理覆盖检查
+
+本轮授权本地检查通过了功能面和账号面的现代及旧版 MCP 协议工具发现，工具数分别为 17 和 11；未设置 `GEMINI_TOOLS` 的主入口路由到功能面。该检查不证明真实后台生成成功。
+
+对此前登记的 67 个测试聊天做 fresh canonical 审计，均已缺席。原生网页另显示 3 个未入 ledger 的残留候选：两个视频测试及一个图片颜色理解测试。仅对这三个候选读取后，核对其与合成测试模板精确一致，且各为两轮、没有用户后续，再将其登记到当前账号的 MCP-owned ledger。通过新账号入口的 `gemini_cleanup` retry 删除后，三条均返回 `verified_absent`；随后独立 fresh canonical 读回和原生网页刷新均确认这三条已消失。
+
+早期遗漏 CID 的覆盖缺口已修复：SDK 元数据从更早的流帧捕获，异常路径有回退，后台操作也会补入清理队列。ledger 审计只覆盖已登记条目，不能据此推断整个账号没有残留。以上是授权本地定向检查，不是 dedicated-account canary。
+
+随后使用新功能入口真实提交图片，0.04 秒返回操作句柄；关闭提交 stdio 连接后，独立 worker 完成了可验证的本地 JPEG，视觉检查符合橙色三角形要求，重复获取仍为同一产物。另一个文本 nonce 与两轮会话记忆检查均通过。这三个新测试对话全部经独立远端读回确认不存在，测试未主动调用删除工具。该结果补充了新入口后台图片成功生成的实机证据，不代表视频、音乐的重复可靠性或专用账号 canary。
+
+会话断开连接后，远端已独立确认删除，但有一条带租约的清理账本记录仍为 pending。随后只启动服务并保持维护循环，未调用清理/删除工具；约 470 秒后，维护过程自动完成读回并补记，最终该测试队列为 3 条 completed、0 条 pending、0 条 retained。这同时记录了租约恢复的实际等待时间，不应描述为退出进程后立即完成账本确认。
+
+最终离线门禁：Ruff、Mypy、2,032 项全量测试（无警告）及 470 项契约检查通过。精确工具清单、12 次现代/旧版 stdio 握手、六个安装入口、Python 3.14 clean-wheel 与隔离 `uvx` 预检通过；77 个源代码 Python 文件与 wheel、干净安装的字节一致。此处是本地构建验证，未发布。
+
+## 模型策略补充验证（2026-10-31）
+
+- 无新鲜基础 Flash 额度证据时，显式 Lite、ID、别名、字典和 descriptor 都应在生成前被拒绝；认证、网络、扩展思考和媒体专用错误不能授权 Lite。
+- 用离线真实 SDK 替身返回一次基础 Flash `UsageLimitExceededError`：原请求只派发一次。下一条新普通查询可使用 Lite，实际请求的强度固定为 SDK 默认值 1；返回实际模型、回退原因及 `thinking_selectable=false`、`effective_thinking_level=null`。
+- 证据在 60 秒过期，或较新的基础 Flash 成功后撤销；其他账号、旧请求的并发成功及扩展思考/学习成功不能误改证据。显式 Pro/Argon 和已有会话不得自动改模型。
+- 研究指定 Pro/Argon 而注册表仅有 Flash 时，应报告不可用，不能派发 Flash。空响应流应报告 `upstream_response_missing`，不能宣称已经收到回答或确认有效模型。
+- 授权本地真实 stdio 拦截测试自动载入浏览器 Cookie，发现四个模型；无额度证据的 Lite 请求被拒绝，生成派发与新增清理记录都是 0。此探针在生成边界另设阻断，不主动耗尽额度，未验证真实耗尽后的成功降级。
+
+对应回归在 `tests/test_model_policy.py` 和 `tests/test_model_policy_integration.py`；当前全量 2,187 项、契约 562 项、静态检查、精确工具清单和 12 次现代/旧版 stdio 握手通过。Skill 内保留社区原帖和场景限制，详细资料见[模型指南](models.md)与[社区证据](model-community-evidence.md)。

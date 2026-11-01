@@ -17,6 +17,7 @@ from .client_wrapper import (
     init_startup_infrastructure,
     list_browser_cookie_profiles,
     reset_client_async,
+    server_lifespan,
 )
 from .domain import DomainResult
 from .error_handler import format_error_response, handle_error
@@ -38,6 +39,7 @@ logger = logging.getLogger(__name__)
 TOOL_GROUPS = os.environ.get("GEMINI_TOOLS", "core").split(",")
 
 mcp = MCPServer(
+    lifespan=server_lifespan,
     name="Gemini Web MCP Server",
     version=__version__,
     instructions=f"""
@@ -47,7 +49,9 @@ mcp = MCPServer(
 - flash-lite → Web UI 3.5 Flash-Lite
 - flash / fast → Web UI 3.8 Flash
 - pro → Web UI 3.1 Pro
-- 三个 Web UI 模型都支持 thinking_level=standard/extended
+- argon → Web UI 4 Argon（仅按运行时注册表解析，不猜测 ID）
+- 默认 Flash；Argon 适合写作、创意和特别困难的推理
+- thinking_level=low/medium/high；standard/extended 兼容低/高；Lite 仅在当前账号基础 Flash 额度耗尽时允许，思考强度不可选
 - thinking 保留为旧兼容别名
 
 ## 工具组（可配置）
@@ -206,6 +210,10 @@ async def gemini_get_cookie_from_browser(browser: str = "chrome", profile: str =
 
 def main():
     """启动服务器 — 基础设施后台自动化，AI 只看到默认底座工具。"""
+    if os.environ.get("GEMINI_TOOLS", "function").strip() in {"", "function", "functions"}:
+        from .surfaces.function import main as function_main
+        function_main()
+        return
     logger.info("🚀 启动 Gemini Web MCP Server (v%s)", __version__)
     logger.info(f"🔧 加载工具组: {', '.join(TOOL_GROUPS)} (mode=default)")
 

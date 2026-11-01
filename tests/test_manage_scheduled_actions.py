@@ -55,7 +55,7 @@ class _FakeBatchClient:
         self.call_count = 0
         self.captured_payloads = []
 
-    async def _batch_execute(self, raw_rpc_list, *, source_path=None, close_on_error=False):
+    async def _batch_execute(self, raw_rpc_list, *, source_path=None, close_on_error=False, current_retry=None):
         self.call_count += 1
         self.captured_payloads.append(raw_rpc_list)
         if self._raise_exc is not None:
@@ -74,6 +74,7 @@ class _NoBatchClient:
 
 def _patch_seams(monkeypatch, client):
     """统一 patch manage 模块的 client_wrapper 接缝。"""
+    monkeypatch.setenv("GEMINI_PSID", "synthetic-test-account")
     monkeypatch.setattr(manage_tools, "get_gemini_client", lambda: client)
 
     async def fake_init():
@@ -442,7 +443,7 @@ def test_create_scheduled_action_not_visible_in_nonempty_registry(monkeypatch):
     # ok=True (有 id) 但 not visible + not readable → ⚠️ visibility 警告
     assert "⚠️" in result[0].text
     assert "✅ 已创建" not in result[0].text
-    assert "cookie/session" in result[0].text
+    assert "创建请求未获确认" in result[0].text
 
 
 def test_create_scheduled_action_registry_empty_unverified(monkeypatch):
@@ -461,7 +462,7 @@ def test_create_scheduled_action_registry_empty_unverified(monkeypatch):
     result = _run(_call(mcp, "gemini_create_scheduled_action",
                         title="T", instructions="I", hour=9))
     assert "⚠️" in result[0].text
-    assert "cookie/session" in result[0].text
+    assert "创建请求未获确认" in result[0].text
 
 
 def test_create_scheduled_action_readable_by_id_registry_empty(monkeypatch):
@@ -622,8 +623,8 @@ def test_create_scheduled_action_batch_execute_exception(monkeypatch):
     mcp = _make_mcp()
     result = _run(_call(mcp, "gemini_create_scheduled_action",
                         title="T", instructions="I", hour=9))
-    assert "❌ 创建定时操作失败" in result[0].text
-    assert "network down" in result[0].text
+    assert "创建结果未验证" in result[0].text
+    assert "network down" not in result[0].text
 
 
 def test_create_scheduled_action_default_locale_when_empty(monkeypatch):
@@ -719,7 +720,7 @@ def test_delete_scheduled_action_still_visible_in_registry(monkeypatch):
 
     mcp = _make_mcp()
     result = _run(_call(mcp, "gemini_delete_scheduled_action", action_id=action_id))
-    assert "⚠️ 删除请求已被 Gemini 接受" in result[0].text
+    assert "⚠️ 删除请求已发送" in result[0].text
     assert "✅" not in result[0].text
     assert "still_visible_in_registry" in result[0].text
 
@@ -737,7 +738,7 @@ def test_delete_scheduled_action_not_visible_not_readable(monkeypatch):
 
     mcp = _make_mcp()
     result = _run(_call(mcp, "gemini_delete_scheduled_action", action_id="a_1"))
-    assert "✅ 已删除 Gemini 定时操作" in result[0].text
+    assert "⚠️ 删除请求已发送" in result[0].text
 
 
 def test_delete_scheduled_action_registry_empty_not_readable(monkeypatch):
@@ -753,9 +754,9 @@ def test_delete_scheduled_action_registry_empty_not_readable(monkeypatch):
 
     mcp = _make_mcp()
     result = _run(_call(mcp, "gemini_delete_scheduled_action", action_id="a_1"))
-    assert "⚠️ 删除请求已被 Gemini 接受" in result[0].text
+    assert "⚠️ 删除请求已发送" in result[0].text
     assert "✅" not in result[0].text
-    assert "registry 为空" in result[0].text
+    assert "registry_empty_not_readable_by_id" in result[0].text
 
 
 def test_delete_scheduled_action_not_visible_active_or_unknown(monkeypatch):
@@ -773,7 +774,7 @@ def test_delete_scheduled_action_not_visible_active_or_unknown(monkeypatch):
     mcp = _make_mcp()
     result = _run(_call(mcp, "gemini_delete_scheduled_action", action_id=action_id))
     assert "⚠️" in result[0].text
-    assert "仍可读取" in result[0].text
+    assert "响应无法确认" in result[0].text
 
 
 def test_delete_scheduled_action_registry_empty_active_or_unknown(monkeypatch):
@@ -791,7 +792,7 @@ def test_delete_scheduled_action_registry_empty_active_or_unknown(monkeypatch):
     mcp = _make_mcp()
     result = _run(_call(mcp, "gemini_delete_scheduled_action", action_id=action_id))
     assert "⚠️" in result[0].text
-    assert "仍可读取" in result[0].text
+    assert "响应无法确认" in result[0].text
 
 
 def test_delete_scheduled_action_verification_error(monkeypatch):
@@ -808,7 +809,7 @@ def test_delete_scheduled_action_verification_error(monkeypatch):
     mcp = _make_mcp()
     result = _run(_call(mcp, "gemini_delete_scheduled_action", action_id="a_1"))
     # A failed read-back leaves the deletion unverified.
-    assert "⚠️ 删除请求已被 Gemini 接受" in result[0].text
+    assert "⚠️ 删除请求已发送" in result[0].text
     assert "✅" not in result[0].text
     assert "verification_error" in result[0].text
 
@@ -827,7 +828,7 @@ def test_delete_scheduled_action_get_task_error(monkeypatch):
     mcp = _make_mcp()
     result = _run(_call(mcp, "gemini_delete_scheduled_action", action_id="a_1"))
     # Still visible in the registry, so success cannot be claimed.
-    assert "⚠️ 删除请求已被 Gemini 接受" in result[0].text
+    assert "⚠️ 删除请求已发送" in result[0].text
     assert "✅" not in result[0].text
     assert "still_visible_in_registry" in result[0].text
 
@@ -903,8 +904,8 @@ def test_delete_scheduled_action_batch_execute_exception(monkeypatch):
 
     mcp = _make_mcp()
     result = _run(_call(mcp, "gemini_delete_scheduled_action", action_id="a_1"))
-    assert "❌ 删除定时操作失败" in result[0].text
-    assert "network down" in result[0].text
+    assert "删除结果未验证" in result[0].text
+    assert "network down" not in result[0].text
 
 
 def test_delete_scheduled_action_request_payload_format(monkeypatch):
