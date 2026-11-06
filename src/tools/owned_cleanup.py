@@ -20,6 +20,8 @@ def register_owned_cleanup_tools(mcp: MCPServer) -> None:
         processes pending records and honors active operations and explicit retention.
         recheck requires one known chat_id and fresh remote metadata; it can repair
         an old completed record only after the chat is positively observed again.
+        For known Tasks, completion requires both exact Task-goal absence and
+        conversation-history absence. Associated schedules protect the thread.
         Unknown chats are never selected by title or deleted by this tool.
         """
         result = await owned_cleanup_result(action, chat_id=chat_id, limit=limit, offset=offset,

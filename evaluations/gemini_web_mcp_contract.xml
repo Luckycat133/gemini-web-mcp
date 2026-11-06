@@ -224,6 +224,10 @@
     <answer>No. Preserve associated scheduled Tasks; verified deletion of the last plan may release cleanup only for a disposable MCP-owned thread.</answer>
   </qa_pair>
   <qa_pair>
+    <question>What proves deletion of a known MCP-owned Task when ordinary history omits it?</question>
+    <answer>Require an exact Task-goal read that proves absence and an independent conversation-history read that proves absence. A goal still present is eligible for native Task deletion only after ownership, the cleanup lease and associated schedules are checked.</answer>
+  </qa_pair>
+  <qa_pair>
     <question>What is required before explicit Task browser input?</question>
     <answer>Use gemini_task_browser with exact screenshot response and candidate IDs, the frame hash and a unique action ID, and require Task state 3 or 5 to remain unchanged before dispatch. Never replay a consumed ID or automatically approve permissions or login.</answer>
   </qa_pair>

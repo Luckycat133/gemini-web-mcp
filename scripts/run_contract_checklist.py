@@ -62,6 +62,7 @@ CONTRACT_TESTS = (
     "tests/test_task_browser_turn.py",
     "tests/test_task_browser_retries.py",
     "tests/test_task_account_lifecycle.py",
+    "tests/test_task_owned_cleanup.py",
     "tests/test_task_delete_readback.py",
     "tests/test_task_browser_transport.py",
     "tests/test_task_browser_tools.py",

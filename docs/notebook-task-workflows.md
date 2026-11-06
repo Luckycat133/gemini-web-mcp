@@ -146,7 +146,7 @@ Task 可能返回需要回复的应用确认卡片。`gemini_get_operation_statu
 
 Task 计划由 `gemini_tasks` 的 `list_schedules`、`get_schedule`、`create_schedule`、`update_schedule`、`pause_schedule`、`resume_schedule`、`delete_schedule` 管理，与聊天 scheduled actions 分开。`schedule` 支持 `frequency` 为 `once`、`daily`、`weekly`、`hourly`、`monthly` 或 `yearly`，按类型提供 `at`、`time`、`weekdays`、`minute`、`days_of_month` 或 `month`/`day`。指定 `window` 时仍保留 `time`。时间戳须带时区，归一化为 UTC 并保留最多九位小数；列表的 `offset`/`limit` 是本地分页。创建和修改仅发送一次，须独立读回核验；未确认的响应不能当成功或盲目重发。
 
-自动清理 MCP 自有 Task 时会保护仍关联计划的线程。仅在最后一项计划经核验删除，且线程属于可清理的 MCP 自有临时线程时，才可能释放清理保护。删除计划不等于删除 Task 线程。
+自动清理 MCP 自有 Task 时会保护仍关联计划的线程。仅在最后一项计划经核验删除，且线程属于可清理的 MCP 自有临时线程时，才可能释放清理保护。已知 Task 必须同时核验精确 Task 目标和普通历史对话都不存在。若普通历史已经缺席而 Task 目标仍可读，按原 Task ID 走原生删除和独立回读。旧清理状态可通过 `gemini_cleanup(action="recheck", chat_id=...)` 复核。
 
 ## Task 浏览器
 

@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- Verify both the exact Task goal and its conversation history before reporting automatic deletion. Task cleanup respects fresh associated schedules and uses the native Task deletion path when its goal is still present.
 - Browser Cookie autoload verifies the selected session before binding it, reports storage permission failures separately from Gemini session rejection, and checks only the original account when recovering a configured session.
 - Added explicit Gemini Omni 1.2 Flash video generation through the Gemini Interactions API, with optional 3–15 second duration, restart-safe retrieval of the original interaction, verified MP4 artifacts, and default interaction cleanup. The default Cookie path continues to use Gemini Apps Create video.
 - Updated native Skill upload for the current first-party endpoint and recognized an empty response for an exact Notebook project chat list.

@@ -49,7 +49,7 @@
 
 账号面的历史查询默认 `response_format="compact"`，返回 ID、标题、置顶状态和分页信息；普通 read 每轮默认最多 800 字符。`gemini_manage_chat` 用准确 ID 执行 rename/pin/unpin，修改前后读取元数据核验；只发送成功但未读回验证时，`changed=null`。详见[紧凑对话管理](web-chat-management.md)。
 
-`gemini_cleanup` 仅清理本项目登记的 MCP 自有聊天，不按标题匹配。Cookie、Doctor 和本地 Prompts 不属于两个业务面。账号数据和删除操作按用户明确意图使用。
+`gemini_cleanup` 仅清理本项目登记的 MCP 自有聊天。旧记录可用准确 `chat_id` 执行 `recheck`。已知 Task 的清理须核验 Task 目标和普通历史均不存在。显式删除已有 Task 使用 `gemini_tasks(action="delete", chat_id=...)`。Cookie、Doctor 和本地 Prompts 不属于两个业务面。账号数据和删除操作按用户明确意图使用。
 
 ### 显式兼容配置 (`GEMINI_TOOLS=core`)
 

@@ -303,6 +303,15 @@ class OperationStore:
                 (chat_id,),
             ).fetchone() is not None
 
+    def has_owned_task_chat(self, account_key: str, chat_id: str) -> bool:
+        """Distinguish a known Task from Notebook-backed Chat in cleanup."""
+        with self._connect() as db:
+            return db.execute(
+                """SELECT 1 FROM operations WHERE account_key=? AND upstream_chat_id=?
+                   AND operation='gemini_run_task' LIMIT 1""",
+                (account_key, chat_id),
+            ).fetchone() is not None
+
     def attach_late_chat(self, operation_id: str, chat_id: str) -> bool:
         """Atomically attach a late ID without changing status or reopening cleanup."""
         if not chat_id:

@@ -54,6 +54,7 @@ def test_targeted_contract_checklist_covers_stable_architecture_boundaries() -> 
         "tests/test_cleanup_store.py",
         "tests/test_cleanup_runtime.py",
         "tests/test_remote_chat_cleanup_manager.py",
+        "tests/test_task_owned_cleanup.py",
         "tests/test_owned_cleanup.py",
         "tests/test_operations.py",
         "tests/test_operation_store.py",

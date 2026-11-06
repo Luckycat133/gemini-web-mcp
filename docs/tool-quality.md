@@ -8,7 +8,7 @@
 
 | 工具 | 作用 | 离线检查 | 相关测试 | 既有真实证据与限制 |
 | --- | --- | --- | --- | --- |
-| `gemini_ask` | 对话、联网信息和自然语言 App 请求 | 空 prompt；非空 prompt 无账号 `AUTH_REQUIRED`、无派发 | `test_assist_surface.py`, `test_search_service.py` | 11-06 普通问答的正文和准确历史回读可用，测试标记未命中。联网样本超时，普通 Notebook Chat 样本返回上游错误。 |
+| `gemini_ask` | 对话、联网信息和自然语言 App 请求 | 空 prompt；非空 prompt 无账号 `AUTH_REQUIRED`、无派发 | `test_assist_surface.py`, `test_search_service.py` | 11-06 能按准确 ID 回读请求及回复。Flash 合成问答未通过内容核验，算术对照返回重试提示，联网样本超时，普通 Notebook Chat 样本返回上游错误。 |
 | `gemini_understand_image` | 单图理解 | 空 image 与不存在的本地路径负例 | `test_understanding_service.py` | 有历史真实图片理解。11-06 返回明确上游错误，测试聊天自动清理并经复查。共享服务现在保留失败结果。 |
 | `gemini_understand` | 多输入理解 | 空 task 负例 | `test_understanding_service.py`, `test_assist_surface.py` | 历史 Flash 图片与文件混合请求识别了颜色和随机标记。11-06 返回明确上游错误，测试聊天自动清理并经复查。共享服务现在返回失败输入及清理状态。 |
 | `gemini_research` | 生成研究计划并保留原操作 | 空 query 负例 | `test_research_identity.py`, `test_research_native_contract.py` | 11-06 的真实 Pro 调用从原句柄取回并核验完整 Markdown 报告，测试聊天经远端回读确认删除。 |
@@ -40,10 +40,10 @@
 | `gemini_create_scheduled_action` | 创建 Chat 每日定时操作 | title 类型负例 | `test_scheduled_mutation_evidence.py` | 11-06 创建合成每日计划并核验所选时间和时区。 |
 | `gemini_delete_scheduled_action` | 精确删除 Chat 定时操作 | 空 action_id：结构化 `INVALID_ARGUMENT` | `test_scheduled_mutation_evidence.py` | 11-06 独立账号 MCP 按准确 ID 确认合成每日计划已删除。 |
 | `gemini_manage_gems` | 管理 Gems | action 类型负例 | `test_manage_gems_models_inventory.py` | 合成 Gem 创建、读取、修改、删除与不存在核验曾通过；不外推附件。 |
-| `gemini_cleanup` | 查看／处理 MCP 自有清理账本 | 无账号 list：`AUTH_REQUIRED`，未读取账本 | `test_owned_cleanup.py`, `test_cleanup_runtime.py` | 自有生成线程的自动清理有真实不存在证据；不是全账号清理。 |
+| `gemini_cleanup` | 查看／处理 MCP 自有清理账本 | 无账号 list：`AUTH_REQUIRED`，未读取账本 | `test_owned_cleanup.py`, `test_cleanup_runtime.py`, `test_task_owned_cleanup.py` | 11-06 的新合成 Task 在取回结果前自动清理。精确 Task 目标与普通历史均经回读确认不存在。旧测试记录可按准确 ID 复查。 |
 | `gemini_manage_chat` | 精确改名或置顶聊天 | chat_id 类型负例 | `test_chat_management_service.py` | 11-06 合成普通聊天的改名、置顶、取消置顶分别独立读回。 |
 | `gemini_tasks` | Task 读取、删除与 Task 专属计划 | action 类型负例 | `test_web_tasks_service.py`, `test_task_delete_readback.py` | 合成 Task 专属删除与不存在读回曾通过；所有计划变体不因此自动通过。 |
 | `gemini_task_browser` | 读取 Task 浏览器并按精确状态输入 | action 类型负例 | `test_task_browser_service.py`, `test_task_browser_turn.py` | 11-06 用新截图核对点击跳转、键盘导航、地址输入和滚动。相同点击 ID 再次调用未派发。 |
-| `gemini_preferences` | 读取或明确修改 Task 偏好 | action 类型负例 | `test_preferences_service.py`, `test_preference_tools.py` | 11-06 读回仅远程和始终询问，实际 Task 出现许可卡。允许一次后远程浏览器开始执行，结束后原偏好经读回恢复。 |
+| `gemini_preferences` | 读取或明确修改 Task 偏好 | action 类型负例 | `test_preferences_service.py`, `test_preference_tools.py` | 11-06 读回仅远程和始终询问，实际 Task 出现许可卡。允许一次后远程浏览器开始执行，结束后原偏好经读回恢复。此前原生与 MCP 在始终允许下均仍出现许可卡。 |
 | `gemini_skills` | 管理原生 Gemini Skills | action 类型负例 | `test_managed_skills.py`, `test_managed_skill_transport.py` | 11-06 修复原生上传端点，实测创建、精确读取、更新、停用、启用和删除，完整列表核验不存在。 |
 | `gemini_manage_notebook` | 管理 Notebook 及其文本来源 | action 类型负例 | `test_notebook_admin.py` | 合成 Notebook 与文本来源创建、读取、删除及独立不存在验证通过；URL／文件来源待核验。 |

@@ -78,7 +78,8 @@ def test_protection_added_during_readback_releases_claim_without_delete(monkeypa
     token = manager._store.claim("a", "c_1")
     manager._store.finish("a", "c_1", token, verified=False, diagnostic_id="diag_1")
 
-    async def observe(_client, _cid):
+    async def observe(_client, _cid, *, expected_account, account_key_provider):
+        assert expected_account == account_key_provider() == "a"
         protected[0] = True
         return False, {}
 

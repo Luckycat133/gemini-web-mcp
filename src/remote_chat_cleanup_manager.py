@@ -386,7 +386,14 @@ class RemoteChatCleanupManager:
         if deferred is not None:
             return replace(deferred, state=CleanupState.PENDING)
         try:
-            absent, _details = await observe_chat_absence(client, cid)
+            known_task = self._is_known_task(account, cid, record["source"])
+            absent: bool | None
+            if known_task and await self._task_is_present(client, account, cid):
+                absent = False
+            else:
+                absent, _details = await observe_chat_absence(
+                    client, cid, expected_account=account, account_key_provider=self._account_key_provider,
+                )
         except Exception:
             return CleanupObservation(state=CleanupState.FAILED, upstream_chat_id=cid)
         if self._account_key_provider() != account:
@@ -415,6 +422,36 @@ class RemoteChatCleanupManager:
                 self._completed_cleanup.pop(cid, None)
                 self._cleanup_observations.pop(cid, None)
         return await self.delete_chat_result(cid, client=client, _expected_account=account)
+
+    @staticmethod
+    def _is_known_task(account: str, cid: str, source: str) -> bool:
+        from .infrastructure.operation_store import OperationStore
+
+        return source.partition(":")[0] == "gemini_run_task" or OperationStore().has_owned_task_chat(account, cid)
+
+    async def _task_is_present(self, client: Any, account: str, cid: str) -> bool:
+        from .services.web_context_transport import fetch_task_metadata
+
+        if self._account_key_provider() != account:
+            raise PermissionError("Cleanup account changed before Task read-back")
+        task = await fetch_task_metadata(client, cid)
+        if self._account_key_provider() != account:
+            raise PermissionError("Cleanup account changed during Task read-back")
+        if task is None:
+            return False  # The transport accepts only strict GetRemyGoal NOT_FOUND.
+        if not isinstance(task, dict) or task.get("chat_id") != cid:
+            raise RuntimeError("Cleanup Task identity could not be verified")
+        return True
+
+    def _check_cleanup_lease(self, account: str, cid: str, token: str, source: str) -> CleanupObservation | None:
+        record = self._store.get(account, cid)
+        if (record and record["state"] == "pending" and record["lease_token"] == token
+                and (record["lease_until"] or 0) > time.time()):
+            return None
+        state = {"retained": CleanupState.RETAINED, "completed": CleanupState.ALREADY_COMPLETED}.get(
+            record["state"] if record else "", CleanupState.PENDING,
+        )
+        return CleanupObservation(state=state, upstream_chat_id=cid, source=source)
 
     async def _execute_delete(
         self,
@@ -470,33 +507,59 @@ class RemoteChatCleanupManager:
                     client = self._client_provider()
             if self._account_key_provider() != account:
                 raise RuntimeError("Cleanup account changed before execution")
-            current = self._store.get(account, cid)
-            if current is None or current["state"] != "pending" or current["lease_token"] != token:
-                return CleanupObservation(state=CleanupState.RETAINED, upstream_chat_id=cid, source=source)
+            lost_lease = self._check_cleanup_lease(account, cid, token, source)
+            if lost_lease is not None:
+                return lost_lease
             # Import lazily to avoid service/client-manager import cycles.
             from .services.history import delete_chat_result as delete_with_readback
             from .services.history import observe_chat_absence
+            from .services.web_context_transport import delete_task_metadata, refresh_task_schedule_guard
 
+            known_task = self._is_known_task(account, cid, source)
+            task_present = known_task and await self._task_is_present(client, account, cid)
+            schedules = await refresh_task_schedule_guard(client, cid) if task_present else []
             already_absent = False
-            if attempts > 1:
-                absent, _details = await observe_chat_absence(client, cid)
+            if not task_present and (known_task or attempts > 1):
+                absent, _details = await observe_chat_absence(
+                    client, cid, expected_account=account, account_key_provider=self._account_key_provider,
+                )
                 if absent is None:
                     raise RuntimeError("Prior cleanup outcome cannot be verified")
                 already_absent = absent
-            if not already_absent:
-                # A retain request may have arrived while read-back was in flight.
-                current = self._store.get(account, cid)
-                if current is None or current["state"] != "pending" or current["lease_token"] != token:
-                    return CleanupObservation(state=CleanupState.RETAINED, upstream_chat_id=cid, source=source)
-                if self._account_key_provider() != account:
-                    raise RuntimeError("Cleanup account changed before execution")
-                deferred = self._defer_if_protected(account, cid, source=source, token=token)
-                if deferred is not None:
-                    return deferred
+            # Revalidate the lease, retention and protection after fresh reads.
+            lost_lease = self._check_cleanup_lease(account, cid, token, source)
+            if lost_lease is not None:
+                return lost_lease
+            if self._account_key_provider() != account:
+                raise RuntimeError("Cleanup account changed before execution")
+            if schedules:
+                self._store.defer_protected(account, cid, token=token)
+                return CleanupObservation(state=CleanupState.PENDING, upstream_chat_id=cid, source=source)
+            deferred = self._defer_if_protected(account, cid, source=source, token=token)
+            if deferred is not None:
+                return deferred
+            if task_present:
+                from .thinking_client import mutation_scope
+
+                try:
+                    with mutation_scope(owner=account, account_key_provider=self._account_key_provider):
+                        await delete_task_metadata(client, cid)
+                except Exception:
+                    pass  # The native request may have been sent. Only read it back.
+                if await self._task_is_present(client, account, cid):
+                    raise RuntimeError("Cleanup Task goal is still present")
+                absent, _details = await observe_chat_absence(
+                    client, cid, expected_account=account, account_key_provider=self._account_key_provider,
+                )
+                if absent is not True:
+                    raise RuntimeError("Cleanup Task conversation absence could not be verified")
+            elif not already_absent:
                 result = await delete_with_readback(client, cid, expected_account=account,
                                                     account_key_provider=self._account_key_provider)
                 if result.meta.verification_status != "verified_absent":
                     raise RuntimeError("Cleanup deletion was not verified")
+                if known_task and await self._task_is_present(client, account, cid):
+                    raise RuntimeError("Cleanup Task goal is still present")
             if self._account_key_provider() != account:
                 raise RuntimeError("Cleanup account changed during read-back")
         except asyncio.CancelledError:
@@ -519,6 +582,12 @@ class RemoteChatCleanupManager:
             except asyncio.CancelledError:
                 pass
 
+        if self._account_key_provider() != account:
+            self._store.finish(account, cid, token, verified=False, diagnostic_id=None)
+            return CleanupObservation(state=CleanupState.FAILED, upstream_chat_id=cid, source=source)
+        lost_lease = self._check_cleanup_lease(account, cid, token, source)
+        if lost_lease is not None:
+            return lost_lease
         self._store.finish(account, cid, token, verified=True, diagnostic_id=None)
         current = self._store.get(account, cid)
         if current is None or current["state"] != "completed":

@@ -17,15 +17,15 @@
 | 功能 | 官方范围 | 原生 UI 观察 | MCP 实现范围 | 本轮实测与剩余覆盖 |
 | --- | --- | --- | --- | --- |
 | 普通 Chat、写作、推理 | [模型与思考程度](https://support.google.com/gemini/answer/18648722?hl=en)区分 Chat、Task 的模型与思考选项。 | 已观察 Chat／Task 切换、模型选择及低／中／高思考选项。 | **已实现**：`gemini_ask`；Flash 默认，按需选择模型和思考程度。 | 已有真实 Chat 与 Task 的 Flash 三档、Argon 中档结果。每项检查只证明实际选中的组合，不代表所有模型均完成复测。 |
-| 联网搜索与来源 | [来源说明](https://support.google.com/gemini/answer/14143489?hl=en)区分回答与可用来源链接；并非每次回答都有来源。 | 已观察原生搜索、App 菜单；本轮未穷举每个搜索入口。 | **已实现**：问答与联网合并到 `gemini_ask`；返回观察到的来源和 grounding 状态，无联网开关。 | **实测通过**：本轮搜索返回结果。正文中自行生成的链接不等于后端 grounding 证据；搜索也不证明网页操作成功。 |
-| 图片、文件、URL 与混合输入理解 | [上传与分析文件](https://support.google.com/gemini/answer/14903178?hl=en)覆盖多种文件、媒体及 Notebook 输入。 | 已观察本地文件、Drive、Notebook 和代码导入等入口；入口出现不等于全部导入流程已适配。 | **已实现**：`gemini_understand_image`、`gemini_understand`，支持已有合同覆盖的文件／URL／混合输入。 | **实测通过**：本轮混合输入理解。Drive／Photos 选择器、仓库导入与所有文件类型未逐项完成端到端覆盖。 |
+| 联网搜索与来源 | [来源说明](https://support.google.com/gemini/answer/14143489?hl=en)区分回答与可用来源链接；并非每次回答都有来源。 | 已观察原生搜索、App 菜单；本轮未穷举每个搜索入口。 | **已实现**：问答与联网合并到 `gemini_ask`；返回观察到的来源和 grounding 状态，无联网开关。 | 此前有搜索结果，11-06 的联网样本超时。后端 grounding 状态与正文内链接分别记录。 |
+| 图片、文件、URL 与混合输入理解 | [上传与分析文件](https://support.google.com/gemini/answer/14903178?hl=en)覆盖多种文件、媒体及 Notebook 输入。 | 已观察本地文件、Drive、Notebook 和代码导入等入口；入口出现不等于全部导入流程已适配。 | **已实现**：`gemini_understand_image`、`gemini_understand`，支持已有合同覆盖的文件／URL／混合输入。 | 此前已验证混合输入。11-06 的图片和混合输入请求返回上游错误，原生上传协议对照也未取得合格识图结果。 |
 | 连续 Chat 会话 | [Chat 与模型说明](https://support.google.com/gemini/answer/18648722?hl=en)提供聊天体验；本地 session 句柄属于本 MCP 的管理方式。 | 本轮原生 UI 未逐项复核会话恢复行为。 | **已实现**：启动、续聊、列出和重置本地会话；续聊保留原有会话身份。 | **局部实测通过**：本轮两轮连续会话及 reset 已通过，发生在随后离线关键修复之前；修复后实时复测及超时后的原请求恢复仍待核验，不能用重新发送相同提示代替恢复。 |
-| 图片生成 | [生成与编辑图片](https://support.google.com/gemini/answer/14286560?hl=en)包括生成、编辑及参考图片。 | 已观察图片工具入口；本轮媒体验证通过 MCP 执行。 | **已实现**：`gemini_generate_image` 后台提交，保存操作句柄并取回本地产物。 | **实测通过**：本轮真实图片生成及产物检查。未由此验证每种原生重生成、模型或界面控制。 |
-| 图片编辑 | [图片帮助](https://support.google.com/gemini/answer/14286560?hl=en)包含基于图片的修改。 | 已观察原生图片编辑能力；未逐项重测所有编辑交互。 | **已实现**：`gemini_edit_image` 接受参考图片与修改要求，异步保存结果。 | **实测通过**：本轮真实图片编辑。多轮编辑、所有参考图组合仍按实际结果判断。 |
+| 图片生成 | [生成与编辑图片](https://support.google.com/gemini/answer/14286560?hl=en)包括生成、编辑及参考图片。 | 已观察图片工具入口；本轮媒体验证通过 MCP 执行。 | **已实现**：`gemini_generate_image` 后台提交，保存操作句柄并取回本地产物。 | 此前保存并解码过真实产物。11-06 的原句柄核实为 `UPSTREAM_REJECTED`，测试对话自动删除。 |
+| 图片编辑 | [图片帮助](https://support.google.com/gemini/answer/14286560?hl=en)包含基于图片的修改。 | 已观察原生图片编辑能力；未逐项重测所有编辑交互。 | **已实现**：`gemini_edit_image` 接受参考图片与修改要求，异步保存结果。 | 此前保存并检查过编辑产物。11-06 的原句柄核实为 `UPSTREAM_REJECTED`，测试对话自动删除。 |
 | 视频生成 | [视频帮助](https://support.google.com/gemini/answer/16126339?hl=en)还包括原生视频编辑、多轮修改和界面选项。 | 原生界面可生成视频；完整原生编辑流程未在本轮逐项覆盖。 | **已实现**：`gemini_generate_video` 后台生成及媒体产物保存。 | **实测通过**：本轮视频生成。原生视频编辑、完整模板／比例／多轮控制未全部适配，不能由生成成功推定。 |
 | 音乐生成 | [音乐帮助](https://support.google.com/gemini/answer/16901237?hl=en)包括音乐及带媒体上下文的生成；时长、模型和额度有独立限制。 | 已观察音乐入口和时长选项；不能把历史某次模型成功当作统一模型要求。 | **已实现**：`gemini_generate_music` 后台生成，保存实际返回的音频／视频等产物。 | **实测通过**：本轮音乐生成。完整时长、所有人声／器乐组合及原生下载形式未穷举。 |
-| Deep Research | [Deep Research](https://support.google.com/gemini/answer/15719111?hl=en)包含研究计划、来源选择、报告和后续导出。 | 已观察原生研究工具和计划确认流程。 | **已实现**：计划、确认、后台报告与同一操作的状态／结果读取；不以重发查询充当恢复。 | 历史已有真实报告、产物与清理成功记录；本轮原句柄尚无经验证的非空报告，认证失效阻挡恢复和远端清理核验。不能把任意普通回答标成研究报告。 |
-| 从研究报告生成衍生内容 | [研究帮助](https://support.google.com/gemini/answer/15719111?hl=en)列出原生报告的后续使用方式。 | 本轮未逐项复核原生报告的全部创建／导出菜单。 | **已实现但范围不同**：本地网页／信息图 HTML、测验／抽认卡 Markdown；`audio_overview` 是旁白稿，`custom_app` 是应用规格。 | 本轮未完成所有衍生操作的真实矩阵。旁白稿不等于已生成音频，应用规格不等于已部署应用。 |
+| Deep Research | [Deep Research](https://support.google.com/gemini/answer/15719111?hl=en)包含研究计划、来源选择、报告和后续导出。 | 已观察原生研究工具和计划确认流程。 | **已实现**：计划、确认、后台报告与同一操作的状态／结果读取；不以重发查询充当恢复。 | 11-06 从新的 Pro Research 原句柄取回并核验了完整 Markdown 报告，测试对话经远端回读确认删除。 |
+| 从研究报告生成衍生内容 | [研究帮助](https://support.google.com/gemini/answer/15719111?hl=en)列出原生报告的后续使用方式。 | 本轮未逐项复核原生报告的全部创建／导出菜单。 | **已实现但范围不同**：本地网页／信息图 HTML、测验／抽认卡 Markdown；`audio_overview` 是旁白稿，`custom_app` 是应用规格。 | 11-06 从真实报告按原句柄列出六种操作，每种都保存了一个本地产物。 |
 
 四个媒体工具默认后台运行。成功标准是取回原操作的可用产物并验证实际文件；“已接受”、链接、生成说明或进度文本不足以证明完成。已有产物与具体工具参数见[工具说明](tools.md)。
 
@@ -35,7 +35,7 @@
 | --- | --- | --- | --- | --- |
 | 委托 Task 与进度 | [Task 帮助](https://support.google.com/gemini/answer/17094507?hl=en)包含持续执行、工作面板、追加指示和文件。 | 已观察 Task 状态、活动面板和等待确认卡片；原生也可在运行中追加指示。 | **已实现**：`gemini_run_task`；持久操作句柄、有限活动元数据、完整回答产物和原操作恢复。活动标签不冒充逐步完成状态。 | **实测通过**：本轮四个浏览器 Task 在各自卡片获授权后完成。任意追加指示、修改运行中计划、Task 暂停／恢复／停止尚无 MCP 入口。 |
 | Task 确认卡续答 | [权限帮助](https://support.google.com/gemini/answer/18766567?hl=en)区分单次、当前线程和跨线程的选择，具体选项随功能变化。 | 真实浏览器卡含浏览器选择和允许／不允许；批准后原生 UI 标注本线程已获许可。 | **已实现**：原句柄、精确 `input_id`、返回的 `input_option_id` 与提示联合续答一次。隐藏、禁用、未知或 subagent 卡片拒绝猜测执行。 | **实测通过**：同一 Task 续答后继续执行；重复消费不重发。按钮文字不能自行解释成 once／thread／always；只发送原卡确切提供的选择。 |
-| Notebook 发现与来源问答 | [Gemini Notebook](https://support.google.com/gemini/answer/16972047?hl=en)支持 Notebook、来源、聊天组织及 Chat／Task 使用。 | 添加 Notebook 的选择器实际显示 Notebook 与来源数量；Notebook 和项目视图属于同一集成产品。 | **已实现**：`gemini_notebooks` 发现；普通 `gemini_ask(notebook_ids=...)` 与 Task 使用相同已发现资源，但保留各自模式。 | **实测通过**：两种模式从合成来源取回未出现在查询中的标记；后台断开、完整回答保存、清理、重启取回均有独立证据。 |
+| Notebook 发现与来源问答 | [Gemini Notebook](https://support.google.com/gemini/answer/16972047?hl=en)支持 Notebook、来源、聊天组织及 Chat／Task 使用。 | 添加 Notebook 的选择器实际显示 Notebook 与来源数量；Notebook 和项目视图属于同一集成产品。 | **已实现**：`gemini_notebooks` 发现；普通 `gemini_ask(notebook_ids=...)` 与 Task 使用相同已发现资源，但保留各自模式。 | 两种模式都有历史来源标记证据。11-06 的 Task 再次从来源取回标记并在断开后保存答案，普通 Notebook Chat 复测返回上游错误。 |
 | 经 Task 管理 Notebook／来源 | [Notebook 帮助](https://support.google.com/gemini/answer/16972047?hl=en)列出创建、修改和删除 Notebook／来源等原生能力。 | 真实删除会要求确认；确认与最终资源不存在分别验证。 | **已实现**：可在用户授权的 Task 请求中使用 Notebook；Task 完成不能替代资源侧核验。 | **实测通过**：合成 Notebook 新增来源、改名、第二来源问答及确认后的删除；不外推为任意用户 Notebook 修改均可靠。 |
 | 专用 Notebook／来源管理 | [Notebook 帮助](https://support.google.com/gemini/answer/16972047?hl=en)还支持原生来源管理。 | 原生 Notebook 的来源管理与来源选择器是不同操作入口；不能猜测资源 ID 转换。 | **已实现**：`gemini_manage_notebook` 的创建、读取、来源列表、添加纯文本、精确删除来源和删除 Notebook。 | **实测通过**：合成 Notebook 与纯文本来源完成创建、读取、删除及独立不存在核验；Notebook Chat 从来源取回查询未包含的随机标记。URL／文件来源及文本更新仍需独立验证。删除 Notebook 会连带其对话，需明确意图。 |
 | 原生 Gemini Skills | [Skills 帮助](https://support.google.com/gemini/answer/17094296?hl=en)说明 Chat／Task 可使用保存的技能，支持创建、编辑、启停、上传及删除。 | 已观察原生 Skills 管理页及其读写效果；这与仓库里的 Agent Skill 文件不是同一资源。 | **已实现**：`gemini_skills` 列表、精确读取、创建、修改、启停、删除及独立读回。正文按明确请求读取。 | **实测通过**：本轮合成技能完整 CRUD 并清理。原生文件夹／zip、参考文件、脚本和显式附加 Skill ID 到生成请求尚未完整适配。 |
@@ -65,7 +65,7 @@
 | 历史发现、读取、搜索与导出 | [查找和管理聊天](https://support.google.com/gemini/answer/13666746?hl=en)说明原生聊天管理。 | 已观察历史列表、搜索和单条聊天；本轮未穷举原生搜索／导出界面。 | **已实现**：紧凑元数据发现；按明确意图读取、搜索或导出；默认避免整段聊天正文。 | **局部实测通过**：本轮对自有合成 Task 完成有界读取和本地导出验证；未重跑全部历史操作组合。列表命中、正文读取和导出文件验证分别记录。 |
 | 改名、置顶、删除、移动到 Notebook | [聊天管理](https://support.google.com/gemini/answer/13666746?hl=en)和[Notebook](https://support.google.com/gemini/answer/16972047?hl=en)支持各自原生组织方式。 | 已观察聊天菜单与 Notebook 项目视图。 | **已实现**：准确 ID 的改名、置顶、取消置顶和删除，移动前独立解析项目目标并读回归属。 | **实测通过**：11-06 的合成聊天改名、置顶、取消置顶和删除经独立回读，另一条测试聊天移入 Notebook 后精确核验归属。 |
 | 原生聊天分支及回合界面控制 | [聊天帮助](https://support.google.com/gemini/answer/13666746?hl=en)还列出从已有回合分支新聊天。 | 本轮未重新覆盖分支、编辑提示、重生成、反馈等完整菜单。 | **仅原生／未覆盖**：无统一的回合编辑、分支和反馈管理入口；普通续聊不能冒充已有回合修改。 | 未完成这些交互的合同和真实闭环；语音／Live 等其他入口亦不在本轮覆盖范围内。 |
-| MCP 自有临时聊天清理 | [活动管理](https://support.google.com/gemini/answer/13278892?hl=en)与原生聊天删除是产品能力；MCP 所有权队列属于本项目生命周期。 | 真实结果取回后曾独立核验对应自有聊天不存在。 | **已实现**：默认清理已登记的自有线程；明确 `retain_chat` 保留；结果不明、等待确认、关联计划等保持保护。 | Notebook Chat／Task 的保存、自动清理和重启取回有真实证据。不是全账号清空；Notebook、用户技能、计划及用户原有对话不因临时线程策略被删除。 |
+| MCP 自有临时聊天清理 | [活动管理](https://support.google.com/gemini/answer/13278892?hl=en)说明原生活动与聊天管理。 | 普通历史曾漏掉两个仍可按 ID 读取的合成 Task。 | **已实现**：默认清理已登记的自有线程，`retain_chat` 明确保留，结果不明、等待确认或关联计划时保护线程。Task 须核验目标和普通历史均不存在。 | 11-06 的新合成 Task 保存答案后自动清理，两处均独立核验不存在，重连仍能从原句柄取回答案。 |
 | Gems | [Gems 帮助](https://support.google.com/gemini/answer/15146780?hl=en)描述创建、使用和管理。 | 历史已观察 Gems 页面；本轮未重新覆盖全部原生选项。 | **已实现**：Gems 列表、创建、修改、删除及已有聊天使用合同；修改须读回。 | **局部实测通过**：本轮合成 Gem 完成创建、列表、修改、删除及独立不存在核验；知识附件和分享矩阵尚未核验。原生 Gemini Skills 与 Gems 分别管理。 |
 | 模型、思考和额度 | [模型帮助](https://support.google.com/gemini/answer/18648722?hl=en)区分 Chat／Task 可选项与思考设置。 | 当前 UI 有四个模型家族；Task 当前仅提供 Flash／Argon。 | **已实现**：默认 Flash、低／中／高；Lite 由新鲜的基础 Flash 额度耗尽证据限制，Lite 不可选择思考强度。 | 已有真实 Flash／Argon 组合验证；**真实耗尽后进入 Lite 的正向路径仍未核验**。媒体或高思考额度耗尽不能冒充基础 Flash 耗尽。 |
 | Library、公开链接与分享 | [图片](https://support.google.com/gemini/answer/14286560?hl=en)／[视频](https://support.google.com/gemini/answer/16126339?hl=en)帮助分别说明其原生下载或分享选项。 | 历史已观察 Library 与公开链接入口；本轮未复测完整资产管理。 | **部分实现／仅原生**：有只读能力／链接探测；无完整 Library 资产和分享链接的创建、撤销、删除生命周期。 | 本地媒体保存不等于 Library 同步或已分享；聊天删除也不能充当公开链接撤销的证据。 |
@@ -76,16 +76,16 @@
 以下项目保持待核验；仅在取得对应最终状态后更新本页，不能凭进程启动、工具接单或文件名出现改成通过。
 
 <!-- web-feature-live-session-research:start -->
-- **连续会话与 Deep Research**：本轮连续会话两轮和 reset 已真实通过，发生在随后离线关键修复之前；修复后尚未重复实时验证。当前 Research 原句柄仍待恢复，尚无非空报告，相关远端清理未确认。历史成功与本轮新请求分开记录。
+- 此前的**连续会话**两轮和 reset 已真实通过，11-06 复测超时，原回合未读到答案。旧的合成 **Research** 对话已按准确 ID 删除并经回读核验。
 <!-- web-feature-live-session-research:end -->
 <!-- web-feature-live-notebook-admin:start -->
-- **专用 Notebook 管理**：合成 Notebook／纯文本来源的创建、精确读取、删除与独立不存在核验已完成，Notebook Chat 另通过来源随机标记验证。URL／文件来源仍需独立合同和测试。
+- **专用 Notebook 管理**已验证合成 Notebook 和纯文本来源的创建、精确读取与删除。URL 和文件来源仍待验证。
 <!-- web-feature-live-notebook-admin:end -->
 <!-- web-feature-live-browser-recovery:start -->
-- **浏览器恢复及收尾**：四种配置对应的合成 Task 已在各自授权后完成；至少一个原生浏览器控制 Task 的远端清理仍待确认。保留已确认的 IANA → RFC 2606 点击效果、重复不重发及旧帧拒绝证据，不把它们外推为全局偏好已免除确认。
+- 11-06 的**浏览器 Task**经单次许可后打开公开页面。新截图核验点击、键盘导航、输入地址和滚动的效果，相同动作 ID 重试未重发。原浏览器偏好已独立读回恢复，旧的浏览器控制 Task 和 App 设置 Task 已按准确 ID 删除并核验。始终允许是否能跳过许可卡仍未证实。
 <!-- web-feature-live-browser-recovery:end -->
 
-当前 Chrome 和现有 Cookie 附件的 SDK 认证均返回未认证；用户表示无需登录，本轮未再发起登录。至少 Research、原生浏览器控制 Task 和等待 App 设置的 Task 仍有远端清理待核验，不能声称全部清理完毕。
+11-06 的功能面与账号面均用当前 Chrome 会话自动认证。旧 Cookie 导出曾返回未认证。普通 Flash Chat、图片生成、编辑和理解在本轮复测中未取得合格结果，具体失败和清理证据见开发状态。
 
 尚未覆盖的原生能力应继续作为明确缺口：Canvas 文档／应用全生命周期、未识别的 Task 附件类型及任意导出（已识别结构化文件卡的下载已实现并局部实测）、运行中自由追加指示和 Task 控制、独占浏览器接管／终端、全部 App 行为、事件型计划／通知、Library／分享生命周期、完整 Skills 资源上传、Drive／Photos／代码导入以及其他账号设置。通过一个生成任务或偏好读回不能关闭这些条目。
 
