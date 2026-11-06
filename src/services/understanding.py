@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
 
-from ..constants import GEMINI_GENERIC_FAILURE_REPLY
+from ..constants import is_generation_failure_reply
 from ..domain import (
     Artifact,
     ArtifactKind,
@@ -220,12 +220,13 @@ class UnderstandService:
                 request_id=chat_result.meta.request_id,
                 diagnostic_id=chat_result.meta.diagnostic_id,
                 verification_status=chat_result.meta.verification_status,
+                lifecycle=chat_result.data.lifecycle if chat_result.data is not None else None,
             )
 
         chat_data = chat_result.data
         assert chat_data is not None
         analysis = _response_text(chat_data.response).strip()
-        if analysis == GEMINI_GENERIC_FAILURE_REPLY:
+        if is_generation_failure_reply(analysis):
             return _understand_failure(
                 task, outcomes, DomainErrorCode.UPSTREAM_REJECTED, "Gemini did not analyze the submitted inputs.",
                 requested_model=chat_data.requested_model, request_id=chat_result.meta.request_id,

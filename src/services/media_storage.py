@@ -11,6 +11,7 @@ import subprocess
 from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from pathlib import Path
+from types import ModuleType
 from typing import TYPE_CHECKING, Optional
 
 from ..constants import OMNI_VIDEO_MODEL
@@ -25,6 +26,49 @@ if TYPE_CHECKING:
     from ..infrastructure.operation_store import OperationRecord, OperationStore
 
 
+class _ImageVerificationError(ValueError):
+    pass
+
+
+class ImageDecoderUnavailable(_ImageVerificationError):
+    pass
+
+
+def require_image_decoder() -> ModuleType:
+    """Fail before generation when the optional decoder is unavailable."""
+    try:
+        from PIL import Image
+    except ImportError:
+        raise ImageDecoderUnavailable("image_decoder_unavailable") from None
+    return Image
+
+
+def _decode_generated_image(path: str) -> tuple[int, int]:
+    mime = detect_image_mime_type(path)
+    if mime is None:
+        raise _ImageVerificationError("image_signature_unrecognized")
+    decoder = require_image_decoder()
+    try:
+        with decoder.open(path) as image:
+            if decoder.MIME.get(image.format) != mime:
+                raise _ImageVerificationError("image_signature_mismatch")
+            image.verify()
+        # verify() validates the container without decoding its pixels.
+        with decoder.open(path) as image:
+            image.load()
+            return int(image.width), int(image.height)
+    except _ImageVerificationError:
+        raise
+    except (OSError, ValueError, SyntaxError, decoder.DecompressionBombError):
+        raise _ImageVerificationError("image_decode_failed") from None
+
+
+def _mark_image_decoded(artifact: Artifact) -> Artifact:
+    return replace(artifact, verification=replace(
+        artifact.verification, methods=(*artifact.verification.methods, "image_pixels_decoded"),
+    ))
+
+
 def read_verified_media_artifacts(
     store: OperationStore, record: OperationRecord, *, include_duration: bool = False,
 ) -> tuple[Artifact, ...]:
@@ -37,15 +81,20 @@ def read_verified_media_artifacts(
         with path.open("rb") as stream:
             if hashlib.file_digest(stream, "sha256").hexdigest() != item["sha256"]:
                 raise ValueError("saved artifact changed")
+        kind = ArtifactKind(item["kind"])
+        generated_image = record.media_type == "image" and kind == ArtifactKind.IMAGE
         artifact = artifact_from_local_path(
-            ArtifactKind(item["kind"]), str(path), source_chat_id=record.upstream_chat_id,
+            kind, str(path), source_chat_id=record.upstream_chat_id,
             requested_backend=record.requested_model, request_model=record.request_model,
             effective_backend=record.effective_backend,
             observed_backend=(OMNI_VIDEO_MODEL if record.verification_status == OMNI_ARTIFACT_MODEL_VERIFIED else None),
             duration_probe=_probe_duration if include_duration else None,
+            dimensions_probe=_decode_generated_image if generated_image else None,
         )
         if artifact.state != ArtifactState.LOCAL:
             raise ValueError("saved artifact did not verify")
+        if generated_image:
+            artifact = _mark_image_decoded(artifact)
         artifacts.append(replace(artifact, id=item["artifact_id"]))
     return tuple(artifacts)
 
@@ -374,18 +423,26 @@ async def _save_generated_media(
                 else:
                     uri = (getattr(media, "mp3_url", None) if expected_kind == "audio" else
                            getattr(media, "url", None)) if expected_kind is not None else _saved_artifact_uri(media, artifact_kind)
-                artifact = artifact_from_local_path(
-                    artifact_kind,
-                    path,
-                    title=getattr(media, "title", None),
-                    uri=uri,
-                    source_chat_id=source_chat_id,
-                    requested_backend=requested_model,
-                    request_model=request_model,
-                    effective_backend=effective_backend,
-                    observed_backend=observed_backend,
-                    duration_probe=duration_probe,
-                )
+                generated_image = media_type == "image" and artifact_kind == ArtifactKind.IMAGE
+                try:
+                    artifact = artifact_from_local_path(
+                        artifact_kind,
+                        path,
+                        title=getattr(media, "title", None),
+                        uri=uri,
+                        source_chat_id=source_chat_id,
+                        requested_backend=requested_model,
+                        request_model=request_model,
+                        effective_backend=effective_backend,
+                        observed_backend=observed_backend,
+                        duration_probe=duration_probe,
+                        dimensions_probe=_decode_generated_image if generated_image else None,
+                    )
+                except _ImageVerificationError as error:
+                    failures.append(f"{kind}:{error}")
+                    continue
+                if generated_image and artifact.state == ArtifactState.LOCAL:
+                    artifact = _mark_image_decoded(artifact)
                 if media_type == "music" and expected_kind is not None and kind == expected_kind and artifact.state == ArtifactState.LOCAL:
                     artifact = replace(artifact, mime_type=mime_type, verification=replace(
                         artifact.verification,

@@ -23,7 +23,7 @@ from ..domain import (
 )
 from ..session_manager import SessionData, SessionOperationResult
 from ..infrastructure.account_identity import current_account_key
-from ..constants import DEFAULT_SESSION_MAX_AGE_SECONDS
+from ..constants import DEFAULT_SESSION_MAX_AGE_SECONDS, is_generation_failure_reply
 from .artifacts import extract_response_artifacts
 from .cleanup_scope import observe_cleanup_frames
 from .client_timeouts import client_timeout_scope
@@ -248,7 +248,7 @@ class ChatService:
             retain_chat=request.retain_chat,
             source=request.cleanup_source,
         )
-        return self._success(
+        return self._reply_result(
             ChatOperationData(
                 requested_model=request.model,
                 normalized_model=normalized_model,
@@ -353,7 +353,7 @@ class ChatService:
                                                           source=request.cleanup_source),
                 )},
             )
-        return self._success(
+        return self._reply_result(
             ChatOperationData(
                 requested_model=request.model,
                 normalized_model=normalized_model,
@@ -400,7 +400,7 @@ class ChatService:
             return self._copy_failure(created)
         state = created.session
         state.account_key = owner
-        return self._success(
+        return self._reply_result(
             ChatOperationData(
                 requested_model=request.model,
                 normalized_model=normalized_model,
@@ -497,7 +497,7 @@ class ChatService:
             if completed_cid in observer.registered:
                 policy = self._completed_session_policy(request, state, completed_cid)
         remote_chat_id, cleanup = self._session_cleanup_after_send(request, state, response, policy)
-        return self._session_success(
+        return self._session_reply_result(
             request,
             state,
             response=response,
@@ -594,7 +594,7 @@ class ChatService:
             if completed_cid in observer.registered:
                 policy = self._completed_session_policy(request, state, completed_cid)
         remote_chat_id, cleanup = self._session_cleanup_after_send(request, state, final_response, policy)
-        return self._session_success(
+        return self._session_reply_result(
             request,
             state,
             response=final_response,
@@ -731,7 +731,7 @@ class ChatService:
         state.unverified_chat_ids.discard(cid)
         policy = self._completed_session_policy(request, state, cid)
         remote_chat_id, cleanup = self._session_cleanup_after_send(request, state, output, policy)
-        return self._session_success(
+        return self._session_reply_result(
             request, state, response=output, stream_text=output.text, remote_chat_id=remote_chat_id, cleanup=cleanup,
             request_id=SessionOperationResult.success(state, output).meta.request_id,
             verification_status="original_session_reply_verified",
@@ -902,7 +902,7 @@ class ChatService:
             observation = CleanupObservation(state=CleanupState.FAILED, upstream_chat_id=cid)
         return cid, observation
 
-    def _session_success(
+    def _session_reply_result(
         self,
         request: SessionMessageRequest,
         state: SessionData,
@@ -919,7 +919,7 @@ class ChatService:
         normalized_model = self._dependencies.normalize_model(state.model)
         effective_model = self._dependencies.resolve_model(normalized_model)
         temporary = state.temporary if request.temporary is None else request.temporary
-        return self._success(
+        return self._reply_result(
             ChatOperationData(
                 requested_model=state.model,
                 normalized_model=normalized_model,
@@ -1017,7 +1017,7 @@ class ChatService:
         )
 
     @staticmethod
-    def _success(
+    def _reply_result(
         data: ChatOperationData,
         *,
         request_id: str | None = None,
@@ -1033,6 +1033,20 @@ class ChatService:
                 warnings.append(DomainWarning(code="model_fallback", message="Verified Flash quota exhaustion selected Flash-Lite for this new request."))
             if not selection.thinking_selectable:
                 warnings.append(DomainWarning(code="thinking_unavailable", message="Thinking strength is fixed in quota fallback; the requested strength was not applied."))
+        final_text = getattr(data.response, "text", None) or data.stream_text
+        if is_generation_failure_reply(final_text) and not extract_response_artifacts(data.response):
+            return DomainResult.failure(
+                DomainErrorCode.UPSTREAM_REJECTED,
+                "Gemini returned a generation failure notice.",
+                data=replace(data, session_state=None),
+                retryable=True,
+                request_id=request_id,
+                warnings=warnings,
+                requested_backend=data.requested_model,
+                effective_backend=data.effective_model,
+                verification_status="upstream_generation_failure_observed",
+                details=details,
+            )
         return DomainResult.success(
             data,
             warnings=tuple(warnings),

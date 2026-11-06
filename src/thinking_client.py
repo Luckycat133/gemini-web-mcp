@@ -18,6 +18,7 @@ from gemini_webapi.types import AvailableModel, ModelOutput
 from .services.cleanup_scope import observe_upstream_identity
 
 from .constants import (
+    is_generation_failure_reply,
     resolve_learning_mode_config,
     resolve_thinking_level_id,
     resolve_thinking_mode_id,
@@ -357,7 +358,9 @@ class ThinkingLevelGeminiClient(GeminiClient):
         )
         try:
             async for response in super()._generate(*args, **kwargs):
-                observed_success = observed_success or bool(getattr(response, "text", ""))
+                reply_text = getattr(response, "text", "")
+                if reply_text:
+                    observed_success = not is_generation_failure_reply(reply_text)
                 object.__setattr__(response, "_mcp_model_selection", selection)
                 observe_upstream_identity(response)
                 yield response

@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import quote
 
-from ..constants import GEMINI_GENERIC_FAILURE_REPLY
+from ..constants import is_generation_failure_reply
 from ..domain import (
     CleanupObservation,
     CleanupState,
@@ -54,11 +54,6 @@ TASK_DEFAULT_TIMEOUT_SECONDS = 600
 # A native setup card was observed while this goal status was 8. The status
 # itself remains unknown; only an exact, independently read card is classified.
 _TASK_SETUP_OBSERVED_STATUS = 8
-_NOTEBOOK_CHAT_REFUSALS = frozenset({
-    GEMINI_GENERIC_FAILURE_REPLY,
-    "I encountered an error doing what you asked. Could you try again?",
-})
-
 _TASK_TERMINAL_STATES = frozenset({
     OperationState.FAILED,
     OperationState.TIMED_OUT,
@@ -66,11 +61,6 @@ _TASK_TERMINAL_STATES = frozenset({
     OperationState.UNAVAILABLE,
 })
 _TASK_CLEANUP_REMOVED = "task_removed_after_cleanup"
-
-
-def _is_notebook_chat_refusal(text: object) -> bool:
-    """Recognize the exact observed Gemini error reply."""
-    return isinstance(text, str) and text.strip() in _NOTEBOOK_CHAT_REFUSALS
 
 
 class _LostTaskLease(RuntimeError):
@@ -168,17 +158,21 @@ def _task_account_mismatch() -> DomainResult[OperationReadData]:
 
 def _partial_saved_answer(record: Any, saved: Any, *, reason: str) -> DomainResult[OperationReadData]:
     """Keep a verified answer usable when its associated file set is uncertain."""
-    artifact, preview = saved if saved is not None else (None, None)
+    notebook_chat = record.operation == "gemini_notebook_chat"
+    # Notebook Chat has no associated Task files. A failure here means its
+    # answer itself failed revalidation, so an earlier snapshot is stale.
+    artifact, preview = saved if saved is not None and not notebook_chat else (None, None)
     data = OperationReadData(
         operation_id=record.operation_id, operation=record.operation, state=OperationState.PARTIAL,
         continuation_possible=bool(record.cleanup_protected), report_available=False,
         verification_status=reason, task_response=preview[:TASK_ANSWER_MAX_CHARS] if preview else None,
-        execution_mode='task', upstream_chat_id=record.upstream_chat_id,
+        execution_mode="chat" if notebook_chat else "task", upstream_chat_id=record.upstream_chat_id,
         artifacts=(artifact,) if artifact is not None else (),
         artifact_state=artifact.state if artifact is not None else None,
     )
-    return _task_read_result(data, warnings=(DomainWarning(code=reason,
-        message='Task file evidence is incomplete; the saved answer remains available.'),))
+    message = ("Notebook Chat answer artifact could not be reverified." if notebook_chat
+               else "Task file evidence is incomplete; the saved answer remains available.")
+    return _task_read_result(data, warnings=(DomainWarning(code=reason, message=message),))
 
 
 def _setup_app_name(turn: Any, cid: str, rid: str, rcid: str) -> str | None:
@@ -201,8 +195,9 @@ def _task_read_result(
     data: OperationReadData, *, warnings: tuple[DomainWarning, ...] = (),
 ) -> DomainResult[OperationReadData]:
     if data.state in _TASK_TERMINAL_STATES:
+        workflow = "Notebook Chat" if data.execution_mode == "chat" else "Task"
         return DomainResult.failure(
-            operation_failure_code(data.error_code), "The Task operation did not complete.",
+            operation_failure_code(data.error_code), f"The {workflow} operation did not complete.",
             data=data, operation_state=data.state, verification_status=data.verification_status,
             warnings=warnings,
         )
@@ -460,7 +455,7 @@ async def recover_task_job(record: Any, *, store: Any, worker_token: str) -> Non
         if not store.is_worker_owner(record.operation_id, worker_token) or not operation_account_matches(record):
             return
         if turn is not None and turn.get("completed") is True:
-            if _is_notebook_chat_refusal(turn.get("text")):
+            if is_generation_failure_reply(turn.get("text")):
                 # Reuse the failed-answer recovery phase so cleanup can still
                 # retry the same exact candidate after an interrupted read.
                 store.finish_worker(record.operation_id, worker_token=worker_token, state="failed",
@@ -592,8 +587,9 @@ async def _finish_saved_task_cleanup(record: Any, store: Any, client: Any, final
     except (OSError, UnicodeError) as error:
         raise TaskResultUnavailable('Task artifact could not be revalidated.') from error
     except Exception:
-        return None, (DomainWarning(code='cleanup_unverified',
-                                    message='Task cleanup or its schedule protection could not be verified.'),)
+        message = ("Notebook Chat cleanup could not be verified." if record.operation == "gemini_notebook_chat"
+                   else "Task cleanup or its schedule protection could not be verified.")
+        return None, (DomainWarning(code="cleanup_unverified", message=message),)
 
 
 async def read_task_operation(
@@ -614,6 +610,7 @@ async def read_task_operation(
     """
     notebook_chat = getattr(record, "operation", "") == "gemini_notebook_chat"
     execution_mode = "chat" if notebook_chat else "task"
+    workflow = "Notebook Chat" if notebook_chat else "Task"
     operation_id = getattr(record, "operation_id", "") or ""
     if not isinstance(operation_id, str) or not operation_id.strip():
         return DomainResult.failure(
@@ -662,7 +659,7 @@ async def read_task_operation(
         saved_artifact = load_task_result(store, record, include_text=include_answer)
     except (TaskResultUnavailable, OSError, UnicodeError):
         return DomainResult.failure(DomainErrorCode.VERIFICATION_FAILED,
-                                    "The saved Task result was removed or changed.",
+                                    f"The saved {workflow} result was removed or changed.",
                                     verification_status="task_artifact_verification_failed")
     if saved_artifact is not None and (notebook_chat or store.task_files_committed(operation_id)):
         artifact, preview = saved_artifact
@@ -684,7 +681,7 @@ async def read_task_operation(
             except TaskResultUnavailable:
                 return _partial_saved_answer(record, saved_artifact, reason='task_artifact_verification_failed')
             except Exception:
-                cached_warnings = (DomainWarning(code='cleanup_unverified', message='Task cleanup is still protected.'),)
+                cached_warnings = (DomainWarning(code="cleanup_unverified", message=f"{workflow} cleanup is still protected."),)
             if not operation_account_matches(record):
                 return _task_account_mismatch()
         data = OperationReadData(
@@ -705,12 +702,13 @@ async def read_task_operation(
     if saved_cleanup_state in {CleanupState.COMPLETED.value, CleanupState.ALREADY_COMPLETED.value}:
         if include_answer:
             return DomainResult.failure(DomainErrorCode.CAPABILITY_UNAVAILABLE,
-                                        "The remote Task was deleted before its answer was saved.",
+                                        f"The remote {workflow} was deleted before its answer was saved.",
                                         verification_status=_TASK_CLEANUP_REMOVED)
         if saved_state != OperationState.COMPLETED:
+            remote_chat = "Notebook Chat" if notebook_chat else "Task chat"
             return DomainResult.failure(
                 DomainErrorCode.CAPABILITY_UNAVAILABLE,
-                "The remote Task chat was deleted and cannot be read again.",
+                f"The remote {remote_chat} was deleted and cannot be read again.",
                 verification_status=_TASK_CLEANUP_REMOVED,
             )
         cleanup = CleanupObservation(
@@ -856,7 +854,7 @@ async def read_task_operation(
                 return _task_account_mismatch()
             if isinstance(turn, dict) and turn.get("completed") is True and isinstance(turn.get("text"), str) and turn["text"].strip():
                 answer = turn["text"]
-                state = OperationState.FAILED if _is_notebook_chat_refusal(answer) else OperationState.COMPLETED
+                state = OperationState.FAILED if is_generation_failure_reply(answer) else OperationState.COMPLETED
                 verification_status = "notebook_reply_rejected" if state == OperationState.FAILED else "exact_reply_completed"
             else:
                 verification_status = "notebook_reply_unverified"
@@ -929,8 +927,10 @@ async def read_task_operation(
             file_artifacts = ()
             state = OperationState.PARTIAL
             verification_status = 'task_files_unverified'
+            message = ("The Notebook Chat answer could not be verified; its thread remains protected." if notebook_chat
+                       else "The Task result files could not be verified; its thread remains protected.")
             warnings.append(DomainWarning(code='task_files_unverified',
-                message='The Task result files could not be verified; its thread remains protected.'))
+                message=message))
     if answer is not None:
         answer, truncated = _bound_answer(answer)
         if truncated:

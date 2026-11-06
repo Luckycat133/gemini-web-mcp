@@ -32,7 +32,7 @@ Task 的计划与 Chat scheduled actions 是不同功能。定时摘要可以使
 | 资料 | 需要 Notebook 时传发现工具返回的准确 `notebook_ids`；同样适用于 Chat 与 Task。无需添加联网、工具启用开关。 |
 | 线程保留 | 默认自动清理；用户要求保留时才传 `retain_chat=true`。关联计划会保护 Task 线程，不能随普通临时请求清理。 |
 | 浏览器偏好 | 账号 `gemini_preferences` 的 `get_browser` 读取原值，`set_browser` 的 `browser="automatic"` 或 `browser="remote_only"` 修改并独立读回。分别对应由 Gemini 决定本机／远程与仅远程。这是持久偏好，不是每次请求的 `browser_mode` 参数。 |
-| 操作权限 | `gemini_preferences` 列出可管理的准确动作，按返回句柄保存 `always_ask` / `always_allow`。写入读回只证明偏好已保存，`effective_permission="unknown"`；本轮原生与 MCP 浏览器 Task 在 always_allow 下仍出现确认卡。一次／本线程授权使用原卡片，按用户已有授权处理，不编造 `auto_approve`。 |
+| 操作权限 | `gemini_preferences` 列出可管理的准确动作，按返回句柄保存 `always_ask` / `always_allow`。写入读回证明偏好已保存，`effective_permission="unknown"`。在实测的远程浏览中，「始终允许」直接放行；本机 Chrome 和敏感动作可能另需确认。收到卡片时按原卡片的精确动作处理。 |
 | 计划 | 明确时间、频率、时区及起止条件。Task 原生还支持事件触发与通知设置；当前专用接口只适配六种时间频率，未提供事件型触发及通知偏好的管理。 |
 
 这些设置按需说明。无需让调用 AI 了解模式字段、VM、网络协议或账号前置条件清单；遇到实际不可用或需要登录／授权的结果时再处理。原生 Gemini Skills 可用于两种模式；当前 MCP 没有显式附加原生 Skill ID 的参数。

@@ -29,6 +29,16 @@ OMNI_VIDEO_API_BACKEND = "Gemini API (Omni 1.2 Flash)"
 GEMINI_GENERIC_FAILURE_REPLY = (
     "I'm having a hard time fulfilling your request. Can I help you with something else instead?"
 )
+_GEMINI_GENERATION_FAILURE_REPLIES = frozenset({
+    GEMINI_GENERIC_FAILURE_REPLY,
+    "I encountered an error doing what you asked. Could you try again?",
+    "Sorry, something went wrong. Please try your request again.",
+})
+
+
+def is_generation_failure_reply(text: object) -> bool:
+    """Recognize the full observed Gemini failure notice, including browser whitespace."""
+    return isinstance(text, str) and " ".join(text.split()) in _GEMINI_GENERATION_FAILURE_REPLIES
 
 
 class ModelConfig(TypedDict):

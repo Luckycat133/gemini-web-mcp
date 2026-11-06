@@ -1,6 +1,7 @@
 """Recovery never regenerates or credits a different turn or candidate."""
 
 import asyncio
+import base64
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -267,11 +268,13 @@ def _real_store_setup(tmp_path):
     return store, handle, destination
 
 
-def _image_response():
-    import base64
-    from pathlib import Path
+_SYNTHETIC_PNG = base64.b64decode(
+    "iVBORw0KGgoAAAANSUhEUgAAAAIAAAABCAIAAAB7QOjdAAAADElEQVR4nGP8zwACAAYIAQFazwZIAAAAAElFTkSuQmCC"
+)
 
-    png = base64.b64decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/aWQAAAAASUVORK5CYII=")
+
+def _image_response(png=_SYNTHETIC_PNG):
+    from pathlib import Path
 
     class Image:
         url = "https://example.invalid/private-signed-image"
@@ -331,6 +334,68 @@ def test_execute_real_store_persists_local_then_default_cleanup(monkeypatch, tmp
     assert events[0]["retain_chat"] is False and events[0]["delete_after_seconds"] is None
     assert b"private prompt" not in store.path.read_bytes()
     assert b"private-signed-image" not in store.path.read_bytes()
+
+
+@pytest.mark.parametrize("payload", [b"<html>Download unavailable</html>", _SYNTHETIC_PNG[:-20]],
+                         ids=["html", "truncated_png"])
+def test_unusable_generated_image_keeps_original_chat_protected(monkeypatch, tmp_path, payload):
+    from pathlib import Path
+
+    import src.client_wrapper as wrapper
+
+    store, handle, destination = _real_store_setup(tmp_path)
+    assert store.checkpoint_media(handle, worker_token="first", chat_id="c_one", response_id="r_one",
+                                  candidate_id="rc_one")
+    finalize = AsyncMock()
+    monkeypatch.setattr(wrapper, "finalize_remote_chat_cleanup_from_response", finalize)
+
+    asyncio.run(media_jobs._save_response(
+        object(), _image_response(payload), store.get(handle), store=store, token="first",
+    ))
+    record = store.get(handle)
+    assert record.state == "partial" and record.error_code == "ARTIFACT_SAVE_FAILED"
+    assert record.cleanup_protected and not store.get_media_artifacts(handle)
+    assert not list(Path(destination).iterdir())
+    finalize.assert_not_awaited()
+
+
+def test_old_image_ledger_with_matching_hash_still_rejects_corrupt_bytes(tmp_path):
+    from pathlib import Path
+
+    from src.services.media_storage import read_verified_media_artifacts
+
+    store, handle, destination = _real_store_setup(tmp_path)
+    path = Path(destination) / "previously-saved.png"
+    path.parent.mkdir()
+    path.write_bytes(_SYNTHETIC_PNG[:-20])
+    legacy = Artifact("image_legacy", ArtifactKind.IMAGE, ArtifactState.LOCAL,
+                      local_path=str(path), mime_type="image/png")
+    assert store.save_media_artifacts(handle, (legacy,), worker_token="first", artifact_state="local")
+    with pytest.raises(ValueError, match="image_decode_failed"):
+        read_verified_media_artifacts(store, store.get(handle))
+
+
+def test_missing_image_decoder_fails_before_initializing_upstream(monkeypatch, tmp_path):
+    import src.client_wrapper as wrapper
+    from src.services.media_storage import ImageDecoderUnavailable
+
+    store, handle, destination = _real_store_setup(tmp_path)
+    initialize = AsyncMock()
+    monkeypatch.setattr(wrapper, "initialize_client", initialize)
+
+    def no_decoder():
+        raise ImageDecoderUnavailable("image_decoder_unavailable")
+
+    monkeypatch.setattr(media_jobs, "require_image_decoder", no_decoder)
+    asyncio.run(media_jobs.execute_media_job(
+        {"media_type": "image", "prompt": "synthetic", "model": "flash", "output_dir": destination},
+        operation_id=handle, store=store, worker_token="first",
+    ))
+    record = store.get(handle)
+    assert record.state == "failed" and record.error_code == "CAPABILITY_UNAVAILABLE"
+    assert record.verification_status == "image_decoder_unavailable"
+    assert not record.upstream_chat_id and not record.cleanup_protected
+    initialize.assert_not_awaited()
 
 
 def test_real_store_crash_recovery_matches_only_exact_turn(monkeypatch, tmp_path):

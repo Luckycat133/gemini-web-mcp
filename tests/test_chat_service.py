@@ -466,6 +466,34 @@ def test_generate_stream_collects_text_and_uses_final_response_for_cleanup():
     assert "stream_text" not in payload["data"]
 
 
+@pytest.mark.parametrize("stream", [False, True])
+def test_upstream_generation_notice_is_a_failure_with_cleanup_evidence(stream):
+    service, client, events, _sessions = _make_service()
+    client.response.text = "Sorry, something went wrong.  Please try your request again."
+
+    async def reply(**_kwargs: Any):
+        yield client.response
+
+    client.generate_content_stream = reply  # type: ignore[method-assign]
+    generate = service.generate_stream if stream else service.generate
+    result = asyncio.run(generate(ChatRequest(message="hello")))
+
+    assert not result.ok and result.error_code == DomainErrorCode.UPSTREAM_REJECTED
+    assert result.meta.verification_status == "upstream_generation_failure_observed"
+    assert result.data is not None and result.data.lifecycle.upstream_chat_id == "c_service"
+    assert events[-1][0] == "cleanup_response"
+    assert client.response.text not in json.dumps(result.to_dict())
+
+
+def test_generation_failure_notice_quoted_inside_an_answer_is_not_a_rejection():
+    service, client, _events, _sessions = _make_service()
+    client.response.text = 'The displayed error was "Sorry, something went wrong. Please try your request again."'
+
+    result = asyncio.run(service.generate(ChatRequest(message="Describe the error wording")))
+
+    assert result.ok
+
+
 def test_generate_stream_cancellation_propagates_and_closes_upstream_iterator():
     service, client, events, _sessions = _make_service()
     started = asyncio.Event()

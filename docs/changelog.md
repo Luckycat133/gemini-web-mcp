@@ -10,6 +10,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- Classify known Gemini generation failure notices in Chat and grounded search while preserving cleanup evidence. Notebook Chat reports its own execution mode and withholds a saved answer if verification fails during cleanup.
+- Decode generated and edited images before returning verified artifacts. Background image work checks for the optional decoder before dispatch and preserves the original chat when the image cannot be verified.
+- Bound single-session reset to 30 seconds while an upstream send still holds the session lock. The original session and pending cleanup remain available for recovery.
 - Verify both the exact Task goal and its conversation history before reporting automatic deletion. Task cleanup respects fresh associated schedules and uses the native Task deletion path when its goal is still present.
 - Browser Cookie autoload verifies the selected session before binding it, reports storage permission failures separately from Gemini session rejection, and checks only the original account when recovering a configured session.
 - Added explicit Gemini Omni 1.2 Flash video generation through the Gemini Interactions API, with optional 3–15 second duration, restart-safe retrieval of the original interaction, verified MP4 artifacts, and default interaction cleanup. The default Cookie path continues to use Gemini Apps Create video.

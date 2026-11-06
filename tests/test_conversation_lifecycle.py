@@ -58,6 +58,27 @@ def test_reset_session_without_observed_chat_id_does_not_report_invalid_cleanup(
     delete.assert_not_awaited()
 
 
+def test_reset_timeout_preserves_session_until_send_releases_lock(monkeypatch):
+    monkeypatch.setattr("src.session_manager.SESSION_RESET_WAIT_SECONDS", 0.01)
+    lifecycle, sessions, _ = _service()
+    state = sessions.store_session("sess_busy", SimpleNamespace(cid="c_busy"), model="flash")
+    delete = AsyncMock(return_value=True)
+
+    async def exercise():
+        async with state._send_lock:
+            result = await lifecycle.reset_one("sess_busy", delete_callback=delete)
+            assert result.error_code == DomainErrorCode.TIMED_OUT
+            assert result.meta.verification_status == "session_reset_waiting_for_send"
+            assert sessions.lookup_session("sess_busy").session is state
+            delete.assert_not_awaited()
+        return await lifecycle.reset_one("sess_busy", delete_callback=delete)
+
+    result = asyncio.run(exercise())
+    assert result.ok
+    assert sessions.lookup_session("sess_busy").error_code == DomainErrorCode.SESSION_NOT_FOUND
+    delete.assert_awaited_once_with("c_busy")
+
+
 def test_cleanup_schedule_is_idempotent_and_retention_cancels_pending():
     manager = RemoteChatCleanupManager(default_retention_seconds=120)
 

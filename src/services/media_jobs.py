@@ -7,7 +7,7 @@ from dataclasses import replace
 from types import SimpleNamespace
 from typing import Any
 
-from ..constants import GEMINI_GENERIC_FAILURE_REPLY, resolve_media_request
+from ..constants import is_generation_failure_reply, resolve_media_request
 from ..client_manager import ClientAuthenticationRequired
 from ..domain import ArtifactKind, ArtifactState
 from ..infrastructure.account_identity import operation_account_matches
@@ -17,17 +17,13 @@ from .deadlines import await_before_deadline
 from .media_generation import (
     VideoModeUnavailable, compose_media_prompt, generate_media_response, media_timeout, media_timeout_scope,
 )
-from .media_storage import _save_generated_media, _valid_media_filename
+from .media_storage import ImageDecoderUnavailable, _save_generated_media, _valid_media_filename, require_image_decoder
 from .music_recovery import MusicErrorCardObserved, fetch_music_media_from_chat, music_response_identity
 from .web_context_transport import fetch_workflow_turn
 
 MEDIA_READBACK_TIMEOUT_SECONDS = 60.0
 
 _QUOTA_REJECTION = "I can create more images as soon as your limit resets. Check your usage in Settings."
-_IMAGE_FAILURE_REPLIES = (
-    GEMINI_GENERIC_FAILURE_REPLY,
-    "Sorry, something went wrong. Please try your request again.",
-)
 _VIDEO_QUOTA_REJECTION = "I can create more videos as soon as your limit resets. Check your usage in Settings."
 _VIDEO_REFUSAL = "请恕我爱莫能助，我只是一个语言模型，不能理解或回复你的这个问题。"
 _MUSIC_ERROR_NOTICE = "生成这段钢琴和弦乐纯音乐时出现了一些问题。你要不要现在再重新尝试一次？"
@@ -160,7 +156,7 @@ async def _save_response(
         await _finish_media_rejection(client, response, record, store=store, token=token, code="ARTIFACT_NOT_RETURNED")
         return
     image_failure = getattr(response, "text", None)
-    if (record.media_type == "image" and image_failure in _IMAGE_FAILURE_REPLIES
+    if (record.media_type == "image" and is_generation_failure_reply(image_failure)
             and not any(getattr(response, name, None) for name in ("images", "videos", "media"))):
         try:
             turn = await await_before_deadline(fetch_workflow_turn(client, cid, rid, rcid), timeout=readback_timeout)
@@ -260,6 +256,15 @@ async def execute_media_job(request: dict, *, operation_id: str, store: Any, wor
         return
     store.configure_media(operation_id, media_type, request.get("output_dir"), filename,
                           settings["request_model"], settings["backend_label"], worker_token=worker_token)
+    if media_type == "image":
+        try:
+            require_image_decoder()
+        except ImageDecoderUnavailable:
+            if store.finish_worker(operation_id, worker_token=worker_token, state="failed",
+                                   phase="image_decoder_unavailable", verification_status="image_decoder_unavailable",
+                                   error_code="CAPABILITY_UNAVAILABLE") and (record is None or not record.upstream_chat_id):
+                store.release_cleanup(operation_id)
+            return
     try:
         try:
             client = get_gemini_client()

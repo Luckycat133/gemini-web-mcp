@@ -54,6 +54,9 @@ def _present(result: DomainResult[OperationReadData]) -> list[TextContent]:
             text += "\n\n" + answer
         elif data.upstream_status is not None:
             text += f"\nObserved Task status: {data.upstream_status}."
+        elif data.operation == "gemini_notebook_chat":
+            if state in {"accepted", "queued", "running", "partial"}:
+                text += "\nNotebook Chat progress is unverified."
         else:
             text += "\nTask progress is unverified; no generation was repeated."
     elif data.report_available:

@@ -195,7 +195,7 @@ report 本地产物；history 的 list/search/read/export/delete 也在 primary 
       "observed_backend": null,
       "verification": {
         "status": "verified",
-        "methods": ["file_exists", "size_checked", "size_nonzero", "image_dimensions"]
+        "methods": ["file_exists", "size_checked", "size_nonzero", "image_dimensions", "image_pixels_decoded"]
       }
     }
   ],
@@ -211,6 +211,7 @@ report 本地产物；history 的 list/search/read/export/delete 也在 primary 
 
 - `state=remote`：响应含可用 URI，但尚未验证远端内容；artifact 的 verification 是 `unverified`。
 - `state=local`：本地文件存在且非零；记录大小和可推断的 MIME，尺寸和时长在探针可用时填写。
+- 后台图片生成和编辑需要 `[image]` 或 `[all]` 提供的 Pillow。下载内容必须通过图像容器检查和像素解码才会标记为已验证。下载损坏时保留原对话保护，可在同一操作上恢复。
 - `state=queued`：上游明确返回 pending/processing/queued 等状态，操作结果仍为 `ok=true`、
   `operation_state=queued`。
 - `state=empty`：请求完成但没有可用产物，返回 `ARTIFACT_NOT_RETURNED`，不把普通文本当作媒体成功。
@@ -324,6 +325,8 @@ report 本地产物；history 的 list/search/read/export/delete 也在 primary 
 - `session_id`: str - 会话 ID
 
 只删除指定会话；未知 ID 返回 `SESSION_NOT_FOUND`，不会影响其他会话。会话未设置 `retain_chat=true` 时，还会尝试立即删除对应远端聊天。
+
+如果上一条请求仍占用会话，单会话重置最多等待 30 秒。此时返回 `TIMED_OUT` 和 `session_reset_waiting_for_send`，会话和原请求的清理保护仍有效。
 
 ---
 

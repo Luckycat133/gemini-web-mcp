@@ -146,6 +146,7 @@ class SearchService:
                 request_id=chat_result.meta.request_id,
                 diagnostic_id=chat_result.meta.diagnostic_id,
                 verification_status=chat_result.meta.verification_status,
+                lifecycle=chat_result.data.lifecycle if chat_result.data is not None else None,
             )
 
         chat_data = chat_result.data
@@ -372,11 +373,13 @@ def _search_failure(
     request_id: str | None = None,
     diagnostic_id: str | None = None,
     verification_status: str = "not_applicable",
+    lifecycle: ConversationLifecycleMetadata | None = None,
 ) -> DomainResult[SearchOperationData]:
     return DomainResult.failure(
         code,
         message,
-        data=SearchOperationData(query=request.query.strip(), grounding_state=GroundingState.FAILED),
+        data=SearchOperationData(query=request.query.strip(), grounding_state=GroundingState.FAILED,
+                                 lifecycle=lifecycle),
         retryable=retryable,
         suggested_action=suggested_action,
         operation_state=operation_state,

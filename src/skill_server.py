@@ -1583,7 +1583,8 @@ async def _session_reset(session_id: Optional[str], *, reset_all: bool = False) 
     if not result.ok:
         return domain_text(
             result,
-            f"SESSION_NOT_FOUND: Invalid session: {session_id}",
+            (f"SESSION_NOT_FOUND: Invalid session: {session_id}"
+             if result.error_code == DomainErrorCode.SESSION_NOT_FOUND else domain_failure_text(result)),
         )
     return domain_text(
         result,

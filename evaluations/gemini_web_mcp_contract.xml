@@ -8,6 +8,14 @@
     <answer>No. A verified video artifact is required; the thumbnail is a separate preview. The function surface defaults video to Flash, while an explicit model choice is preserved.</answer>
   </qa_pair>
   <qa_pair>
+    <question>What evidence makes a generated or edited image a verified local artifact?</question>
+    <answer>Require the downloaded image container to match its signature and pass pixel decoding before returning a verified artifact. Keep an unresolved background image conversation protected if decoding fails.</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>How should a complete Gemini generation failure notice affect Chat or grounded search?</question>
+    <answer>Return UPSTREAM_REJECTED for an exact known failure notice without a generated artifact, preserve cleanup evidence, and do not treat the notice as a successful answer or grounding.</answer>
+  </qa_pair>
+  <qa_pair>
     <question>How can a caller explicitly request the latest Omni video model and a 15-second video?</question>
     <answer>Configure GEMINI_API_KEY for a billed Gemini API project, then call gemini_generate_video with model="gemini-omni-1.2-flash" and duration_seconds=15. Poll the returned operation_id and use the verified MP4 from gemini_get_operation_result. The default video call uses the signed-in Gemini App.</answer>
   </qa_pair>
@@ -285,7 +293,7 @@
   </qa_pair>
   <qa_pair>
     <question>How should an agent recover a session message after the upstream response times out?</question>
-    <answer>Use gemini_send_message with the same session_id and recover_only=true, omitting message. Recovery reads the original observed CID/RID/candidate and accepts only completed exact-turn evidence; it sends no generation. Until resolved, another message must not replay the uncertain request, and reset preserves pending cleanup rather than deleting in-flight work.</answer>
+    <answer>Use gemini_send_message with the same session_id and recover_only=true, omitting message. Recovery reads the original exact completed turn without dispatching generation. If a send holds the lock for 30 seconds during reset, return TIMED_OUT and preserve the session and its cleanup protection.</answer>
   </qa_pair>
   <qa_pair>
     <question>Can default Research cleanup delete the only recoverable report before the caller retrieves it?</question>

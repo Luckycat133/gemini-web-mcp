@@ -31,6 +31,7 @@ _session_guard_states: weakref.WeakValueDictionary[int, Any] = weakref.WeakValue
 _session_guard_lock = threading.RLock()
 
 SESSION_NOT_FOUND = DomainErrorCode.SESSION_NOT_FOUND.value
+SESSION_RESET_WAIT_SECONDS = 30.0
 
 
 @dataclass
@@ -341,24 +342,37 @@ class SessionService:
             )
 
     async def reset_one_async(self, session_id: str) -> SessionOperationResult:
-        """Wait for an in-flight send before detaching exactly one session."""
+        """Detach one session after its in-flight send releases the lock."""
         lookup = self.lookup_session(session_id)
         if not lookup.ok or lookup.session is None:
             return lookup
         data = lookup.session
 
-        async with data._policy_lock:
-            async with data._send_lock:
+        try:
+            async with asyncio.timeout(SESSION_RESET_WAIT_SECONDS), data._policy_lock, data._send_lock:
                 with self._lock:
                     self._clean_expired_sessions()
                     if self._sessions.get(session_id) is not data:
                         return SessionOperationResult.not_found(session_id)
                     self._sessions.pop(session_id)
                     data.lifecycle_state = SessionLifecycleState.REMOVED
-            return SessionOperationResult.success(
-                data,
-                verification_status="local_state_removed",
+        except TimeoutError:
+            return SessionOperationResult(
+                ok=False,
+                data=None,
+                error=DomainError(
+                    code=DomainErrorCode.TIMED_OUT,
+                    message="The session is still waiting for its previous Gemini request.",
+                    retryable=True,
+                ),
+                warnings=(),
+                meta=ResultMeta.create(
+                    OperationState.TIMED_OUT,
+                    verification_status="session_reset_waiting_for_send",
+                    details={"session_id": session_id},
+                ),
             )
+        return SessionOperationResult.success(data, verification_status="local_state_removed")
 
     def reset_one(self, session_id: str) -> SessionOperationResult:
         """Reset exactly one session; an unknown ID never affects other state."""

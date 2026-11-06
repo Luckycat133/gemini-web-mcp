@@ -833,7 +833,10 @@ def test_notebook_chat_only_saves_completed_exact_reply_and_restarts_offline(sto
         finalize_chat_cleanup=finalize, include_answer=True))
     assert result.ok and result.data.execution_mode == "chat" and result.data.task_response is None
     if not completed:
+        from src.tools.operations import _present
+
         assert result.data.answer is None and not result.data.artifacts
+        assert "Notebook Chat progress is unverified." in _present(result)[0].text
         assert store.get(record.operation_id).cleanup_protected
         finalize.assert_not_awaited()
         return
@@ -893,6 +896,29 @@ def test_notebook_chat_classifies_only_exact_completed_refusal(store, monkeypatc
     ))
     assert cached.ok is quoted and cached.data.state is expected_state
     assert cached.error_code == (None if quoted else "UPSTREAM_REJECTED")
+    if not quoted:
+        assert cached.error.message == "The Notebook Chat operation did not complete."
+
+
+def test_notebook_chat_answer_changed_during_cleanup_stays_chat_and_protected(store):
+    record = _notebook_record(store, state="completed")
+    artifact = task_jobs.save_task_result(store, record, "Saved Notebook answer.")
+
+    async def initialize():
+        Path(artifact.local_path).write_text("Modified Notebook answer.")
+
+    finalize = AsyncMock()
+    result = asyncio.run(task_jobs.read_task_operation(
+        record, store=store, client_provider=lambda: TaskClient(), client_initializer=initialize,
+        finalize_chat_cleanup=finalize, include_answer=True,
+    ))
+
+    assert result.ok and result.data.state == OperationState.PARTIAL
+    assert result.data.execution_mode == "chat"
+    assert result.data.answer is None and result.data.task_response is None and not result.data.artifacts
+    assert result.warnings[0].message == "Notebook Chat answer artifact could not be reverified."
+    assert store.get(record.operation_id).cleanup_protected
+    finalize.assert_not_awaited()
 
 
 def test_completed_task_goal_does_not_authorize_partial_candidate_cleanup(store, monkeypatch):

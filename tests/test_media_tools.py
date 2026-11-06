@@ -19,6 +19,11 @@ from src.adapters.mcp_sdk import MCPServer
 import src.tools.media as media_tools
 
 
+_SYNTHETIC_PNG = base64.b64decode(
+    "iVBORw0KGgoAAAANSUhEUgAAAAIAAAABCAIAAAB7QOjdAAAADElEQVR4nGP8zwACAAYIAQFazwZIAAAAAElFTkSuQmCC"
+)
+
+
 # ---------------------------------------------------------------------------
 # 辅助
 # ---------------------------------------------------------------------------
@@ -59,20 +64,18 @@ class _FakeSavedImage:
         if not filename.suffix:
             filename = filename.with_suffix(".png")
         path = destination / filename
-        path.write_bytes(
-            base64.b64decode(
-                "iVBORw0KGgoAAAANSUhEUgAAAAIAAAABAQMAAADO7O3JAAAAIGNIUk0AAHomAACAhAAA+gAAAIDoAAB1MAAA6mAAADqYAAAXcJy6UTwAAAAGUExURf8AAP///0EdNBEAAAABYktHRAH/Ai3eAAAAB3RJTUUH6ggDByA1n7aAbwAAAApJREFUCNdjYAAAAAIAAeIhvDMAAAAASUVORK5CYII="
-            )
-        )
+        path.write_bytes(_SYNTHETIC_PNG)
         return str(path)
 
 
 class _FakeSavedJpegWithPngName(_FakeSavedImage):
     async def save(self, **kwargs):
+        from PIL import Image
+
         destination = Path(kwargs["path"])
         destination.mkdir(parents=True, exist_ok=True)
         path = destination / kwargs["filename"]
-        path.write_bytes(b"\xff\xd8\xff\xe0" + b"jpeg-content")
+        Image.new("RGB", (2, 1), "red").save(path, format="JPEG")
         return str(path)
 
 
@@ -1404,7 +1407,6 @@ def test_generate_music_default_thinking_level_does_not_invent_backend(monkeypat
 
 def test_concurrent_image_saves_reserve_distinct_names(tmp_path):
     from src.services.media_storage import _save_generated_media
-    png = bytes.fromhex('89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c489')
     async def run():
         entered = 0
         ready = asyncio.Event()
@@ -1418,7 +1420,7 @@ def test_concurrent_image_saves_reserve_distinct_names(tmp_path):
                     ready.set()
                 await ready.wait()
                 output = Path(path) / filename
-                output.write_bytes(png)
+                output.write_bytes(_SYNTHETIC_PNG)
                 return str(output)
         async def save_one():
             return await _save_generated_media(SimpleNamespace(), media_type='image', output_dir=str(tmp_path),
@@ -1427,7 +1429,7 @@ def test_concurrent_image_saves_reserve_distinct_names(tmp_path):
         return await asyncio.gather(save_one(), save_one())
     results = asyncio.run(run())
     paths = [Path(result.artifacts[0].local_path) for result in results]
-    assert len(set(paths)) == 2 and all(path.read_bytes() == png for path in paths)
+    assert len(set(paths)) == 2 and all(path.read_bytes() == _SYNTHETIC_PNG for path in paths)
 
 
 def test_media_save_failure_does_not_log_signed_url(tmp_path, caplog):

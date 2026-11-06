@@ -230,7 +230,8 @@ def _register_session_tools(mcp: MCPServer, chat_service) -> None:
         if not result.ok:
             return domain_text(
                 result,
-                f"❌ SESSION_NOT_FOUND: 会话 {session_id} 不存在",
+                (f"❌ SESSION_NOT_FOUND: 会话 {session_id} 不存在"
+                 if result.error_code == DomainErrorCode.SESSION_NOT_FOUND else domain_failure_text(result)),
             )
         return domain_text(
             result,
