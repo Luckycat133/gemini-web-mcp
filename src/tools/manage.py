@@ -1356,7 +1356,7 @@ def _register_history_facade_tools(
         owner = current_owner
 
         try:
-            result = await delete_chat_result(client, chat_id, expected_account=owner)
+            result = await delete_chat_result(client, chat_id, expected_account=owner, reconcile_owned_cleanup=True)
             if not result.ok:
                 if result.error_code == "AUTH_REQUIRED":
                     return domain_text(result, "Gemini account changed or is unavailable.")

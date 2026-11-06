@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import hashlib
 import os
 import re
 import shutil
@@ -10,13 +11,43 @@ import subprocess
 from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 
+from ..constants import OMNI_VIDEO_MODEL
 from ..domain import Artifact, ArtifactKind, ArtifactState
 from .artifacts import (artifact_from_local_path, classify_artifact_state, detect_av_mime_type,
                         detect_image_mime_type, probe_playable_av_tracks, response_image_items)
 
 logger = logging.getLogger(__name__)
+OMNI_ARTIFACT_MODEL_VERIFIED = "omni_model_and_artifact_verified"
+
+if TYPE_CHECKING:
+    from ..infrastructure.operation_store import OperationRecord, OperationStore
+
+
+def read_verified_media_artifacts(
+    store: OperationStore, record: OperationRecord, *, include_duration: bool = False,
+) -> tuple[Artifact, ...]:
+    """Read only the saved artifact identities whose local bytes still match."""
+    artifacts = []
+    for item in store.get_media_artifacts(record.operation_id):
+        path = Path(item["local_path"])
+        if not path.is_file() or path.stat().st_size != item["size_bytes"]:
+            raise ValueError("saved artifact changed")
+        with path.open("rb") as stream:
+            if hashlib.file_digest(stream, "sha256").hexdigest() != item["sha256"]:
+                raise ValueError("saved artifact changed")
+        artifact = artifact_from_local_path(
+            ArtifactKind(item["kind"]), str(path), source_chat_id=record.upstream_chat_id,
+            requested_backend=record.requested_model, request_model=record.request_model,
+            effective_backend=record.effective_backend,
+            observed_backend=(OMNI_VIDEO_MODEL if record.verification_status == OMNI_ARTIFACT_MODEL_VERIFIED else None),
+            duration_probe=_probe_duration if include_duration else None,
+        )
+        if artifact.state != ArtifactState.LOCAL:
+            raise ValueError("saved artifact did not verify")
+        artifacts.append(replace(artifact, id=item["artifact_id"]))
+    return tuple(artifacts)
 
 
 def reconcile_remote_media_types(remote: tuple[Artifact, ...], local: tuple[Artifact, ...]) -> tuple[Artifact, ...]:

@@ -25,19 +25,19 @@ gemini_doctor
 1. **Cookie 是否过期**：Gemini 的 `__Secure-1PSID` 会定期失效。重新到 gemini.google.com 取一次。
 2. **`__Secure-1PSIDTS` 是否同步**：只更新 `__Secure-1PSID` 而忘了 `__Secure-1PSIDTS` 是常见坑。两者要一起换。
 3. **是否提交到了 Git**：检查 `cookies.json` 是否被误提交。`.gitignore` 应已忽略；若已泄露，立即重置 Cookie。
-4. **环境变量是否生效**：`echo $GEMINI_PSID` 确认 shell 里能读到；Claude Desktop / MCP 客户端要在其配置的 `env` 块里设置，不是 shell。
+4. **环境变量是否生效**：使用 `gemini_get_cookie_status` 查看 MCP 进程的凭据状态和来源。使用自动读取时省略 Cookie 占位值。
 
 ### 症状：多账号 / 多 Chrome profile 取到错误的 Cookie
 
 用 `gemini_list_browser_cookie_profiles` 列出本机 Chrome profile，确认哪个 profile 对应目标账号，再用 `gemini_get_cookie_from_browser` 的 `profile` 参数显式指定。
 
-> `cookie_manager.py` 会优先选择能读取 scheduled registry 的 profile，但多账号场景下手动指定更稳。
+自动读取优先检查 Chrome 当前 Profile，并验证 Gemini 会话。恢复已绑定会话时只检查匹配原 PSID 的候选。
 
 ### 症状：从浏览器读 Cookie 失败
 
 - 确认安装了可选依赖：`pip install -e ".[browser]"`（依赖 `browser-cookie3`）
-- Chrome 必须处于关闭状态，或允许其他进程读取其 Cookie 数据库（部分系统会锁文件）
-- macOS 上可能需要在"系统设置 → 隐私与安全 → 完全磁盘访问"里授权终端
+- `BROWSER_COOKIE_ACCESS_DENIED` 表示宿主无法打开浏览器的 Cookie 存储。macOS 可在系统设置的“隐私与安全”中检查实际运行 MCP 的宿主权限。
+- `BROWSER_COOKIE_AUTH_REJECTED` 或 `GEMINI_SESSION_REJECTED` 表示会话在 Google 认证处失败。检查目标 Profile 里的 Gemini 登录状态。
 
 ### 症状：`BROWSER_COOKIE_ACCESS_TIMEOUT`
 

@@ -105,10 +105,12 @@ class RemoteChatCleanupManager:
                 self._active_account = account
         return account
 
-    def record_explicit_verified_absence(self, cid: str) -> None:
-        """Record an explicit Task deletion only for a previously owned queue entry."""
+    def record_explicit_verified_absence(self, cid: str, *, expected_account: str | None = None) -> None:
+        """Record an explicit deletion only for a previously owned queue entry."""
         account = self._account()
-        if not account or not self._store.record_explicit_verified_absence(account, cid):
+        if not account or (expected_account is not None and account != expected_account):
+            return
+        if not self._store.record_explicit_verified_absence(account, cid):
             return
         observation = CleanupObservation(state=CleanupState.COMPLETED, upstream_chat_id=cid)
         with self._lock:

@@ -113,6 +113,8 @@ gemini_tasks(action="delete", chat_id=<已确认的准确 c_ Task ID>)
 同一合成 Notebook 的 Task 新增来源与重命名也已通过：fresh metadata 保持原 ID，来源数量由 1 变 2，标题匹配；新的 Task 又从第二来源取回未出现在查询中的随机标记与答案。该合成 Notebook 经原生确认卡片后，独立完整目录读回确认已删除。另行实测同一 Task 的直接确认请求和公开 MCP 的同句柄显式回复，均取得最终回答产物并独立确认目标 Notebook 已不存在。这些是授权本地检查，不代表已验证普通用户 Notebook 的任意修改，也不替代专用账号 canary。
 <!-- notebook-task-live-evidence:end -->
 
+2026-11-06 用现有 Chrome 会话复测。两种 Notebook 目录视图读到了同一个合成 Notebook。精确移动聊天后，项目列表独立确认归属。带 Notebook 的 Task 从来源取回未写进问题的随机标记，提交连接断开后仍保存了完整回答，重连后核验摘要并确认测试聊天已自动删除。合成来源和 Notebook 均经远端回读确认删除。普通 Notebook Chat 在本次复测中出现上游错误，工作进程保存失败记录和回答产物，并按默认策略清理测试聊天。
+
 Task 的独占浏览器接管、暂停／恢复、应用权限自动确认和导出尚未适配。`gemini_tasks` 的元数据状态不等于完整工作面板。ProcessSession 的握手与响应探测仍属实验，当前生产路径不依赖该实验，也不声明它已可用。
 
 生产请求构造集中在 RPC registry：Task 使用已观察的模式字段；普通 Notebook 聊天使用网页生成的 File 引用形式，保留 Chat 语义。File 引用是可逆元数据编码，不是另一个认证凭据，也不需要假造上传流程。
@@ -150,6 +152,13 @@ Task 计划由 `gemini_tasks` 的 `list_schedules`、`get_schedule`、`create_sc
 
 安装 `gemini-web-mcp[browser-control]`，或使用包含该依赖的 `gemini-web-mcp[all]`。账号面 `gemini_task_browser(chat_id=...)` 默认读取最新 Task 的浏览器截图；同时提供 `response_id` 和 `candidate_id` 可指定精确回合。可验证的 PNG 会保存为本地 Artifact，并在不超过 2 MiB 且摘要匹配时附带原生图片预览。
 
-显式输入传入 `browser_input`：`kind` 为 `click`、`scroll`、`key` 或 `type`，坐标基于当前截图。调用必须同时提供截图对应的精确 `response_id`、`candidate_id`、`expected_frame_sha256` 和至少 20 字符的唯一 `action_id`。仅当 Task 状态为完成（3）或等待输入（5），且发送前重新读回状态未变化时允许输入。相同 action ID 已消费即不重发；日志只保存操作元数据，不保存输入文本或坐标。
+显式输入传入 `browser_input`，坐标以当前截图为准。调用必须同时提供截图对应的精确 `response_id`、`candidate_id`、`expected_frame_sha256` 和至少 20 字符的唯一 `action_id`。仅当 Task 状态为完成（3）或等待输入（5），且发送前重新读回状态未变化时允许输入。相同 action ID 已消费即不重发。输入日志只保存操作元数据。
 
-这些条件不建立独占控制，也不表示远端 Task 已暂停。截图和发送后的帧只证明观察或派发，不证明网站效果；登录、应用授权和权限卡片不能自动批准。Task 停止、取消、暂停与恢复控制尚未实现。
+| 输入 | `browser_input` 示例 |
+| --- | --- |
+| 点击 | `{"kind":"click","x":640,"y":520}` |
+| 滚动 | `{"kind":"scroll","x":640,"y":520,"steps":4}` |
+| 按键 | `{"kind":"key","key":"Ctrl+l"}` |
+| 输入文字 | `{"kind":"type","text":"https://www.iana.org/"}` |
+
+滚动的 `steps` 为 -10 到 10 的非零整数。派发后可再次取截图确认网页位置或页面内容实际变化。账号授权继续使用原生卡片。Task 停止、取消、暂停、恢复和独占接管仍需原生界面。最新一次性权限和浏览器操作实测见 [Task 偏好](task-preferences.md)。

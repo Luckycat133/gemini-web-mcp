@@ -199,7 +199,7 @@ VIDEO_GENERATION_TRANSPORT = GenerationTransportContract(
     mode_index=49,
     mode_value=11,
     content_options_index=9,
-    observed="2026-10-31 Gemini Web UI request and verified generated video artifact",
+    observed="2026-10-31 Web request and video artifact; 2026-11-06 public Create video route confirms mode 11",
 )
 
 
@@ -891,8 +891,8 @@ _CONTRACT_LIST = [
         "MaZiqc",
         "/notebook/{notebook_slug}",
         _notebook_chats_payload,
-        "conversation_page",
-        "2026-07-04 Pro UI / Native Gemini Notebook recent chats",
+        "notebook_conversation_page",
+        "2026-07-04 Native Notebook recent chats; 2026-11-06 verified empty project page",
         stability="preview",
     ),
     _contract(

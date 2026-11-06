@@ -49,7 +49,7 @@ def _resolve_executable(command: str) -> str:
 def _safe_environment(profile: str | None, state_directory: Path | None = None) -> dict[str, str]:
     environment = os.environ.copy()
     environment.pop("PYTHONPATH", None)
-    for name in ("GEMINI_PSID", "GEMINI_PSIDTS", "GEMINI_PSIDCC"):
+    for name in ("GEMINI_PSID", "GEMINI_PSIDTS", "GEMINI_PSIDCC", "GEMINI_API_KEY"):
         environment.pop(name, None)
     environment["GEMINI_AUTO_REFRESH"] = "false"
     environment["GEMINI_BROWSER_AUTO_LOAD"] = "false"

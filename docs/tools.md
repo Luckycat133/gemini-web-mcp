@@ -39,7 +39,7 @@
 
 `gemini_run_task(prompt, model="flash", thinking_level="standard", notebook_ids=None, timeout_seconds=600, retain_chat=false, delete_after_seconds=None, operation_id=None)` 明确启动后台 Task，返回 `execution_mode="task"`。使用 `gemini_get_operation_status/result` 读取同一操作，不能通过重发提示查询进度。该工具可按用户提示执行应用修改，注解为 destructive；Task 完成不替代应用侧修改的独立核验。见 [Notebook 与 Task 工作流](notebook-task-workflows.md)。
 
-功能面的 `gemini_generate_video` 也默认使用 `model="flash"`；显式指定的模型会原样保留。历史授权测试中 Pro 返回了经验证的视频文件，Flash 返回过普通文本拒绝；不自动切换到 Pro，视频可用性仍需按实际结果判断。
+功能面的 `gemini_generate_video` 默认用 `model="flash"` 进入 Gemini 网页的「创建视频」模式。需要明确指定 Omni 1.2 Flash 或精确时长时，使用单独计费的 Developer API 路径。见[视频生成参数与示例](#gemini_generate_video)。
 
 ### 显式账号面（`gemini-mcp-account`）
 
@@ -329,6 +329,24 @@ report 本地产物；history 的 list/search/read/export/delete 也在 primary 
 
 ## 媒体工具
 
+### gemini_generate_video
+
+后台视频生成。省略 `model` 或传入 `model="flash"` 时，使用 Cookie 登录并进入当前账号的网页「创建视频」模式。Google 将此入口标为 Gemini Omni 1.2 Flash，账号开放范围由 Google 决定。网页结果未提供精确版本时，`observed_backend` 留空。[Gemini Apps 视频帮助](https://support.google.com/gemini/answer/16126339?hl=en)
+
+如需锁定版本，在 MCP 进程中配置 `GEMINI_API_KEY`，显式选择官方 API 模型：
+
+```json
+{
+  "prompt": "一只纸飞机穿过安静的图书馆，连续跟拍",
+  "model": "gemini-omni-1.2-flash",
+  "duration_seconds": 15
+}
+```
+
+该路径使用 Gemini Developer API 的计费额度。可传 3–15 秒的整数 `duration_seconds`，省略时默认 10 秒。可传一张本地参考图 `image_path`。使用默认思考参数和后台模式。需要保留 API 交互时传 `retain_chat=true`，定时删除参数只用于网页路径（API 路径可省略或传 0）。[Gemini Omni API 用法](https://ai.google.dev/gemini-api/docs/omni)
+
+使用 `gemini_get_operation_status` 和 `gemini_get_operation_result` 查询原 `operation_id`。后台任务校验并保存 MP4 后默认清理自己创建的 API 交互。兼容入口也支持同一模型与时长参数：`gemini_generate_media(media_type="video", ...)` 和 compact 的 `create(type="video", ...)`。compact 用 `session(action="operation_status"|"operation_result", session_id=<operation_id>)` 查询。
+
 ### gemini_generate_media
 
 通用媒体生成。默认 `background=true`：立即返回 `operation_id`，用 `gemini_get_operation_status` / `gemini_get_operation_result` 查询同一任务和取回 Artifact；`background=false` 保留等待结果的路径。
@@ -336,16 +354,17 @@ report 本地产物；history 的 list/search/read/export/delete 也在 primary 
 **参数：**
 - `prompt`: str - 生成描述
 - `media_type`: "image" | "video" | "music"
-- `model`: str - MCP 别名或运行时模型名 (默认: `flash`)
+- `model`: str - MCP 别名或运行时模型名（默认 `flash`）。视频还可显式选择 `gemini-omni-1.2-flash`
 - `thinking_level`: str - `standard` / `extended` (默认: `standard`)
 - `image_path`: str - 可选参考图片
-- `background`: bool - 默认 `true`；`false` 等待本次结果
+- `duration_seconds`: int - 仅供显式选择的 Omni 1.2 Flash API 视频使用
+- `background`: bool - 默认 `true`；网页路径可传 `false` 等待本次结果
 - `operation_id`: str - 可选调用方生成的操作句柄
 
 **真实网页行为：**
 - `image`: Flash-Lite 使用 `Nano Banana 2 Lite`；Flash / Pro 使用 `Nano Banana 2`
 - `music`: 返回 Lyria 产物；当前 MCP 响应没有提供可验证的具体版本
-- `video`: 使用专用视频模式；兼容的 `gemini_generate_media` 和 compact `create` 可显式传 `model="pro"` 使用本次实测路线，默认值保持不变。需要实际视频 Artifact 才算成功，单独缩略图不能证明视频生成完成
+- `video`: 网页路径使用专用「创建视频」模式。需要实际视频 Artifact 才算成功
 - `image + model=pro` 不会直接切换首轮图像后端；Pro redo 是网页生成后的二次操作
 
 **artifact 行为：** 后台任务默认保存到操作数据库同级的 `artifacts/<operation_id>/` 持久目录，也可指定 `output_dir`；显式同步路径仍默认使用 `generated_media/`。实际写入的文件会检查存在性、
@@ -362,8 +381,7 @@ report 本地产物；history 的 list/search/read/export/delete 也在 primary 
 - `model`: str - MCP 别名或运行时模型名 (默认: `flash`)
 - `thinking_level`: str - `standard` / `extended` (默认: `standard`)
 
-媒体工具使用对应的 Gemini Web 生成模式触发图像、视频和音乐能力。
-账号可用性、上游排队和响应形状仍由 Gemini Web 决定。
+媒体工具默认使用对应的 Gemini Web 生成模式。网页账号可用性、上游排队和响应形状由 Gemini Web 决定。
 
 ---
 

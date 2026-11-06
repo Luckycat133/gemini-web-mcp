@@ -74,7 +74,16 @@ async def run_worker(payload: dict[str, Any], *, store: OperationStore | None = 
         return
     store.bind_worker(operation_id, token, os.getpid())
     heartbeat = asyncio.create_task(_heartbeat(store, operation_id, token))
+    kind = payload["kind"]
+    omni_job = kind in {"omni_video", "omni_video_resume"}
     try:
+        if omni_job:
+            from .services.omni_video_jobs import run_omni_video_job
+            await run_omni_video_job(
+                store, operation_id, token, request=payload.pop("request", {}) if kind == "omni_video" else None,
+                observation_seconds=observation_seconds, poll_seconds=poll_seconds,
+            )
+            return
         from .client_wrapper import init_startup_infrastructure
         init_startup_infrastructure()
         cookies = payload.pop("auth_cookies", None)
@@ -85,7 +94,6 @@ async def run_worker(payload: dict[str, Any], *, store: OperationStore | None = 
                 extra_cookies=cookies, source=("browser_worker" if payload.pop("auth_source", None) == "browser_worker"
                                               else "worker_inherited"),
             )
-        kind = payload["kind"]
         record = store.get(operation_id)
         account = current_account_key()
         if not account:
@@ -214,12 +222,13 @@ async def run_worker(payload: dict[str, Any], *, store: OperationStore | None = 
             pass
         store.retire_worker(operation_id, token)
         # Only due, unprotected cleanup is eligible. Active operations remain protected.
-        try:
-            from .client_wrapper import _drain_due_cleanup, _client_manager
-            await asyncio.wait_for(_drain_due_cleanup(), 20)
-            await asyncio.wait_for(_client_manager.reset_async(), 10)
-        except Exception:
-            pass
+        if not omni_job:
+            try:
+                from .client_wrapper import _drain_due_cleanup, _client_manager
+                await asyncio.wait_for(_drain_due_cleanup(), 20)
+                await asyncio.wait_for(_client_manager.reset_async(), 10)
+            except Exception:
+                pass
 
 
 def main() -> None:

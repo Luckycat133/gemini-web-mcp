@@ -9,6 +9,7 @@ import socket
 import tempfile
 import threading
 import logging
+import time
 from contextlib import suppress
 from pathlib import Path
 from typing import Optional, Any, Dict
@@ -116,6 +117,18 @@ class ClientInitializationResetError(RuntimeError):
 class ClientAuthenticationRequired(PermissionError):
     """Authentication could not be restored before request dispatch."""
 
+    def __init__(
+        self, message: str = "Gemini authentication is required.", *,
+        auth_reason: str | None = None, browser_auth_reason: str | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.auth_reason = auth_reason
+        self.browser_auth_reason = browser_auth_reason
+
+
+def browser_cookie_auto_load_enabled() -> bool:
+    return os.environ.get("GEMINI_BROWSER_AUTO_LOAD", "true").lower() == "true"
+
 
 def _explicitly_unauthenticated(client: Any) -> bool:
     from gemini_webapi.constants import AccountStatus
@@ -133,9 +146,50 @@ class ClientManager:
         self._init_task: Optional[asyncio.Task[Any]] = None
         self._client_loop: Optional[asyncio.AbstractEventLoop] = None
         self._retirement_tasks: set[asyncio.Task[None]] = set()
+        self._browser_auth_lock = threading.Lock()
+        self._browser_retry_at = 0.0
+        self.browser_auth_reason: str | None = None
+
+    def ensure_browser_cookie(self) -> None:
+        """Bind a verified browser session when no credential is configured."""
+        if os.environ.get("GEMINI_PSID"):
+            return
+        if not browser_cookie_auto_load_enabled():
+            raise ClientAuthenticationRequired(auth_reason="BROWSER_COOKIE_AUTO_LOAD_DISABLED")
+        if not COOKIE_MANAGER_AVAILABLE:
+            raise ClientAuthenticationRequired(auth_reason="BROWSER_COOKIE_DEPENDENCY_MISSING")
+
+        with self._browser_auth_lock:
+            if os.environ.get("GEMINI_PSID"):
+                return
+            if self.browser_auth_reason and time.monotonic() < self._browser_retry_at:
+                raise ClientAuthenticationRequired(auth_reason=self.browser_auth_reason)
+            manager = get_cookie_manager()
+            discovery = manager.discover_browser_cookies()
+            psid = discovery.cookies.get("__Secure-1PSID")
+            if not psid:
+                self.browser_auth_reason = discovery.reason or "BROWSER_COOKIE_NOT_FOUND"
+                self._browser_retry_at = time.monotonic() + 30
+                raise ClientAuthenticationRequired(auth_reason=self.browser_auth_reason)
+            psidts = discovery.cookies.get("__Secure-1PSIDTS", "")
+            if manager.update_cookie(
+                psid, psidts, source=discovery.source or "browser_chrome", extra_cookies=discovery.cookies,
+                notify=False, guard=lambda: not os.environ.get("GEMINI_PSID"),
+            ):
+                os.environ["GEMINI_PSID"] = psid
+                if psidts:
+                    os.environ["GEMINI_PSIDTS"] = psidts
+                else:
+                    os.environ.pop("GEMINI_PSIDTS", None)
+                self.browser_auth_reason = None
+                logger.info("Browser cookie loaded from a verified Gemini session source=%s", discovery.source)
+            elif not os.environ.get("GEMINI_PSID"):
+                raise ClientAuthenticationRequired(auth_reason="BROWSER_COOKIE_AUTH_UNVERIFIED")
 
     def get_client(self) -> Any:
         """获取或初始化 GeminiClient 实例"""
+        if self._client is None and not os.environ.get("GEMINI_PSID"):
+            self.ensure_browser_cookie()
         with self._lock:
             if self._client is None:
                 self._create_client()
@@ -152,7 +206,7 @@ class ClientManager:
                     continue
                 if self._initialized:
                     if _explicitly_unauthenticated(client):
-                        raise ClientAuthenticationRequired("Gemini authentication is required.")
+                        raise ClientAuthenticationRequired(auth_reason="GEMINI_SESSION_REJECTED")
                     return client
 
                 generation = self._generation
@@ -181,13 +235,15 @@ class ClientManager:
 
             init_options = dict(timeout=30, verbose=False, auto_close=False,
                                 auto_refresh=os.environ.get("GEMINI_AUTO_REFRESH", "true").lower() == "true")
+            auth_reason = None
             try:
                 await client.init(**init_options)
-                authentication_failed = _explicitly_unauthenticated(client)
+                if _explicitly_unauthenticated(client):
+                    auth_reason = "GEMINI_SESSION_REJECTED"
             except AuthError:
-                authentication_failed = True
-            if authentication_failed:
-                await self._restore_browser_authentication(client, generation, init_options)
+                auth_reason = "GEMINI_SESSION_UNVERIFIED"
+            if auth_reason:
+                await self._restore_browser_authentication(client, generation, init_options, auth_reason=auth_reason)
             with self._lock:
                 if self._generation != generation or self._client is not client:
                     raise ClientInitializationResetError("client reset during initialization")
@@ -213,21 +269,35 @@ class ClientManager:
                 if self._init_task is current_task:
                     self._init_task = None
 
-    async def _restore_browser_authentication(self, client: Any, generation: int, options: dict[str, Any]) -> None:
-        """Reinitialize the same undispatched client once using the bound Chrome account."""
+    async def _restore_browser_authentication(
+        self, client: Any, generation: int, options: dict[str, Any], *, auth_reason: str,
+    ) -> None:
+        """Reinitialize the same undispatched client once using the bound account."""
         from gemini_webapi.exceptions import AuthError
 
-        if not COOKIE_MANAGER_AVAILABLE or os.environ.get("GEMINI_BROWSER_AUTO_LOAD", "true").lower() != "true":
-            raise ClientAuthenticationRequired("Gemini authentication is required.")
+        if not COOKIE_MANAGER_AVAILABLE or not browser_cookie_auto_load_enabled():
+            reason = "BROWSER_COOKIE_AUTO_LOAD_DISABLED" if COOKIE_MANAGER_AVAILABLE else "BROWSER_COOKIE_DEPENDENCY_MISSING"
+            raise ClientAuthenticationRequired(auth_reason=auth_reason, browser_auth_reason=reason)
         manager = get_cookie_manager()
         old_psid = os.environ.get("GEMINI_PSID", "")
+        if not old_psid:
+            raise ClientAuthenticationRequired(auth_reason=auth_reason)
         try:
-            cookies = await asyncio.wait_for(asyncio.to_thread(manager.get_cookies_from_browser, "chrome"), timeout=60)
+            discovery = await asyncio.wait_for(
+                asyncio.to_thread(manager.discover_browser_cookies, expected_psid=old_psid), timeout=60,
+            )
         except Exception:
-            raise ClientAuthenticationRequired("Gemini browser authentication is unavailable.") from None
-        psid = cookies.get("__Secure-1PSID") if isinstance(cookies, dict) else None
-        if not old_psid or not psid or psid != old_psid or os.environ.get("GEMINI_PSID", "") != old_psid:
-            raise ClientAuthenticationRequired("The authenticated browser account could not be verified.")
+            self.browser_auth_reason = "BROWSER_COOKIE_AUTH_UNVERIFIED"
+            raise ClientAuthenticationRequired(
+                auth_reason=auth_reason, browser_auth_reason=self.browser_auth_reason,
+            ) from None
+        cookies = discovery.cookies
+        psid = cookies.get("__Secure-1PSID")
+        if psid != old_psid or os.environ.get("GEMINI_PSID", "") != old_psid:
+            self.browser_auth_reason = discovery.reason or "BROWSER_COOKIE_ACCOUNT_MISMATCH"
+            raise ClientAuthenticationRequired(
+                auth_reason=auth_reason, browser_auth_reason=self.browser_auth_reason,
+            )
         with self._lock:
             if (self._generation != generation or self._client is not client
                     or os.environ.get("GEMINI_PSID", "") != old_psid):
@@ -244,18 +314,19 @@ class ClientManager:
         try:
             await client.init(**options)
         except AuthError:
-            raise ClientAuthenticationRequired("Gemini browser authentication was rejected.") from None
+            raise ClientAuthenticationRequired(auth_reason="GEMINI_SESSION_UNVERIFIED") from None
         if _explicitly_unauthenticated(client):
             await client.close()
-            raise ClientAuthenticationRequired("Gemini browser authentication was rejected.")
+            raise ClientAuthenticationRequired(auth_reason="GEMINI_SESSION_REJECTED")
         def generation_current() -> bool:
             with self._lock:
                 return (self._generation == generation and self._client is client
                         and os.environ.get("GEMINI_PSID", "") == old_psid)
 
-        if not manager.update_cookie(psid, cookies.get("__Secure-1PSIDTS", ""), source="browser_chrome",
+        if not manager.update_cookie(psid, cookies.get("__Secure-1PSIDTS", ""), source=discovery.source or "browser_chrome",
                                      extra_cookies=cookies, notify=False, guard=generation_current):
             raise ClientInitializationResetError("client reset during initialization")
+        self.browser_auth_reason = None
 
     def _create_client(self) -> None:
         """创建新的客户端实例"""

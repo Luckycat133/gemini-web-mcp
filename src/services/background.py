@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import os
 from pathlib import Path
 import re
@@ -13,11 +14,17 @@ import threading
 import uuid
 from typing import Any
 
-from ..constants import resolve_media_request, resolve_thinking_level_id
+from ..constants import OMNI_VIDEO_API_BACKEND, resolve_media_request, resolve_thinking_level_id
 from ..domain.operations import LongOperationData, operation_failure_code
-from ..domain.results import DomainErrorCode, DomainResult, DomainWarning, OperationState
-from ..infrastructure.account_identity import current_account_key, operation_account_matches
+from ..domain.results import DomainErrorCode, DomainResult, DomainWarning, OperationState, result_from_exception
+from ..infrastructure.account_identity import (
+    current_account_key, omni_video_api_key, operation_account_matches, uses_omni_video_api,
+)
 from ..infrastructure.operation_store import OperationRecord, OperationStore, RETENTION_SECONDS
+from .media_generation import video_options_error
+from .media_storage import _valid_media_filename
+
+logger = logging.getLogger(__name__)
 
 
 def worker_active(record: OperationRecord, *, now: float) -> bool:
@@ -25,10 +32,13 @@ def worker_active(record: OperationRecord, *, now: float) -> bool:
 
 
 def _launch_detached_worker(payload: dict[str, Any], store: OperationStore) -> int:
-    from ..client_manager import get_extra_cookies
-    from ..cookie_manager import get_cookie_manager
-
+    omni_job = payload["kind"] in {"omni_video", "omni_video_resume"}
     environment = os.environ.copy()
+    if omni_job:
+        for key in ("GEMINI_PSID", "GEMINI_PSIDTS", "GEMINI_PSIDCC"):
+            environment.pop(key, None)
+    else:
+        environment.pop("GEMINI_API_KEY", None)
     environment["GEMINI_OPERATION_DB_PATH"] = str(store.path.resolve())
     for key in ("GEMINI_CLEANUP_DB_PATH", "XDG_STATE_HOME", "GEMINI_COOKIE_PATH"):
         if environment.get(key):
@@ -45,9 +55,14 @@ def _launch_detached_worker(payload: dict[str, Any], store: OperationStore) -> i
     try:
         # The same anonymous pipe also preserves the parent's complete cookie
         # context. Neither authentication nor request content enters the ledger.
-        cookie_data = get_cookie_manager().get_cookie()
-        source = "browser_worker" if cookie_data and cookie_data.source.startswith("browser_") else "worker_inherited"
-        envelope = {**payload, "auth_cookies": get_extra_cookies(), "auth_source": source}
+        envelope = payload
+        if not omni_job:
+            from ..client_manager import get_extra_cookies
+            from ..cookie_manager import get_cookie_manager
+
+            cookie_data = get_cookie_manager().get_cookie()
+            source = "browser_worker" if cookie_data and cookie_data.source.startswith("browser_") else "worker_inherited"
+            envelope = {**payload, "auth_cookies": get_extra_cookies(), "auth_source": source}
         process.stdin.write(json.dumps(envelope).encode("utf-8"))
         process.stdin.close()
     except Exception:
@@ -62,10 +77,13 @@ def _handle_valid(operation_id: str) -> bool:
 
 
 def _accepted(record: OperationRecord) -> DomainResult[LongOperationData]:
+    continuation = record.state not in {"failed", "unavailable", "cancelled"}
+    if uses_omni_video_api(record) and record.state == "partial" and not record.upstream_operation_id:
+        continuation = False
     data = LongOperationData(
         operation=record.operation, state=OperationState(record.state), operation_id=record.operation_id,
         upstream_chat_id=record.upstream_chat_id, upstream_operation_id=record.upstream_operation_id,
-        continuation_possible=record.state not in {"failed", "unavailable", "cancelled"}, media_type=record.media_type,
+        continuation_possible=continuation, media_type=record.media_type,
         # Only a verified result read may claim current local availability.
         artifacts_available=False,
         error_code=record.error_code,
@@ -96,9 +114,11 @@ async def _dispatch(store: OperationStore, record: OperationRecord, kind: str,
         }, store)
         store.bind_worker(record.operation_id, token, pid)
     except Exception:
-        store.finish_worker(record.operation_id, worker_token=token, state="failed", phase="dispatch_failed",
+        api_recovery = kind == "omni_video_resume"
+        store.finish_worker(record.operation_id, worker_token=token, state="partial" if api_recovery else "failed",
+                            phase="omni_observer_unavailable" if api_recovery else "dispatch_failed",
                             verification_status="worker_not_dispatched", error_code="WORKER_START_FAILED")
-        if not record.upstream_chat_id and operation_account_matches(record):
+        if not (record.upstream_chat_id or record.upstream_operation_id) and operation_account_matches(record):
             store.release_cleanup(record.operation_id)
         store.retire_worker(record.operation_id, token)
         return DomainResult.failure(DomainErrorCode.INTERNAL_ERROR, "The background worker could not be started.",
@@ -116,16 +136,37 @@ async def submit_media(request: dict[str, Any], *, operation: str,
     if media_type not in {"image", "video", "music"}:
         return DomainResult.failure(DomainErrorCode.INVALID_ARGUMENT, "Unsupported media type.")
     filename = request.get("filename") or handle
-    if not isinstance(filename, str) or Path(filename).name != filename or filename in {".", ".."}:
+    if not isinstance(filename, str) or not _valid_media_filename(filename):
         return DomainResult.failure(DomainErrorCode.INVALID_ARGUMENT, "filename must be a single file name.")
+    model, thinking_level = request.get("model", "flash"), request.get("thinking_level", "standard")
+    invalid = video_options_error(
+        media_type=media_type, model=model, thinking_level=thinking_level,
+        duration_seconds=request.get("duration_seconds"), delete_after_seconds=request.get("delete_after_seconds"),
+    )
+    if invalid:
+        return DomainResult.failure(DomainErrorCode.INVALID_ARGUMENT, invalid)
+    settings = resolve_media_request(model, media_type, thinking_level)
+    omni_job = settings["backend_label"] == OMNI_VIDEO_API_BACKEND
+    if omni_job and not omni_video_api_key():
+        return DomainResult.failure(
+            DomainErrorCode.AUTH_REQUIRED, "The Gemini API video route requires GEMINI_API_KEY.",
+            suggested_action="Configure GEMINI_API_KEY for a project with Gemini API billing enabled.",
+            verification_status="credential_missing_before_dispatch",
+        )
+    if not omni_job and not current_account_key():
+        from ..client_manager import ClientAuthenticationRequired
+        from ..client_wrapper import ensure_web_cookie
+
+        try:
+            await asyncio.to_thread(ensure_web_cookie)
+        except ClientAuthenticationRequired as error:
+            return result_from_exception(error, logger=logger, operation=operation)
     store = OperationStore()
     try:
-        settings = resolve_media_request(request.get("model", "flash"), media_type, request.get("thinking_level", "standard"))
         directory = str(Path(request.get("output_dir") or store.path.resolve().parent / "artifacts" / handle).expanduser().resolve())
         record, created = store.create_or_get(
             handle, operation, retain_chat=request.get("retain_chat", False),
-            delete_after_seconds=request.get("delete_after_seconds"), requested_model=request.get("model", "flash"),
-            thinking_level=request.get("thinking_level", "standard"),
+            delete_after_seconds=request.get("delete_after_seconds"), requested_model=model, thinking_level=thinking_level,
             media_type=media_type, output_dir=directory, filename=filename,
             request_model=settings["request_model"], effective_backend=settings["backend_label"],
         )
@@ -133,7 +174,7 @@ async def submit_media(request: dict[str, Any], *, operation: str,
             if not operation_account_matches(record):
                 return DomainResult.failure(DomainErrorCode.CAPABILITY_UNAVAILABLE, "Operation account could not be verified.",
                                             verification_status="account_mismatch_or_unbound")
-            if record.operation != operation or record.media_type != media_type:
+            if record.operation != operation or record.media_type != media_type or uses_omni_video_api(record) != omni_job:
                 return DomainResult.failure(DomainErrorCode.INVALID_ARGUMENT, "This handle belongs to a different operation.")
             if store.clock() - record.created_at >= RETENTION_SECONDS and not record.cleanup_protected:
                 return DomainResult.failure(DomainErrorCode.INVALID_ARGUMENT, "The operation handle has expired.")
@@ -141,7 +182,7 @@ async def submit_media(request: dict[str, Any], *, operation: str,
         payload = {**request, "output_dir": directory, "filename": filename}
         if payload.get("image_path"):
             payload["image_path"] = str(Path(payload["image_path"]).expanduser().resolve())
-        return await _dispatch(store, store.get(handle) or record, "media", payload)
+        return await _dispatch(store, record, "omni_video" if omni_job else "media", payload)
     except Exception:
         return DomainResult.failure(DomainErrorCode.INTERNAL_ERROR, "Unable to persist the media operation; no retry was sent.",
                                     verification_status="operation_not_persisted")
@@ -239,7 +280,13 @@ async def resume_media_worker(store: OperationStore, record: OperationRecord) ->
     if not operation_account_matches(record):
         return DomainResult.failure(DomainErrorCode.CAPABILITY_UNAVAILABLE, "Operation account could not be verified.",
                                     verification_status="account_mismatch_or_unbound")
-    if worker_active(record, now=store.clock()) or not record.upstream_chat_id:
+    if record.cleanup_state in {"completed", "already_completed"} or worker_active(record, now=store.clock()):
+        return _accepted(record)
+    if uses_omni_video_api(record):
+        if not record.upstream_operation_id or record.cleanup_state == "retained":
+            return _accepted(record)
+        return await _dispatch(store, record, "omni_video_resume")
+    if not record.upstream_chat_id:
         return _accepted(record)
     if record.state != "completed" and (record.upstream_response_id is None or record.upstream_candidate_id is None):
         from dataclasses import replace

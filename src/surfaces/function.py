@@ -54,7 +54,7 @@ async def _submit(
     *, prompt: str, media_type: str, model: str, thinking_level: str, image_path: str | None,
     output_dir: str | None, filename: str | None, timeout_seconds: int | None,
     retain_chat: bool, delete_after_seconds: int | None, operation_id: str | None,
-    operation: str, edit: bool,
+    operation: str, edit: bool, duration_seconds: int | None = None,
 ) -> list[TextContent]:
     if not prompt.strip():
         result: DomainResult[Any] = DomainResult.failure(DomainErrorCode.INVALID_ARGUMENT, "prompt must not be blank.")
@@ -73,10 +73,10 @@ async def _submit(
         "prompt": prompt, "media_type": media_type, "model": model, "thinking_level": thinking_level,
         "image_path": safe_path, "output_dir": output_dir, "filename": filename,
         "timeout_seconds": timeout_seconds, "retain_chat": retain_chat,
-        "delete_after_seconds": delete_after_seconds, "edit": edit,
+        "delete_after_seconds": delete_after_seconds, "edit": edit, "duration_seconds": duration_seconds,
     }, operation=operation, operation_id=operation_id)
     handle = result.data.operation_id if result.data else None
-    text = f"Task accepted. Operation handle: {handle}" if result.ok and handle else domain_failure_text(result)
+    text = f"Media operation handle: {handle}" if result.ok and handle else domain_failure_text(result)
     return domain_text(result, text, use_result_data=True)
 
 
@@ -111,12 +111,19 @@ async def gemini_generate_video(
     prompt: str, model: str = "flash", thinking_level: str = "standard", image_path: str | None = None,
     output_dir: str | None = None, filename: str | None = None, timeout_seconds: int | None = None,
     retain_chat: bool = False, delete_after_seconds: int | None = None, operation_id: str | None = None,
+    duration_seconds: int | None = None,
 ) -> list[TextContent]:
-    """Submit video generation in the background using Flash by default; a preview alone is not a video."""
+    """Generate a video in the background using the Gemini App's Create video mode by default.
+
+    Use model="gemini-omni-1.2-flash" to explicitly call the paid Gemini API via
+    GEMINI_API_KEY. Only this route accepts duration_seconds from 3 to 15.
+    Poll the original operation_id for a verified MP4.
+    """
     return await _submit(prompt=prompt, media_type="video", model=model, thinking_level=thinking_level,
                          image_path=image_path, output_dir=output_dir, filename=filename, timeout_seconds=timeout_seconds,
                          retain_chat=retain_chat, delete_after_seconds=delete_after_seconds,
-                         operation_id=operation_id, operation="gemini_generate_video", edit=False)
+                         operation_id=operation_id, operation="gemini_generate_video", edit=False,
+                         duration_seconds=duration_seconds)
 
 
 @mcp.tool(annotations=MUTATES_REMOTE)

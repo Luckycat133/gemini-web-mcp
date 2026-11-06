@@ -76,14 +76,13 @@ def test_get_cookie_status_available_with_cookie(monkeypatch):
     assert "env" in text
 
 
-def test_get_cookie_status_available_without_cookie_needs_refresh(monkeypatch):
-    """可用 + has_cookie=False + needs_refresh=True → 未设置 + 需要刷新。"""
+def test_get_cookie_status_reports_autoload_denial_without_claiming_refresh(monkeypatch):
     monkeypatch.setattr(server, "get_cookie_status", lambda: {
         "available": True,
-        "status": "EXPIRED",
+        "status": "unknown",
         "has_cookie": False,
-        "needs_refresh": True,
-        "source": "browser_chrome",
+        "browser_auto_load": True,
+        "browser_auth_reason": "BROWSER_COOKIE_ACCESS_DENIED",
     })
 
     async def run():
@@ -91,9 +90,9 @@ def test_get_cookie_status_available_without_cookie_needs_refresh(monkeypatch):
 
     result = asyncio.run(run())
     text = result[0].text
-    assert "EXPIRED" in text
     assert "未设置" in text
-    assert "需要刷新" in text
+    assert "暂无可刷新凭据" in text
+    assert "浏览器自动读取: 开启" in text and "BROWSER_COOKIE_ACCESS_DENIED" in text
 
 
 # ---------------------------------------------------------------------------

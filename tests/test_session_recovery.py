@@ -1,4 +1,4 @@
-"""A timed-out session turn is recovered read-only, never regenerated."""
+"""An unverified session turn is recovered read-only, never regenerated."""
 
 import asyncio
 from types import SimpleNamespace
@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 from gemini_webapi.exceptions import TimeoutError as SDKTimeoutError
+from gemini_webapi.types import Candidate, ModelOutput, WebImage
 
 from src.domain import CleanupObservation, CleanupState
 from src.services.chat import ChatService, ChatServiceDependencies, SessionMessageRequest
@@ -15,7 +16,8 @@ from src.session_manager import SessionData, SessionOperationResult
 
 @pytest.mark.parametrize("stream", [False, True])
 @pytest.mark.parametrize("ready", [False, True])
-def test_timeout_readback_requires_exact_completed_turn_without_regeneration(monkeypatch, stream, ready):
+@pytest.mark.parametrize("outcome", ["timeout", "blank"])
+def test_unverified_reply_requires_exact_completed_turn_without_regeneration(monkeypatch, stream, ready, outcome):
     from src.services import web_context_transport
 
     client = SimpleNamespace(timeout=30, watchdog_timeout=30)
@@ -25,8 +27,13 @@ def test_timeout_readback_requires_exact_completed_turn_without_regeneration(mon
     scheduled = []
     async def send(_sid, **_kwargs):
         sends.append(1)
-        observe_upstream_identity(SimpleNamespace(cid="c_one", metadata=["c_one", "r_one", "rc_one"]))
-        raise SDKTimeoutError("synthetic")
+        if outcome == "timeout":
+            observe_upstream_identity(SimpleNamespace(cid="c_one", metadata=["c_one", "r_one", "rc_one"]))
+            raise SDKTimeoutError("synthetic")
+        reply = ModelOutput(metadata=["c_one", "r_one", "rc_one"], candidates=[
+            Candidate(rcid="rc_one", text="  ", thoughts="synthetic internal content"),
+        ])
+        return SessionOperationResult.success(state, [reply] if stream else reply)
     lookup = AsyncMock(return_value={"chat_id": "c_one", "rid": "r_one", "rcid": "rc_one",
                                      "completed": ready, "text": "synthetic answer" if ready else None})
     monkeypatch.setattr(web_context_transport, "fetch_workflow_turn", lookup)
@@ -46,6 +53,8 @@ def test_timeout_readback_requires_exact_completed_turn_without_regeneration(mon
     lookup.assert_awaited_once_with(client, "c_one", "r_one", "rc_one")
     if ready:
         assert result.ok and result.data.response.text == "synthetic answer"
+        if stream:
+            assert result.data.stream_text == "synthetic answer"
         assert result.meta.verification_status == "original_session_reply_verified"
         assert state.pending_turn is None and not state.unverified_chat_ids
         assert session.metadata == ["c_one", "r_one", "rc_one"]
@@ -58,6 +67,55 @@ def test_timeout_readback_requires_exact_completed_turn_without_regeneration(mon
                                "completed": True, "text": "synthetic answer"}
         recovered = asyncio.run(method(SessionMessageRequest(session_id="sess_one", message="", recover_only=True)))
         assert recovered.ok and recovered.data.response.text == "synthetic answer" and len(sends) == 1
+        if stream:
+            assert recovered.data.stream_text == "synthetic answer"
+
+
+@pytest.mark.parametrize("outcome", ["media", "earlier_text", "unrelated_text"])
+def test_session_only_counts_selected_content_from_the_same_reply(monkeypatch, outcome):
+    client = SimpleNamespace(timeout=30, watchdog_timeout=30)
+    state = SessionData(session=SimpleNamespace(geminiclient=client, cid="", metadata=[]),
+                        session_id="sess_one", account_key="account")
+    metadata = ["c_one", "r_one", "rc_one"]
+    image = WebImage(url="https://example.invalid/generated.png")
+    terminal = ModelOutput(metadata=metadata, candidates=[
+        Candidate(rcid="rc_unselected", text="unselected text"),
+        Candidate(rcid="rc_one", text="", web_images=[image] if outcome == "media" else []),
+    ], chosen=1)
+    stream = outcome != "media"
+
+    async def send(_sid, **_kwargs):
+        observe_upstream_identity(terminal)
+        if not stream:
+            return SessionOperationResult.success(state, terminal)
+        candidate_id = "rc_one" if outcome == "earlier_text" else "rc_unrelated"
+        earlier = ModelOutput(metadata=metadata[:2], candidates=[Candidate(rcid=candidate_id, text="synthetic answer")])
+        return SessionOperationResult.success(state, [earlier, terminal])
+
+    read = AsyncMock(return_value=None)
+    monkeypatch.setattr("src.services.web_context_transport.fetch_workflow_turn", read)
+    service = ChatService(ChatServiceDependencies(
+        client_provider=lambda: client, client_initializer=AsyncMock(), cleanup_due_remote_chats=AsyncMock(),
+        create_session=lambda *_a, **_k: None, lookup_session=lambda *_a, **_k: SessionOperationResult.success(state),
+        send_session_message=send, send_session_message_stream=send,
+        schedule_response_cleanup=lambda *_a, **_k: None,
+        schedule_chat_cleanup=lambda cid, **_k: CleanupObservation(state=CleanupState.PENDING, upstream_chat_id=cid),
+        normalize_model=lambda value: value, resolve_model=lambda value: value, account_key_provider=lambda: "account",
+    ))
+    method = service.send_session_stream if stream else service.send_session
+    result = asyncio.run(method(SessionMessageRequest(session_id="sess_one", message="synthetic")))
+    if outcome == "unrelated_text":
+        assert not result.ok and result.meta.verification_status == "session_reply_unverified"
+        assert state.pending_turn == tuple(metadata)
+        read.assert_awaited_once_with(client, *metadata)
+    else:
+        assert result.ok and result.data.response is terminal
+        assert state.pending_turn is None and not state.unverified_chat_ids
+        read.assert_not_awaited()
+        if stream:
+            assert result.data.stream_text == "synthetic answer"
+        else:
+            assert result.data.response.images == [image]
 
 
 def test_unverified_session_reset_keeps_durable_cleanup_pending():
@@ -96,14 +154,17 @@ def test_new_session_turn_does_not_reuse_previous_candidate_id():
     assert state.pending_turn == ("c_one", "r_new", "rc_new")
 
 
-def test_timeout_without_new_identity_does_not_recover_previous_reply(monkeypatch):
+@pytest.mark.parametrize("outcome", ["timeout", "absent"])
+def test_unverified_reply_without_new_identity_does_not_recover_previous_reply(monkeypatch, outcome):
     from src.services import web_context_transport
 
     client = SimpleNamespace(timeout=30, watchdog_timeout=30)
     session = SimpleNamespace(geminiclient=client, cid="c_one", metadata=["c_one", "r_old", "rc_old"])
     state = SessionData(session=session, session_id="sess_one", account_key="account")
     async def send(_sid, **_kwargs):
-        raise SDKTimeoutError("synthetic")
+        if outcome == "timeout":
+            raise SDKTimeoutError("synthetic")
+        return SessionOperationResult.success(state)
     lookup = AsyncMock(side_effect=AssertionError("must not read previous reply"))
     monkeypatch.setattr(web_context_transport, "fetch_workflow_turn", lookup)
     service = ChatService(ChatServiceDependencies(

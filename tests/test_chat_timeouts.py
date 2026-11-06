@@ -265,3 +265,144 @@ def test_real_sdk_session_uses_timeout_budget_and_never_replays(monkeypatch, str
     recovery.assert_awaited_once_with(client, "c_session", "r_session", None)
     assert transport.requests == 1 and scheduled
     assert (client.timeout, client.watchdog_timeout) == (0.01, 0.01)
+
+
+@pytest.mark.parametrize("stream", [False, True])
+def test_session_deadline_keeps_late_send_protected_until_exact_recovery(monkeypatch, tmp_path, stream):
+    from src.remote_chat_cleanup_manager import RemoteChatCleanupManager
+    from src.services.chat import SessionMessageRequest
+    from src.services.cleanup_scope import observe_upstream_identity
+    from src.session_manager import SessionService, session_cleanup_protected
+
+    monkeypatch.setattr(chat_module, "CHAT_GENERATION_TIMEOUT_SECONDS", 0.05)
+    client = SimpleNamespace(timeout=0.01, watchdog_timeout=0.01)
+    owner = "synthetic-account"
+    cleanup = RemoteChatCleanupManager(store_path=tmp_path / "cleanup.sqlite3", account_key_provider=lambda: owner)
+    delete = AsyncMock()
+    monkeypatch.setattr("src.services.history.delete_chat_result", delete)
+    recovery = AsyncMock(return_value={
+        "chat_id": "c_session", "rid": "r_new", "rcid": "rc_new", "completed": True, "text": "verified exact reply",
+    })
+    monkeypatch.setattr("src.services.web_context_transport.fetch_workflow_turn", recovery)
+
+    async def run():
+        release = asyncio.Event()
+        late_identity = asyncio.Event()
+        finished = asyncio.Event()
+        calls = []
+        response = SimpleNamespace(text="late transport reply", metadata=["c_session", "r_new", "rc_new"])
+
+        class Session:
+            geminiclient = client
+            cid = "c_session"
+            metadata = ["c_session", "r_old", "rc_old"]
+
+            async def send_message(self, **_kwargs):
+                calls.append(1)
+                try:
+                    await asyncio.sleep(0.2)
+                except asyncio.CancelledError:
+                    self.metadata = response.metadata
+                    observe_upstream_identity(response)
+                    late_identity.set()
+                    await release.wait()
+                finally:
+                    finished.set()
+                return response
+
+            async def send_message_stream(self, **kwargs):
+                yield await self.send_message(**kwargs)
+
+        sessions = SessionService()
+        state = sessions.store_session("sess_test", Session(), model="flash")
+        state.account_key = owner
+        service = ChatService(ChatServiceDependencies(
+            client_provider=lambda: client, client_initializer=AsyncMock(), cleanup_due_remote_chats=AsyncMock(),
+            create_session=sessions.create_session, lookup_session=sessions.lookup_session,
+            send_session_message=sessions.send_message, send_session_message_stream=sessions.send_message_stream,
+            schedule_response_cleanup=lambda *_a, **_kw: None, schedule_chat_cleanup=cleanup.schedule_cleanup_result,
+            normalize_model=lambda value: value, resolve_model=lambda value: value, account_key_provider=lambda: owner,
+        ))
+        method = service.send_session_stream if stream else service.send_session
+        request = SessionMessageRequest(session_id="sess_test", message="original request")
+        recovery_request = SessionMessageRequest(session_id="sess_test", message="", recover_only=True)
+
+        try:
+            result = await method(request)
+            assert not result.ok and result.meta.verification_status == "session_reply_unverified"
+            await asyncio.wait_for(late_identity.wait(), 1)
+            assert state._send_lock.locked() and not finished.is_set()
+            assert state.pending_turn == ("c_session", "r_new", "rc_new")
+            assert session_cleanup_protected("c_session", account_key=owner)
+            assert cleanup._store.get(owner, "c_session")["state"] == "pending"
+            await cleanup.delete_chat_result("c_session", client=client)
+            delete.assert_not_awaited()
+            assert not (await method(request)).ok
+            assert not (await method(recovery_request)).ok
+            recovery.assert_not_awaited()
+        finally:
+            release.set()
+
+        await asyncio.wait_for(finished.wait(), 1)
+        assert not state._send_lock.locked() and state.pending_turn is not None
+        assert (client.timeout, client.watchdog_timeout) == (0.01, 0.01)
+        result = await method(recovery_request)
+        assert result.ok and result.data.response.text == "verified exact reply"
+        assert result.meta.verification_status == "original_session_reply_verified"
+        assert len(calls) == 1 and state.pending_turn is None
+        recovery.assert_awaited_once_with(client, "c_session", "r_new", "rc_new")
+
+    asyncio.run(run())
+
+
+def test_automatic_session_readback_cannot_publish_a_result_past_the_send_deadline(monkeypatch):
+    from src.services.chat import SessionMessageRequest
+    from src.services.cleanup_scope import observe_upstream_identity
+    from src.session_manager import SessionData, SessionOperationResult
+
+    monkeypatch.setattr(chat_module, "CHAT_GENERATION_TIMEOUT_SECONDS", 0.05)
+    client = SimpleNamespace(timeout=0.01, watchdog_timeout=0.01)
+    state = SessionData(session=SimpleNamespace(geminiclient=client, metadata=[]),
+                        session_id="sess_test", account_key="synthetic-account")
+    response = {"chat_id": "c_session", "rid": "r_new", "rcid": "rc_new",
+                "completed": True, "text": "verified exact reply"}
+
+    async def send(*_args, **_kwargs):
+        observe_upstream_identity(SimpleNamespace(metadata=["c_session", "r_new", "rc_new"]))
+        raise TimeoutError("SDK stopped before deadline")
+
+    service = ChatService(ChatServiceDependencies(
+        client_provider=lambda: client, client_initializer=AsyncMock(), cleanup_due_remote_chats=AsyncMock(),
+        create_session=lambda *_a, **_kw: None, lookup_session=lambda *_a, **_kw: SessionOperationResult.success(state),
+        send_session_message=send, send_session_message_stream=send,
+        schedule_response_cleanup=lambda *_a, **_kw: None,
+        schedule_chat_cleanup=lambda cid, **_kw: CleanupObservation(state=CleanupState.PENDING, upstream_chat_id=cid),
+        normalize_model=lambda value: value, resolve_model=lambda value: value,
+        account_key_provider=lambda: "synthetic-account",
+    ))
+
+    async def run():
+        release = asyncio.Event()
+        finished = asyncio.Event()
+
+        async def delayed_read(*_args):
+            try:
+                await asyncio.sleep(0.2)
+            except asyncio.CancelledError:
+                await release.wait()
+            finally:
+                finished.set()
+            return response
+
+        monkeypatch.setattr("src.services.web_context_transport.fetch_workflow_turn", delayed_read)
+        try:
+            result = await service.send_session(SessionMessageRequest(session_id="sess_test", message="original"))
+            assert not result.ok and result.meta.verification_status == "session_reply_unverified"
+            assert not finished.is_set()
+        finally:
+            release.set()
+        await asyncio.wait_for(finished.wait(), 1)
+        assert state.pending_turn == ("c_session", "r_new", "rc_new")
+        assert state.session.metadata == []
+
+    asyncio.run(run())

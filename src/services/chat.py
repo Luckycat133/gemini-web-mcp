@@ -6,7 +6,7 @@ import asyncio
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass, field, replace
 from enum import Enum
-from typing import Any
+from typing import Any, cast
 
 from ..domain import (
     CleanupObservation,
@@ -24,6 +24,7 @@ from ..domain import (
 from ..session_manager import SessionData, SessionOperationResult
 from ..infrastructure.account_identity import current_account_key
 from ..constants import DEFAULT_SESSION_MAX_AGE_SECONDS
+from .artifacts import extract_response_artifacts
 from .cleanup_scope import observe_cleanup_frames
 from .client_timeouts import client_timeout_scope
 from .deadlines import await_before_deadline
@@ -456,13 +457,13 @@ class ChatService:
                     state.unverified_chat_ids.add(cid)
             observer.observe(value)
 
-        from ..thinking_client import strict_session_recovery_scope
         client = getattr(state.session, "geminiclient", None) or prepared_client or self._dependencies.client_provider()
+        deadline = asyncio.get_running_loop().time() + CHAT_GENERATION_TIMEOUT_SECONDS
         try:
-            with strict_session_recovery_scope(), observe_cleanup_frames(observe_session), model_policy_scope("query"), client_timeout_scope(
-                client, CHAT_GENERATION_TIMEOUT_SECONDS
-            ):
-                sent = await self._dependencies.send_session_message(request.session_id, **request_kwargs)
+            sent = await self._send_session_request(
+                self._dependencies.send_session_message, request.session_id, request_kwargs,
+                client=client, observe=observe_session, deadline=deadline,
+            )
         except BaseException as error:
             observe_session(state.session)
             if observer.failed:
@@ -471,7 +472,7 @@ class ChatService:
                 self._protect_ambiguous_session_turn(state, prior_metadata)
                 if isinstance(error, asyncio.CancelledError):
                     raise
-                return await self._recover_session_pending(request, state)
+                return await self._recover_session_pending(request, state, deadline=deadline)
             raise
         if observer.failed:
             raise RuntimeError("Conversation cleanup could not be persisted.")
@@ -482,7 +483,13 @@ class ChatService:
         state = sent.session
         response = sent.response
         if not self._session_reply_matches_pending(state, response):
-            return await self._recover_session_pending(request, state)
+            return await self._recover_session_pending(request, state, deadline=deadline)
+        if not self._session_reply_has_content(response):
+            observe_session(response if self._response_chat_id(response) else state.session)
+            self._protect_ambiguous_session_turn(state, prior_metadata)
+            if observer.failed:
+                raise RuntimeError("Conversation cleanup could not be persisted.")
+            return await self._recover_session_pending(request, state, deadline=deadline)
         completed_cid = self._response_chat_id(response)
         if completed_cid:
             state.unverified_chat_ids.discard(completed_cid)
@@ -542,13 +549,13 @@ class ChatService:
                     state.unverified_chat_ids.add(cid)
             observer.observe(value)
 
-        from ..thinking_client import strict_session_recovery_scope
         client = getattr(state.session, "geminiclient", None) or prepared_client or self._dependencies.client_provider()
+        deadline = asyncio.get_running_loop().time() + CHAT_GENERATION_TIMEOUT_SECONDS
         try:
-            with strict_session_recovery_scope(), observe_cleanup_frames(observe_session), model_policy_scope("query"), client_timeout_scope(
-                client, CHAT_GENERATION_TIMEOUT_SECONDS
-            ):
-                streamed = await self._dependencies.send_session_message_stream(request.session_id, **request_kwargs)
+            streamed = await self._send_session_request(
+                self._dependencies.send_session_message_stream, request.session_id, request_kwargs,
+                client=client, observe=observe_session, deadline=deadline,
+            )
         except BaseException as error:
             observe_session(state.session)
             if observer.failed:
@@ -557,7 +564,7 @@ class ChatService:
                 self._protect_ambiguous_session_turn(state, prior_metadata)
                 if isinstance(error, asyncio.CancelledError):
                     raise
-                return await self._recover_session_pending(request, state)
+                return await self._recover_session_pending(request, state, deadline=deadline)
             raise
         if observer.failed:
             raise RuntimeError("Conversation cleanup could not be persisted.")
@@ -567,12 +574,19 @@ class ChatService:
             return self._copy_failure(streamed)
         state = streamed.session
         responses = tuple(streamed.response or ())
-        collector = StreamTextAccumulator()
-        for response in responses:
-            collector.consume(response)
         final_response = responses[-1] if responses else None
         if not self._session_reply_matches_pending(state, final_response):
-            return await self._recover_session_pending(request, state)
+            return await self._recover_session_pending(request, state, deadline=deadline)
+        matching_responses = tuple(response for response in responses if self._session_reply_matches_pending(state, response))
+        collector = StreamTextAccumulator()
+        for response in matching_responses:
+            collector.consume(response)
+        if not collector.text.strip() and not any(self._session_reply_has_content(response) for response in matching_responses):
+            observe_session(final_response if self._response_chat_id(final_response) else state.session)
+            self._protect_ambiguous_session_turn(state, prior_metadata)
+            if observer.failed:
+                raise RuntimeError("Conversation cleanup could not be persisted.")
+            return await self._recover_session_pending(request, state, deadline=deadline)
         completed_cid = self._response_chat_id(final_response)
         if completed_cid:
             state.unverified_chat_ids.discard(completed_cid)
@@ -592,6 +606,25 @@ class ChatService:
             request_id=streamed.meta.request_id,
             verification_status=streamed.meta.verification_status,
         )
+
+    @staticmethod
+    async def _send_session_request(
+        send: Callable[..., Awaitable[SessionOperationResult]], session_id: str, arguments: dict[str, Any],
+        *, client: Any, observe: Callable[[Any], None], deadline: float,
+    ) -> SessionOperationResult:
+        from ..thinking_client import strict_session_recovery_scope
+
+        async def send_once() -> SessionOperationResult:
+            # Keep identity observation and the SDK lease with the send if
+            # its transport needs time to acknowledge cancellation.
+            with strict_session_recovery_scope(), observe_cleanup_frames(observe), model_policy_scope("query"), client_timeout_scope(
+                client, CHAT_GENERATION_TIMEOUT_SECONDS
+            ):
+                return await send(session_id, **arguments)
+
+        return cast(SessionOperationResult, await await_before_deadline(
+            send_once(), timeout=deadline - asyncio.get_running_loop().time(),
+        ))
 
     @staticmethod
     def _remember_session_turn(state: SessionData, value: Any, cid: str, previous: tuple[Any, ...]) -> bool:
@@ -647,6 +680,11 @@ class ChatService:
                     and (pending[2] is None or rcid == pending[2]))
 
     @staticmethod
+    def _session_reply_has_content(response: Any) -> bool:
+        text = getattr(response, "text", None)
+        return (isinstance(text, str) and bool(text.strip())) or bool(extract_response_artifacts(response))
+
+    @staticmethod
     def _session_pending_failure() -> DomainResult[ChatOperationData]:
         return DomainResult.failure(
             DomainErrorCode.TIMED_OUT,
@@ -655,20 +693,26 @@ class ChatService:
         )
 
     async def _recover_session_pending(
-        self, request: SessionMessageRequest, state: SessionData,
+        self, request: SessionMessageRequest, state: SessionData, *, deadline: float | None = None,
     ) -> DomainResult[ChatOperationData]:
         from gemini_webapi.types import Candidate, ModelOutput
         from .web_context_transport import fetch_workflow_turn
 
         pending = state.pending_turn
-        if not pending or not pending[1]:
-            return self._session_pending_failure()
         if not state.account_key or self._dependencies.account_key_provider() != state.account_key:
             return self._account_failure()
+        # The session service holds this lock until the original SDK call
+        # exits, even if the caller already timed out.
+        if not pending or not pending[1] or state._send_lock.locked():
+            return self._session_pending_failure()
+        remaining = deadline - asyncio.get_running_loop().time() if deadline is not None else None
+        if remaining is not None and remaining <= 0:
+            return self._session_pending_failure()
         cid, rid, rcid = pending
         client = getattr(state.session, "geminiclient", None) or self._dependencies.client_provider()
         try:
-            result = await fetch_workflow_turn(client, cid, rid, rcid)
+            read = fetch_workflow_turn(client, cid, rid, rcid)
+            result = await read if remaining is None else await await_before_deadline(read, timeout=remaining)
         except Exception:
             return self._session_pending_failure()
         if self._dependencies.account_key_provider() != state.account_key:
@@ -688,7 +732,7 @@ class ChatService:
         policy = self._completed_session_policy(request, state, cid)
         remote_chat_id, cleanup = self._session_cleanup_after_send(request, state, output, policy)
         return self._session_success(
-            request, state, response=output, remote_chat_id=remote_chat_id, cleanup=cleanup,
+            request, state, response=output, stream_text=output.text, remote_chat_id=remote_chat_id, cleanup=cleanup,
             request_id=SessionOperationResult.success(state, output).meta.request_id,
             verification_status="original_session_reply_verified",
         )

@@ -6,10 +6,11 @@ from collections.abc import Awaitable, Callable, Sequence
 from contextlib import contextmanager
 from contextvars import ContextVar
 import inspect
+import sqlite3
 from datetime import datetime, timezone
 from typing import Any, Iterator
 
-from ..domain import DomainErrorCode, DomainResult, OperationState
+from ..domain import DomainErrorCode, DomainResult, DomainWarning, OperationState
 from ..infrastructure.account_identity import current_account_key
 from ..infrastructure.rpc_contracts import RawRPCData, get_contract
 from ..infrastructure.rpc_parsers import parse_contract_body, parse_rpc_envelope
@@ -470,6 +471,7 @@ async def delete_chat_result(
     *,
     expected_account: str | None = None,
     account_key_provider: Callable[[], str | None] = current_account_key,
+    reconcile_owned_cleanup: bool = False,
 ) -> DomainResult[dict[str, Any]]:
     """Request deletion and distinguish accepted work from positive read-back evidence."""
     normalized_chat_id = str(chat_id or "").strip()
@@ -540,10 +542,20 @@ async def delete_chat_result(
         )
 
     if absent:
+        warnings: tuple[DomainWarning, ...] = ()
+        if reconcile_owned_cleanup:
+            from ..client_wrapper import _cleanup_manager
+
+            try:
+                _cleanup_manager.record_explicit_verified_absence(normalized_chat_id, expected_account=owner)
+            except (OSError, sqlite3.Error):
+                warnings = (DomainWarning(code="cleanup_ledger_unverified",
+                                          message="The chat is absent, but its local cleanup ledger could not be updated."),)
         return DomainResult.success(
             _deletion_payload(normalized_chat_id, True, "verified_absent", "history.page"),
             verification_status="verified_absent",
             details=observation_details,
+            warnings=warnings,
         )
 
     return DomainResult.failure(

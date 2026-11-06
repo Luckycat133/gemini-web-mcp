@@ -8,6 +8,14 @@
     <answer>No. A verified video artifact is required; the thumbnail is a separate preview. The function surface defaults video to Flash, while an explicit model choice is preserved.</answer>
   </qa_pair>
   <qa_pair>
+    <question>How can a caller explicitly request the latest Omni video model and a 15-second video?</question>
+    <answer>Configure GEMINI_API_KEY for a billed Gemini API project, then call gemini_generate_video with model="gemini-omni-1.2-flash" and duration_seconds=15. Poll the returned operation_id and use the verified MP4 from gemini_get_operation_result. The default video call uses the signed-in Gemini App.</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>May a timed-out Gemini Omni API video start be repeated automatically, or deleted before saving its MP4?</question>
+    <answer>No. The original interaction ID, if observed, is used for recovery without another paid start. By default a completed interaction is deleted only after its local MP4 is verified. retain_chat=true keeps it.</answer>
+  </qa_pair>
+  <qa_pair>
     <question>When Flash and Flash-Lite both appear in the runtime registry, may Flash be selected by a fuzzy match to Flash-Lite?</question>
     <answer>No. Select the matching Flash model family from the runtime registry.</answer>
   </qa_pair>
@@ -22,6 +30,10 @@
   <qa_pair>
     <question>Can an SDK account status marked cached_unverified prove the current authenticated state?</question>
     <answer>No. It is cached SDK state, not a verified live authentication result.</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>How can an agent distinguish browser Cookie permission failure from Google rejecting an existing Gemini session?</question>
+    <answer>Inspect auth_reason and browser_auth_reason in the AUTH_REQUIRED result. BROWSER_COOKIE_ACCESS_DENIED means the MCP host cannot read browser storage. GEMINI_SESSION_REJECTED means Google rejected the configured session. Automatic discovery verifies a candidate before binding it.</answer>
   </qa_pair>
   <qa_pair>
     <question>Should a completed one-shot tool call keep its Gemini conversation by default, and what explicitly opts into retention?</question>

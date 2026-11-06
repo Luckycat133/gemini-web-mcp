@@ -70,7 +70,7 @@ def _present(result: DomainResult[OperationReadData]) -> list[TextContent]:
         text += "\nThis read did not return a verified research report; upstream progress is unconfirmed."
     cleanup = getattr(data, "cleanup", None)
     if cleanup is not None and getattr(cleanup.state, "value", cleanup.state) in {"failed", "pending", "invalid_id"}:
-        text += "\nAutomatic chat cleanup is not verified; inspect the cleanup state before claiming deletion."
+        text += "\nAutomatic cleanup is pending verification."
     return append_artifact_block(domain_text(result, text, use_result_data=True), data.artifacts)
 
 
@@ -81,7 +81,7 @@ def register_operation_tools(mcp: MCPServer) -> None:
         """Check one saved operation by its explicit opaque handle without starting new work.
 
         Works across server restarts using the local operation database. Reads
-        only the remote chat recorded for this handle; it never lists account
+        only the remote resource recorded for this handle; it never lists account
         history or repeats a generation or research start. A missing result is unconfirmed
         progress, not evidence that the provider is still running.
         """

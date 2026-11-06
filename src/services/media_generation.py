@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 import inspect
 from typing import Any, Callable
 
+from ..constants import OMNI_VIDEO_MODEL, normalize_model_alias
 from ..domain import CleanupObservation, CleanupState, DomainResult, DomainWarning
 from .artifacts import response_chat_id
 from .client_timeouts import client_timeout_scope
@@ -31,6 +32,25 @@ def media_timeout(media_type: str, timeout_seconds: int | None = None) -> int:
     if timeout_seconds and timeout_seconds > 0:
         return timeout_seconds
     return 180 if media_type == "image" else 600
+
+
+def video_options_error(
+    *, media_type: str, model: str, thinking_level: str, duration_seconds: int | None,
+    delete_after_seconds: int | None, background: bool = True,
+) -> str | None:
+    if normalize_model_alias(model) != OMNI_VIDEO_MODEL:
+        if duration_seconds is not None:
+            return f"duration_seconds requires the video model {OMNI_VIDEO_MODEL}."
+        return None
+    if media_type != "video" or not background:
+        return f"{OMNI_VIDEO_MODEL} requires background video generation."
+    if duration_seconds is not None and (type(duration_seconds) is not int or not 3 <= duration_seconds <= 15):
+        return "duration_seconds must be a whole number from 3 through 15."
+    if thinking_level != "standard":
+        return "The Gemini API video model does not accept a chat thinking level. Omit thinking_level."
+    if delete_after_seconds not in {None, 0}:
+        return "Delayed cleanup is available for Web chats only. Use retain_chat to keep the API interaction."
+    return None
 
 
 media_timeout_scope = client_timeout_scope

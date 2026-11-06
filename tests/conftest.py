@@ -13,6 +13,9 @@ import pytest
 @pytest.fixture(autouse=True)
 def isolated_operation_database(monkeypatch, tmp_path):
     """Offline tests must never write to the user's real operation ledger."""
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    monkeypatch.setenv("GEMINI_BROWSER_AUTO_LOAD", "false")
+    monkeypatch.setenv("GEMINI_AUTO_REFRESH", "false")
     monkeypatch.setenv("GEMINI_OPERATION_DB_PATH", str(tmp_path / "operations.sqlite3"))
     monkeypatch.setenv("GEMINI_CLEANUP_DB_PATH", str(tmp_path / "cleanup.sqlite3"))
     monkeypatch.setattr("src.remote_chat_cleanup_manager.default_account_key", lambda: "test-account")

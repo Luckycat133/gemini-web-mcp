@@ -12,7 +12,8 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 
-from .account_identity import current_account_key
+from .account_identity import current_account_key, omni_video_api_key, omni_video_owner
+from ..constants import OMNI_VIDEO_API_BACKEND
 from ..domain.artifacts import Artifact
 
 RETENTION_SECONDS = 7 * 24 * 60 * 60
@@ -202,7 +203,8 @@ class OperationStore:
                       request_model: str | None = None, effective_backend: str | None = None) -> tuple[OperationRecord, bool]:
         """Atomically claim a caller handle; never replace an existing claim."""
         now = self.clock()
-        account = current_account_key()
+        account = (omni_video_owner(omni_video_api_key()) if effective_backend == OMNI_VIDEO_API_BACKEND
+                   else current_account_key())
         with self._connect() as db:
             db.execute("DELETE FROM operations WHERE created_at <= ? AND cleanup_protected=0 AND operation_id <> ?", (
                 now - RETENTION_SECONDS, operation_id,
@@ -472,9 +474,13 @@ class OperationStore:
             cursor = db.execute(
                 """UPDATE operations SET worker_token=?, worker_pid=NULL, heartbeat_at=?, updated_at=?
                    WHERE operation_id=? AND (state NOT IN ('completed','failed','unavailable','cancelled')
-                     OR (state='completed' AND media_type IS NOT NULL AND retain_chat=0
+                     OR (state='completed' AND media_type IS NOT NULL
+                         AND (retain_chat=0 OR (effective_backend=? AND cleanup_protected=1))
                          AND cleanup_state NOT IN ('completed','already_completed')
                          AND EXISTS (SELECT 1 FROM operation_artifacts WHERE operation_id=?))
+                     OR (state='failed' AND effective_backend=? AND phase='omni_rejected'
+                         AND (retain_chat=0 OR cleanup_protected=1) AND upstream_operation_id IS NOT NULL
+                         AND cleanup_state NOT IN ('completed','already_completed'))
                      OR (state='completed' AND operation IN ('gemini_research','gemini_deep_research')
                          AND retain_chat=0 AND cleanup_state NOT IN ('completed','already_completed')
                          AND (cleanup_protected=1 OR verification_status='research_artifact_verified'))
@@ -482,7 +488,8 @@ class OperationStore:
                          AND (state != 'failed' OR phase IN ('task_failed','task_failure_saved'))
                          AND (cleanup_protected=1 OR (retain_chat=0 AND cleanup_state NOT IN ('completed','already_completed')))))
                      AND (worker_token IS NULL OR heartbeat_at IS NULL OR heartbeat_at < ?)""",
-                (worker_token, now, now, operation_id, operation_id, now - stale_after_seconds),
+                (worker_token, now, now, operation_id, OMNI_VIDEO_API_BACKEND, operation_id, OMNI_VIDEO_API_BACKEND,
+                 now - stale_after_seconds),
             )
             return cursor.rowcount == 1
 
@@ -514,6 +521,42 @@ class OperationStore:
                    WHERE operation_id=? AND worker_token=?""", (operation_id, worker_token),
             )
 
+    def begin_omni_video(self, operation_id: str, *, worker_token: str) -> bool:
+        """Durably claim the one paid submission before sending it."""
+        with self._connect() as db:
+            return db.execute(
+                """UPDATE operations SET state='running',phase='omni_dispatching',updated_at=?
+                   WHERE operation_id=? AND worker_token=? AND account_key=? AND effective_backend=?
+                     AND phase='created' AND upstream_operation_id IS NULL""",
+                (self.clock(), operation_id, worker_token, omni_video_owner(omni_video_api_key()),
+                 OMNI_VIDEO_API_BACKEND),
+            ).rowcount == 1
+
+    def checkpoint_omni_interaction(self, operation_id: str, interaction_id: str, *, worker_token: str) -> bool:
+        """Save the first accepted interaction, so recovery can only read it."""
+        with self._connect() as db:
+            return db.execute(
+                """UPDATE operations SET upstream_operation_id=?,state='queued',phase='omni_observing',
+                   verification_status='upstream_identity_observed',updated_at=?
+                   WHERE operation_id=? AND worker_token=? AND account_key=? AND effective_backend=?
+                     AND phase='omni_dispatching' AND upstream_operation_id IS NULL""",
+                (interaction_id, self.clock(), operation_id, worker_token,
+                 omni_video_owner(omni_video_api_key()), OMNI_VIDEO_API_BACKEND),
+            ).rowcount == 1
+
+    def finish_omni_cleanup(self, operation_id: str, state: str, *, worker_token: str) -> bool:
+        """Record an explicit retention decision or verified interaction absence."""
+        if state not in {"pending", "completed", "retained"}:
+            raise ValueError("unsupported Omni cleanup state")
+        with self._connect() as db:
+            return db.execute(
+                """UPDATE operations SET cleanup_state=?,cleanup_protected=?,updated_at=?
+                   WHERE operation_id=? AND worker_token=? AND account_key=? AND effective_backend=?
+                     AND (state='completed' OR (state='failed' AND phase='omni_rejected'))""",
+                (state, int(state == "pending"), self.clock(), operation_id, worker_token,
+                 omni_video_owner(omni_video_api_key()), OMNI_VIDEO_API_BACKEND),
+            ).rowcount == 1
+
     def checkpoint_media(self, operation_id: str, *, worker_token: str, chat_id: str,
                          response_id: str | None = None, candidate_id: str | None = None) -> bool:
         """Protect the first observed identity; never silently switch generation turns."""
@@ -538,7 +581,7 @@ class OperationStore:
             return True
 
     def save_media_artifacts(self, operation_id: str, artifacts: tuple, *, worker_token: str,
-                             artifact_state: str) -> bool:
+                             artifact_state: str, verification_status: str = "local_artifacts_verified") -> bool:
         """Atomically checkpoint completed local files, excluding URLs and response text."""
         record = self.get(operation_id)
         if record is None or not record.output_dir:
@@ -564,9 +607,9 @@ class OperationStore:
             db.execute("DELETE FROM operation_artifacts WHERE operation_id=?", (operation_id,))
             db.executemany("INSERT INTO operation_artifacts VALUES (?,?,?,?,?,?,?)", rows)
             db.execute(
-                """UPDATE operations SET state='completed',phase='artifacts_saved',artifact_state=?,
-                   verification_status='local_artifacts_verified',updated_at=? WHERE operation_id=?""",
-                (artifact_state, self.clock(), operation_id),
+                """UPDATE operations SET state='completed',phase='artifacts_saved',artifact_state=?,error_code=NULL,
+                   verification_status=?,updated_at=? WHERE operation_id=?""",
+                (artifact_state, verification_status, self.clock(), operation_id),
             )
             return True
 
@@ -777,15 +820,25 @@ class OperationStore:
             ))
 
     def recoverable_media(self, *, limit: int = 20) -> tuple[OperationRecord, ...]:
+        api_owner = omni_video_owner(omni_video_api_key())
+        web_owner = current_account_key()
         with self._connect() as db:
             return tuple(_record_from_row(row) for row in db.execute(
                 """SELECT * FROM operations WHERE media_type IS NOT NULL
+                   AND ((effective_backend=? AND account_key=?) OR (effective_backend IS NOT ? AND account_key=?))
                    AND (worker_token IS NULL OR heartbeat_at IS NULL OR heartbeat_at < ?)
                    AND updated_at <= ?
                    AND ((state NOT IN ('completed','failed','unavailable','cancelled') AND upstream_chat_id IS NOT NULL
                          AND upstream_response_id IS NOT NULL AND upstream_candidate_id IS NOT NULL)
-                     OR (state='completed' AND retain_chat=0 AND cleanup_state NOT IN ('completed','already_completed')))
-                   ORDER BY updated_at LIMIT ?""", (self.clock() - 60, self.clock() - 60, limit),
+                     OR (effective_backend=? AND upstream_operation_id IS NOT NULL
+                         AND (state NOT IN ('completed','failed','unavailable','cancelled')
+                              OR (state='failed' AND phase='omni_rejected' AND (retain_chat=0 OR cleanup_protected=1)
+                                  AND cleanup_state NOT IN ('completed','already_completed'))))
+                     OR (state='completed' AND (retain_chat=0 OR (effective_backend=? AND cleanup_protected=1))
+                         AND cleanup_state NOT IN ('completed','already_completed')))
+                   ORDER BY updated_at LIMIT ?""",
+                (OMNI_VIDEO_API_BACKEND, api_owner, OMNI_VIDEO_API_BACKEND, web_owner,
+                 self.clock() - 60, self.clock() - 60, OMNI_VIDEO_API_BACKEND, OMNI_VIDEO_API_BACKEND, limit),
             ))
 
     def recoverable_web_workflows(self, *, limit: int = 20) -> tuple[OperationRecord, ...]:

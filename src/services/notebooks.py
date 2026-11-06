@@ -116,7 +116,7 @@ async def fetch_notebook_chats(
         envelope = parse_rpc_envelope(response_text, contract.rpc_id)
         if envelope.reject_code is not None:
             raise NotebookChatReadError("rejected")
-        if not envelope.parsed or not envelope.bodies:
+        if not envelope.parsed or len(envelope.bodies) != 1:
             raise NotebookChatReadError("missing_envelope")
         status_code = getattr(response, "status_code", None)
         if status_code != 200:

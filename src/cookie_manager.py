@@ -21,6 +21,7 @@ from .sdk_auth_logging import suppress_sdk_auth_logs
 
 logger = logging.getLogger(__name__)
 _BROWSER_COOKIE_ACCESS_LOCK = threading.Lock()
+_SUPPORTED_BROWSERS = ("chrome", "chrome-beta", "edge", "brave", "firefox", "opera")
 
 
 class _BrowserCookieAccessTimeout(BaseException):
@@ -99,6 +100,15 @@ class CookieData:
     expires_at: Optional[float] = None
     status: CookieStatus = CookieStatus.UNKNOWN
     source: str = "manual"  # manual, browser, refresh
+
+
+@dataclass(frozen=True)
+class BrowserCookieDiscovery:
+    """Credentials for a verified browser session or a safe reason discovery failed."""
+
+    cookies: dict[str, str] = field(default_factory=dict, repr=False)
+    source: str | None = None
+    reason: str | None = None
 
 
 class CookieManager:
@@ -198,93 +208,100 @@ class CookieManager:
         profile: str = "",
         timeout_seconds: Optional[float] = None,
     ) -> Dict[str, str]:
-        """从浏览器获取 Gemini 所需的完整 Google 认证 Cookie。
-
-        若指定浏览器因 Keychain 锁定、权限不足或未安装而失败，
-        会自动回退到其他可用浏览器（Chrome→Edge→Brave→Firefox→Opera）。
-        """
-        cookie_names = CookieManager._google_cookie_names()
-
+        """Compatibility adapter. A named profile is a local extraction only."""
+        if not profile:
+            return CookieManager.discover_browser_cookies(browser, timeout_seconds=timeout_seconds).cookies
         try:
-            import browser_cookie3
+            candidates = CookieManager._read_browser_candidates(browser, timeout_seconds)
+        except (Exception, _BrowserCookieAccessTimeout):
+            return {}
+        return CookieManager._select_named_cookie_candidate(candidates, profile)
+
+    @staticmethod
+    def discover_browser_cookies(
+        browser: str = "chrome",
+        profile: str = "",
+        *,
+        expected_psid: str | None = None,
+        timeout_seconds: float | None = None,
+    ) -> BrowserCookieDiscovery:
+        """Find a locally readable browser Cookie that authenticates to Gemini."""
+        try:
+            import browser_cookie3  # noqa: F401 - distinguishes unavailable browser support
         except ImportError:
-            logger.warning("⚠️ browser-cookie3 未安装，无法从浏览器获取Cookie")
-            logger.warning("   请运行: pip install browser-cookie3")
-            logger.info("   备选方案: 直接设置 GEMINI_PSID 和 GEMINI_PSIDTS 环境变量")
-            return {}
+            return BrowserCookieDiscovery(reason="BROWSER_COOKIE_DEPENDENCY_MISSING")
 
-        # 浏览器优先级：指定浏览器优先，失败后按此顺序回退
-        fallback_order = ["chrome", "chrome-beta", "edge", "brave", "firefox", "opera"]
-        cookie_functions = {
-            "chrome": browser_cookie3.chrome,
-            "chrome-beta": browser_cookie3.chrome,
-            "firefox": browser_cookie3.firefox,
-            "edge": browser_cookie3.edge,
-            "opera": browser_cookie3.opera,
-            "brave": browser_cookie3.brave,
-        }
-
-        if browser not in cookie_functions:
-            logger.warning("不支持的浏览器: %s", browser)
-            return {}
-
-        # 构建尝试列表：先指定的浏览器，再按 fallback_order 追加其余
-        tried = {browser}
-        attempt_browsers = [browser]
-        attempt_browsers += [b for b in fallback_order if b not in tried]
-
-        last_error: Optional[str] = None
+        if browser not in _SUPPORTED_BROWSERS:
+            return BrowserCookieDiscovery(reason="BROWSER_COOKIE_NOT_FOUND")
+        attempt_browsers = [browser] if profile else [browser, *(name for name in _SUPPORTED_BROWSERS if name != browser)]
+        reasons: set[str] = set()
         for attempt_browser in attempt_browsers:
-            cookie_function = cookie_functions[attempt_browser]
+            browser_reasons: set[str] = set()
             try:
-                with _bounded_macos_keychain_reader(
-                    browser_cookie3,
-                    _browser_cookie_timeout_seconds(timeout_seconds),
-                ):
-                    logger.info(f"🔍 正在从 {attempt_browser} 浏览器获取 Cookie...")
-                    candidates = CookieManager._browser_cookie_candidates(
-                        browser_cookie3,
-                        attempt_browser,
-                        cookie_function,
-                        cookie_names,
-                    )
-                    if profile and candidates:
-                        cookies = CookieManager._select_named_cookie_candidate(candidates, profile)
-                    elif not candidates:
-                        cookies = CookieManager._read_cookie_jar(
-                            cookie_function(domain_name="google.com"),
-                            cookie_names,
-                        )
-                    else:
-                        cookies = CookieManager._select_valid_cookie_candidate(candidates)
-
-                if cookies.get("__Secure-1PSID"):
-                    for name in ("__Secure-1PSID", "__Secure-1PSIDTS"):
-                        if name in cookies:
-                            logger.info(f"✅ 从 {attempt_browser} 获取到 {name}")
-                    logger.info(f"✅ 已获取 {len(cookies)} 个 Google 认证 Cookie (来源: {attempt_browser})")
-                    return cookies
-
-                last_error = f"{attempt_browser}: 未找到有效的 __Secure-1PSID"
-                logger.debug(last_error)
-
+                candidates = CookieManager._read_browser_candidates(attempt_browser, timeout_seconds, browser_reasons)
             except _BrowserCookieAccessTimeout:
-                # macOS Keychain 是系统级锁定，所有浏览器都会受影响，
-                # 无需逐个尝试，直接停止回退并提示用户设置环境变量
-                last_error = f"{attempt_browser}: macOS Keychain 锁定超时"
-                logger.warning(f"⚠️ {last_error}，Keychain 为系统级锁定，停止浏览器回退")
+                reasons.add("BROWSER_COOKIE_ACCESS_TIMEOUT")
                 break
-            except Exception as e:
-                last_error = f"{attempt_browser}: {type(e).__name__}"
-                logger.debug("从 %s 获取 Cookie 失败 error_type=%s", attempt_browser, type(e).__name__)
+            except PermissionError:
+                reasons.add("BROWSER_COOKIE_ACCESS_DENIED")
+                continue
+            except Exception as error:
+                logger.debug("Browser Cookie read failed browser=%s error_type=%s", attempt_browser, type(error).__name__)
+                continue
+            finally:
+                reasons.update(browser_reasons)
+
+            candidates = [(name, jar) for name, jar in candidates
+                          if jar.get("__Secure-1PSID") and (not profile or name.casefold() == profile.strip().casefold())]
+            if expected_psid is not None:
+                matching = [(name, jar) for name, jar in candidates if jar["__Secure-1PSID"] == expected_psid]
+                if candidates and not matching:
+                    reasons.add("BROWSER_COOKIE_ACCOUNT_MISMATCH")
+                candidates = matching
+            if not candidates:
                 continue
 
-        # 所有浏览器都失败，给出明确的用户引导
-        logger.error("❌ 无法从任何浏览器获取 Gemini Cookie")
-        if last_error:
-            logger.error("   最后错误: %s", last_error)
-        logger.info("   请手动设置 GEMINI_PSID 和 GEMINI_PSIDTS 环境变量，或确保浏览器已登录并解锁系统密钥串")
-        return {}
+            # The generic library reader can return the same jar as a named
+            # profile. Prefer the named profile so the diagnostic is precise.
+            named = [jar for name, jar in candidates if name != "auto"]
+            sources = [(f"browser_{attempt_browser}" + (f":{name}" if name != "auto" else ""), jar)
+                       for name, jar in candidates if name != "auto" or jar not in named]
+            result = CookieManager._validate_browser_candidates(sources)
+            if result.cookies:
+                return result
+            if result.reason:
+                reasons.add(result.reason)
+
+        for reason in ("BROWSER_COOKIE_ACCESS_TIMEOUT", "BROWSER_COOKIE_AUTH_UNVERIFIED", "BROWSER_COOKIE_AUTH_REJECTED",
+                       "BROWSER_COOKIE_ACCESS_DENIED", "BROWSER_COOKIE_ACCOUNT_MISMATCH"):
+            if reason in reasons:
+                return BrowserCookieDiscovery(reason=reason)
+        return BrowserCookieDiscovery(reason="BROWSER_COOKIE_NOT_FOUND")
+
+    @staticmethod
+    def _read_browser_candidates(
+        browser: str,
+        timeout_seconds: float | None,
+        reasons: set[str] | None = None,
+        *,
+        require_psid: bool = True,
+    ) -> list[tuple[str, dict[str, str]]]:
+        import browser_cookie3
+
+        reader = getattr(browser_cookie3, "chrome" if browser == "chrome-beta" else browser, None)
+        if not callable(reader):
+            return []
+        cookie_names = CookieManager._google_cookie_names()
+        reasons = reasons if reasons is not None else set()
+        with _bounded_macos_keychain_reader(browser_cookie3, _browser_cookie_timeout_seconds(timeout_seconds)):
+            candidates = CookieManager._browser_cookie_candidates(
+                browser_cookie3, browser, reader, cookie_names, require_psid=require_psid, reasons=reasons,
+            )
+            if not candidates and browser != "chrome-beta" and "BROWSER_COOKIE_ACCESS_DENIED" not in reasons:
+                cookies = CookieManager._read_cookie_jar(reader(domain_name="google.com"), cookie_names)
+                if cookies and (not require_psid or cookies.get("__Secure-1PSID")):
+                    candidates = [("auto", cookies)]
+        return candidates
 
     @staticmethod
     def list_browser_cookie_profiles(
@@ -293,41 +310,21 @@ class CookieManager:
         timeout_seconds: Optional[float] = None,
     ) -> list[dict[str, object]]:
         """Return browser cookie profile diagnostics without exposing cookie values."""
-        cookie_names = CookieManager._google_cookie_names()
-
         try:
-            import browser_cookie3
+            import browser_cookie3  # noqa: F401 - distinguishes unavailable browser support
         except ImportError:
-            return [{"browser": browser, "error": "browser-cookie3 not installed"}]
+            return [{"browser": browser, "error": "browser-cookie3 not installed",
+                     "error_code": "BROWSER_COOKIE_DEPENDENCY_MISSING"}]
 
-        cookie_functions = {
-            "chrome": browser_cookie3.chrome,
-            "firefox": browser_cookie3.firefox,
-            "edge": browser_cookie3.edge,
-            "opera": browser_cookie3.opera,
-            "brave": browser_cookie3.brave,
-        }
-        if browser not in cookie_functions:
+        if browser not in _SUPPORTED_BROWSERS:
             return [{"browser": browser, "error": f"unsupported browser: {browser}"}]
 
+        reasons: set[str] = set()
         try:
-            with _bounded_macos_keychain_reader(
-                browser_cookie3,
-                _browser_cookie_timeout_seconds(timeout_seconds),
-            ):
-                candidates = CookieManager._browser_cookie_candidates(
-                    browser_cookie3,
-                    browser,
-                    cookie_functions[browser],
-                    cookie_names,
-                    require_psid=False,
-                )
-                if not candidates:
-                    cookies = CookieManager._read_cookie_jar(
-                        cookie_functions[browser](domain_name="google.com"),
-                        cookie_names,
-                    )
-                    candidates = [("auto", cookies)] if cookies else []
+            candidates = CookieManager._read_browser_candidates(browser, timeout_seconds, reasons, require_psid=False)
+        except PermissionError:
+            reasons.add("BROWSER_COOKIE_ACCESS_DENIED")
+            candidates = []
         except _BrowserCookieAccessTimeout:
             return [
                 {
@@ -358,15 +355,22 @@ class CookieManager:
             validation_by_profile = {item["profile"]: item for item in validation}
             for profile in profiles:
                 profile.update(validation_by_profile.get(profile["profile"], {}))
+        if "BROWSER_COOKIE_ACCESS_DENIED" in reasons:
+            profiles.append({"browser": browser, "error": "The operating system denied access to browser Cookie storage.",
+                             "error_code": "BROWSER_COOKIE_ACCESS_DENIED"})
         return profiles
 
     @staticmethod
     def _read_cookie_jar(cookie_jar, cookie_names: set[str]) -> Dict[str, str]:
         cookies: Dict[str, str] = {}
+        now = time.time()
         for cookie in cookie_jar:
             if cookie.name not in cookie_names or not cookie.value:
                 continue
             if cookie.domain != "google.com" and not cookie.domain.endswith(".google.com"):
+                continue
+            expires = getattr(cookie, "expires", None)
+            if isinstance(expires, (int, float)) and expires <= now:
                 continue
             cookies[cookie.name] = cookie.value
         return cookies
@@ -424,6 +428,7 @@ class CookieManager:
         cookie_function,
         cookie_names: set[str],
         require_psid: bool = True,
+        reasons: set[str] | None = None,
     ) -> list[tuple[str, Dict[str, str]]]:
         """从指定浏览器枚举可用的 Cookie 候选。
 
@@ -433,8 +438,7 @@ class CookieManager:
         Auto 候选始终要求 __Secure-1PSID（与历史行为一致），仅 profile
         候选在 require_psid=False 时允许无 PSID。
         """
-        # Chrome 族使用历史兼容的 _chrome_base_path；其余浏览器使用跨平台路径
-        if browser in ("chrome", "chrome-beta"):
+        if browser == "chrome":
             base = CookieManager._chrome_base_path()
             bases = [base] if base else []
         else:
@@ -445,46 +449,63 @@ class CookieManager:
 
         candidates: list[tuple[str, Dict[str, str]]] = []
         seen_profiles: set[str] = set()
+        reasons = reasons if reasons is not None else set()
 
         for base in bases:
-            if not base or not base.exists():
+            try:
+                base.stat()
+            except (FileNotFoundError, NotADirectoryError):
+                continue
+            except PermissionError:
+                reasons.add("BROWSER_COOKIE_ACCESS_DENIED")
                 continue
 
-            # 先尝试浏览器自带的域名查询（最快路径）
-            try:
-                cookies = CookieManager._read_cookie_jar(
-                    cookie_function(domain_name="google.com"), cookie_names
-                )
-                if cookies.get("__Secure-1PSID"):
-                    key = "auto"
-                    if key not in seen_profiles:
-                        seen_profiles.add(key)
-                        candidates.append((key, cookies))
-            except Exception as e:
-                logger.debug("跳过 %s 自动 Cookie error_type=%s", browser, type(e).__name__)
+            # Chrome's generic reader may select a different Chrome channel.
+            if browser != "chrome-beta":
+                try:
+                    cookies = CookieManager._read_cookie_jar(cookie_function(domain_name="google.com"), cookie_names)
+                    if cookies.get("__Secure-1PSID") and "auto" not in seen_profiles:
+                        seen_profiles.add("auto")
+                        candidates.append(("auto", cookies))
+                except PermissionError:
+                    reasons.add("BROWSER_COOKIE_ACCESS_DENIED")
+                except Exception as e:
+                    logger.debug("跳过 %s 自动 Cookie error_type=%s", browser, type(e).__name__)
 
             # Chrome 族浏览器：枚举 Profile 目录
             if browser in ("chrome", "chrome-beta", "edge", "brave", "opera"):
-                cookie_files = [base / "Default/Cookies", *sorted(base.glob("Profile */Cookies"))]
-                for path in cookie_files:
-                    if not path.exists():
-                        continue
-                    profile_name = path.parent.name
+                try:
+                    named_profiles = sorted(path for path in base.iterdir() if path.name.startswith("Profile "))
+                except PermissionError:
+                    reasons.add("BROWSER_COOKIE_ACCESS_DENIED")
+                    named_profiles = []
+                for profile_dir in (base / "Default", *named_profiles):
+                    profile_name = profile_dir.name
                     if profile_name in seen_profiles:
                         continue
-                    try:
-                        profile_cookies = CookieManager._read_cookie_jar(
-                            browser_cookie3.chrome(cookie_file=str(path), domain_name="google.com"),
-                            cookie_names,
-                        )
-                    except Exception as e:
-                        logger.debug(
-                            "跳过 %s profile %s Cookie error_type=%s", browser, profile_name, type(e).__name__
-                        )
-                        continue
-                    if profile_cookies.get("__Secure-1PSID") or not require_psid:
-                        seen_profiles.add(profile_name)
-                        candidates.append((profile_name, profile_cookies))
+                    for path in (profile_dir / "Network/Cookies", profile_dir / "Cookies"):
+                        try:
+                            # browser-cookie3 may translate an OS-denied read
+                            # into a generic BrowserCookieError via SQLite.
+                            with path.open("rb"):
+                                pass
+                            profile_cookies = CookieManager._read_cookie_jar(
+                                (browser_cookie3.chrome if browser in {"chrome", "chrome-beta"} else cookie_function)(
+                                    cookie_file=str(path), domain_name="google.com",
+                                ), cookie_names,
+                            )
+                        except (FileNotFoundError, NotADirectoryError):
+                            continue
+                        except PermissionError:
+                            reasons.add("BROWSER_COOKIE_ACCESS_DENIED")
+                            continue
+                        except Exception as e:
+                            logger.debug("Skipping %s profile Cookie error_type=%s", browser, type(e).__name__)
+                            continue
+                        if profile_cookies.get("__Secure-1PSID") or not require_psid:
+                            seen_profiles.add(profile_name)
+                            candidates.append((profile_name, profile_cookies))
+                            break
 
             # Firefox：Profiles 目录下的 cookies.sqlite
             elif browser == "firefox":
@@ -549,24 +570,22 @@ class CookieManager:
         return ""
 
     @staticmethod
-    def _select_valid_cookie_candidate(candidates: list[tuple[str, Dict[str, str]]]) -> Dict[str, str]:
-        if len(candidates) == 1:
-            return candidates[0][1]
-
-        result: dict[str, Dict[str, str]] = {}
+    def _validate_browser_candidates(
+        candidates: list[tuple[str, dict[str, str]]],
+    ) -> BrowserCookieDiscovery:
+        result = BrowserCookieDiscovery(reason="BROWSER_COOKIE_AUTH_UNVERIFIED")
 
         def validate_worker() -> None:
-            result["cookies"] = asyncio.run(CookieManager._validate_cookie_candidates_async(candidates))
+            nonlocal result
+            try:
+                result = asyncio.run(asyncio.wait_for(CookieManager._verify_cookie_candidates(candidates), 40))
+            except Exception as error:
+                logger.debug("Browser Cookie verification unavailable error_type=%s", type(error).__name__)
 
-        thread = threading.Thread(target=validate_worker)
+        thread = threading.Thread(target=validate_worker, daemon=True)
         thread.start()
         thread.join(timeout=45)
-        cookies = result.get("cookies")
-        if cookies:
-            return cookies
-
-        logger.warning("⚠️ 无法验证 Chrome profile，使用第一个可读取的 Cookie 候选")
-        return candidates[0][1]
+        return result
 
     @staticmethod
     def _select_named_cookie_candidate(candidates: list[tuple[str, Dict[str, str]]], profile: str) -> Dict[str, str]:
@@ -585,45 +604,108 @@ class CookieManager:
         def validate_worker() -> None:
             result["profiles"] = asyncio.run(CookieManager._validate_cookie_candidate_profiles_async(candidates))
 
-        thread = threading.Thread(target=validate_worker)
+        thread = threading.Thread(target=validate_worker, daemon=True)
         thread.start()
         thread.join(timeout=45)
         return result.get("profiles", [])
 
     @staticmethod
     async def _validate_cookie_candidates_async(candidates: list[tuple[str, Dict[str, str]]]) -> Dict[str, str]:
-        try:
-            from gemini_webapi import GeminiClient
-            from gemini_webapi.constants import AccountStatus
-        except ImportError as e:
-            logger.warning("gemini_webapi 不可用，跳过 Chrome profile Cookie 验证 error_type=%s", type(e).__name__)
-            return {}
+        return (await CookieManager._verify_cookie_candidates(candidates)).cookies
 
-        for profile_name, cookies in candidates:
-            client = GeminiClient(cookies.get("__Secure-1PSID"), cookies.get("__Secure-1PSIDTS", ""))
-            client.cookies = cookies
+    @staticmethod
+    def _make_browser_cookie_probe_client(cookies: dict[str, str]) -> Any:
+        from gemini_webapi import GeminiClient
+        from gemini_webapi.constants import AccountStatus
+        from gemini_webapi.utils.get_access_token import (
+            AsyncSession, CurlFollow, CurlHttpVersion, _extract_payload, _send_request,
+        )
+
+        from .client_manager import get_configured_proxy
+
+        class BrowserCookieProbeClient(GeminiClient):
+            async def init(self, *, timeout: float = 15, **_options: Any) -> None:
+                # Reuse the SDK's exact-jar transport and frontend parser.
+                # Its general bootstrap prefers a persistent cache and can
+                # fall back to another jar. Neither verifies this candidate.
+                candidate = self.cookies
+                self.client = AsyncSession(impersonate=self.impersonate, proxy=self.proxy,
+                                           allow_redirects=CurlFollow.SAFE, http_version=CurlHttpVersion.NONE,
+                                           timeout=timeout)
+                response = await _send_request(self.client, candidate, verbose=False)
+                frontend = _extract_payload(response)
+                if not frontend:
+                    return
+                self.access_token, self.build_label, self.session_id, language, _ = frontend
+                if language:
+                    self.language = language
+                self._running = True
+                await self._fetch_user_status()
+                # The SDK treats a missing numeric status as AVAILABLE. A
+                # positive probe also needs the model catalog from that RPC.
+                if getattr(self, "account_status", None) == AccountStatus.AVAILABLE and not self.list_models():
+                    setattr(self, "account_status", None)
+
+            async def _batch_execute(self, *args: Any, **kwargs: Any) -> Any:
+                kwargs.update(current_retry=0, close_on_error=False)
+                return await super()._batch_execute(*args, **kwargs)
+
+            async def close(self, delay: float = 0) -> None:
+                # Profile probes must not overwrite a persistent SDK cache.
+                self._running = False
+                await super().close(delay)
+
+        client = BrowserCookieProbeClient(cookies.get("__Secure-1PSID"), cookies.get("__Secure-1PSIDTS", ""),
+                                          proxy=get_configured_proxy())
+        client.cookies = cookies
+        client.account_status = None  # The SDK starts with a synthetic AVAILABLE default.
+        return client
+
+    @staticmethod
+    def _browser_auth_reason(client: Any) -> str | None:
+        from gemini_webapi.constants import AccountStatus
+
+        status = getattr(client, "account_status", None)
+        if status is None:
+            return "BROWSER_COOKIE_AUTH_UNVERIFIED"
+        if status != AccountStatus.AVAILABLE:
+            return "BROWSER_COOKIE_AUTH_REJECTED"
+        return None
+
+    @staticmethod
+    async def _verify_cookie_candidates(candidates: list[tuple[str, dict[str, str]]]) -> BrowserCookieDiscovery:
+        from gemini_webapi.exceptions import AuthError
+
+        reasons: set[str] = set()
+        for source, cookies in candidates:
+            client = None
             try:
+                client = CookieManager._make_browser_cookie_probe_client(cookies)
                 suppress_sdk_auth_logs()
-                await client.init(timeout=15, auto_close=False, auto_refresh=False, verbose=False)
-                if getattr(client, "account_status", None) != AccountStatus.AVAILABLE:
-                    logger.debug("Chrome profile %s 的 Gemini 账号状态不可用", profile_name)
-                    continue
-                logger.info("✅ 浏览器 profile %s 的 Gemini Cookie 验证通过", profile_name)
-                return cookies
+                await asyncio.wait_for(client.init(timeout=15, auto_close=False, auto_refresh=False, verbose=False), 15)
+                reason = CookieManager._browser_auth_reason(client)
+                if not reason:
+                    return BrowserCookieDiscovery(cookies=cookies, source=source)
+                reasons.add(reason)
+            except AuthError:
+                reasons.add("BROWSER_COOKIE_AUTH_REJECTED")
             except Exception as e:
-                logger.debug("Chrome profile %s 的 Gemini Cookie 验证失败 error_type=%s", profile_name, type(e).__name__)
+                reasons.add("BROWSER_COOKIE_AUTH_UNVERIFIED")
+                logger.debug("Browser Cookie verification failed error_type=%s", type(e).__name__)
             finally:
-                try:
-                    await client.close()
-                except Exception as close_err:
-                    logger.debug("关闭验证用 client 失败 error_type=%s", type(close_err).__name__)
-        return {}
+                if client is not None:
+                    try:
+                        await client.close()
+                    except Exception as close_err:
+                        logger.debug("关闭验证用 client 失败 error_type=%s", type(close_err).__name__)
+        reason = ("BROWSER_COOKIE_AUTH_REJECTED" if reasons == {"BROWSER_COOKIE_AUTH_REJECTED"}
+                  else "BROWSER_COOKIE_AUTH_UNVERIFIED")
+        return BrowserCookieDiscovery(reason=reason)
 
     @staticmethod
     async def _validate_cookie_candidate_profiles_async(candidates: list[tuple[str, Dict[str, str]]]) -> list[dict[str, object]]:
         try:
-            from gemini_webapi import GeminiClient
-            from gemini_webapi.constants import AccountStatus
+            import gemini_webapi  # noqa: F401 - keep this diagnostic usable without the SDK
         except Exception as e:
             return [{"profile": profile_name, "validation_error": "Cookie validation is unavailable.", "error_type": type(e).__name__} for profile_name, _ in candidates]
 
@@ -634,14 +716,17 @@ class CookieManager:
                 "account_available": False,
                 "scheduled_registry_count": 0,
             }
-            client = GeminiClient(cookies.get("__Secure-1PSID"), cookies.get("__Secure-1PSIDTS", ""))
-            client.cookies = cookies
+            client = None
             try:
+                client = CookieManager._make_browser_cookie_probe_client(cookies)
                 suppress_sdk_auth_logs()
-                await client.init(timeout=15, auto_close=False, auto_refresh=False, verbose=False)
+                await asyncio.wait_for(client.init(timeout=15, auto_close=False, auto_refresh=False, verbose=False), 15)
                 status = getattr(client, "account_status", None)
                 info["account_status"] = str(status)
-                info["account_available"] = status == AccountStatus.AVAILABLE
+                reason = CookieManager._browser_auth_reason(client)
+                info["account_available"] = reason is None
+                if reason:
+                    info["error_code"] = reason
                 if info["account_available"]:
                     info["scheduled_registry_count"] = await CookieManager._probe_scheduled_registry_count(client)
                     info["language"] = getattr(client, "language", "")
@@ -650,10 +735,11 @@ class CookieManager:
                 info["validation_error"] = "Cookie validation failed."
                 info["error_type"] = type(e).__name__
             finally:
-                try:
-                    await client.close()
-                except Exception as close_err:
-                    logger.debug("关闭 profile 验证 client 失败 error_type=%s", type(close_err).__name__)
+                if client is not None:
+                    try:
+                        await client.close()
+                    except Exception as close_err:
+                        logger.debug("关闭 profile 验证 client 失败 error_type=%s", type(close_err).__name__)
             profiles.append(info)
         return profiles
 

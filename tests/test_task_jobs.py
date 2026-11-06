@@ -851,6 +851,50 @@ def test_notebook_chat_only_saves_completed_exact_reply_and_restarts_offline(sto
     assert cached.data.upstream_status is None and cached.data.execution_mode == "chat"
 
 
+@pytest.mark.parametrize("quoted", [False, True])
+@pytest.mark.parametrize("refusal", [
+    "I'm having a hard time fulfilling your request. Can I help you with something else instead?",
+    "I encountered an error doing what you asked. Could you try again?",
+])
+def test_notebook_chat_classifies_only_exact_completed_refusal(store, monkeypatch, quoted, refusal):
+    record = _notebook_record(store)
+    answer = f'The sample support text is "{refusal}"' if quoted else refusal
+    client = TaskClient(raise_on_generate=True)
+    _install_execute_doubles(monkeypatch, client)
+    turn = AsyncMock(return_value={"completed": True, "text": answer})
+    monkeypatch.setattr(task_jobs, "fetch_workflow_turn", turn)
+    finalize = AsyncMock(return_value=CleanupObservation(state=CleanupState.COMPLETED, upstream_chat_id="c_one"))
+    expected_state = OperationState.COMPLETED if quoted else OperationState.FAILED
+
+    asyncio.run(task_jobs.recover_task_job(record, store=store, worker_token="worker"))
+    recovered = store.get(record.operation_id)
+    assert recovered.state == expected_state.value and recovered.cleanup_protected
+    if not quoted:
+        assert recovered.verification_status == "notebook_reply_rejected"
+        assert recovered.error_code == "UPSTREAM_REJECTED"
+
+    result = asyncio.run(task_jobs.read_task_operation(
+        recovered, store=store, client_provider=lambda: client, client_initializer=AsyncMock(),
+        finalize_chat_cleanup=finalize, include_answer=True,
+    ))
+    assert result.ok is quoted and result.data.state is expected_state
+    assert result.data.answer == answer and result.data.execution_mode == "chat"
+    assert Path(result.data.artifacts[0].local_path).read_text() == answer
+    finalize.assert_awaited_once()
+    assert [call.args for call in turn.await_args_list] == [(client, "c_one", "r_one", "rc_one")] * 2
+    assert not client.calls
+    saved = store.get(record.operation_id)
+    assert not saved.cleanup_protected and saved.cleanup_state == "completed"
+    restarted = OperationStore(store.path)
+    cached = asyncio.run(task_jobs.read_task_operation(
+        restarted.get(record.operation_id), store=restarted, client_provider=lambda: None,
+        client_initializer=AsyncMock(side_effect=AssertionError("cached refusal must stay local")),
+        finalize_chat_cleanup=None, include_answer=True,
+    ))
+    assert cached.ok is quoted and cached.data.state is expected_state
+    assert cached.error_code == (None if quoted else "UPSTREAM_REJECTED")
+
+
 def test_completed_task_goal_does_not_authorize_partial_candidate_cleanup(store, monkeypatch):
     record = _read_record(store)
     partial = _model_turn("c_one", "r_one", "rc_id", "Working on it")

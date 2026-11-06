@@ -58,6 +58,7 @@ def _resolve_server_command(command: str | None = None) -> str:
 def _server_environment(*, profile: str, allow_live_account: bool) -> dict[str, str]:
     environment = os.environ.copy()
     environment.pop("PYTHONPATH", None)
+    environment.pop("GEMINI_API_KEY", None)
     environment["GEMINI_TOOLS"] = profile
     if not allow_live_account:
         for name in COOKIE_ENVIRONMENT_NAMES:

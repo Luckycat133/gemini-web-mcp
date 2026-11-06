@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import quote
 
+from ..constants import GEMINI_GENERIC_FAILURE_REPLY
 from ..domain import (
     CleanupObservation,
     CleanupState,
@@ -53,6 +54,10 @@ TASK_DEFAULT_TIMEOUT_SECONDS = 600
 # A native setup card was observed while this goal status was 8. The status
 # itself remains unknown; only an exact, independently read card is classified.
 _TASK_SETUP_OBSERVED_STATUS = 8
+_NOTEBOOK_CHAT_REFUSALS = frozenset({
+    GEMINI_GENERIC_FAILURE_REPLY,
+    "I encountered an error doing what you asked. Could you try again?",
+})
 
 _TASK_TERMINAL_STATES = frozenset({
     OperationState.FAILED,
@@ -61,6 +66,11 @@ _TASK_TERMINAL_STATES = frozenset({
     OperationState.UNAVAILABLE,
 })
 _TASK_CLEANUP_REMOVED = "task_removed_after_cleanup"
+
+
+def _is_notebook_chat_refusal(text: object) -> bool:
+    """Recognize the exact observed Gemini error reply."""
+    return isinstance(text, str) and text.strip() in _NOTEBOOK_CHAT_REFUSALS
 
 
 class _LostTaskLease(RuntimeError):
@@ -450,6 +460,13 @@ async def recover_task_job(record: Any, *, store: Any, worker_token: str) -> Non
         if not store.is_worker_owner(record.operation_id, worker_token) or not operation_account_matches(record):
             return
         if turn is not None and turn.get("completed") is True:
+            if _is_notebook_chat_refusal(turn.get("text")):
+                # Reuse the failed-answer recovery phase so cleanup can still
+                # retry the same exact candidate after an interrupted read.
+                store.finish_worker(record.operation_id, worker_token=worker_token, state="failed",
+                                    phase="task_failed", verification_status="notebook_reply_rejected",
+                                    error_code="UPSTREAM_REJECTED")
+                return
             store.finish_worker(record.operation_id, worker_token=worker_token, state="completed",
                                 phase="notebook_reply_completed", verification_status="exact_reply_completed")
         else:
@@ -742,7 +759,12 @@ async def read_task_operation(
 
     if notebook_chat:
         state = saved_state if saved_state in _TASK_TERMINAL_STATES or saved_state == OperationState.COMPLETED else OperationState.PARTIAL
-        verification_status = "exact_reply_completed" if state == OperationState.COMPLETED else "notebook_reply_unverified"
+        if state == OperationState.COMPLETED:
+            verification_status = "exact_reply_completed"
+        elif state == OperationState.FAILED and getattr(record, "verification_status", None) == "notebook_reply_rejected":
+            verification_status = "notebook_reply_rejected"
+        else:
+            verification_status = "notebook_reply_unverified"
     elif upstream_status == TASK_COMPLETED_STATUS:
         state = OperationState.COMPLETED
         verification_status = "task_completed_verified"
@@ -834,8 +856,8 @@ async def read_task_operation(
                 return _task_account_mismatch()
             if isinstance(turn, dict) and turn.get("completed") is True and isinstance(turn.get("text"), str) and turn["text"].strip():
                 answer = turn["text"]
-                state = OperationState.COMPLETED
-                verification_status = "exact_reply_completed"
+                state = OperationState.FAILED if _is_notebook_chat_refusal(answer) else OperationState.COMPLETED
+                verification_status = "notebook_reply_rejected" if state == OperationState.FAILED else "exact_reply_completed"
             else:
                 verification_status = "notebook_reply_unverified"
         elif (

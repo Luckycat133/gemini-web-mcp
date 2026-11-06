@@ -19,6 +19,7 @@ def _read(monkeypatch, envelope, *, http=200):
 @pytest.mark.parametrize(("body", "status", "expected"), [
     ([None, None, [["c_fixture", "synthetic"]]], "success", 1),
     ([None, None, []], "empty", 0),
+    ([], "empty", 0),
 ])
 def test_verified_notebook_pages(monkeypatch, body, status, expected):
     items, page = _read(monkeypatch, RPCEnvelope(True, 1, (body,)))
@@ -29,6 +30,7 @@ def test_verified_notebook_pages(monkeypatch, body, status, expected):
 
 @pytest.mark.parametrize(("envelope", "status"), [
     (RPCEnvelope(False, 0, ()), "missing_envelope"),
+    (RPCEnvelope(True, 2, ([], [])), "missing_envelope"),
     (RPCEnvelope(True, 1, (), reject_code=7), "rejected"),
     (RPCEnvelope(True, 1, ({"changed": True},)), "changed_shape"),
     (RPCEnvelope(True, 1, ([None, "next", []],)), "incomplete_page"),
@@ -43,6 +45,11 @@ def test_unverified_notebook_pages_never_become_empty(monkeypatch, envelope, sta
 def test_http_failure_cannot_prove_empty(monkeypatch):
     with pytest.raises(notebooks.NotebookChatReadError, match="http_error"):
         _read(monkeypatch, RPCEnvelope(True, 1, ([None, None, []],)), http=403)
+
+
+def test_notebook_empty_page_does_not_relax_account_history():
+    assert notebooks.parse_contract_body("notebooks.chats", []).status == "empty"
+    assert notebooks.parse_contract_body("history.page", []).status == "changed_shape"
 
 
 def _read_pages(monkeypatch, bodies, *, limit=100, offset=0):

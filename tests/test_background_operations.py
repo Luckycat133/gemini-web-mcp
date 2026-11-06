@@ -50,6 +50,30 @@ def test_submission_returns_handle_without_initializing_or_waiting_for_gemini(st
     assert set(store.get_media_artifacts(record.operation_id)) == set()
 
 
+def test_web_video_with_unreadable_browser_fails_before_queueing(tmp_path, monkeypatch):
+    from src import client_wrapper
+    from src.client_manager import ClientAuthenticationRequired
+
+    monkeypatch.delenv("GEMINI_PSID", raising=False)
+
+    def unavailable():
+        raise ClientAuthenticationRequired("private diagnostic", auth_reason="BROWSER_COOKIE_ACCESS_DENIED")
+
+    monkeypatch.setattr(client_wrapper, "ensure_web_cookie", unavailable)
+    launch = AsyncMock()
+    monkeypatch.setattr(background, "_dispatch", launch)
+    handle = "op_" + "d" * 32
+    result = asyncio.run(background.submit_media(
+        {**request(tmp_path), "media_type": "video"}, operation="gemini_generate_video", operation_id=handle,
+    ))
+    assert not result.ok and result.data is None
+    assert result.error.code.value == "AUTH_REQUIRED"
+    assert "denied" in result.error.message and "private" not in result.error.message
+    assert result.meta.details["auth_reason"] == "BROWSER_COOKIE_ACCESS_DENIED"
+    launch.assert_not_awaited()
+    assert OperationStore().get(handle) is None
+
+
 def test_task_option_without_its_original_card_never_creates_or_dispatches_a_task(store, monkeypatch):
     launch = AsyncMock(side_effect=AssertionError('must not dispatch'))
     monkeypatch.setattr(background, '_dispatch', launch)
@@ -176,15 +200,24 @@ def test_failed_background_job_returns_typed_failure_and_cleanup_evidence(store,
     handle = "op_" + "e" * 32
     asyncio.run(background.submit_media(request(tmp_path), operation="media", operation_id=handle))
     record = store.get(handle)
+    assert store.checkpoint_media(handle, worker_token=record.worker_token, chat_id="c_test",
+                                  response_id="r_test", candidate_id="rc_test")
     store.finish_worker(handle, worker_token=record.worker_token, state="failed", phase="media_rejected",
                         verification_status="upstream_limit_message_observed", error_code="UPSTREAM_LIMIT_EXCEEDED")
+    store.release_cleanup(handle)
     store.update_cleanup(handle, "completed")
-    result = asyncio.run(OperationService(store, lambda: None, AsyncMock()).get_status(handle))
-    assert not result.ok and result.error.code.value == "RATE_LIMITED"
-    assert result.data.state.value == "failed" and result.data.error_code == "UPSTREAM_LIMIT_EXCEEDED"
-    assert result.data.cleanup.state.value == "completed"
+    store.retire_worker(handle, record.worker_token)
+    dispatch = AsyncMock()
+    monkeypatch.setattr(background, "_dispatch", dispatch)
+    service = OperationService(store, lambda: None, AsyncMock())
+    for read in (service.get_status, service.get_result):
+        result = asyncio.run(read(handle))
+        assert not result.ok and result.error.code.value == "RATE_LIMITED"
+        assert result.data.state.value == "failed" and result.data.error_code == "UPSTREAM_LIMIT_EXCEEDED"
+        assert result.data.cleanup.state.value == "completed"
     repeated = asyncio.run(background.submit_media(request(tmp_path), operation="media", operation_id=handle))
     assert not repeated.ok and repeated.error.code.value == "RATE_LIMITED"
+    dispatch.assert_not_awaited()
 
 
 def test_complete_authentication_is_transferred_only_in_the_anonymous_pipe(store, tmp_path, monkeypatch):

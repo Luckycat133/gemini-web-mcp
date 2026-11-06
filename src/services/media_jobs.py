@@ -7,18 +7,27 @@ from dataclasses import replace
 from types import SimpleNamespace
 from typing import Any
 
-from ..constants import resolve_media_request
+from ..constants import GEMINI_GENERIC_FAILURE_REPLY, resolve_media_request
+from ..client_manager import ClientAuthenticationRequired
 from ..domain import ArtifactKind, ArtifactState
 from ..infrastructure.account_identity import operation_account_matches
+from ..infrastructure.rpc_contracts import VideoTransportChanged
 from .artifacts import is_response_queued, observed_backend_from_response, response_chat_id
 from .deadlines import await_before_deadline
-from .media_generation import compose_media_prompt, generate_media_response, media_timeout, media_timeout_scope
+from .media_generation import (
+    VideoModeUnavailable, compose_media_prompt, generate_media_response, media_timeout, media_timeout_scope,
+)
 from .media_storage import _save_generated_media, _valid_media_filename
 from .music_recovery import MusicErrorCardObserved, fetch_music_media_from_chat, music_response_identity
+from .web_context_transport import fetch_workflow_turn
 
 MEDIA_READBACK_TIMEOUT_SECONDS = 60.0
 
 _QUOTA_REJECTION = "I can create more images as soon as your limit resets. Check your usage in Settings."
+_IMAGE_FAILURE_REPLIES = (
+    GEMINI_GENERIC_FAILURE_REPLY,
+    "Sorry, something went wrong. Please try your request again.",
+)
 _VIDEO_QUOTA_REJECTION = "I can create more videos as soon as your limit resets. Check your usage in Settings."
 _VIDEO_REFUSAL = "请恕我爱莫能助，我只是一个语言模型，不能理解或回复你的这个问题。"
 _MUSIC_ERROR_NOTICE = "生成这段钢琴和弦乐纯音乐时出现了一些问题。你要不要现在再重新尝试一次？"
@@ -105,7 +114,8 @@ async def _finish_media_rejection(
     """Checkpoint the exact observed rejection before releasing cleanup protection."""
     if not operation_account_matches(record):
         return
-    verification = _REJECTIONS[code]
+    verification = ("upstream_media_failure_reply_observed"
+                    if code == "UPSTREAM_REJECTED" and record.media_type == "image" else _REJECTIONS[code])
     if not store.finish_worker(record.operation_id, worker_token=token, state="partial", phase="media_rejected",
                                verification_status=verification, error_code=code):
         return
@@ -149,6 +159,17 @@ async def _save_response(
             and not any(getattr(response, name, None) for name in ("images", "videos", "media"))):
         await _finish_media_rejection(client, response, record, store=store, token=token, code="ARTIFACT_NOT_RETURNED")
         return
+    image_failure = getattr(response, "text", None)
+    if (record.media_type == "image" and image_failure in _IMAGE_FAILURE_REPLIES
+            and not any(getattr(response, name, None) for name in ("images", "videos", "media"))):
+        try:
+            turn = await await_before_deadline(fetch_workflow_turn(client, cid, rid, rcid), timeout=readback_timeout)
+        except Exception:
+            turn = None
+        if (turn and turn.get("completed") is True and turn.get("text") == image_failure
+                and (turn.get("chat_id"), turn.get("rid"), turn.get("rcid")) == (cid, rid, rcid)):
+            await _finish_media_rejection(client, response, record, store=store, token=token, code="UPSTREAM_REJECTED")
+            return
     media_items = None
     if record.media_type == "music" and not getattr(response, "media", None):
         try:
@@ -239,10 +260,18 @@ async def execute_media_job(request: dict, *, operation_id: str, store: Any, wor
         return
     store.configure_media(operation_id, media_type, request.get("output_dir"), filename,
                           settings["request_model"], settings["backend_label"], worker_token=worker_token)
-    client = get_gemini_client()
     try:
         try:
+            client = get_gemini_client()
             await await_before_deadline(initialize_client(), timeout=MEDIA_READBACK_TIMEOUT_SECONDS)
+        except ClientAuthenticationRequired:
+            if (store.is_worker_owner(operation_id, worker_token)
+                    and (record is None or operation_account_matches(record))):
+                if store.finish_worker(operation_id, worker_token=worker_token, state="failed",
+                                       phase="authentication_required", verification_status="auth_required_before_dispatch",
+                                       error_code="AUTH_REQUIRED"):
+                    store.release_cleanup(operation_id)
+            return
         except asyncio.TimeoutError:
             if (store.is_worker_owner(operation_id, worker_token)
                     and (record is None or operation_account_matches(record))):
@@ -270,6 +299,9 @@ async def execute_media_job(request: dict, *, operation_id: str, store: Any, wor
             await _save_response(client, response, record, store=store, token=worker_token)
     except _LostMediaLease:
         return
+    except (VideoTransportChanged, VideoModeUnavailable) as error:
+        code = "UPSTREAM_CHANGED" if isinstance(error, VideoTransportChanged) else "CAPABILITY_UNAVAILABLE"
+        _unknown(store, operation_id, worker_token, phase="video_transport_unverified", code=code)
     except asyncio.CancelledError:
         raise
     except Exception as exc:

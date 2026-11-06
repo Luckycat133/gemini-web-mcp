@@ -15,6 +15,7 @@ _REQUIREMENT_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
 REQUIRED_IMPORTS = {
     "anyio": "anyio",
     "gemini_webapi": "gemini-webapi",
+    "httpx2": "httpx2",
     "loguru": "loguru",
     "mcp": "mcp",
     "mcp_types": "mcp-types",
@@ -38,6 +39,7 @@ OPTIONAL_IMPORTS = {
 EXPECTED_REQUIREMENTS = {
     "anyio": "anyio>=4.9,<5",
     "gemini-webapi": "gemini-webapi>=2.1.1,<3",
+    "httpx2": "httpx2>=2.10.0,<3",
     "loguru": "loguru>=0.7.3,<1",
     "mcp": "mcp>=2.0.0,<3",
     "mcp-types": "mcp-types>=2.0.0,<3",

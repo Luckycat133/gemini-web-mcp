@@ -143,12 +143,17 @@ async def gemini_get_cookie_status() -> list[TextContent]:
     has_cookie = bool(status.get("has_cookie"))
     needs_refresh = bool(status.get("needs_refresh", False))
     cookie_text = "已设置" if has_cookie else "未设置"
-    refresh_text = "需要刷新" if needs_refresh else "无需刷新"
+    refresh_text = ("需要刷新" if needs_refresh else "无需刷新") if has_cookie else "暂无可刷新凭据"
+    auto_load = status.get("browser_auto_load")
+    auto_load_text = "开启" if auto_load is True else "关闭" if auto_load is False else "未知"
+    auth_reason = status.get("browser_auth_reason")
+    auth_note = f"\n浏览器认证诊断: {auth_reason}" if auth_reason else ""
     return [TextContent(type="text", text=f"""📊 Cookie 状态
-状态: {status.get('status', 'unknown')}
+状态: {status.get('status', 'unknown')}（本地凭据状态）
 Cookie: {cookie_text}
 来源: {status.get('source', 'unknown')}
-刷新: {refresh_text}""")]
+浏览器自动读取: {auto_load_text}
+刷新: {refresh_text}{auth_note}""")]
 
 
 @mcp.tool()
@@ -201,6 +206,9 @@ async def gemini_get_cookie_from_browser(browser: str = "chrome", profile: str =
             suffix = f" profile={profile}" if profile else ""
             return [TextContent(type="text", text=f"✅ 已从 {browser}{suffix} 获取 Cookie")]
         else:
+            reason = get_cookie_status().get("browser_auth_reason")
+            if reason:
+                return [TextContent(type="text", text=f"❌ 浏览器 Cookie 获取失败 [{reason}]")]
             return [TextContent(type="text", text="❌ 获取失败，请确保浏览器已登录 Gemini 网页版")]
     except Exception as e:
         error_info = handle_error(e)

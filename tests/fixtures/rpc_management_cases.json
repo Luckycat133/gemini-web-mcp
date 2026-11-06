@@ -280,6 +280,15 @@
       }
     }
   },
+  "notebook_conversation_page": {
+    "contract_key": "notebooks.chats",
+    "cases": {
+      "success": {"body": [null, null, [["c_fixture", "Synthetic"]]]},
+      "empty": {"body": []},
+      "rejected": {"body": [], "reject_code": 7},
+      "changed_shape": {"body": [null, null, [{"unexpected": true}]]}
+    }
+  },
   "remy_goals_page": {
     "contract_key": "history.remy_goals",
     "cases": {

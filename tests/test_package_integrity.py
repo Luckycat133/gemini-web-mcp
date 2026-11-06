@@ -31,6 +31,7 @@ def test_runtime_imports_have_direct_or_extra_dependency_intent():
         "PIL",
         "browser_cookie3",
         "gemini_webapi",
+        "httpx2",
         "loguru",
         "mcp",
         "mcp_types",

@@ -115,7 +115,8 @@ chunk semantics and counts.
 
 | Tool | Purpose |
 |------|---------|
-| `gemini_generate_media` | Generate image, video, or music |
+| `gemini_generate_video` | Background video generation on the function surface |
+| `gemini_generate_media` | Generate image, video, or music on the legacy surface |
 | `gemini_generate_music` | Convenience wrapper for music generation |
 
 Current Gemini Web media routing:
@@ -125,13 +126,17 @@ Current Gemini Web media routing:
 | `media_type=image`, `model=flash-lite` | `Nano Banana 2 Lite` route; exact observed backend may be unavailable |
 | `media_type=image`, `model=flash` / `pro` | First pass reports `Nano Banana 2`; Pro redo is separate |
 | `media_type=music` | `Lyria` family; exact version is unverified unless upstream identifies it |
-| `media_type=video` | Generic chat route is not a verified Omni video mode; require a video Artifact |
+| `media_type=video`, default `model=flash` | Gemini Apps Create video mode with the account's current Omni rollout |
+| Video with `model=gemini-omni-1.2-flash` | Exact Gemini API model via `GEMINI_API_KEY`, with optional `duration_seconds` (integer 3–15, provider default 10) |
 
 `model=pro` does not directly select a different first-pass image backend than
 Flash. The Pro image redo control is a post-generation Gemini Web UI action.
 The signed-in 2026-09-26 live check produced images and music through MCP, while
-generic MCP video returned `ARTIFACT_NOT_RETURNED`; Gemini Web's dedicated
-Videos page produced a downloadable Omni video.
+generic MCP video returned `ARTIFACT_NOT_RETURNED`. The current Web route uses
+the dedicated Create video transport. The exact API model requires a billed API
+project and runs in the background. It stores the original interaction ID for
+recovery and independently verifies deletion after saving the MP4, unless
+`retain_chat=true`. A preview or response text cannot prove a video exists.
 
 ### File And URL
 

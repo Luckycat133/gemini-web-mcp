@@ -229,7 +229,7 @@ def _probe(module_name: str) -> None:
 def _safe_environment(profile: str) -> dict[str, str]:
     environment = os.environ.copy()
     environment.pop("PYTHONPATH", None)
-    for name in ("GEMINI_PSID", "GEMINI_PSIDTS", "GEMINI_PSIDCC", "GEMINI_SKILL_MODE"):
+    for name in ("GEMINI_PSID", "GEMINI_PSIDTS", "GEMINI_PSIDCC", "GEMINI_API_KEY", "GEMINI_SKILL_MODE"):
         environment.pop(name, None)
     environment["GEMINI_AUTO_REFRESH"] = "false"
     environment["GEMINI_BROWSER_AUTO_LOAD"] = "false"

@@ -15,6 +15,7 @@
 | GEMINI_PSID | ✅ | Cookie __Secure-1PSID | - |
 | GEMINI_PSIDTS | ❌ | Cookie __Secure-1PSIDTS | - |
 | GEMINI_PSIDCC | ❌ | Cookie __Secure-1PSIDCC，附加到客户端的 extra cookies | - |
+| GEMINI_API_KEY | ❌ | 仅用于显式选择 `gemini-omni-1.2-flash` 的付费 API 视频。通过 MCP 服务环境提供 | - |
 | GEMINI_PROXY | ❌ | 代理地址 | - |
 | GEMINI_AUTO_REFRESH | ❌ | 自动刷新 Cookie | true |
 | GEMINI_BROWSER_AUTO_LOAD | ❌ | 启动时无 Cookie 则尝试读取浏览器；设为 false 可禁用 | true |
@@ -27,6 +28,8 @@
 | GEMINI_COOKIE_PATH | ❌ | gemini_webapi cookie cache 目录；浏览器刷新 Cookie 时由 `client_manager` 写入临时目录隔离 | 系统临时目录下的 `gemini_web_mcp_webapi_cookie_cache` |
 
 操作和清理记录通过原账号的不可逆标识分区。请求中切换账号时，迟到的对话 ID 仍登记到原账号；不会用新账号继续会话、读回旧任务或删除旧对话。旧版操作库迁移后无法确认归属的记录不会被当前登录账号自动接管；新建任务只允许持有该任务租约的 worker 在首次鉴权后绑定一次。Cookie 和对话正文不写入这两个数据库。
+
+显式 API 视频使用原 API Key 的不可逆标识来恢复任务，与 Cookie 账号隔离。请通过本地 MCP 环境或凭据管理器提供 Key，换 Key 后原任务需要原 Key 才能继续读取。API 视频保留原任务 ID 和已验证的本地文件摘要，提示词、Key 和视频字节不进入 SQLite。默认验证 MP4 后删除 API 交互，`retain_chat=true` 可保留。
 
 ---
 

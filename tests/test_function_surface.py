@@ -36,6 +36,7 @@ def test_function_catalog_and_safety_annotations():
     assert tools["gemini_run_task"].annotations.destructive_hint is True
     assert tools["gemini_run_task"].input_schema["properties"]["model"]["default"] == "flash"
     assert tools["gemini_generate_video"].input_schema["properties"]["model"]["default"] == "flash"
+    assert "duration_seconds" in tools["gemini_generate_video"].input_schema["properties"]
     assert tools["gemini_generate_music"].input_schema["properties"]["thinking_level"]["default"] == "standard"
     assert tools["gemini_research"].input_schema["properties"]["thinking_level"]["default"] == "standard"
     assert all(tools[name].annotations.read_only_hint is False for name in (
@@ -93,7 +94,7 @@ def test_function_catalog_over_real_stdio(tmp_path):
     from mcp import StdioServerParameters, stdio_client
 
     environment = os.environ.copy()
-    for name in ("GEMINI_PSID", "GEMINI_PSIDTS", "GEMINI_PSIDCC"):
+    for name in ("GEMINI_PSID", "GEMINI_PSIDTS", "GEMINI_PSIDCC", "GEMINI_API_KEY"):
         environment.pop(name, None)
     environment.update(GEMINI_BROWSER_AUTO_LOAD="false", GEMINI_AUTO_REFRESH="false",
                        GEMINI_OPERATION_DB_PATH=str(tmp_path / "operations.sqlite"),
@@ -103,6 +104,14 @@ def test_function_catalog_over_real_stdio(tmp_path):
                                    env=environment, cwd=Path(__file__).resolve().parents[1])
     async def run():
         async with Client(stdio_client(params), mode="auto", cache=None) as client:
+            missing_key = await client.call_tool("gemini_generate_video", {
+                "prompt": "A raindrop on glass.", "model": "gemini-omni-1.2-flash", "duration_seconds": 15,
+            })
+            invalid_duration = await client.call_tool("gemini_generate_video", {
+                "prompt": "A raindrop on glass.", "model": "gemini-omni-1.2-flash", "duration_seconds": 16,
+            })
+            assert domain_result_from_call(missing_key)["error"]["code"] == "AUTH_REQUIRED"
+            assert domain_result_from_call(invalid_duration)["error"]["code"] == "INVALID_ARGUMENT"
             return {tool.name for tool in (await client.list_tools()).tools}
     assert asyncio.run(run()) == EXPECTED
 

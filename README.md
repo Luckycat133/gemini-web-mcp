@@ -136,7 +136,15 @@ gemini-mcp-assist
 
 Function tools `gemini_generate_image`, `gemini_edit_image`, `gemini_generate_video`, and `gemini_generate_music` always start in the background. Deep Research also defaults to background execution. Preserve the returned `operation_id` and retrieve the same operation with `gemini_get_operation_status` / `gemini_get_operation_result`; use `background=false` for the waiting path where the compatibility tool exposes it. The compact server uses `session(action="operation_status" | "operation_result", session_id=operation_id)`, and assist uses `gemini_research(action="status" | "result", operation_id=...)`.
 
-The function surface defaults video to `model="flash"` and preserves an explicit model choice without automatically falling back to Pro. In earlier authorized local observations, Pro produced a verified video with audio while the same prompt returned a text refusal with Flash; those observations do not verify current Flash video availability.
+Video defaults to the Gemini App's Create video mode with the Flash chat model. Google identifies the current App generator as Gemini Omni 1.2 Flash and is rolling out 15-second clips to Ultra subscribers. The App selects the video backend for the signed-in account. [Gemini Apps video guide](https://support.google.com/gemini/answer/16126339?hl=en)
+
+To select **Gemini Omni 1.2 Flash** by exact model ID, configure `GEMINI_API_KEY` for a billed Gemini API project, then call `gemini_generate_video`:
+
+```json
+{"prompt":"A macro shot of a raindrop sliding down a leaf","model":"gemini-omni-1.2-flash","duration_seconds":15}
+```
+
+The explicit API route accepts 3–15 whole seconds and an optional JPEG, PNG or WebP reference. It uses the same background handle and returns a verified local MP4. API interaction cleanup runs after verification unless `retain_chat=true`. See [video routing and usage](docs/models.md#视频生成).
 
 Music and Deep Research start with `thinking_level="standard"` by default. An explicit `extended` choice is preserved, as is the original level when recovering a research operation. The level does not identify a Lyria, Veo, or Research model version.
 An authorized local Flash/standard test produced verified music files and a separate Flash/standard research report; both conversations were independently verified absent after cleanup. Other requests and account conditions can produce different results.

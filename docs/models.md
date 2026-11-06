@@ -77,9 +77,10 @@ Flash-Lite 首轮使用 **Nano Banana 2 Lite**；Flash 和 Pro 首轮使用 **Na
 
 ### 视频生成
 
-当前网页专用 [视频页面](https://gemini.google.com/videos)显示 Gemini Omni。
-此前网页页面生成并下载了 10 秒 MP4，旧通用聊天路线只返回文本。2026-10-31 授权本地测试中，MCP 专用模式返回并验证了 10 秒 MP4。后续单次功能面 `model="pro"` 测试返回了 10 秒 1280×720 视频和音轨，Flash 对同一提示返回普通文本拒绝。按当前模型选择要求，功能面的 `gemini_generate_video` 默认 Flash，不自动回退到 Pro，显式模型不会被替换；历史 Pro 成功不构成 Flash 已验证可用。独立缩略图不算视频完成。Google 的[视频帮助](https://support.google.com/gemini/answer/16126339)
-也将现行生成模型称为 Gemini Omni。
+Google 2026-11-05 发布 **Gemini Omni 1.2 Flash**。Gemini Apps 的「创建视频」入口已使用该模型名称，15 秒视频正向 Google AI Ultra 用户逐步开放。网页可选时长与账号要求以 Google 帮助为准。[发布公告](https://blog.google/innovation-and-ai/technology/developers-tools/introducing-gemini-omni-1-2-flash/)、[Gemini Apps 视频帮助](https://support.google.com/gemini/answer/16126339?hl=en)
+
+- **网页 Cookie 路径**：`gemini_generate_video(prompt=...)` 默认用 Flash 聊天别名进入专用「创建视频」模式。当前公开网页代码仍给该入口设置模式 11，模型版本由 Google 和账号开放状态决定。MCP 没有从这一模式取得精确后端版本或时长选择的证据。2026-10-31 至 11-01 的授权测试曾验证网页模式的 10 秒 MP4 和音轨。这次上线复查在派发前返回 `AUTH_REQUIRED`，尚未用该账号验证 1.2 Flash 的生成结果。
+- **明确指定版本**：配置 MCP 进程的 `GEMINI_API_KEY`，再调用 `gemini_generate_video(prompt=..., model="gemini-omni-1.2-flash", duration_seconds=15)`。这会使用单独计费的 Gemini Developer API。时长支持 3–15 秒的整数，省略时由 API 默认生成 10 秒。可传一张本地参考图，使用返回的原 `operation_id` 取回经过校验的 MP4。真实付费生成尚未验证。[官方 API 用法](https://ai.google.dev/gemini-api/docs/omni#control-video-duration)
 
 ### 音乐生成
 

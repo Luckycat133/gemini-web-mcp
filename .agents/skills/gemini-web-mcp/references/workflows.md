@@ -240,7 +240,11 @@ For a full-length song or advanced arrangement, if the current Flash route expli
 
 A later authorized local test verified an MP4 video and separate JPEG preview through the primary video mode. A thumbnail alone is not a completed video. A subsequent compact test verified an MP4 video and separate preview; compact music also returned verified MP3 and MP4 artifacts. For either route, verify the actual video Artifact; use the dedicated Videos page if the account or upstream route is unavailable.
 
-The function video tool defaults to Flash. An earlier explicit Pro request returned a verified 10-second MP4 with audio; that observation does not prove the current Flash route is available. Preserve an explicitly requested model and do not silently retry a refused request with another model.
+The function video tool defaults to the Flash chat alias and enters the native Create video mode. Google identifies this mode as Gemini Omni 1.2 Flash in its current help. Account rollout determines access, and 15-second clips are rolling out to Ultra in Gemini Apps. Treat the exact Web version as unknown unless the response identifies it. [Gemini Apps video help](https://support.google.com/gemini/answer/16126339?hl=en)
+
+When the user chooses the paid Developer API route for an exact Omni 1.2 Flash request, use `model="gemini-omni-1.2-flash"` on `gemini_generate_video` (or on the compatibility video routes above). Configure `GEMINI_API_KEY` in the MCP server environment. Optional `duration_seconds` accepts integers from 3 to 15 and defaults to 10 seconds upstream. Supply at most one local reference through `image_path`, use default thinking and keep background execution enabled. Use the original handle to recover the verified MP4. The worker deletes its API interaction after saving and verifying the video unless `retain_chat=true`. A delayed delete is specific to the Web route. [Gemini Omni API guide](https://ai.google.dev/gemini-api/docs/omni)
+
+Preserve an explicitly requested model. Check a failed or interrupted operation before considering any new generation. The Cookie and paid API routes use separate credentials and quotas.
 
 Process:
 

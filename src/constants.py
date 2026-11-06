@@ -24,6 +24,12 @@ ENDPOINTS = {
 DEFAULT_CHAT_RETENTION_SECONDS = 0
 DEFAULT_SESSION_MAX_AGE_SECONDS = 1800
 
+OMNI_VIDEO_MODEL = "gemini-omni-1.2-flash"
+OMNI_VIDEO_API_BACKEND = "Gemini API (Omni 1.2 Flash)"
+GEMINI_GENERIC_FAILURE_REPLY = (
+    "I'm having a hard time fulfilling your request. Can I help you with something else instead?"
+)
+
 
 class ModelConfig(TypedDict):
     name: str
@@ -202,8 +208,17 @@ def resolve_media_request(
     media_type: str,
     thinking_level: str | None = None,
 ) -> dict[str, str]:
-    """Resolve the effective Gemini Web backend behavior for media generation."""
+    """Resolve media routing while keeping Web chat aliases and API IDs separate."""
     alias = normalize_model_alias(model)
+
+    if media_type == "video" and alias == OMNI_VIDEO_MODEL:
+        return {
+            "requested_alias": alias,
+            "effective_alias": alias,
+            "request_model": OMNI_VIDEO_MODEL,
+            "backend_label": OMNI_VIDEO_API_BACKEND,
+            "note": "Explicit Gemini API video generation with GEMINI_API_KEY.",
+        }
 
     if media_type == "image":
         if alias == "flash-lite":

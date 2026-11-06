@@ -184,7 +184,7 @@ TOOL_MANIFEST: list[dict[str, Any]] = [
     {
         "name": "gemini_generate_media",
         "group": "media",
-        "purpose": "Start image, music, or video generation in the background by default; recover verified artifacts using the returned operation handle. background=false waits for the result.",
+        "purpose": "Generate image, music or video and recover artifacts by operation handle. For video, explicitly select gemini-omni-1.2-flash to use the paid Gemini API with GEMINI_API_KEY and optional 3–15 second duration. This API route requires background mode.",
         "read_only": False,
         "destructive": False,
         "privacy": "sends_user_prompt_and_optional_reference_files",

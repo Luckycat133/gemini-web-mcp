@@ -8,7 +8,7 @@
 - `_read_cookie_jar`：cookie 名不在集合 / 空值 / 域名不匹配 → 过滤
 - `_browser_cookie_candidates`：非 chrome 浏览器 → 空列表
 - `_chrome_selected_profile_directory`：Local State 读取的各种边界
-- `_select_valid_cookie_candidate`：单候选直接返回
+- `_validate_browser_candidates`：验证单候选，失败不回退到未验证 Cookie
 - `_select_named_cookie_candidate`：未找到 → 空 dict
 - `get_cookies_from_browser`：不支持的浏览器 → 空 dict
 - `list_browser_cookie_profiles`：不支持的浏览器 → error dict
@@ -23,15 +23,18 @@
 """
 
 import asyncio
+import errno
 import json
 import subprocess
 import sys
+from importlib import import_module
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from src.cookie_manager import CookieManager
+from src.cookie_manager import BrowserCookieDiscovery, CookieManager
 
 
 @pytest.fixture(autouse=True)
@@ -41,6 +44,7 @@ def isolate_browser_readers(monkeypatch):
 
     for name in ("chrome", "firefox", "edge", "opera", "brave"):
         monkeypatch.setattr(browser_cookie3, name, MagicMock(return_value=[]))
+    monkeypatch.setattr(CookieManager, "_browser_base_paths", staticmethod(lambda _browser: []))
 
 
 def _run(coro):
@@ -71,6 +75,14 @@ def test_read_cookie_jar_filters_empty_values():
     jar = [_fake_cookie("__Secure-1PSID", "")]
     result = CookieManager._read_cookie_jar(jar, names)
     assert result == {}
+
+
+def test_read_cookie_jar_omits_expired_cookie_without_dropping_session_cookie():
+    expired = _fake_cookie("__Secure-1PSID", "expired-psid")
+    expired.expires = 1
+    session = _fake_cookie("__Secure-1PSIDTS", "session-ts")
+    session.expires = None
+    assert CookieManager._read_cookie_jar([expired, session], {expired.name, session.name}) == {session.name: session.value}
 
 
 def test_read_cookie_jar_filters_non_google_domains():
@@ -154,6 +166,43 @@ def test_browser_cookie_candidates_chrome_reads_auto_and_profiles(monkeypatch, t
     profile_names = [name for name, _ in candidates]
     assert "auto" in profile_names
     assert "Profile 1" in profile_names
+
+
+def test_browser_cookie_candidates_reads_network_database_as_named_profile(monkeypatch, tmp_path):
+    network = tmp_path / "Profile 2" / "Network"
+    network.mkdir(parents=True)
+    database = network / "Cookies"
+    database.touch()
+    monkeypatch.setattr(CookieManager, "_chrome_base_path", staticmethod(lambda: tmp_path))
+    browser = MagicMock()
+    browser.chrome.return_value = [_fake_cookie("__Secure-1PSID", "profile-psid")]
+
+    candidates = CookieManager._browser_cookie_candidates(
+        browser, "chrome", MagicMock(return_value=[]), {"__Secure-1PSID"},
+    )
+    assert candidates == [("Profile 2", {"__Secure-1PSID": "profile-psid"})]
+    browser.chrome.assert_called_once_with(cookie_file=str(database), domain_name="google.com")
+
+
+def test_os_denied_cookie_storage_is_reported_without_sensitive_path(monkeypatch, tmp_path):
+    default = tmp_path / "Default"
+    default.mkdir()
+    database = default / "Cookies"
+    database.touch()
+    monkeypatch.setattr(CookieManager, "_chrome_base_path", staticmethod(lambda: tmp_path))
+    real_open = Path.open
+
+    def deny_cookie_open(path, *args, **kwargs):
+        if path == database:
+            raise PermissionError(errno.EPERM, "private-system-message")
+        return real_open(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "open", deny_cookie_open)
+    result = CookieManager.discover_browser_cookies("chrome", profile="Default")
+    profiles = CookieManager.list_browser_cookie_profiles("chrome", validate=False)
+    assert not result.cookies and result.reason == "BROWSER_COOKIE_ACCESS_DENIED"
+    assert profiles[0]["error_code"] == "BROWSER_COOKIE_ACCESS_DENIED"
+    assert "private-system-message" not in json.dumps(profiles)
 
 
 @pytest.mark.parametrize(
@@ -318,42 +367,43 @@ def test_chrome_selected_profile_returns_empty_when_no_selected_key(mock_chrome_
 
 
 # ---------------------------------------------------------------------------
-# _select_valid_cookie_candidate
+# _validate_browser_candidates
 # ---------------------------------------------------------------------------
 
 
-def test_select_valid_cookie_candidate_returns_directly_for_single():
-    """单候选 → 直接返回其 cookies，不启动验证线程（lines 329-330）。"""
+def test_validate_browser_candidates_checks_a_single_candidate(monkeypatch):
     cookies = {"__Secure-1PSID": "x"}
-    result = CookieManager._select_valid_cookie_candidate([("Default", cookies)])
-    assert result is cookies
+    rejected = BrowserCookieDiscovery(reason="BROWSER_COOKIE_AUTH_REJECTED")
+    verify = AsyncMock(return_value=rejected)
+    monkeypatch.setattr(CookieManager, "_verify_cookie_candidates", staticmethod(verify))
+    candidates = [("Default", cookies)]
+    assert CookieManager._validate_browser_candidates(candidates) == rejected
+    verify.assert_awaited_once_with(candidates)
 
 
-def test_select_valid_cookie_candidate_falls_back_to_first_on_timeout(monkeypatch):
-    """多候选 + 验证返回空 → 回退到第一个候选（lines 344-345）。"""
+def test_failed_candidate_verification_does_not_return_first_cookie(monkeypatch):
+    candidates = [("A", {"__Secure-1PSID": "a"}), ("B", {"__Secure-1PSID": "b"})]
+    monkeypatch.setattr(
+        CookieManager, "_verify_cookie_candidates",
+        staticmethod(AsyncMock(return_value=BrowserCookieDiscovery(reason="BROWSER_COOKIE_AUTH_UNVERIFIED"))),
+    )
+    result = CookieManager._validate_browser_candidates(candidates)
+    assert not result.cookies and result.reason == "BROWSER_COOKIE_AUTH_UNVERIFIED"
+
+
+def test_discovery_validates_only_the_bound_psid_and_reports_its_profile(monkeypatch):
     cookies_a = {"__Secure-1PSID": "a"}
     cookies_b = {"__Secure-1PSID": "b"}
-    # mock 异步验证返回空 dict（模拟"无可用候选"），AsyncMock 返回协程，
-    # asyncio.run 才能 await；用 lambda 返回 dict 会让 asyncio.run 抛 TypeError
-    monkeypatch.setattr(
-        CookieManager, "_validate_cookie_candidates_async",
-        staticmethod(AsyncMock(return_value={})),
-    )
-    result = CookieManager._select_valid_cookie_candidate([("A", cookies_a), ("B", cookies_b)])
-    assert result is cookies_a
+    monkeypatch.setattr(CookieManager, "_browser_cookie_candidates", staticmethod(lambda *a, **k: [
+        ("Profile 1", cookies_a), ("auto", cookies_b), ("Profile 2", cookies_b),
+    ]))
+    verify = AsyncMock(return_value=BrowserCookieDiscovery(cookies_b, "browser_chrome:Profile 2"))
+    monkeypatch.setattr(CookieManager, "_verify_cookie_candidates", staticmethod(verify))
 
-
-def test_select_valid_cookie_candidate_returns_validated_cookies(monkeypatch):
-    """多候选 + 验证成功 → 返回验证后的 cookies（line 342）。"""
-    cookies_a = {"__Secure-1PSID": "a"}
-    cookies_b = {"__Secure-1PSID": "b"}
-    validated = {"__Secure-1PSID": "validated"}
-    monkeypatch.setattr(
-        CookieManager, "_validate_cookie_candidates_async",
-        staticmethod(AsyncMock(return_value=validated)),
-    )
-    result = CookieManager._select_valid_cookie_candidate([("A", cookies_a), ("B", cookies_b)])
-    assert result == validated
+    result = CookieManager.discover_browser_cookies(expected_psid="b")
+    assert result == BrowserCookieDiscovery(cookies_b, "browser_chrome:Profile 2")
+    assert "__Secure-1PSID" not in repr(result)
+    verify.assert_awaited_once_with([("browser_chrome:Profile 2", cookies_b)])
 
 
 # ---------------------------------------------------------------------------
@@ -438,12 +488,15 @@ def test_get_cookies_from_browser_with_profile_selects_named(monkeypatch):
 
 
 def test_get_cookies_from_browser_no_profile_single_candidate(monkeypatch):
-    """candidates 但无 profile → _select_valid_cookie_candidate 单候选直返（line 171）。"""
+    """The compatibility adapter delegates automatic selection to verified discovery."""
     candidates = [("Default", {"__Secure-1PSID": "psid"})]
     monkeypatch.setattr(
         CookieManager, "_browser_cookie_candidates",
         staticmethod(lambda *a, **k: candidates),
     )
+    monkeypatch.setattr(CookieManager, "_verify_cookie_candidates", AsyncMock(
+        return_value=BrowserCookieDiscovery(candidates[0][1], "browser_chrome:Default"),
+    ))
     cookies = CookieManager.get_cookies_from_browser("chrome")
     assert cookies["__Secure-1PSID"] == "psid"
 
@@ -457,6 +510,9 @@ def test_get_cookies_from_browser_no_candidates_falls_back_to_read_jar(monkeypat
     )
     jar = [_fake_cookie("__Secure-1PSID", "fallback-psid")]
     monkeypatch.setattr(browser_cookie3, "chrome", lambda domain_name="": jar)
+    monkeypatch.setattr(CookieManager, "_verify_cookie_candidates", AsyncMock(
+        return_value=BrowserCookieDiscovery({"__Secure-1PSID": "fallback-psid"}, "browser_chrome"),
+    ))
     cookies = CookieManager.get_cookies_from_browser("chrome")
     assert cookies["__Secure-1PSID"] == "fallback-psid"
 
@@ -633,10 +689,26 @@ def _make_fake_gemini_client_class(*, init_side_effect=None, account_status=None
             self.cookies = {}
             self.account_status = account_status
             self.language = "en"
-            self.init = AsyncMock(side_effect=init_side_effect)
+            self.init = AsyncMock(side_effect=self._init)
             self.close = AsyncMock(side_effect=close_side_effect)
 
+        async def _init(self, **_kwargs):
+            if init_side_effect is not None:
+                raise init_side_effect
+            self.account_status = account_status
+            self._cookie_source = "Base Cookies"
+
     return FakeGeminiClient
+
+
+def _use_fake_probe_client(monkeypatch, fake_client_class):
+    def build(cookies):
+        client = fake_client_class(cookies.get("__Secure-1PSID"), cookies.get("__Secure-1PSIDTS", ""))
+        client.cookies = cookies
+        client.account_status = None
+        return client
+
+    monkeypatch.setattr(CookieManager, "_make_browser_cookie_probe_client", staticmethod(build))
 
 
 def _make_async_probe(return_value):
@@ -656,7 +728,7 @@ def test_validate_cookie_candidates_async_selects_first_available_without_schedu
     from gemini_webapi.constants import AccountStatus
 
     fake_cls = _make_fake_gemini_client_class(account_status=AccountStatus.AVAILABLE)
-    monkeypatch.setattr("gemini_webapi.GeminiClient", fake_cls)
+    _use_fake_probe_client(monkeypatch, fake_cls)
     probe = AsyncMock(return_value=3)
     monkeypatch.setattr(CookieManager, "_probe_scheduled_registry_count", probe)
 
@@ -670,7 +742,7 @@ def test_validate_cookie_candidates_async_selects_first_available_without_schedu
 def test_validate_cookie_candidates_async_skips_unavailable_account(monkeypatch):
     """账号不可用 → 跳过，返回空（line 385-386）。"""
     fake_cls = _make_fake_gemini_client_class(account_status=None)
-    monkeypatch.setattr("gemini_webapi.GeminiClient", fake_cls)
+    _use_fake_probe_client(monkeypatch, fake_cls)
 
     result = _run(CookieManager._validate_cookie_candidates_async(
         [("Default", {"__Secure-1PSID": "x"})],
@@ -685,11 +757,14 @@ def test_validate_cookie_candidates_async_skips_expired_then_selects_available(m
     class FakeClient:
         def __init__(self, psid, psidts):
             self.cookies = {}
-            self.account_status = AccountStatus.AVAILABLE if psid == "valid" else AccountStatus.UNAUTHENTICATED
-            self.init = AsyncMock()
+            self.psid = psid
             self.close = AsyncMock()
 
-    monkeypatch.setattr("gemini_webapi.GeminiClient", FakeClient)
+        async def init(self, **_kwargs):
+            self.account_status = AccountStatus.AVAILABLE if self.psid == "valid" else AccountStatus.UNAUTHENTICATED
+            self._cookie_source = "Base Cookies"
+
+    _use_fake_probe_client(monkeypatch, FakeClient)
     probe = AsyncMock()
     monkeypatch.setattr(CookieManager, "_probe_scheduled_registry_count", probe)
     valid = {"__Secure-1PSID": "valid"}
@@ -700,10 +775,49 @@ def test_validate_cookie_candidates_async_skips_expired_then_selects_available(m
     probe.assert_not_awaited()
 
 
+@pytest.mark.parametrize(
+    ("status", "has_models", "reason"),
+    [(1000, True, None), (1016, False, "BROWSER_COOKIE_AUTH_REJECTED"),
+     (1000, False, "BROWSER_COOKIE_AUTH_UNVERIFIED"), (None, False, "BROWSER_COOKIE_AUTH_UNVERIFIED")],
+)
+def test_cookie_probe_uses_exact_jar_without_sdk_bootstrap_or_cache(monkeypatch, status, has_models, reason):
+    from gemini_webapi import GeminiClient
+    from gemini_webapi.constants import AccountStatus
+
+    sdk_auth = import_module("gemini_webapi.utils.get_access_token")
+    transport = SimpleNamespace(cookies=sdk_auth.Cookies(), close=AsyncMock())
+    blocked = AsyncMock(side_effect=AssertionError("general SDK bootstrap used"))
+    monkeypatch.setattr(GeminiClient, "init", blocked)
+    monkeypatch.setattr(sdk_auth, "get_access_token", blocked)
+    monkeypatch.setattr(sdk_auth, "AsyncSession", lambda **_options: transport)
+    monkeypatch.delenv("GEMINI_PROXY", raising=False)
+
+    async def bootstrap(session, jar, *, verbose):
+        assert session is transport and not verbose
+        assert {cookie.name: cookie.value for cookie in jar.jar} == {"__Secure-1PSID": "candidate-psid"}
+        return SimpleNamespace(text='"SNlM0e":"synthetic-token"')
+
+    async def observe_status(client):
+        assert client.client is transport
+        if status is not None:
+            client.account_status = AccountStatus(status)
+        if has_models:
+            client._model_registry["synthetic"] = object()
+
+    monkeypatch.setattr(sdk_auth, "_send_request", bootstrap)
+    monkeypatch.setattr(GeminiClient, "_fetch_user_status", observe_status)
+    candidate = {"__Secure-1PSID": "candidate-psid"}
+    result = _run(CookieManager._verify_cookie_candidates([("browser_chrome:Default", candidate)]))
+    assert result.reason == reason
+    assert result.cookies == ({} if reason else candidate)
+    blocked.assert_not_awaited()
+    transport.close.assert_awaited_once()
+
+
 def test_validate_cookie_candidates_async_handles_init_exception(monkeypatch):
     """client.init 抛异常 → 跳过该候选（lines 394-395）。"""
     fake_cls = _make_fake_gemini_client_class(init_side_effect=RuntimeError("network"))
-    monkeypatch.setattr("gemini_webapi.GeminiClient", fake_cls)
+    _use_fake_probe_client(monkeypatch, fake_cls)
 
     result = _run(CookieManager._validate_cookie_candidates_async(
         [("Default", {"__Secure-1PSID": "x"})],
@@ -717,7 +831,7 @@ def test_validate_cookie_candidates_async_swallows_close_exception(monkeypatch):
         account_status=None,
         close_side_effect=RuntimeError("close boom"),
     )
-    monkeypatch.setattr("gemini_webapi.GeminiClient", fake_cls)
+    _use_fake_probe_client(monkeypatch, fake_cls)
 
     # 账号不可用 → continue 触发 finally；close 抛异常被 finally 内 try/except 吞掉
     result = _run(CookieManager._validate_cookie_candidates_async(
@@ -736,7 +850,7 @@ def test_validate_cookie_candidate_profiles_async_marks_available(monkeypatch):
     from gemini_webapi.constants import AccountStatus
 
     fake_cls = _make_fake_gemini_client_class(account_status=AccountStatus.AVAILABLE)
-    monkeypatch.setattr("gemini_webapi.GeminiClient", fake_cls)
+    _use_fake_probe_client(monkeypatch, fake_cls)
     monkeypatch.setattr(
         CookieManager, "_probe_scheduled_registry_count",
         staticmethod(_make_async_probe(5)),
@@ -753,7 +867,7 @@ def test_validate_cookie_candidate_profiles_async_marks_available(monkeypatch):
 def test_validate_cookie_candidate_profiles_async_records_init_error(monkeypatch):
     """client.init 抛异常 → validation_error（lines 431-432）。"""
     fake_cls = _make_fake_gemini_client_class(init_side_effect=RuntimeError("fail"))
-    monkeypatch.setattr("gemini_webapi.GeminiClient", fake_cls)
+    _use_fake_probe_client(monkeypatch, fake_cls)
 
     profiles = _run(CookieManager._validate_cookie_candidate_profiles_async(
         [("Default", {"__Secure-1PSID": "x"})],
@@ -771,7 +885,7 @@ def test_validate_cookie_candidate_profiles_async_swallows_close_exception(monke
         account_status=AccountStatus.AVAILABLE,
         close_side_effect=RuntimeError("close boom"),
     )
-    monkeypatch.setattr("gemini_webapi.GeminiClient", fake_cls)
+    _use_fake_probe_client(monkeypatch, fake_cls)
     monkeypatch.setattr(
         CookieManager, "_probe_scheduled_registry_count",
         staticmethod(_make_async_probe(2)),
@@ -964,13 +1078,15 @@ def test_cookie_validation_disables_sdk_verbose_logging(monkeypatch, caplog):
 
         async def init(self, *, verbose=True, **kwargs):
             observed.append(verbose)
+            self.account_status = AccountStatus.AVAILABLE
+            self._cookie_source = "Base Cookies"
             if verbose:
                 logging.getLogger("synthetic_sdk").warning(".cached_cookies_%s.json", secret)
 
-        async def close(self):
+        async def close(self, delay=0):
             pass
 
-    monkeypatch.setattr("gemini_webapi.GeminiClient", FakeClient)
+    _use_fake_probe_client(monkeypatch, FakeClient)
     monkeypatch.setattr(CookieManager, "_probe_scheduled_registry_count", _make_async_probe(0))
     candidates = [("Default", {"__Secure-1PSID": secret})]
     with caplog.at_level(logging.DEBUG):
@@ -1003,7 +1119,7 @@ def test_cookie_validation_errors_are_safe_in_profile_results_and_logs(monkeypat
 
     secret = "synthetic-private-cookie-in-init-error"
     fake_cls = _make_fake_gemini_client_class(init_side_effect=RuntimeError(secret), close_side_effect=RuntimeError(secret))
-    monkeypatch.setattr("gemini_webapi.GeminiClient", fake_cls)
+    _use_fake_probe_client(monkeypatch, fake_cls)
     candidates = [("Default", {"__Secure-1PSID": secret})]
     with caplog.at_level(logging.DEBUG):
         profiles = _run(CookieManager._validate_cookie_candidate_profiles_async(candidates))

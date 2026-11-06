@@ -13,6 +13,9 @@ from ..infrastructure.rpc_parsers import parse_contract_body, parse_rpc_envelope
 from .deadlines import await_before_deadline
 
 
+_SKILL_PUSH_UPLOAD = "https://push.clients6.google.com/upload/"
+
+
 class SkillTransportUnavailable(RuntimeError):
     """A safe failure; a sent mutation must not be replayed."""
 
@@ -54,10 +57,13 @@ def skill_upload_configuration(html: str) -> tuple[str, dict[str, str]]:
         endpoint = "https://content-push.googleapis.com/upload/"
         if contribution:
             configured = bootstrap.get("h1eoVe", "")
-            if configured and (not isinstance(configured, str)
-                               or not configured.startswith("https://contribution.usercontent.google.com/")):
+            if configured == _SKILL_PUSH_UPLOAD:
+                endpoint = _SKILL_PUSH_UPLOAD + "?upload_schema=agent_skills"
+            elif not configured or (isinstance(configured, str)
+                                    and configured.startswith("https://contribution.usercontent.google.com/")):
+                endpoint = "https://contribution.usercontent.google.com/upload?upload_schema=agent_skills"
+            else:
                 raise ValueError
-            endpoint = "https://contribution.usercontent.google.com/upload?upload_schema=agent_skills"
         headers = {"Push-ID": push_id, "X-Tenant-Id": "agent_skills", "Content-Type": "application/zip"}
         context = bootstrap.get("Ylro7b")
         if context:
@@ -101,7 +107,8 @@ async def upload_skill(client: Any, archive_bytes: bytes, filename: str) -> str:
     try:
         parsed = urlsplit(upload_url)
         if (parsed.scheme != "https" or parsed.hostname not in {"content-push.googleapis.com",
-                "contribution.usercontent.google.com"} or parsed.username is not None or parsed.password is not None
+                "contribution.usercontent.google.com", "push.clients6.google.com"}
+                or parsed.username is not None or parsed.password is not None
                 or parsed.port not in (None, 443) or parsed.fragment or len(upload_url) > 8192
                 or any(ord(char) < 32 or ord(char) == 127 for char in upload_url)):
             raise ValueError

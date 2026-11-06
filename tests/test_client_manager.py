@@ -613,14 +613,15 @@ def _synthetic_auth_client(statuses):
 
 def test_explicit_unauthenticated_refreshes_same_bound_browser_account_once(monkeypatch):
     from gemini_webapi.constants import AccountStatus
-    from src.cookie_manager import CookieManager
+    from src.cookie_manager import BrowserCookieDiscovery, CookieManager
     monkeypatch.setenv("GEMINI_PSID", "synthetic-bound")
     monkeypatch.setenv("GEMINI_PSIDTS", "old")
     monkeypatch.setenv("GEMINI_BROWSER_AUTO_LOAD", "true")
     monkeypatch.setattr(client_manager, "prepare_browser_cookie_cache", lambda **_kwargs: None)
     cookies = {"__Secure-1PSID": "synthetic-bound", "__Secure-1PSIDTS": "fresh"}
     cm = CookieManager(auto_refresh=False)
-    monkeypatch.setattr(cm, "get_cookies_from_browser", lambda *_args: cookies)
+    discover = MagicMock(return_value=BrowserCookieDiscovery(cookies=cookies, source="browser_chrome:Default"))
+    monkeypatch.setattr(cm, "discover_browser_cookies", discover)
     monkeypatch.setattr(client_manager, "get_cookie_manager", lambda: cm)
     monkeypatch.setattr(client_manager, "COOKIE_MANAGER_AVAILABLE", True)
     client = _synthetic_auth_client([AccountStatus.UNAUTHENTICATED, AccountStatus.AVAILABLE])
@@ -632,35 +633,41 @@ def test_explicit_unauthenticated_refreshes_same_bound_browser_account_once(monk
     asyncio.run(run())
     assert client.init.await_count == 2 and client.close.await_count == 1
     assert client._cookies.clear.call_count == 1 and client.cookies == cookies
-    assert cm.get_cookie().extra_cookies == cookies and cm.get_cookie().source == "browser_chrome"
+    discover.assert_called_once_with(expected_psid="synthetic-bound")
+    assert cm.get_cookie().extra_cookies == cookies and cm.get_cookie().source == "browser_chrome:Default"
     assert os.environ["GEMINI_PSIDTS"] == "old"  # No environment/config change.
 
 
 def test_unauthenticated_different_browser_account_fails_closed(monkeypatch):
     from gemini_webapi.constants import AccountStatus
+    from src.cookie_manager import BrowserCookieDiscovery
     monkeypatch.setenv("GEMINI_PSID", "bound")
     monkeypatch.setenv("GEMINI_BROWSER_AUTO_LOAD", "true")
     monkeypatch.setattr(client_manager, "COOKIE_MANAGER_AVAILABLE", True)
     cm = MagicMock()
-    cm.get_cookies_from_browser.return_value = {"__Secure-1PSID": "other"}
+    cm.discover_browser_cookies.return_value = BrowserCookieDiscovery(reason="BROWSER_COOKIE_ACCOUNT_MISMATCH")
     monkeypatch.setattr(client_manager, "get_cookie_manager", lambda: cm)
     client = _synthetic_auth_client([AccountStatus.UNAUTHENTICATED])
     mgr = ClientManager()
     mgr._client = client
-    with pytest.raises(PermissionError):
+    with pytest.raises(client_manager.ClientAuthenticationRequired) as caught:
         asyncio.run(mgr.initialize())
+    assert caught.value.auth_reason == "GEMINI_SESSION_REJECTED"
+    assert caught.value.browser_auth_reason == "BROWSER_COOKIE_ACCOUNT_MISMATCH"
+    cm.discover_browser_cookies.assert_called_once_with(expected_psid="bound")
     assert not mgr._initialized and client.init.await_count == 1
     assert client._cookies.clear.call_count == 0 and cm.update_cookie.call_count == 0
 
 
 def test_browser_refresh_rejected_status_remains_auth_failure(monkeypatch):
     from gemini_webapi.constants import AccountStatus
+    from src.cookie_manager import BrowserCookieDiscovery
     monkeypatch.setenv("GEMINI_PSID", "bound")
     monkeypatch.setenv("GEMINI_BROWSER_AUTO_LOAD", "true")
     monkeypatch.setattr(client_manager, "COOKIE_MANAGER_AVAILABLE", True)
     monkeypatch.setattr(client_manager, "prepare_browser_cookie_cache", lambda **_kw: None)
     cm = MagicMock()
-    cm.get_cookies_from_browser.return_value = {"__Secure-1PSID": "bound"}
+    cm.discover_browser_cookies.return_value = BrowserCookieDiscovery(cookies={"__Secure-1PSID": "bound"})
     monkeypatch.setattr(client_manager, "get_cookie_manager", lambda: cm)
     client = _synthetic_auth_client([AccountStatus.UNAUTHENTICATED, AccountStatus.UNAUTHENTICATED])
     mgr = ClientManager()
@@ -680,7 +687,8 @@ def test_network_failure_does_not_trigger_browser_cookie_recovery(monkeypatch):
     mgr._client = client
     with pytest.raises(OSError):
         asyncio.run(mgr.initialize())
-    assert cm.get_cookies_from_browser.call_count == 0 and not mgr._initialized
+    cm.discover_browser_cookies.assert_not_called()
+    assert not mgr._initialized
 
 
 def test_previously_initialized_explicit_unauthenticated_is_not_returned(monkeypatch):
@@ -698,13 +706,14 @@ def test_previously_initialized_explicit_unauthenticated_is_not_returned(monkeyp
 def test_sdk_auth_error_refreshes_before_any_generation(monkeypatch):
     from gemini_webapi.constants import AccountStatus
     from gemini_webapi.exceptions import AuthError
+    from src.cookie_manager import BrowserCookieDiscovery
 
     monkeypatch.setenv("GEMINI_PSID", "bound")
     monkeypatch.setenv("GEMINI_BROWSER_AUTO_LOAD", "true")
     monkeypatch.setattr(client_manager, "COOKIE_MANAGER_AVAILABLE", True)
     monkeypatch.setattr(client_manager, "prepare_browser_cookie_cache", lambda **_kw: None)
     cm = MagicMock()
-    cm.get_cookies_from_browser.return_value = {"__Secure-1PSID": "bound"}
+    cm.discover_browser_cookies.return_value = BrowserCookieDiscovery(cookies={"__Secure-1PSID": "bound"})
     cm.update_cookie.return_value = True
     monkeypatch.setattr(client_manager, "get_cookie_manager", lambda: cm)
     client = _synthetic_auth_client([AccountStatus.AVAILABLE])
@@ -723,15 +732,16 @@ def test_sdk_auth_error_refreshes_before_any_generation(monkeypatch):
 
 def test_auth_refresh_rejects_account_changed_during_browser_read(monkeypatch):
     from gemini_webapi.constants import AccountStatus
+    from src.cookie_manager import BrowserCookieDiscovery
 
     monkeypatch.setenv("GEMINI_PSID", "bound")
     monkeypatch.setenv("GEMINI_BROWSER_AUTO_LOAD", "true")
     monkeypatch.setattr(client_manager, "COOKIE_MANAGER_AVAILABLE", True)
     cm = MagicMock()
-    def read_browser(*_args):
+    def read_browser(**_kwargs):
         os.environ["GEMINI_PSID"] = "changed"
-        return {"__Secure-1PSID": "bound"}
-    cm.get_cookies_from_browser.side_effect = read_browser
+        return BrowserCookieDiscovery(cookies={"__Secure-1PSID": "bound"})
+    cm.discover_browser_cookies.side_effect = read_browser
     monkeypatch.setattr(client_manager, "get_cookie_manager", lambda: cm)
     client = _synthetic_auth_client([AccountStatus.UNAUTHENTICATED])
     mgr = ClientManager()
@@ -739,3 +749,35 @@ def test_auth_refresh_rejects_account_changed_during_browser_read(monkeypatch):
     with pytest.raises(PermissionError):
         asyncio.run(mgr.initialize())
     assert client.init.await_count == 1 and cm.update_cookie.call_count == 0
+
+
+def test_browser_autoload_retries_on_next_use_after_a_read_denial(monkeypatch):
+    from src.cookie_manager import BrowserCookieDiscovery, CookieManager
+
+    monkeypatch.setenv("GEMINI_BROWSER_AUTO_LOAD", "true")
+    monkeypatch.delenv("GEMINI_PSID", raising=False)
+    monkeypatch.delenv("GEMINI_PSIDTS", raising=False)
+    manager = CookieManager(auto_refresh=False)
+    cookies = {"__Secure-1PSID": "synthetic-browser-session", "__Secure-1PSIDTS": "fresh"}
+    discover = MagicMock(side_effect=[
+        BrowserCookieDiscovery(reason="BROWSER_COOKIE_ACCESS_DENIED"),
+        BrowserCookieDiscovery(cookies=cookies, source="browser_chrome:Default"),
+    ])
+    monkeypatch.setattr(manager, "discover_browser_cookies", discover)
+    monkeypatch.setattr(client_manager, "get_cookie_manager", lambda: manager)
+    monkeypatch.setattr(client_manager, "COOKIE_MANAGER_AVAILABLE", True)
+    client = MagicMock()
+    monkeypatch.setattr("src.thinking_client.ThinkingLevelGeminiClient", lambda *args, **kwargs: client)
+    monkeypatch.setattr(client_manager, "prepare_browser_cookie_cache", lambda: None)
+    mgr = ClientManager()
+
+    for _ in range(2):
+        with pytest.raises(client_manager.ClientAuthenticationRequired) as caught:
+            mgr.get_client()
+        assert caught.value.auth_reason == "BROWSER_COOKIE_ACCESS_DENIED"
+    assert not manager.get_cookie() and discover.call_count == 1
+
+    mgr._browser_retry_at = 0
+    assert mgr.get_client() is client
+    assert discover.call_count == 2 and mgr.browser_auth_reason is None
+    assert client.cookies == cookies and manager.get_cookie().source == "browser_chrome:Default"

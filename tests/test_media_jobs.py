@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+from src.constants import GEMINI_GENERIC_FAILURE_REPLY
 from src.domain import Artifact, ArtifactKind, ArtifactState
 from src.services import media_jobs
 
@@ -99,6 +100,29 @@ def test_thumbnail_alone_never_completes_video(monkeypatch):
     asyncio.run(media_jobs.recover_media_job(record, store=store, worker_token="worker"))
     assert [event[0] for event in store.events] == ["finish"]
     assert store.events[0][1]["phase"] == "media_artifact_not_observed"
+
+
+def test_expired_web_auth_fails_before_video_generation(monkeypatch, tmp_path):
+    from src import client_wrapper
+    from src.client_manager import ClientAuthenticationRequired
+    from src.infrastructure.operation_store import OperationStore
+
+    store = OperationStore()
+    store.create_or_get("job", "gemini_generate_video", media_type="video", output_dir=str(tmp_path),
+                        filename="job", request_model="gemini-3-flash", effective_backend="Gemini Web video mode")
+    assert store.claim_worker("job", "worker")
+    generate = AsyncMock()
+    monkeypatch.setattr(media_jobs, "generate_media_response", generate)
+    monkeypatch.setattr(client_wrapper, "get_gemini_client", lambda: object())
+    monkeypatch.setattr(client_wrapper, "initialize_client", AsyncMock(side_effect=ClientAuthenticationRequired()))
+    asyncio.run(media_jobs.execute_media_job(
+        {"prompt": "A synthetic scene", "media_type": "video", "output_dir": str(tmp_path)},
+        operation_id="job", store=store, worker_token="worker",
+    ))
+    saved = store.get("job")
+    assert saved.state == "failed" and saved.error_code == "AUTH_REQUIRED"
+    assert not saved.cleanup_protected and saved.upstream_chat_id is None
+    generate.assert_not_awaited()
 
 
 def test_stream_checkpoints_cid_then_full_identity_before_cleanup():
@@ -795,6 +819,57 @@ def test_video_refusal_is_exact_and_requires_no_artifacts(monkeypatch):
         asyncio.run(media_jobs._save_response(None, response, record, store=store, token="worker"))
         assert all(event[0] != "release_rejected" for event in store.events)
         assert store.events[0][1]["state"] in {"partial", "queued"}
+
+
+@pytest.mark.parametrize("failure_reply", [
+    GEMINI_GENERIC_FAILURE_REPLY,
+    "Sorry, something went wrong. Please try your request again.",
+])
+@pytest.mark.parametrize("completed, same_candidate, same_reply, has_media", [
+    (True, True, True, False),
+    (False, True, True, False),
+    (True, False, True, False),
+    (True, True, False, False),
+    (True, True, True, True),
+])
+def test_image_generic_failure_releases_cleanup_only_after_exact_readback(
+    monkeypatch, completed, same_candidate, same_reply, has_media, failure_reply,
+):
+    import src.client_wrapper as wrapper
+    from src.domain import CleanupObservation, CleanupState
+
+    class RejectionStore(Store):
+        def release_failed_media_cleanup(self, operation_id, **kwargs):
+            self.events.append(("release_rejected", operation_id))
+            return True
+
+    finalize = AsyncMock(return_value=CleanupObservation(state=CleanupState.COMPLETED, upstream_chat_id="c_one"))
+    monkeypatch.setattr(wrapper, "finalize_remote_chat_cleanup_from_response", finalize)
+    monkeypatch.setattr(media_jobs, "_save_generated_media", AsyncMock(return_value=SimpleNamespace(artifacts=(), failures=())))
+    other_failure_reply = ("Sorry, something went wrong. Please try your request again."
+                           if failure_reply == GEMINI_GENERIC_FAILURE_REPLY else GEMINI_GENERIC_FAILURE_REPLY)
+    read_turn = AsyncMock(return_value={
+        "chat_id": "c_one", "rid": "r_one", "rcid": "rc_one" if same_candidate else "rc_other",
+        "completed": completed, "text": failure_reply if same_reply else other_failure_reply,
+    })
+    monkeypatch.setattr(media_jobs, "fetch_workflow_turn", read_turn)
+    response = SimpleNamespace(metadata=["c_one", "r_one"], rcid="rc_one", text=failure_reply,
+                               images=[object()] if has_media else [], videos=[], media=[])
+    store = RejectionStore()
+    asyncio.run(media_jobs._save_response(None, response, _record(), store=store, token="worker"))
+    if completed and same_candidate and same_reply and not has_media:
+        assert store.events[-1][1]["state"] == "failed"
+        assert store.events[-1][1]["error_code"] == "UPSTREAM_REJECTED"
+        assert store.events[-1][1]["verification_status"] == "upstream_media_failure_reply_observed"
+        assert ("release_rejected", "op_one") in store.events
+        finalize.assert_awaited_once()
+    else:
+        assert store.events[-1][1]["state"] == "partial"
+        finalize.assert_not_awaited()
+    if has_media:
+        read_turn.assert_not_awaited()
+    else:
+        assert read_turn.await_args.args == (None, "c_one", "r_one", "rc_one")
 
 
 def test_abc_music_refusal_requires_prefix_and_verified_empty_cards(monkeypatch):

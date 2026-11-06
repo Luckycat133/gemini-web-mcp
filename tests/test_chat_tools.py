@@ -22,6 +22,7 @@ import asyncio
 from types import SimpleNamespace
 
 from src.adapters.mcp_sdk import MCPServer
+from src.constants import DEFAULT_SESSION_MAX_AGE_SECONDS
 
 import src.tools.chat as chat_tools
 from src.session_manager import SessionData, SessionOperationResult
@@ -630,19 +631,17 @@ def test_send_message_stream_accumulates_text_delta(monkeypatch):
     assert result[0].text == "partial reply"
 
 
-def test_send_message_stream_empty_stream_still_schedules_cleanup_with_none(monkeypatch):
-    """空流（无 chunk）→ final_response=None → 仍调 cleanup（传 None，文档化当前行为）。
-
-    注意：这与 gemini_chat_stream 不同——chat_stream 用 `if final_response:` 守卫，
-    send_message_stream 无守卫，总是调用。这是一个潜在的不一致，本测试锁定当前行为。
-    """
+def test_send_message_stream_empty_stream_preserves_known_chat_for_recovery(monkeypatch):
     fake_session = _FakeStreamSession(chunks=[])
-    schedule_calls = []
+    response_cleanup = []
+    deferred_cleanup = []
     _patch_stream_session_env(
         monkeypatch,
         {"session": fake_session, "thinking_level": "standard"},
-        captured_schedule=schedule_calls,
+        captured_schedule=response_cleanup,
     )
+    monkeypatch.setattr(chat_tools, "schedule_remote_chat_cleanup",
+                        lambda chat_id, **kwargs: deferred_cleanup.append((chat_id, kwargs)))
 
     mcp = _make_mcp()
 
@@ -651,10 +650,16 @@ def test_send_message_stream_empty_stream_still_schedules_cleanup_with_none(monk
                                 session_id="s1", message="hi")
 
     result = asyncio.run(run())
-    assert result[0].text == ""  # full_text 为空
-    assert len(schedule_calls) == 1
-    assert schedule_calls[0]["response"] is None  # 文档化：空流传 None
-    assert schedule_calls[0]["source"] == "gemini_send_message_stream"
+    domain = result[0].meta["domain_result"]
+    assert domain["ok"] is False
+    assert domain["meta"]["verification_status"] == "session_reply_unverified"
+    assert not response_cleanup
+    assert deferred_cleanup == [(fake_session.cid, {
+        "retain_chat": False,
+        "delete_after_seconds": DEFAULT_SESSION_MAX_AGE_SECONDS,
+        "source": "gemini_send_message_stream",
+        "reschedule_pending": True,
+    })]
 
 
 def test_send_message_stream_persists_explicit_retention_before_sending(monkeypatch):

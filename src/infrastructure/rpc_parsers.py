@@ -398,6 +398,14 @@ def parse_conversation_page(body: Any, **_: Any) -> RPCParseResult:
     return _result_for_items(body, 2, parse_conversation_metadata)
 
 
+def parse_notebook_conversation_page(body: Any, **_: Any) -> RPCParseResult:
+    # A fresh, empty Notebook returned an explicit [] for its filtered page.
+    # That shape has not been verified for unfiltered account history.
+    if isinstance(body, list) and not body:
+        return RPCParseResult("empty", value=[])
+    return parse_conversation_page(body)
+
+
 def parse_remy_goals_page(body: Any, **_: Any) -> RPCParseResult:
     return _result_for_items(body, 0, parse_remy_goal_entry)
 
@@ -1322,6 +1330,7 @@ PARSER_FUNCTIONS: Mapping[str, Callable[..., RPCParseResult]] = {
     "notebooklm_picker": parse_notebooklm_picker,
     "notebooklm_list": parse_notebooklm_list,
     "conversation_page": parse_conversation_page,
+    "notebook_conversation_page": parse_notebook_conversation_page,
     "remy_goals_page": parse_remy_goals_page,
     "notebook_list": parse_notebook_list,
     "notebook_move": parse_notebook_move,

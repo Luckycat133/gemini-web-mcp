@@ -28,7 +28,7 @@ from ..services.music_recovery import (
 )
 from ..services.media_generation import (
     MediaGenerationProgress, add_media_cleanup_evidence, compose_media_prompt, generate_media_response, media_timeout_scope,
-    media_timeout as _media_timeout,
+    media_timeout as _media_timeout, video_options_error,
 )
 from ..services import (
     artifact_exception_result,
@@ -350,11 +350,14 @@ def register_media_tools(mcp: MCPServer):
         filename: Optional[str] = None,
         background: bool = True,
         operation_id: Optional[str] = None,
+        duration_seconds: Optional[int] = None,
     ) -> list[TextContent]:
         """生成媒体；默认后台运行，以 operation_id 查询任务状态和结果。
 
         使用 gemini_get_operation_status / gemini_get_operation_result 查询；
         background=false 显式选择同步模式，不接受 operation_id。
+        视频可显式使用付费 API 模型 gemini-omni-1.2-flash，需 GEMINI_API_KEY
+        及后台模式。此路线接受 3 至 15 秒的 duration_seconds。
         """
         if not background and operation_id is not None:
             return _invalid_media_argument("operation_id requires background=true.")
@@ -362,6 +365,11 @@ def register_media_tools(mcp: MCPServer):
             return _invalid_media_argument("prompt must not be blank.")
         if not _valid_media_filename(filename):
             return _invalid_media_argument("filename must be a single non-empty file name.")
+        invalid = video_options_error(media_type=media_type, model=model, thinking_level=thinking_level,
+                                      duration_seconds=duration_seconds, delete_after_seconds=delete_after_seconds,
+                                      background=background)
+        if invalid:
+            return _invalid_media_argument(invalid)
         valid_image, safe_image_path, image_error = validate_optional_image_path(image_path)
         if not valid_image:
             return _invalid_image_response(image_error)
@@ -372,7 +380,7 @@ def register_media_tools(mcp: MCPServer):
                 "prompt": prompt, "media_type": media_type, "model": model, "thinking_level": thinking_level,
                 "image_path": safe_image_path, "output_dir": output_dir, "filename": filename,
                 "timeout_seconds": timeout_seconds, "retain_chat": retain_chat,
-                "delete_after_seconds": delete_after_seconds, "edit": False,
+                "delete_after_seconds": delete_after_seconds, "edit": False, "duration_seconds": duration_seconds,
             }, operation="gemini_generate_media", operation_id=operation_id)
             return domain_text(result, "媒体任务已提交，可用任务句柄查询状态和结果。" if result.ok
                                else domain_failure_text(result), use_result_data=True)

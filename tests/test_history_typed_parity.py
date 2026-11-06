@@ -7,7 +7,13 @@ import json
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
+import pytest
+
+from src import client_wrapper
 from src.adapters.mcp_sdk import MCPServer
+from src.infrastructure.account_identity import current_account_key
+from src.infrastructure.cleanup_store import CleanupStore
+from src.remote_chat_cleanup_manager import RemoteChatCleanupManager
 import src.skill_server as skill_server
 import src.tools.manage as manage_tools
 
@@ -320,6 +326,31 @@ def test_history_delete_verifies_absence_on_both_surfaces(monkeypatch) -> None:
     }
     assert compact[0].text == "Deleted and verified absent: c_delete"
     assert primary[0].text == "已删除并回读确认聊天不存在: c_delete"
+
+
+@pytest.mark.parametrize("compact, absent", [(False, True), (True, True), (False, False)])
+def test_explicit_delete_reconciles_only_the_verified_owned_row(monkeypatch, tmp_path, compact, absent) -> None:
+    items = [] if absent else [["c_delete", "Still here", False, None, None, [1700000000, 0]]]
+    client = SimpleNamespace(delete_chat=AsyncMock(), _batch_execute=AsyncMock(return_value=_history_page_response(items)))
+    _patch_clients(monkeypatch, client)
+    path = tmp_path / "owned.sqlite3"
+    monkeypatch.setattr(client_wrapper, "_cleanup_manager", RemoteChatCleanupManager(
+        store_path=path, account_key_provider=current_account_key,
+    ))
+    ledger = CleanupStore(path)
+    account = current_account_key()
+    assert account is not None
+    for owner in (account, "another-account"):
+        ledger.schedule(owner, "c_delete", 0, "test", retain=True)
+
+    if compact:
+        content = _run(skill_server.history(action="delete", chat_id="c_delete"))
+    else:
+        content = _run(_primary_content(_primary_mcp(), "gemini_delete_chat", {"chat_id": "c_delete"}))
+
+    assert _domain_data(content)["deleted"] is absent
+    assert ledger.get(account, "c_delete")["state"] == ("completed" if absent else "retained")
+    assert ledger.get("another-account", "c_delete")["state"] == "retained"
 
 
 def test_history_delete_fails_closed_when_chat_is_still_present(monkeypatch) -> None:

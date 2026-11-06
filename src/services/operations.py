@@ -4,20 +4,21 @@ from __future__ import annotations
 
 import logging
 import hashlib
-from dataclasses import replace
-from pathlib import Path
+import sqlite3
 from collections.abc import Awaitable, Callable
+from dataclasses import replace
 from typing import Any
 
-from ..domain.artifacts import ArtifactKind, ArtifactState
+from ..domain.artifacts import ArtifactState
 from ..domain.conversations import CleanupObservation, CleanupState
 from ..domain.operations import InlineReportArtifact, OperationReadData, operation_failure_code
 from ..domain.results import DomainErrorCode, DomainResult, DomainWarning, OperationState, result_from_exception
-from ..infrastructure.account_identity import operation_account_matches
+from ..infrastructure.account_identity import operation_account_matches, uses_omni_video_api
+from ..infrastructure.cleanup_store import CleanupStore
 from ..infrastructure.operation_store import RETENTION_SECONDS, OperationRecord, OperationStore
 from ..infrastructure.rpc_contracts import execute_contract, get_contract
 from ..infrastructure.rpc_parsers import parse_contract_body, parse_rpc_envelope
-from .artifacts import artifact_from_local_path
+from .media_storage import read_verified_media_artifacts
 from .research_result_storage import (
     RESEARCH_OPERATIONS, RESEARCH_REPORT_PREVIEW_CHARS, ResearchResultUnavailable, load_research_result, save_research_result,
 )
@@ -29,6 +30,21 @@ logger = logging.getLogger(__name__)
 def _account_mismatch() -> DomainResult[Any]:
     return DomainResult.failure(DomainErrorCode.CAPABILITY_UNAVAILABLE, "Operation account could not be verified.",
                                 verification_status="account_mismatch_or_unbound")
+
+
+def _observe_owned_cleanup(record: OperationRecord) -> OperationRecord:
+    """Read the verified cleanup ledger when a separate process deleted the chat."""
+    if (not record.account_key or not record.upstream_chat_id or record.retain_chat or record.cleanup_protected
+            or uses_omni_video_api(record)
+            or record.cleanup_state in {CleanupState.COMPLETED.value, CleanupState.ALREADY_COMPLETED.value}):
+        return record
+    try:
+        entry = CleanupStore().get(record.account_key, record.upstream_chat_id)
+    except (OSError, sqlite3.Error):
+        return record
+    if entry is not None and entry["state"] == CleanupState.COMPLETED.value:
+        return replace(record, cleanup_state=CleanupState.COMPLETED.value)
+    return record
 
 
 class OperationService:
@@ -96,13 +112,18 @@ class OperationService:
             return DomainResult.failure(DomainErrorCode.CAPABILITY_UNAVAILABLE, "Operation account could not be verified.",
                                         verification_status="account_mismatch_or_unbound")
         expired = self.store.clock() - record.created_at >= RETENTION_SECONDS
-        expired_protected = expired and record.cleanup_protected and bool(record.upstream_chat_id)
+        expired_protected = expired and record.cleanup_protected and bool(
+            record.upstream_chat_id or (uses_omni_video_api(record) and record.upstream_operation_id)
+        )
         if expired and not expired_protected:
             self.store.delete_expired(operation_id)
             return DomainResult.failure(
                 DomainErrorCode.INVALID_ARGUMENT, "The operation handle has expired.",
                 verification_status="operation_expired",
             )
+        record = _observe_owned_cleanup(record)
+        if not operation_account_matches(record):
+            return _account_mismatch()
         if record.operation in {"gemini_run_task", "gemini_notebook_chat"}:
             from .task_jobs import read_task_operation
             return await read_task_operation(
@@ -158,7 +179,6 @@ class OperationService:
         result = (await self._read_report(record, include_report=True) if include_report
                   else await self._read_research_status(record))
         if expired_protected:
-            from dataclasses import replace
             result = replace(result, warnings=(*result.warnings, DomainWarning(
                 code="expired_protected_operation",
                 message="The normal retention period has elapsed; this handle remains available while cleanup is protected.",
@@ -194,33 +214,20 @@ class OperationService:
     async def _read_media(self, record: OperationRecord, *, include_artifacts: bool) -> DomainResult[OperationReadData]:
         from .background import resume_media_worker, worker_active
 
+        omni_api = uses_omni_video_api(record)
+        upstream_id = record.upstream_operation_id if omni_api else record.upstream_chat_id
         active = worker_active(record, now=self.store.clock())
-        saved = self.store.get_media_artifacts(record.operation_id)
-        artifacts = []
-        invalid = False
-        for item in saved:
-            path = Path(item["local_path"])
-            try:
-                with path.open("rb") as stream:
-                    digest = hashlib.file_digest(stream, "sha256").hexdigest()
-                if not path.is_file() or path.stat().st_size != item["size_bytes"] or digest != item["sha256"]:
-                    raise ValueError("saved artifact changed")
-                artifact = artifact_from_local_path(
-                    ArtifactKind(item["kind"]), str(path), source_chat_id=record.upstream_chat_id,
-                    requested_backend=record.requested_model, request_model=record.request_model,
-                    effective_backend=record.effective_backend,
-                )
-                if artifact.verification.status.value != "verified":
-                    raise ValueError("saved artifact did not verify")
-                artifacts.append(replace(artifact, id=item["artifact_id"]))
-            except (OSError, ValueError):
-                invalid = True
-        if invalid or (record.state == "completed" and not artifacts):
+        try:
+            artifacts = read_verified_media_artifacts(self.store, record, include_duration=include_artifacts and omni_api)
+            if record.state == "completed" and not artifacts:
+                raise ValueError("completed operation has no saved artifacts")
+        except (OSError, ValueError):
             return DomainResult.failure(
                 DomainErrorCode.CAPABILITY_UNAVAILABLE, "A saved media artifact is missing or no longer matches its verification.",
                 verification_status="local_artifact_unavailable",
             )
-        if include_artifacts and not artifacts and record.upstream_chat_id and not active:
+        if (include_artifacts and upstream_id and not active
+                and (not artifacts or (omni_api and record.cleanup_protected))):
             await resume_media_worker(self.store, record)
             record = self.store.get(record.operation_id) or record
             if not operation_account_matches(record):
@@ -228,10 +235,10 @@ class OperationService:
             active = worker_active(record, now=self.store.clock())
         cleanup_state = (CleanupState.RETAINED if record.retain_chat else
                          CleanupState(record.cleanup_state) if record.cleanup_state in {s.value for s in CleanupState}
-                         else CleanupState.PENDING)
+                         else CleanupState.PENDING if upstream_id else CleanupState.NOT_APPLICABLE)
         cleanup = CleanupObservation(state=cleanup_state, upstream_chat_id=record.upstream_chat_id)
         warnings: tuple[DomainWarning, ...] = ()
-        if (include_artifacts and artifacts and not record.retain_chat
+        if (not omni_api and include_artifacts and artifacts and not record.retain_chat
                 and cleanup_state not in {CleanupState.COMPLETED, CleanupState.ALREADY_COMPLETED}
                 and (record.cleanup_protected or record.cleanup_state == "not_scheduled")
                 and self.finalize_chat_cleanup is not None):
@@ -246,17 +253,19 @@ class OperationService:
                 except Exception:
                     warnings = (DomainWarning(code="cleanup_unverified", message="Media cleanup remains pending."),)
         state = OperationState.COMPLETED if artifacts else OperationState(record.state)
-        if not artifacts and not active and not record.upstream_chat_id and state not in {OperationState.FAILED, OperationState.UNAVAILABLE}:
+        if not artifacts and not active and not upstream_id and state not in {OperationState.FAILED, OperationState.UNAVAILABLE}:
             state = OperationState.PARTIAL
+        observable = upstream_id and cleanup.state not in {CleanupState.COMPLETED, CleanupState.ALREADY_COMPLETED}
+        if omni_api and state == OperationState.FAILED:
+            observable = None
         data = OperationReadData(
             operation_id=record.operation_id, operation=record.operation, state=state,
-            continuation_possible=bool(artifacts or active or (record.upstream_chat_id and cleanup.state not in {
-                CleanupState.COMPLETED, CleanupState.ALREADY_COMPLETED,
-            })), report_available=False,
-            verification_status="local_artifacts_verified" if artifacts else record.verification_status,
-            media_type=record.media_type, artifacts=tuple(artifacts) if include_artifacts else (),
+            continuation_possible=bool(artifacts or active or observable), report_available=False,
+            verification_status="local_artifacts_verified" if artifacts and not omni_api else record.verification_status,
+            media_type=record.media_type, artifacts=artifacts if include_artifacts else (),
             artifact_state=ArtifactState.LOCAL if artifacts else None, worker_active=active,
             error_code=record.error_code, cleanup=cleanup,
+            upstream_operation_id=record.upstream_operation_id if omni_api else None,
         )
         return _operation_read_result(data, warnings=warnings)
 

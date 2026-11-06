@@ -16,7 +16,9 @@ from typing import Any, Dict, Optional, Self
 import anyio
 
 from .client_manager import (
+    ClientAuthenticationRequired,
     ClientManager,
+    browser_cookie_auto_load_enabled,
     get_configured_proxy,  # noqa: F401  (re-exported as public facade API)
     get_default_chat_retention_seconds,
     validate_config,  # noqa: F401  (re-exported as public facade API)
@@ -547,15 +549,14 @@ def get_cookie_from_browser(browser: str = "chrome", profile: str = "") -> bool:
     if not COOKIE_MANAGER_AVAILABLE:
         logger.error("❌ Cookie Manager 不可用")
         return False
-    _prepare_browser_cookie_cache(force=True)
     cm = get_cookie_manager()
-    cookies = cm.get_cookies_from_browser(browser, profile=profile)
+    discovery = cm.discover_browser_cookies(browser, profile=profile)
+    cookies = discovery.cookies
+    _client_manager.browser_auth_reason = discovery.reason
     psid = cookies.get("__Secure-1PSID")
     psidts = cookies.get("__Secure-1PSIDTS", "")
     if psid:
-        source = f"browser_{browser}"
-        if profile:
-            source += f":{profile}"
+        source = discovery.source or f"browser_{browser}"
         success = cm.update_cookie(
             psid,
             psidts,
@@ -566,6 +567,8 @@ def get_cookie_from_browser(browser: str = "chrome", profile: str = "") -> bool:
             os.environ["GEMINI_PSID"] = psid
             if psidts:
                 os.environ["GEMINI_PSIDTS"] = psidts
+            else:
+                os.environ.pop("GEMINI_PSIDTS", None)
             logger.info("✅ 已从浏览器获取 Cookie 并更新")
         return success
     return False
@@ -589,11 +592,17 @@ def init_startup_infrastructure() -> None:
     """
     init_cookie_manager_integration()
 
-    cookie_status = get_cookie_status()
-    browser_autoload = os.environ.get("GEMINI_BROWSER_AUTO_LOAD", "true").lower() == "true"
-    if browser_autoload and not cookie_status.get("has_cookie"):
+    if browser_cookie_auto_load_enabled() and not os.environ.get("GEMINI_PSID"):
         logger.info("🍪 环境变量未设置 Cookie，尝试从 Chrome 自动获取...")
-        get_cookie_from_browser(browser="chrome", profile="")
+        try:
+            _client_manager.ensure_browser_cookie()
+        except ClientAuthenticationRequired as error:
+            logger.warning("Browser cookie autoload unavailable reason=%s", error.auth_reason)
+
+
+def ensure_web_cookie() -> None:
+    """Make browser acquisition available to background submissions before they claim an account."""
+    _client_manager.ensure_browser_cookie()
 
 
 def get_cookie_status() -> Dict[str, Any]:
@@ -601,4 +610,6 @@ def get_cookie_status() -> Dict[str, Any]:
     if not COOKIE_MANAGER_AVAILABLE:
         return {"available": False, "message": "Cookie Manager 不可用"}
     status, info = get_cookie_manager().get_cookie_status()
-    return {"available": True, "status": status.value, **info}
+    return {**info, "available": True, "status": status.value,
+            "browser_auto_load": browser_cookie_auto_load_enabled(),
+            "browser_auth_reason": _client_manager.browser_auth_reason}

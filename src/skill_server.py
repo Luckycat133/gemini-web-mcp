@@ -74,7 +74,7 @@ from .services import (
 from .services.music_recovery import fetch_music_media_from_chat, music_response_identity
 from .services.media_generation import (
     MediaGenerationProgress, add_media_cleanup_evidence, compose_media_prompt, generate_media_response,
-    media_timeout, media_timeout_scope,
+    media_timeout, media_timeout_scope, video_options_error,
 )
 from .services.media_storage import (
     _MediaSaveOutcome, _save_generated_media, _valid_media_filename, reconcile_remote_media_types,
@@ -627,7 +627,7 @@ async def _history_export_text(client: object, chat_id: Optional[str], limit: in
 
 
 async def _history_delete_text(client: object, chat_id: Optional[str]) -> list[TextContent]:
-    result = await _delete_chat_result(client, chat_id or "")
+    result = await _delete_chat_result(client, chat_id or "", reconcile_owned_cleanup=True)
     if not result.ok:
         if result.error_code == DomainErrorCode.INVALID_ARGUMENT.value:
             return domain_text(result, "chat_id required")
@@ -1133,11 +1133,14 @@ async def create(
     filename: Optional[str] = None,
     background: bool = True,
     operation_id: Optional[str] = None,
+    duration_seconds: Optional[int] = None,
 ) -> list[TextContent]:
     """Generate image/video/music in the background by default.
 
     Use session(action="operation_status" or "operation_result", session_id=handle)
     to check the returned handle. Synchronous mode does not accept operation_id.
+    For video, model="gemini-omni-1.2-flash" explicitly uses the paid Gemini API
+    with GEMINI_API_KEY and background mode. This route accepts duration_seconds from 3 to 15.
     """
     if not background and operation_id is not None:
         return domain_text(_invalid_argument_result("operation_id requires background=true."),
@@ -1149,6 +1152,11 @@ async def create(
                            "Error: filename must be a single non-empty file name.")
     requested_model = model
     media_type = _normalize_media_type(type)
+    invalid = video_options_error(media_type=media_type, model=model, thinking_level=thinking_level,
+                                  duration_seconds=duration_seconds, delete_after_seconds=delete_after_seconds,
+                                  background=background)
+    if invalid:
+        return domain_text(_invalid_argument_result(invalid), invalid, use_result_data=True)
     request_model: str | None = None
     effective_backend: str | None = None
     input_artifacts: tuple[Artifact, ...] = ()
@@ -1169,7 +1177,7 @@ async def create(
                 "prompt": prompt, "media_type": media_type, "model": model, "thinking_level": thinking_level,
                 "image_path": safe_image_path, "output_dir": output_dir, "filename": filename,
                 "timeout_seconds": None, "retain_chat": retain_chat,
-                "delete_after_seconds": delete_after_seconds, "edit": False,
+                "delete_after_seconds": delete_after_seconds, "edit": False, "duration_seconds": duration_seconds,
             }, operation="create", operation_id=operation_id)
             return domain_text(submission, "Media task submitted." if submission.ok else "Media task submission failed.",
                                use_result_data=True)

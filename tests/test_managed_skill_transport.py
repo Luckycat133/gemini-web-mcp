@@ -27,7 +27,9 @@ def test_native_skill_upload_uses_current_flag_override_and_optional_context():
 
 
 @pytest.mark.parametrize("html", ["", "window.WIZ_global_data = {};", bootstrap(flags={"45853319": 1}),
-    bootstrap(flags={"45785737": "invalid"}), bootstrap(flags={"45853319": True}, h1eoVe="https://unknown.test/")])
+    bootstrap(flags={"45785737": "invalid"}), bootstrap(flags={"45853319": True}, h1eoVe="https://unknown.test/"),
+    bootstrap(flags={"45853319": True}, h1eoVe="https://push.clients6.google.com.evil.example/upload/"),
+    bootstrap(flags={"45853319": True}, h1eoVe="https://push.clients6.google.com/upload/?other=value")])
 def test_unknown_skill_upload_configuration_fails_before_upload(html):
     with pytest.raises(transport.SkillTransportUnavailable):
         transport.skill_upload_configuration(html)
@@ -77,19 +79,27 @@ def test_skill_save_dispatches_once_and_checks_returned_update_identity(monkeypa
     assert calls[0][1]["retry_count"] == 0
 
 
-def test_skill_upload_uses_native_resumable_handshake(monkeypatch):
+@pytest.mark.parametrize(("html", "endpoint", "session_url"), [
+    (bootstrap(), "https://content-push.googleapis.com/upload/",
+     "https://content-push.googleapis.com/upload/session?opaque=1"),
+    (bootstrap(flags={"45853319": True}, h1eoVe="https://push.clients6.google.com/upload/"),
+     "https://push.clients6.google.com/upload/?upload_schema=agent_skills",
+     "https://push.clients6.google.com/upload/session?opaque=1"),
+])
+def test_skill_upload_uses_native_resumable_handshake(monkeypatch, html, endpoint, session_url):
     monkeypatch.setattr(transport, "current_account_key", lambda: "account")
     calls = []
     class HTTP:
         async def get(self, _url):
-            return SimpleNamespace(status_code=200, text=bootstrap())
+            return SimpleNamespace(status_code=200, text=html)
         async def post(self, url, **kwargs):
             calls.append((url, kwargs))
             if len(calls) == 1:
-                return SimpleNamespace(status_code=200, headers={"X-Goog-Upload-URL": "https://content-push.googleapis.com/upload/session?opaque=1"})
+                return SimpleNamespace(status_code=200, headers={"X-Goog-Upload-URL": session_url})
             return SimpleNamespace(status_code=200, text="synthetic-upload-handle")
     archive = b"PK\x03\x04fixture"
     assert asyncio.run(transport.upload_skill(SimpleNamespace(client=HTTP()), archive, "fixture.zip")) == "synthetic-upload-handle"
+    assert [url for url, _kwargs in calls] == [endpoint, session_url]
     start, final = calls[0][1], calls[1][1]
     assert start["data"] == "File name: fixture.zip"
     assert start["headers"]["X-Goog-Upload-Protocol"] == "resumable"

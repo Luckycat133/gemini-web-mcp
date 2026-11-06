@@ -147,7 +147,7 @@
       },
       {
         "annotations_sha256": "99300d9e2937ba92c763822593cb3ba8ec634d1813f3ab37fad3d6d0432268f9",
-        "input_schema_sha256": "ce3f9ceeabef6ab11902836516f092c3d9c9780f718fd4bbb991b2d19eb7bde9",
+        "input_schema_sha256": "60b80f856407033936c8d8466ee8a243bf892b162519e3efe21e8934cf62ca8e",
         "name": "create",
         "output_schema_sha256": "c40a6fff545524312dd4e529c51ac7cd310d11ca071bfceb8a39cd55c889e265"
       },
@@ -197,7 +197,7 @@
       },
       {
         "annotations_sha256": "99300d9e2937ba92c763822593cb3ba8ec634d1813f3ab37fad3d6d0432268f9",
-        "input_schema_sha256": "327cf3d29b0fc22c5a255aaec3f96788b10f6e497cc540494ba519c60238c97a",
+        "input_schema_sha256": "8b166f81879dc638fa76dcace20abc43431018753a3289968e195a0659d5689d",
         "name": "gemini_generate_video",
         "output_schema_sha256": "d9f153dc1fecce17d30172cd51b3927c1c5c9165c6c08c718549b07788ab1af5"
       },

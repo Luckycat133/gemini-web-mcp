@@ -10,6 +10,7 @@ from concurrent.futures import ThreadPoolExecutor
 import pytest
 
 from src.domain import CleanupObservation, CleanupState, OperationState
+from src.infrastructure.cleanup_store import CleanupStore
 from src.infrastructure.operation_store import RETENTION_SECONDS, OperationStore
 from src.remote_chat_cleanup_manager import RemoteChatCleanupManager
 from src.services.operations import OperationService
@@ -86,6 +87,45 @@ def test_saved_plan_rejection_preserves_failure_without_remote_reads(tmp_path, c
         assert result.data.cleanup.state.value == cleanup_state
     initializer.assert_not_awaited()
     client.fetch_latest_chat_response.assert_not_awaited()
+
+
+@pytest.mark.parametrize("same_chat, same_account, verified", [
+    (True, True, True),
+    (True, False, True),
+    (False, True, True),
+    (True, True, False),
+])
+def test_operation_reads_verified_delayed_cleanup_from_its_owned_ledger(tmp_path, same_chat, same_account, verified):
+    store = OperationStore(tmp_path / "operations.sqlite")
+    operation_id = "op_rejected"
+    chat_id = "c_owned"
+    store.create(operation_id, "gemini_research")
+    store.update(operation_id, state="partial", phase="plan_outcome_unverified", upstream_chat_id=chat_id)
+    record = store.get(operation_id)
+    assert store.bind_research_turn(operation_id, account_key=record.account_key, chat_id=chat_id,
+                                    response_id="r_owned", candidate_id="rc_owned")
+    assert store.reject_research_turn(operation_id, account_key=record.account_key, chat_id=chat_id,
+                                      response_id="r_owned", candidate_id="rc_owned")
+    store.release_cleanup(operation_id)
+    store.update_cleanup(operation_id, "pending")
+
+    ledger = CleanupStore()
+    ledger_account = record.account_key if same_account else "other-account"
+    ledger_chat = chat_id if same_chat else "c_other"
+    ledger.schedule(ledger_account, ledger_chat, 0, "test", retain=False)
+    if verified:
+        assert ledger.record_verified_absence(ledger_account, ledger_chat)
+
+    initialize = AsyncMock()
+    finalize = AsyncMock()
+    service = OperationService(OperationStore(store.path), lambda: None, initialize, finalize)
+    expected = CleanupState.COMPLETED if same_chat and same_account and verified else CleanupState.PENDING
+    for read in (service.get_status, service.get_result):
+        result = asyncio.run(read(operation_id))
+        assert result.data.cleanup.state is expected
+        assert result.data.state is OperationState.FAILED
+    initialize.assert_not_awaited()
+    finalize.assert_not_awaited()
 
 
 def test_operation_store_survives_reopen_and_contains_metadata_only(tmp_path):
