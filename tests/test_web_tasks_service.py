@@ -409,6 +409,18 @@ def test_list_empty_page_is_success_with_no_items():
     assert result.data.items == ()
 
 
+def test_list_marks_a_page_with_unaddressable_goals_partial():
+    transport = FakeTransport(page=WebTaskPage(
+        items=(_task(),), next_page_token=None, unaddressable_count=1,
+    ))
+    result = _run(_service(transport).list_tasks())
+    assert result.ok and result.data is not None
+    assert len(result.data.items) == 1 and result.data.unaddressable_count == 1
+    assert result.meta.operation_state.value == "partial"
+    assert result.meta.verification_status == "partial_task_page"
+    assert [warning.code for warning in result.warnings] == ["unaddressable_task_goals"]
+
+
 def test_list_description_preview_never_exceeds_160_chars():
     transport = FakeTransport(
         page=WebTaskPage(items=(_task(description=LONG_DESCRIPTION),), next_page_token=None)

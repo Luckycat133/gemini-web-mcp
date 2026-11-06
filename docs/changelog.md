@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- Accept the empty final cursor from the native Task list. Return verified chat-backed Tasks with a partial-page count when an entry has no supported conversation ID.
 - Verify chat deletion with one exact read for the original account. This covers chats outside the ordinary history lists, including Notebook chats. Task cleanup also requires independent absence of the Task goal.
 - Shorten MCP catalogs while preserving validation rules and tool annotations. Add file-only operation results, conditional browser frames by SHA-256, and optional file-only screenshots.
 - Read current operation databases without a write lock or redundant schema initialization. Verify saved Research files once per read when no cleanup or state change intervenes.

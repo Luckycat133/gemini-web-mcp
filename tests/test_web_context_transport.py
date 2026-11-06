@@ -15,7 +15,8 @@ from src.infrastructure.rpc_contracts import (
 from src.infrastructure.rpc_parsers import parse_contract_body
 from src.infrastructure.webchannel import parse_protobuf
 from src.services.web_context_transport import (
-    WebContextUnavailable, delete_task_metadata, fetch_notebooklm_metadata, fetch_task_metadata, update_task_metadata,
+    WebContextUnavailable, delete_task_metadata, fetch_notebooklm_metadata, fetch_task_metadata,
+    fetch_task_metadata_page, update_task_metadata,
 )
 from src.thinking_client import WebRequestOptions, inject_web_request_options
 
@@ -101,6 +102,23 @@ def test_task_delete_disables_sdk_replay_and_requires_separate_readback():
     assert asyncio.run(delete_task_metadata(client, "c_fixture")) is None
     assert client._batch_execute.await_count == 1
     assert client._batch_execute.await_args.kwargs["current_retry"] == 0
+
+
+def test_task_list_accepts_the_final_cursor_and_counts_non_conversation_goals():
+    goal = [None] * 14
+    goal[1], goal[2], goal[13] = "Synthetic task", 3, "c_fixture"
+    non_conversation_goal = goal.copy()
+    non_conversation_goal[13] = "synthetic-opaque-goal"
+    client = SimpleNamespace(_batch_execute=AsyncMock(return_value=_response(
+        "tasks.list", [[goal, non_conversation_goal], ""])))
+
+    result = asyncio.run(fetch_task_metadata_page(client, 30))
+
+    assert [item["chat_id"] for item in result["items"]] == ["c_fixture"]
+    assert result["next_page_token"] is None
+    assert result["unaddressable_count"] == 1
+    assert parse_contract_body("tasks.get", [non_conversation_goal]).status == "changed_shape"
+    client._batch_execute.assert_awaited_once()
 
 
 @pytest.mark.parametrize(("field", "value", "expected_fields"), [

@@ -26,6 +26,8 @@ from typing import Any
 from ..domain import (
     DomainErrorCode,
     DomainResult,
+    DomainWarning,
+    OperationState,
     is_valid_remote_chat_id,
     result_from_exception,
 )
@@ -146,9 +148,14 @@ class WebTaskService:
                 )
             summaries.append(self._to_summary(task))
 
+        warnings = (DomainWarning(code="unaddressable_task_goals",
+                                  message="Some Task entries lack a supported conversation ID."),) if page.unaddressable_count else ()
         return DomainResult.success(
-            WebTaskPage(items=tuple(summaries), next_page_token=page.next_page_token),
-            verification_status=STATUS_VERIFIED,
+            WebTaskPage(items=tuple(summaries), next_page_token=page.next_page_token,
+                        unaddressable_count=page.unaddressable_count),
+            operation_state=OperationState.PARTIAL if warnings else OperationState.COMPLETED,
+            verification_status="partial_task_page" if warnings else STATUS_VERIFIED,
+            warnings=warnings,
             details={"service": "web_tasks", "operation": "list_tasks"},
         )
 

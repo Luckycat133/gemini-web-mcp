@@ -36,7 +36,8 @@ async def _get(client: Any, chat_id: str) -> WebTask | None:
 async def _list(client: Any, limit: int, token: str | None) -> WebTaskPage[WebTask]:
     page = await fetch_task_metadata_page(client, limit, token)
     return WebTaskPage(items=tuple(WebTask(**item) for item in page["items"]),
-                       next_page_token=page["next_page_token"])
+                       next_page_token=page["next_page_token"],
+                       unaddressable_count=page["unaddressable_count"])
 
 
 def _service() -> WebTaskService:

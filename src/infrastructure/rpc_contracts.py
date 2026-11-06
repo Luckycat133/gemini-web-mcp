@@ -769,7 +769,7 @@ _CONTRACT_LIST = [
     ),
     _contract(
         "tasks.list", "tasks", "task_goal_list", "GS7W1", "/app", _task_page_payload, "task_goal_page",
-        "2026-11-01 public ListRemyGoals builder and goal metadata schema",
+        "Public ListRemyGoals metadata and authenticated 2026-11-06 empty final cursor",
     ),
     _contract(
         "tasks.update_metadata", "tasks", "task_goal_update_metadata", "Dxg8ke", "/app",

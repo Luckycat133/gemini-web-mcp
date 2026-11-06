@@ -28,6 +28,8 @@ Keep ordinary Notebook chat (`gemini_ask` with `notebook_ids`, `execution_mode=c
 
 For authorized local tests, use a synthetic Notebook whose source contains a marker absent from the query. Verify source retrieval independently, submitter disconnect, the original operation handle, exact completed reply identity, a full verified local answer artifact, automatic save/cleanup before the caller requests the result, and post-restart local result access. A Task answer needs both its same-chat completed or failed terminal goal and the exact completed candidate; failed answers remain failed after caching; ordinary Notebook Chat must not create a Task goal. Cover crash recovery between answer completion and file save. Status reads must not regenerate or read full chat text. Do not mark user Notebook content mutations verified from response prose; independently read back the exact resource metadata or source content. Task schedules, rich steps, app confirmations and ProcessSession experiments require separate evidence; Chat scheduled-action checks do not cover them.
 
+Keep the isolated ownership ledger for authorized local browser tests until remote teardown is verified. When a synthetic test stops at a permission card, tear down its exact owned Task and independently verify absence of both the goal and its conversation.
+
 See [Notebook, Chat and Task workflows](notebook-task-workflows.md) and the latest [development observations](development-status.md) for implemented scope versus live evidence.
 
 

@@ -9,6 +9,7 @@ import json
 import logging
 from typing import Any, Callable, Literal, Mapping
 
+from ..domain.conversations import is_valid_remote_chat_id
 from .rpc_contracts import GRAPHQL_READ_CONTRACTS, GraphQLReadContract, RPCContract, get_contract
 from .task_confirmation import parse_confirmation_replies
 from .task_setup import parse_app_setup_card
@@ -708,7 +709,7 @@ def _task_goal_metadata(entry: Any) -> dict[str, Any] | None:
     if not isinstance(entry, list) or len(entry) < 14:
         return None
     identifier = entry[13]
-    if not isinstance(identifier, str) or not identifier.startswith("c_") or len(identifier) > 256:
+    if not isinstance(identifier, str) or not identifier.strip() or len(identifier) > 256:
         return None
     description = entry[1] if len(entry) > 1 else None
     status = entry[2] if len(entry) > 2 else None
@@ -742,22 +743,30 @@ def parse_task_goal(body: Any, **_: Any) -> RPCParseResult:
     if not body or body[0] is None:
         return RPCParseResult("empty", value=None)
     goal = _task_goal_metadata(body[0])
-    return RPCParseResult("success", value=goal) if goal is not None else RPCParseResult("changed_shape")
+    if goal is None or not is_valid_remote_chat_id(goal["chat_id"]):
+        return RPCParseResult("changed_shape")
+    return RPCParseResult("success", value=goal)
 
 
 def parse_task_goal_page(body: Any, **_: Any) -> RPCParseResult:
     if not isinstance(body, list) or not body or not isinstance(body[0], list):
         return RPCParseResult("changed_shape")
     token = body[1] if len(body) > 1 else None
-    if token is not None and (not isinstance(token, str) or not token):
+    if token is not None and not isinstance(token, str):
         return RPCParseResult("changed_shape")
-    items = [_task_goal_metadata(entry) for entry in body[0]]
-    if any(item is None for item in items):
+    goals = [_task_goal_metadata(entry) for entry in body[0]]
+    if any(goal is None for goal in goals):
         return RPCParseResult("changed_shape")
-    identifiers = [item["chat_id"] for item in items if item is not None]
-    if len(set(identifiers)) != len(identifiers) or (token and not items):
+    goals_with_metadata = [goal for goal in goals if goal is not None]
+    identifiers = {goal["chat_id"] for goal in goals_with_metadata}
+    if len(identifiers) != len(goals_with_metadata) or (token and not goals_with_metadata):
         return RPCParseResult("changed_shape")
-    return RPCParseResult("success" if items else "empty", value={"items": items, "next_page_token": token})
+    items = [goal for goal in goals_with_metadata if is_valid_remote_chat_id(goal["chat_id"])]
+    return RPCParseResult("success" if goals_with_metadata else "empty", value={
+        "items": items,
+        "next_page_token": token or None,
+        "unaddressable_count": len(goals_with_metadata) - len(items),
+    })
 
 
 def parse_task_schedule_refs(body: Any, **_: Any) -> RPCParseResult:

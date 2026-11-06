@@ -133,6 +133,7 @@ class WebTaskPage(Generic[T]):
 
     items: tuple[T, ...]
     next_page_token: str | None
+    unaddressable_count: int = 0
 
 
 @dataclass(frozen=True)

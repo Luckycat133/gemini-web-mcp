@@ -85,7 +85,7 @@
   </qa_pair>
   <qa_pair>
     <question>What is the permitted scope of gemini_cleanup on the account surface?</question>
-    <answer>Only chats recorded as MCP-owned in its ledger; do not select chats by matching their titles.</answer>
+    <answer>Use exact IDs recorded as MCP-owned in the ledger. Chat titles are display metadata. Verify absence by an independent exact conversation read and, for Task cleanup, an exact goal read.</answer>
   </qa_pair>
   <qa_pair>
     <question>May an unbound old operation or another account's conversation be resumed or cleaned up after signing in?</question>
@@ -221,7 +221,7 @@
   </qa_pair>
   <qa_pair>
     <question>Does gemini_tasks list or get read private conversation answers, and what proves deletion?</question>
-    <answer>List and get return bounded goal metadata without conversation answers. Delete dispatches once and independently reads back exact absence; a successful acknowledgement or missing envelope alone is insufficient. The combined tool is marked destructive because delete is exposed.</answer>
+    <answer>List and get return bounded goal metadata without conversation answers. A list with entries lacking supported conversation IDs returns the usable tasks and their unaddressable count with partial verification. Delete dispatches once and independently reads back exact absence. The combined tool is marked destructive because delete is exposed.</answer>
   </qa_pair>
   <qa_pair>
     <question>How should an agent answer a Gemini Task confirmation card without replaying it or deleting the unfinished conversation?</question>
