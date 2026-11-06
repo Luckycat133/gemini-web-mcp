@@ -12,11 +12,49 @@ from pathlib import Path
 import jsonschema
 import pytest
 from mcp import Client
+from mcp.server import MCPServer as SDKMCPServer
+from pydantic import BaseModel, Field
 
 from scripts.snapshot_mcp_v2_contract import build_snapshot
-from src.adapters.mcp_sdk import MCPServer
+from src.adapters.mcp_sdk import ImageContent, MCPServer, TextContent
 
 FIXTURE = Path(__file__).parent / "fixtures" / "mcp_v2_tool_contract.json"
+
+
+class _BusinessOutput(BaseModel):
+    title: str = Field(description="A user-facing report title.")
+    result: list[TextContent] = Field(description="The report evidence.")
+
+
+def test_catalog_trims_sdk_content_labels_and_preserves_business_schema():
+    async def capture() -> list[TextContent | ImageContent]:
+        return [TextContent(type="text", text="Frame ready")]
+
+    async def report() -> _BusinessOutput:
+        return _BusinessOutput(title="Report", result=[])
+
+    async def tools_for(server):
+        for handler in (capture, report):
+            server.tool(structured_output=True)(handler)
+        return {tool.name: tool for tool in await server.list_tools()}
+
+    sdk = asyncio.run(tools_for(SDKMCPServer("SDK")))
+    compact = asyncio.run(tools_for(MCPServer("Project")))
+    assert compact["report"].output_schema == sdk["report"].output_schema
+    assert compact["capture"].input_schema == sdk["capture"].input_schema
+    before = sdk["capture"].output_schema
+    after = compact["capture"].output_schema
+    assert before is not None and after is not None
+    assert "title" in before and "title" not in after
+    assert after["required"] == before["required"]
+    assert after["properties"]["result"]["items"] == before["properties"]["result"]["items"]
+    assert "description" in before["$defs"]["TextContent"]
+    assert "description" not in after["$defs"]["TextContent"]
+    payload = {"result": [{"type": "text", "text": "Frame ready"}]}
+    jsonschema.validate(payload, before)
+    jsonschema.validate(payload, after)
+    with pytest.raises(jsonschema.ValidationError):
+        jsonschema.validate({"result": [{"type": "image", "data": "missing MIME"}]}, after)
 
 
 def _reload_server_full():

@@ -38,8 +38,10 @@ def test_account_catalog_and_safety_annotations():
         assert tools[name].annotations.destructive_hint is True
         assert tools[name].annotations.idempotent_hint is False
         assert tools[name].annotations.open_world_hint is True
-    assert {'progress', 'create_schedule', 'update_schedule', 'pause_schedule', 'resume_schedule', 'delete_schedule'} <= set(
-        tools['gemini_tasks'].input_schema['properties']['action']['enum'])
+    task_arguments = tools['gemini_tasks'].input_schema['properties']
+    assert {'rename', 'pin', 'unpin', 'progress', 'create_schedule', 'update_schedule', 'pause_schedule',
+            'resume_schedule', 'delete_schedule'} <= set(task_arguments['action']['enum'])
+    assert task_arguments['title']['default'] is None
     assert tools["gemini_notebooks"].input_schema["properties"]["source"]["default"] == "notebooklm"
     control = tools["gemini_manage_chat"].annotations
     assert control.read_only_hint is False and control.destructive_hint is False

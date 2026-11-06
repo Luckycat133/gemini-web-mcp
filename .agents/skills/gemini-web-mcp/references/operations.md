@@ -22,4 +22,6 @@ Ordinary sessions have a separate lifetime. Function `gemini_send_message(sessio
 
 Bounded Task progress, time schedules and explicit browser input are supported. Chat scheduled-action tools do not implement Task schedules. Associated schedules protect owned Task threads; independently verify schedule mutations and preserve timezone/fractional precision. Exclusive browser handoff, Task pause/resume, automatic permission approval and export are unavailable.
 
-For `gemini_task_browser`, install `[browser-control]`. Input requires the returned exact reply IDs, prior frame hash and a unique action ID; the original Task must still be in state 3 or 5. Never replay an action ID or auto-approve login/permissions. A verified frame or input dispatch does not verify website effects or exclusive pause. See [tool_surface.md](tool_surface.md) for account-operation safety.
+For `gemini_task_browser`, install `[browser-control]`. On repeat observations, pass the last `known_frame_sha256` to skip an unchanged image. Use `include_image=false` when you only need the verified PNG file. Input uses the exact reply IDs, `expected_frame_sha256`, and a unique action ID. It requires Task state 3 or 5. Never replay an action or auto-approve a card. Verify website effects independently. See [tool_surface.md](tool_surface.md).
+
+For a verified report or answer file without an inline preview, set `include_text=false` on an operation result read. Status, required input, and cleanup evidence still apply.

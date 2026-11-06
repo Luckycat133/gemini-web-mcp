@@ -22,7 +22,7 @@
 | `gemini_generate_music` | 后台生成音乐 | 空 prompt 负例 | `test_music_recovery.py`, `test_media_jobs.py` | 11-06 的 Flash 调用保存可解码 MP3 和含音视频轨的 MP4，另存封面，测试聊天独立核验已删除。 |
 | `gemini_run_task` | 委托 Task 执行工作 | 空 prompt 负例 | `test_task_jobs.py`, `test_task_files.py` | 11-06 实测浏览器一次性许可在原 Task 续答并执行，另一个 Task 取回仅存在于指定 Notebook 来源中的标记。此前也验证过 CSV 附件保存与清理。 |
 | `gemini_get_operation_status` | 查询已有操作 | 空 operation_id 负例 | `test_operations.py`, `test_operation_tools.py` | 媒体、Task 和研究原 handle 状态曾真实读取；不同操作状态分别判断。 |
-| `gemini_get_operation_result` | 取回操作结果 | 空 operation_id 负例 | `test_operations.py`, `test_task_jobs.py` | 11-06 按原句柄取回真实研究报告、媒体和 Task 结果，Notebook 来源回答跨连接重读通过。 |
+| `gemini_get_operation_result` | 取回操作结果，支持仅返回文件 | 空 operation_id 负例 | `test_operations.py`, `test_task_jobs.py` | 11-06 按原句柄取回真实研究报告、媒体和 Task 结果。已清理 Task 的 `include_text=false` 省略预览并保留同一经校验文件。 |
 | `gemini_list_research_report_actions` | 查看已保存报告的派生动作 | 缺少报告身份负例 | `test_research_report_helpers.py` | 从真实本地研究报告按原句柄列出六种派生动作。 |
 | `gemini_create_from_research_report` | 从已保存报告生成本地产物 | 缺少报告身份负例 | `test_research_report_helpers.py` | 六种本地渲染均返回保存验证状态。音频概览产物是文稿，自定义应用产物是规格。 |
 
@@ -42,8 +42,8 @@
 | `gemini_manage_gems` | 管理 Gems | action 类型负例 | `test_manage_gems_models_inventory.py` | 合成 Gem 创建、读取、修改、删除与不存在核验曾通过；不外推附件。 |
 | `gemini_cleanup` | 查看／处理 MCP 自有清理账本 | 无账号 list：`AUTH_REQUIRED`，未读取账本 | `test_owned_cleanup.py`, `test_cleanup_runtime.py`, `test_task_owned_cleanup.py` | 11-06 的新合成 Task 在取回结果前自动清理。精确 Task 目标与普通历史均经回读确认不存在。旧测试记录可按准确 ID 复查。 |
 | `gemini_manage_chat` | 精确改名或置顶聊天 | chat_id 类型负例 | `test_chat_management_service.py` | 11-06 合成普通聊天的改名、置顶、取消置顶分别独立读回。 |
-| `gemini_tasks` | Task 读取、删除与 Task 专属计划 | action 类型负例 | `test_web_tasks_service.py`, `test_task_delete_readback.py` | 合成 Task 专属删除与不存在读回曾通过；所有计划变体不因此自动通过。 |
-| `gemini_task_browser` | 读取 Task 浏览器并按精确状态输入 | action 类型负例 | `test_task_browser_service.py`, `test_task_browser_turn.py` | 11-06 用新截图核对点击跳转、键盘导航、地址输入和滚动。相同点击 ID 再次调用未派发。 |
+| `gemini_tasks` | Task 读取、改名、置顶、删除与 Task 专属计划 | action 类型负例 | `test_web_tasks_service.py`, `test_task_delete_readback.py` | 合成 Task 改名、置顶、取消置顶独立读回通过。重复改名没有再派发。专属删除及不存在读回曾通过。 |
+| `gemini_task_browser` | 读取 Task 浏览器并按精确状态输入 | action 类型负例 | `test_task_browser_service.py`, `test_task_browser_turn.py` | 11-06 核对了点击、键盘导航、输入和滚动。重复动作未派发。同一帧的条件读取实测只返回 1,726 字节元数据。 |
 | `gemini_preferences` | 读取或明确修改 Task 偏好 | action 类型负例 | `test_preferences_service.py`, `test_preference_tools.py` | 11-06 的仅远程和始终询问产生实际许可卡，允许一次后继续。仅远程及自动选择分别搭配始终允许，两次实际远程浏览均未弹卡。原偏好读回恢复。 |
 | `gemini_skills` | 管理原生 Gemini Skills | action 类型负例 | `test_managed_skills.py`, `test_managed_skill_transport.py` | 11-06 修复原生上传端点，实测创建、精确读取、更新、停用、启用和删除，完整列表核验不存在。 |
-| `gemini_manage_notebook` | 管理 Notebook 及其文本来源 | action 类型负例 | `test_notebook_admin.py` | 合成 Notebook 与文本来源创建、读取、删除及独立不存在验证通过；URL／文件来源待核验。 |
+| `gemini_manage_notebook` | 管理 Notebook 和纯文本、网页 URL、UTF-8 文本文件来源 | action 类型负例 | `test_notebook_admin.py` | 实测 URL 与文件来源已索引。Task 取回只存在于文件中的校验词。测试来源、Notebook 和 Task 已独立核验清理。 |

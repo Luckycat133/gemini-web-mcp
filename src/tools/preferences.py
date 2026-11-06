@@ -38,23 +38,17 @@ def register_preference_tools(mcp: MCPServer) -> None:
         permission_id: str | None = None, expected_revision: str | None = None,
         limit: int = 20, offset: int = 0,
     ) -> list[TextContent]:
-        """Read or explicitly change persistent Gemini Task browser/permission preferences.
+        """Read or explicitly change saved Task browser and app-action preferences.
 
-        get_browser reads saved browser choice and permission_preference. set_browser
-        changes automatic (Gemini decides local Chrome/remote) or remote_only, and/or
-        always_ask/always_allow. These are account preferences, not per-prompt flags.
-        list_permissions discovers compact stored settings and available native app
-        actions; use returned opaque permission_id for set_permission. Never invent
-        an app/action identity. Lists are locally bounded and do not prove every app
-        or action is available. expected_revision protects against stale reads.
-        Always allow saves a persistent preference: require that scope of intent.
-        Verification covers the stored setting, not Task behavior. effective_permission
-        remains unknown and behavior_verified=false; native confirmations can still appear.
-        Once/thread approvals remain the exact returned confirmation-card flow.
-        Writes dispatch once and independently read back; sent/unverified is not
-        success and must not be blindly replayed. No cookies or native grant IDs
-        are returned. Neither a permission preference nor a screenshot proves an
-        external website/app action completed.
+        get_browser returns saved browser choice and permission_preference. set_browser
+        supports automatic (local Chrome or remote) and remote_only. list_permissions
+        is bounded and returns the exact opaque permission_id for set_permission.
+        Use expected_revision to guard stale writes. always_allow requires explicit
+        persistent authorization. Once/thread approvals use the original Task card.
+        Writes dispatch once and independently read back the saved value. Unknown
+        outcomes must not be replayed. effective_permission stays unknown and
+        behavior_verified=false. Native confirmations may still appear. Verify app
+        and website changes separately. Permission identifiers are opaque.
         """
         incompatible = (
             (action in {"get_browser", "list_permissions"}

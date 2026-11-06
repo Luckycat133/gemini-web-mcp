@@ -8,7 +8,7 @@ Function `gemini_ask(notebook_ids=...)` starts background ordinary Chat; `gemini
 
 Account `gemini_preferences` manages saved browser/action preferences using returned handles and optional revisions. Writes have independent read-back; their verification scope is `stored_preference`, with `behavior_verified=false`. `permission_preference` is the saved value; `effective_permission` remains unknown. Native cards may still appear. Its annotation is mutating, non-destructive and non-idempotent.
 
-`gemini_skills` manages native Gemini Skills; list metadata first, read one exact instruction body only with explicit intent. `gemini_manage_notebook` creates and manages exact Notebooks and plaintext sources; deletion includes the Notebook's conversations. Both are account-only destructive unions. Notebook reads use bounded local limit/offset pages.
+`gemini_skills` manages native Gemini Skills. List metadata first and read one exact instruction body only with explicit intent. `gemini_manage_notebook` manages exact Notebooks and plaintext, URL or UTF-8 `.txt` sources. Check the exact source ID for indexed state and verify source QA separately. Notebook deletion includes its conversations. Both are account-only destructive unions.
 
 ## Annotation legend
 
@@ -24,8 +24,8 @@ Account `gemini_preferences` manages saved browser/action preferences using retu
 |---|---|---|
 | `gemini_reset_session` | core | Clear one MCP/Gemini session and its configured remote-chat lifecycle; never changes agent memory or agent instructions |
 | `gemini_run_task` | tasks | Send user-requested Task and explicit Notebook context; connected-app requests may mutate data (`sends_user_requested_task_and_explicit_notebook_context`) |
-| `gemini_tasks` | account | Task metadata, bounded progress, schedules, or explicit exact-ID deletion with read-back; union annotation is destructive |
-| `gemini_task_browser` | account | Verified screenshot or explicit one-shot browser input; union annotation is destructive |
+| `gemini_tasks` | account | Task metadata, bounded progress, schedules, and exact rename/pin/unpin/delete with read-back. Destructive union |
+| `gemini_task_browser` | account | Verified screenshot, conditional frame read or explicit one-shot input. Destructive union |
 | `gemini_cleanup` | account | Clean MCP-owned ledger entries under the requested scope |
 | `gemini_cleanup_test_artifacts` | explicit legacy history | Find and optionally delete test chats/scheduled actions by marker |
 | `gemini_delete_chat` | history | Request remote chat deletion and report read-back evidence |

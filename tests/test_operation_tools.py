@@ -59,6 +59,51 @@ def test_recovery_failure_does_not_claim_report_ready(monkeypatch):
     assert "ready" not in result.content[0].text
 
 
+@pytest.mark.parametrize("surface", ["function", "assist", "compact"])
+def test_file_only_operation_result_keeps_verified_artifact_without_report_preview(monkeypatch, tmp_path, surface):
+    from src.domain.artifacts import Artifact, ArtifactKind, ArtifactState, ArtifactVerification, ArtifactVerificationStatus
+
+    path = tmp_path / "report.md"
+    path.write_text("Full verified report text.", encoding="utf-8")
+    artifact = Artifact(
+        "art_fixture", ArtifactKind.REPORT, ArtifactState.LOCAL, local_path=str(path),
+        verification=ArtifactVerification(ArtifactVerificationStatus.VERIFIED),
+    )
+
+    class Service:
+        async def get_result(self, operation_id):
+            return DomainResult.success(OperationReadData(
+                operation_id, "gemini_research", OperationState.COMPLETED, False, True,
+                "research_artifact_verified", report="Full verified report text.", artifacts=(artifact,),
+            ))
+
+    monkeypatch.setattr(operations, "_service", Service)
+    if surface == "function":
+        mcp = MCPServer("operations-file-only")
+        operations.register_operation_tools(mcp)
+        result = asyncio.run(mcp.call_tool("gemini_get_operation_result", {
+            "operation_id": "op_test", "include_text": False,
+        }))
+        content = result.content[0]
+    else:
+        from src.services import operations as operation_service
+
+        monkeypatch.setattr(operation_service, "OperationService", lambda *args: Service())
+        if surface == "assist":
+            from src.surfaces.assist import gemini_research
+
+            content = asyncio.run(gemini_research(action="result", operation_id="op_test", include_text=False))[0]
+        else:
+            from src.skill_server import session
+
+            content = asyncio.run(session(action="operation_result", session_id="op_test", include_text=False))[0]
+    payload = content.meta["domain_result"]
+    assert payload["ok"] and payload["data"]["report"] is None
+    assert payload["data"]["artifacts"][0]["local_path"] == str(path)
+    assert "Full verified report text." not in content.text
+    assert "in verified local artifact." in content.text
+
+
 def test_native_app_setup_is_presented_as_attention_with_original_task_url():
     data = OperationReadData("op_setup", "gemini_run_task", OperationState.PARTIAL,
         False, False, "task_setup_required", upstream_status=8, needs_attention=True,

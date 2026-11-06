@@ -21,6 +21,7 @@ except ImportError:
 
 from . import __version__
 from .adapters import append_artifact_block, attach_domain_result, domain_failure_text, domain_text, exception_text
+from .adapters.artifacts import omit_saved_preview
 from .client_wrapper import (
     cleanup_due_remote_chats,
     create_session,
@@ -1605,11 +1606,13 @@ async def session(
     thinking_level: str = "standard",
     learning_mode: Optional[str] = None,
     image_path: Optional[str] = None,
+    include_text: bool = True,
 ) -> list[TextContent]:
     """Manage sessions and background operations.
 
     For operation_status or operation_result, pass the operation handle as
-    session_id. reset/reset_one need a session ID; only reset_all clears all.
+    session_id. For operation_result, include_text=false returns the verified
+    file without the preview. reset/reset_one need a session ID.
     """
     try:
         if action in {"operation_status", "operation_result"}:
@@ -1622,10 +1625,15 @@ async def session(
                                        finalize_remote_chat_cleanup)
             result = await (service.get_status(session_id) if action == "operation_status"
                             else service.get_result(session_id))
+            omitted = False
+            if action == "operation_result" and not include_text:
+                result, omitted = omit_saved_preview(result)
             data = result.data
             text = f"Operation {data.operation_id}: {data.state.value}." if result.ok and data else "Operation lookup failed."
             if data and data.report:
                 text += f"\n\n{data.report}"
+            elif omitted:
+                text += "\nFull result in verified local artifact."
             content = domain_text(result, text, use_result_data=True)
             return append_artifact_block(content, data.artifacts) if data and data.artifacts else content
         valid_image, safe_image_path, image_error = validate_optional_image_path(image_path)

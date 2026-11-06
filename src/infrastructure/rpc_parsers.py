@@ -1281,6 +1281,11 @@ def parse_notebook_admin_project(body: Any, **arguments: Any) -> RPCParseResult:
     return parse_project(body, **arguments)
 
 
+def parse_notebook_admin_source_created(body: Any, **arguments: Any) -> RPCParseResult:
+    from .notebook_admin import parse_source_created
+    return parse_source_created(body, **arguments)
+
+
 def parse_custom_gems(body: Any, *, include_instructions_for: str | None = None, **_: Any) -> RPCParseResult:
     """Parse one complete custom-Gem catalog; missing field 3 is not an empty list."""
     if not isinstance(body, list) or len(body) < 3 or not isinstance(body[2], list):
@@ -1308,6 +1313,7 @@ PARSER_FUNCTIONS: Mapping[str, Callable[..., RPCParseResult]] = {
     "custom_gems": parse_custom_gems,
     "notebook_admin_created": parse_notebook_admin_created,
     "notebook_admin_project": parse_notebook_admin_project,
+    "notebook_admin_source_created": parse_notebook_admin_source_created,
     "managed_skills_list": parse_managed_skills_list,
     "managed_skills_get": parse_managed_skills_get,
     "managed_skills_saved": parse_managed_skills_saved,
@@ -1326,6 +1332,7 @@ PARSER_FUNCTIONS: Mapping[str, Callable[..., RPCParseResult]] = {
     "remy_schedule_list": parse_remy_schedule_list,
     "workflow_turn": parse_workflow_turn,
     "task_goal": parse_task_goal,
+    "task_goal_update": parse_task_goal,
     "task_goal_page": parse_task_goal_page,
     "notebooklm_picker": parse_notebooklm_picker,
     "notebooklm_list": parse_notebooklm_list,

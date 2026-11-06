@@ -152,6 +152,36 @@ def _assert_private(result, harness):
         assert private.encode() not in persisted
 
 
+def test_observation_with_known_frame_omits_identical_png_and_returns_changed_frame(harness):
+    async def run():
+        original = await harness.service.observe(CID, response_id=RID, candidate_id=RCID)
+        assert original.ok and original.data and original.data.artifacts
+        digest = original.data.frame_sha256
+        assert digest == hashlib.sha256(harness.rfb.before).hexdigest()
+        changed_png = harness.rfb.after
+        harness.rfb.after = harness.rfb.before
+        same = await harness.service.observe(CID, response_id=RID, candidate_id=RCID, known_frame_sha256=digest)
+        assert same.ok and same.data and same.data.state == "frame_unchanged"
+        assert same.meta.verification_status == "browser_frame_hash_matched"
+        assert same.data.frame_sha256 == digest and same.data.artifacts == ()
+        assert same.data.response_id == RID and same.data.candidate_id == RCID
+        harness.rfb.after = changed_png
+        changed = await harness.service.observe(CID, response_id=RID, candidate_id=RCID, known_frame_sha256=digest)
+        assert changed.ok and changed.data and changed.data.state == "frame_ready"
+        assert changed.data.frame_sha256 == hashlib.sha256(changed_png).hexdigest()
+        assert changed.data.artifacts and not harness.rfb.inputs
+
+    asyncio.run(run())
+
+
+def test_known_frame_digest_is_rejected_for_input_before_any_remote_work(harness):
+    arguments = harness.input_arguments()
+    arguments["known_frame_sha256"] = arguments["expected_frame_sha256"]
+    result = asyncio.run(harness.service.observe(CID, **arguments))
+    assert result.error_code == DomainErrorCode.INVALID_ARGUMENT
+    assert not harness.initializations and not harness.rfb.inputs and not harness.action_count()
+
+
 def _assert_frame(data, expected):
     assert len(data.artifacts) == 1
     artifact = data.artifacts[0]

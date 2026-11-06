@@ -10,7 +10,7 @@ Gemini 网页中的 NotebookLM／Gemini Notebook 已接入同一组工作流。�
 | 根据指定 Notebook 的来源回答问题 | 功能面 `gemini_ask(notebook_ids=[...])` | 后台普通聊天，`execution_mode="chat"`；保存完整回答产物后取回 |
 | 明确要求 Task，或委托 Gemini 持续执行、跟踪进度、操作网站 | 功能面 `gemini_run_task` | 后台 Task，`execution_mode="task"`；同一操作句柄读取状态与结果 |
 | 查找 Notebook 名称、ID、来源数量 | 账号面 `gemini_notebooks` | 默认 `source="notebooklm"`，只读紧凑元数据 |
-| 新建 Notebook、管理纯文本来源或删除 Notebook | 账号面 `gemini_manage_notebook` | 准确资源身份与独立元数据读回；删除 Notebook 包含其中对话 |
+| 新建 Notebook、管理纯文本、网页 URL 或 UTF-8 `.txt` 来源 | 账号面 `gemini_manage_notebook` | 准确资源身份与独立元数据读回。删除 Notebook 包含其中对话 |
 | 管理原生 Gemini Skills | 账号面 `gemini_skills` | 创建、更新、启停、删除与独立读回；指令正文读取须显式选择 |
 | 列出、查看或删除已有 Task 线程 | 账号面 `gemini_tasks` | list/get 只读元数据；delete 使用准确 Task 聊天 ID 并独立核验不存在 |
 | 把已有聊天整理进 Notebook | 账号面 `gemini_move_chat_to_notebook` | 先在 `source="gemini"` 项目视图精确解析目标，再修改并读回归属 |
@@ -142,6 +142,8 @@ Task 可能返回需要回复的应用确认卡片。`gemini_get_operation_statu
 
 ## Task 进度与计划
 
+对准确的 Task `chat_id`，`gemini_tasks` 支持 `rename`、`pin` 和 `unpin`。改名传 `title`。结果独立读回实际名称或置顶状态。请求已达到的状态时返回 `no_op`。
+
 `gemini_tasks(action="progress", chat_id=...)` 读取当前账号下最新 Task 回合的有限活动；也可同时提供 `response_id` 和 `candidate_id` 指定精确回合。返回活动名称、工具名和数量，步骤状态未知；它不会改变原 `operation_id` 的答案恢复路径。
 
 Task 计划由 `gemini_tasks` 的 `list_schedules`、`get_schedule`、`create_schedule`、`update_schedule`、`pause_schedule`、`resume_schedule`、`delete_schedule` 管理，与聊天 scheduled actions 分开。`schedule` 支持 `frequency` 为 `once`、`daily`、`weekly`、`hourly`、`monthly` 或 `yearly`，按类型提供 `at`、`time`、`weekdays`、`minute`、`days_of_month` 或 `month`/`day`。指定 `window` 时仍保留 `time`。时间戳须带时区，归一化为 UTC 并保留最多九位小数；列表的 `offset`/`limit` 是本地分页。创建和修改仅发送一次，须独立读回核验；未确认的响应不能当成功或盲目重发。
@@ -151,6 +153,8 @@ Task 计划由 `gemini_tasks` 的 `list_schedules`、`get_schedule`、`create_sc
 ## Task 浏览器
 
 安装 `gemini-web-mcp[browser-control]`，或使用包含该依赖的 `gemini-web-mcp[all]`。账号面 `gemini_task_browser(chat_id=...)` 默认读取最新 Task 的浏览器截图；同时提供 `response_id` 和 `candidate_id` 可指定精确回合。可验证的 PNG 会保存为本地 Artifact，并在不超过 2 MiB 且摘要匹配时附带原生图片预览。
+
+重复查看同一页面时，传入上一帧的 `known_frame_sha256`。帧内容未变时只返回核验后的帧摘要和回合状态。帧改变时仍返回新图；只需要保存的 PNG 时使用 `include_image=false`。
 
 显式输入传入 `browser_input`，坐标以当前截图为准。调用必须同时提供截图对应的精确 `response_id`、`candidate_id`、`expected_frame_sha256` 和至少 20 字符的唯一 `action_id`。仅当 Task 状态为完成（3）或等待输入（5），且发送前重新读回状态未变化时允许输入。相同 action ID 已消费即不重发。输入日志只保存操作元数据。
 

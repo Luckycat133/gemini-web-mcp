@@ -3,6 +3,7 @@
 import json
 from typing import Any, cast
 
+from ..domain.web_tasks import TaskMetadataField
 from ..infrastructure.rpc_contracts import execute_contract, execute_graphql_read, get_contract
 from ..infrastructure.rpc_parsers import parse_contract_body, parse_rpc_envelope
 from .deadlines import await_before_deadline
@@ -71,6 +72,15 @@ async def fetch_task_metadata_page(client: Any, limit: int, page_token: str | No
 async def delete_task_metadata(client: Any, chat_id: str) -> None:
     """One dispatch; the caller must independently verify exact Task absence."""
     await await_before_deadline(_batch(client, "tasks.delete", chat_id=chat_id), timeout=30)
+
+
+async def update_task_metadata(client: Any, chat_id: str, field: TaskMetadataField, value: str | bool) -> None:
+    """Dispatch one field-masked update and leave verification to a fresh Task read."""
+    task = await await_before_deadline(
+        _batch(client, "tasks.update_metadata", chat_id=chat_id, field=field, value=value), timeout=30,
+    )
+    if not isinstance(task, dict) or task.get("chat_id") != chat_id:
+        raise WebContextUnavailable("The Task metadata update response did not identify the exact Task.")
 
 
 async def refresh_task_schedule_guard(client: Any, chat_id: str, *, store: Any = None) -> list[str]:

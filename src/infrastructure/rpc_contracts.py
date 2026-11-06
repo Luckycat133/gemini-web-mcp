@@ -340,6 +340,24 @@ def _task_id_payload(*, chat_id: str) -> str:
     return _compact([chat_id])
 
 
+def _task_metadata_update_payload(*, chat_id: str, field: str, value: str | bool) -> str:
+    from ..domain.conversations import is_valid_remote_chat_id
+    from ..domain.web_tasks import MAX_TASK_TITLE_LENGTH
+
+    if not is_valid_remote_chat_id(chat_id):
+        raise ValueError("An exact Task chat ID is required.")
+    goal: list[Any] = [None] * 14
+    goal[13] = chat_id
+    if field == "description" and isinstance(value, str) and value.strip() and len(value) <= MAX_TASK_TITLE_LENGTH:
+        goal[1] = value
+    elif field == "pinned" and type(value) is bool:
+        goal.extend([None] * 5)
+        goal.append(int(value))
+    else:
+        raise ValueError("An observed Task metadata field and value are required.")
+    return _compact([goal, [[field]]])
+
+
 def _single_turn_payload(*, chat_id: str, rid: str) -> str:
     if not isinstance(chat_id, str) or not chat_id.startswith('c_') or not isinstance(rid, str) or not rid.startswith('r_'):
         raise ValueError('An exact conversation and turn are required')
@@ -639,6 +657,16 @@ def _notebook_admin_source_create_payload(**arguments: Any) -> str:
     return source_create_payload(**arguments)
 
 
+def _notebook_admin_source_url_create_payload(**arguments: Any) -> str:
+    from .notebook_admin import source_url_create_payload
+    return source_url_create_payload(**arguments)
+
+
+def _notebook_admin_source_file_create_payload(**arguments: Any) -> str:
+    from .notebook_admin import source_file_create_payload
+    return source_file_create_payload(**arguments)
+
+
 def _notebook_admin_source_delete_payload(**arguments: Any) -> str:
     from .notebook_admin import source_delete_payload
     return source_delete_payload(**arguments)
@@ -663,6 +691,14 @@ _CONTRACT_LIST = [
               _notebook_admin_source_create_payload, "mutation_ack",
               "2026-11-01 public CJ.E3/Bsf notebook text source oneof and partner surface [1,3]",
               mode="mutation", verification_strategy="independent_exact_source_readback"),
+    _contract("notebook_admin.source_create_url", "notebook_admin", "add_url_source", "ko3zcd", "/app",
+              _notebook_admin_source_url_create_payload, "notebook_admin_source_created",
+              "2026-11-06 public lbYGFc bYe/OI.e5 URL source oneof field 4 and exact created source name",
+              mode="mutation", stability="preview", verification_strategy="independent_exact_url_source_readback"),
+    _contract("notebook_admin.source_create_file", "notebook_admin", "add_file_source", "ko3zcd", "/app",
+              _notebook_admin_source_file_create_payload, "notebook_admin_source_created",
+              "2026-10-18 indexed file source; 2026-11-06 public lbYGFc bYe/OI.e5 upload oneof field 5 and assigned name",
+              mode="mutation", stability="preview", verification_strategy="independent_exact_file_source_readback"),
     _contract("notebook_admin.source_delete", "notebook_admin", "delete_source", "AptDmf", "/app",
               _notebook_admin_source_delete_payload, "mutation_ack",
               "2026-11-01 public native source deletion with exact observed resource key and partner surface [1,3]",
@@ -734,6 +770,12 @@ _CONTRACT_LIST = [
     _contract(
         "tasks.list", "tasks", "task_goal_list", "GS7W1", "/app", _task_page_payload, "task_goal_page",
         "2026-11-01 public ListRemyGoals builder and goal metadata schema",
+    ),
+    _contract(
+        "tasks.update_metadata", "tasks", "task_goal_update_metadata", "Dxg8ke", "/app",
+        _task_metadata_update_payload, "task_goal_update",
+        "2026-11-06 public Web UpdateRemyGoal: goal fields 2/14/20, one description or pinned field mask",
+        mode="mutation", verification_strategy="independent_exact_task_metadata_read_back",
     ),
     _contract(
         "tasks.delete", "tasks", "task_goal_delete", "w4yNDb", "/app", _task_id_payload, "mutation_ack",

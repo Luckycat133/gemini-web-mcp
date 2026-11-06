@@ -14,15 +14,12 @@ def register_owned_cleanup_tools(mcp: MCPServer) -> None:
     @domain_error_boundary("gemini_cleanup", logging.getLogger(__name__))
     async def gemini_cleanup(action: Literal["list", "retry", "recheck"] = "list", chat_id: str | None = None,
                              limit: int = 50, offset: int = 0, include_completed: bool = False) -> list[TextContent]:
-        """Inspect or retry cleanup of MCP-owned chats in the currently authenticated account.
+        """Inspect or retry cleanup of exact MCP-owned chats in the current account.
 
-        list reads the local ownership ledger, not a fresh deletion proof. retry
-        processes pending records and honors active operations and explicit retention.
-        recheck requires one known chat_id and fresh remote metadata; it can repair
-        an old completed record only after the chat is positively observed again.
-        For known Tasks, completion requires both exact Task-goal absence and
-        conversation-history absence. Associated schedules protect the thread.
-        Unknown chats are never selected by title or deleted by this tool.
+        list reads the local ledger. retry processes pending rows. recheck requires
+        a known chat_id and fresh remote evidence, and may retry after positive
+        presence. Task cleanup verifies both exact goal and chat absence. Active
+        operations, retention and associated schedules protect chats. Never match titles.
         """
         result = await owned_cleanup_result(action, chat_id=chat_id, limit=limit, offset=offset,
                                              include_completed=include_completed)

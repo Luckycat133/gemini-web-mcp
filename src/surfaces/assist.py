@@ -61,6 +61,7 @@ from ..services import (
     observed_backend_from_response,
 )
 from ..tools.annotations import DESTRUCTIVE_REMOTE, MUTATES_REMOTE
+from ..adapters.artifacts import omit_saved_preview
 from ..tools.utils import parse_response
 
 logger = logging.getLogger(__name__)
@@ -181,15 +182,10 @@ async def gemini_ask(
     retain_chat: bool = False,
     delete_after_seconds: int | None = None,
 ) -> list[TextContent]:
-    """Ask Gemini naturally and return the answer with observed source evidence.
+    """Ask Gemini Chat for answers, writing, web research, or direct app requests.
 
-    Default Chat route for answers, writing, analysis and direct connected-app
-    requests, including complex or multi-step questions. Name the app naturally
-    in the prompt, such as "Create a Keep note" or "Find a file in Drive";
-    no separate app-named tool or web/tool enable switch is needed.
-    thinking_level accepts low/medium/high; standard/extended remain low/high
-    compatibility aliases. The structured result includes observed sources and grounding status; it
-    does not infer app execution from prose.
+    Name the app in the prompt. Use observed sources for grounding and verify
+    app effects independently. Thinking accepts low/medium/high or standard/extended.
     """
     if not prompt.strip():
         return domain_text(
@@ -270,13 +266,10 @@ async def gemini_search(
     max_results: int = DEFAULT_MAX_RESULTS,
     model: str = "flash",
 ) -> list[TextContent]:
-    """Search the web through Gemini and return the answer with observed source evidence.
+    """Search the web with Gemini. Returns an answer, observed sources and timestamp.
 
-    Use this for current-web questions whose answer should name its sources.
-    The structured result carries ``grounding_state`` (grounded, answer_only,
-    unavailable, or failed), the observed ``sources`` list, and an
-    ``observed_at`` timestamp. An answer without observed source evidence is
-    reported as ``answer_only`` and is never labeled grounded.
+    grounding_state is grounded only with observed attribution or citation;
+    other states are answer_only, unavailable and failed.
     """
     result = await _search_service.search(
         SearchRequest(
@@ -331,13 +324,9 @@ async def gemini_understand_image(
     model: str = "flash",
     thinking_level: str = "standard",
 ) -> list[TextContent]:
-    """Understand one image and return the analysis tied to that image.
+    """Analyze one screenshot, photo or diagram from a local path or HTTP(S) URL.
 
-    Use this for screenshots, photos, diagrams, and other single-image tasks.
-    ``image`` accepts a local image file path or an http(s) image URI; local
-    images ride the shared chat upload workflow. The structured result
-    carries the input image artifact identity, the per-input outcome, and
-    requested/effective/observed model evidence alongside the analysis text.
+    Returns analysis, the input artifact and its outcome, and model evidence.
     """
     result = await _understand_service.understand_image(
         UnderstandImageRequest(
@@ -358,20 +347,12 @@ async def gemini_understand(
     model: str = "flash",
     thinking_level: str = "standard",
 ) -> list[TextContent]:
-    """Understand mixed text, image, file, and URL inputs in one request.
+    """Analyze up to 16 mixed inputs with one Gemini request.
 
-    Each input is one typed object — ``{"id", "kind", ...}`` — instead of one
-    overloaded string: ``kind=text`` carries ``text``, ``kind=image`` accepts a
-    local ``path`` or an http(s) URI, ``kind=file`` accepts a local ``path`` or
-    an http(s) URI, and ``kind=url`` carries an absolute ``url``. Requests
-    with more than 16 inputs are rejected outright by the input schema; an
-    input the service cannot use is recorded as ``skipped`` with its reason.
-    Every input keeps its ``id``; the structured result records a per-input
-    outcome (``accepted``, ``analyzed``, ``skipped``, or ``failed``) so no
-    input is silently dropped, plus the synthesized analysis. An input is
-    marked ``analyzed`` only when the completed analysis acknowledges it —
-    implicitly when it is the sole input, otherwise by referencing its
-    ``[id]``.
+    Give each input an id and kind. Text uses text, image/file uses path or
+    HTTP(S) uri, and url uses url. Outcomes are accepted, analyzed, skipped
+    or failed. Analyzed requires a completed answer for that sole input or
+    a reference to its [id] in a multi-input answer.
     """
     result = await _understand_service.understand(
         UnderstandRequest(
@@ -418,37 +399,19 @@ async def gemini_research(
     operation_id: Optional[str] = None,
     action: Literal["start", "status", "result"] = "start",
     background: bool = True,
+    include_text: bool = True,
 ) -> list[TextContent]:
-    """Start one Deep Research run asynchronously and return its operation handle.
+    """Start AI Plus Deep Research for a durable report from multiple sources.
 
-    Use this for multi-source investigation that produces a durable report.
-    By default this queues a background worker and promptly returns an opaque
-    ``operation_id``. Set ``background=false`` for the compatibility path.
-    Use ``action=status`` or ``action=result`` with that handle to read back.
-    ``timeout_seconds`` (default 600) bounds the plan and start phases
-    of that startup: it is clamped to a 30-second floor, and the start phase
-    is additionally capped at 120 seconds. It does not bound the report
-    itself, which can take several minutes after the call has returned. The
-    structured result preserves the upstream operation and chat identifiers
-    (``upstream_operation_id``, ``upstream_chat_id``) with a typed ``state``
-    (``accepted`` when progress is unconfirmed, otherwise the observed state)
-    so the report stays recoverable later. By default the chat is scheduled
-    for deletion after a temporary grace period, or after the report is read;
-    set ``retain_chat`` to true to retain it. The local
-    operation metadata database supports recovery through the primary server's
-    gemini_get_operation_status and gemini_get_operation_result tools after restart.
-    For recovery even if this first call disconnects before returning, generate
-    an opaque handle (op_ plus 32 lowercase random hexadecimal characters) and
-    pass it as operation_id. While its seven-day record remains in the same
-    database, reusing that handle ignores the new query and retention settings.
-    If a completed original plan is found for an unverified plan outcome, the
-    server may atomically claim and confirm it once using the saved model and
-    thinking level; an already claimed confirmation is never resent. Otherwise
-    the saved state is returned. Never reuse a pruned handle. If the connection is lost before an
-    upstream chat ID is observed, the saved handle prevents a duplicate start
-    but cannot recover the remote plan or its progress.
-    Deep Research requires an AI Plus
-    subscription.
+    Runs in background by default. Use action=status/result with the original
+    operation_id after reconnecting. background=false waits for startup. Timeout
+    bounds planning/startup (30s minimum, 120s start cap); the report runs longer.
+    Optionally supply op_ plus 32 random lowercase hex digits before starting.
+    For seven days the same database reuses that handle and its saved settings.
+    Recovery confirms the original plan at most once. Without an observed chat
+    ID, the handle prevents duplicate start but cannot recover the remote plan.
+    Do not reuse expired handles. Set retain_chat=true to keep the conversation.
+    For result, include_text=false omits a preview when the verified file is available.
     """
     if action in {"status", "result"}:
         result: DomainResult[Any]
@@ -460,10 +423,15 @@ async def gemini_research(
             service = OperationService(OperationStore(), get_gemini_client, initialize_client,
                                        finalize_remote_chat_cleanup)
             result = await (service.get_status(operation_id) if action == "status" else service.get_result(operation_id))
+        omitted = False
+        if action == "result" and not include_text:
+            result, omitted = omit_saved_preview(result)
         data = result.data
         text = f"Operation {data.operation_id}: {data.state.value}." if result.ok and data else domain_failure_text(result)
         if data and data.report:
             text += f"\n\n{data.report}"
+        elif omitted:
+            text += "\nFull report in verified local artifact."
         content = domain_text(result, text, use_result_data=True)
         return append_artifact_block(content, data.artifacts) if data and data.artifacts else content
     request = ResearchRequest(
@@ -504,20 +472,13 @@ def register_assist_tools(server: MCPServer, *, notebook_context: bool = False) 
             retain_chat: bool = False, delete_after_seconds: int | None = None,
             operation_id: str | None = None,
         ) -> list[TextContent]:
-            """Ask normally, or read explicit NotebookLM/Gemini Notebook sources in chat mode.
+            """Ask Gemini Chat for answers, writing, web research or named app requests.
 
-            notebook_ids comes from gemini_notebooks. Notebook context starts a
-            background chat and returns its original operation handle for status
-            and result; it does not turn the chat into Gemini Task mode. A full
-            answer artifact is saved before automatic cleanup. Other questions
-            return normally. Chat also handles complex questions, writing and
-            direct app requests supported in Chat. Use gemini_run_task when the
-            user requests Task or delegates ongoing execution, work progress or
-            browser operation. Apps, Notebooks and background work alone do not
-            require Task. Name apps naturally, e.g. "Create a Keep note"; no
-            separate app-named tool or web/tool enable switch is needed.
-            thinking_level accepts low/medium/high (legacy standard/extended
-            aliases still select low/high).
+            notebook_ids from gemini_notebooks starts ordinary Chat in background.
+            Read the original operation_id for the saved answer and cleanup.
+            Without Notebook sources the answer returns inline. Use gemini_run_task
+            for delegated ongoing work or browser operation. Thinking accepts
+            low/medium/high or the standard/extended aliases.
             """
             if notebook_ids:
                 from ..services.background import submit_notebook_chat

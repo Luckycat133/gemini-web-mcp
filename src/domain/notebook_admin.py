@@ -9,3 +9,18 @@ class NotebookChange:
     verified: bool
     changed: bool | None
     content_verified: bool = False
+
+
+@dataclass(frozen=True)
+class NotebookRegisteredSourceChange(NotebookChange):
+    source_state: int | None = None
+
+
+@dataclass(frozen=True)
+class NotebookURLSourceChange(NotebookRegisteredSourceChange):
+    url_verified: bool = False
+
+
+@dataclass(frozen=True)
+class NotebookFileSourceChange(NotebookRegisteredSourceChange):
+    upload_reference_verified: bool = False

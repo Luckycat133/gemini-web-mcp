@@ -4,5 +4,9 @@
   "notebook_admin_project":{"contract_key":"notebook_admin.get","cases":{
     "success":{"body":[["fixture-notebook",["Synthetic notebook"]]],"arguments":{"notebook_id":"fixture-notebook"}},
     "empty":{"body":[],"arguments":{"notebook_id":"fixture-notebook"}},"rejected":{"body":[],"reject_code":403},
-    "changed_shape":{"body":[{}],"arguments":{"notebook_id":"fixture-notebook"}}}}
+    "changed_shape":{"body":[{}],"arguments":{"notebook_id":"fixture-notebook"}}}},
+  "notebook_admin_source_created":{"contract_key":"notebook_admin.source_create_url","cases":{
+    "success":{"body":[["fixture-notebook",["Synthetic notebook",null,null,null,null,null,null,null,null,null,null,null,null,null,[null,null,null,"fixture-source"]]]],"arguments":{"notebook_id":"fixture-notebook"}},
+    "empty":{"body":[],"arguments":{"notebook_id":"fixture-notebook"}},"rejected":{"body":[],"reject_code":7},
+    "changed_shape":{"body":[["fixture-notebook",["Synthetic notebook"]]],"arguments":{"notebook_id":"fixture-notebook"}}}}
 }

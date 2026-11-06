@@ -11,7 +11,7 @@
 | 图片／编辑 | 后台操作句柄 | 创作面同步返回产物 |
 | 长任务控制 | 显式 `operation_id`；不提供取消 | `idempotency_key`、状态／结果和取消；取消须有独立证据 |
 | 状态存储 | `GEMINI_OPERATION_DB_PATH` 与 `GEMINI_CLEANUP_DB_PATH` | `GEMINI_STATE_DB_PATH`，包含作用域、幂等、取消及清理元数据 |
-| 账号能力差异 | 新增 Task 浏览器、原卡精确续答、偏好与附件门禁；Notebook／纯文本来源及原生 Skills 管理 | 还包含 Canvas、Library、分享、原生 Skills ZIP 和其他嵌套账号操作 |
+| 账号能力差异 | Task 浏览器、原卡续答、偏好、附件校验、Notebook 来源和原生 Skills 管理 | 还包含 Canvas、Library、分享、原生 Skills ZIP 和其他嵌套账号操作 |
 
 工具同名不代表输入和返回合同相同，尤其是 `gemini_history`、`gemini_notebooks`、`gemini_cleanup` 和 Research。两种账本不能仅通过改名环境变量互换。本分支的“兼容 profile”指共同祖先的配置，不能据此声称覆盖已发布 0.2.2 的全部新接口。
 

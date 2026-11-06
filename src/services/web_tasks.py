@@ -1,4 +1,4 @@
-"""Shared service for Gemini Web Task (Remy goal) metadata: list, get, delete.
+"""Read and mutate exact Gemini Web Task (Remy goal) metadata.
 
 The service validates every request before touching transport or client state,
 guards account identity across each await, fresh-reads task metadata before
@@ -34,6 +34,7 @@ from ..domain.web_tasks import (
     DEFAULT_TASK_LIST_LIMIT,
     MAX_TASK_DESCRIPTION_PREVIEW,
     MAX_TASK_GET_CHARS,
+    MAX_TASK_TITLE_LENGTH,
     STATUS_ACCOUNT_MISMATCH,
     STATUS_ACCOUNT_REQUIRED,
     STATUS_ABSENT,
@@ -43,9 +44,12 @@ from ..domain.web_tasks import (
     STATUS_UNVERIFIED,
     STATUS_VERIFIED,
     STATUS_WRONG_IDENTITY,
+    TaskMetadataAction,
+    TaskMetadataField,
     WebTask,
     WebTaskDeleteData,
     WebTaskGetData,
+    WebTaskMetadataUpdateData,
     WebTaskPage,
     WebTaskSummary,
     truncate_text,
@@ -67,10 +71,11 @@ class WebTaskDependencies:
     delete_task: Callable[[Any, str], Awaitable[Any]]
     account_key_provider: Callable[[], str | None] = current_account_key
     readback_delays: tuple[float, ...] = ()
+    update_metadata: Callable[[Any, str, TaskMetadataField, str | bool], Awaitable[None]] | None = None
 
 
 class WebTaskService:
-    """Fresh Task (Remy goal) metadata reads and read-back-verified deletion."""
+    """Fresh Task metadata reads and independently verified mutations."""
 
     def __init__(self, dependencies: WebTaskDependencies) -> None:
         delays = dependencies.readback_delays
@@ -239,6 +244,116 @@ class WebTaskService:
             verification_status=STATUS_VERIFIED,
             details={"service": "web_tasks", "operation": "get_task", "chat_id": chat_id},
         )
+
+    async def update_task(self, action: TaskMetadataAction, chat_id: str,
+                          title: str | None = None) -> DomainResult[WebTaskMetadataUpdateData]:
+        data = WebTaskMetadataUpdateData(action, chat_id)
+        details = {"service": "web_tasks", "operation": "update_task", "action": action}
+
+        def failure(code: DomainErrorCode, message: str, status: str) -> DomainResult[WebTaskMetadataUpdateData]:
+            return DomainResult.failure(code, message, data=data, verification_status=status, details=details)
+
+        if action not in ("rename", "pin", "unpin") or not is_valid_remote_chat_id(chat_id):
+            return failure(DomainErrorCode.INVALID_ARGUMENT, "Provide a supported action and exact Task chat_id.",
+                           STATUS_INVALID_REQUEST)
+        field: TaskMetadataField = "pinned"
+        value: str | bool = action == "pin"
+        if action == "rename":
+            normalized = title.strip() if isinstance(title, str) else ""
+            if not normalized or len(normalized) > MAX_TASK_TITLE_LENGTH:
+                return failure(DomainErrorCode.INVALID_ARGUMENT,
+                               f"Provide a nonblank title of at most {MAX_TASK_TITLE_LENGTH} characters.",
+                               STATUS_INVALID_REQUEST)
+            field, value = "description", normalized
+        elif title is not None:
+            return failure(DomainErrorCode.INVALID_ARGUMENT, "title is only valid for rename.", STATUS_INVALID_REQUEST)
+
+        update = self._dependencies.update_metadata
+        if update is None:
+            return failure(DomainErrorCode.CAPABILITY_UNAVAILABLE, "Task metadata updates are unavailable.",
+                           STATUS_UNVERIFIED)
+
+        def matches(task: WebTask) -> bool:
+            observed = task.description if field == "description" else task.is_pinned
+            return type(observed) is type(value) and observed == value
+
+        def success(changed: bool) -> DomainResult[WebTaskMetadataUpdateData]:
+            return DomainResult.success(replace(
+                data, changed=changed, verified=True,
+                description=value if isinstance(value, str) else None,
+                is_pinned=value if isinstance(value, bool) else None,
+            ), verification_status=STATUS_VERIFIED if changed else STATUS_NO_OP, details=details)
+
+        def account_mismatch() -> DomainResult[WebTaskMetadataUpdateData]:
+            return failure(DomainErrorCode.AUTH_REQUIRED, "The Task account changed. The result is unverified.",
+                           STATUS_ACCOUNT_MISMATCH)
+
+        original_owner = self._account_identity()
+        try:
+            await self._dependencies.client_initializer()
+            client = self._dependencies.client_provider()
+        except Exception as exc:
+            return replace(result_from_exception(exc, logger=_logger, operation="web_tasks.initialize_client"),
+                           data=data)
+        owner = self._account_identity()
+        if not owner:
+            return failure(DomainErrorCode.AUTH_REQUIRED, "An account is required for Task metadata updates.",
+                           STATUS_ACCOUNT_REQUIRED)
+        if original_owner is not None and original_owner != owner:
+            return account_mismatch()
+
+        try:
+            before = await await_before_deadline(self._dependencies.get_task(client, chat_id), timeout=30)
+        except Exception:
+            if self._account_identity() != owner:
+                return account_mismatch()
+            return failure(DomainErrorCode.VERIFICATION_FAILED, "Task metadata could not be read before the update.",
+                           STATUS_READ_ERROR)
+        if self._account_identity() != owner:
+            return account_mismatch()
+        if before is None:
+            return failure(DomainErrorCode.SESSION_NOT_FOUND, "The Task is absent from this account.", STATUS_ABSENT)
+        if before.chat_id != chat_id:
+            return failure(DomainErrorCode.VERIFICATION_FAILED, "The pre-read returned a different Task.",
+                           STATUS_WRONG_IDENTITY)
+        if matches(before):
+            return success(False)
+
+        from ..thinking_client import mutation_scope
+
+        try:
+            with mutation_scope(owner=owner, account_key_provider=self._account_identity):
+                data = replace(data, changed=None, mutation_sent=None)
+                await await_before_deadline(update(client, chat_id, field, value), timeout=30)
+                data = replace(data, mutation_sent=True)
+        except Exception:
+            if data.mutation_sent is False:
+                return account_mismatch()
+            # The outcome may have been applied. Only independent reads can verify it.
+
+        for delay in (0, *self._dependencies.readback_delays):
+            if delay:
+                await asyncio.sleep(delay)
+            if self._account_identity() != owner:
+                return account_mismatch()
+            try:
+                observed = await await_before_deadline(self._dependencies.get_task(client, chat_id), timeout=10)
+            except Exception:
+                if self._account_identity() != owner:
+                    return account_mismatch()
+                return failure(DomainErrorCode.VERIFICATION_FAILED, "Task metadata read-back failed.", STATUS_READ_ERROR)
+            if self._account_identity() != owner:
+                return account_mismatch()
+            if observed is None:
+                return failure(DomainErrorCode.VERIFICATION_FAILED, "The Task was absent on read-back.", STATUS_ABSENT)
+            if observed.chat_id != chat_id:
+                return failure(DomainErrorCode.VERIFICATION_FAILED, "Read-back returned a different Task.",
+                               STATUS_WRONG_IDENTITY)
+            if matches(observed):
+                return success(True)
+
+        return failure(DomainErrorCode.VERIFICATION_FAILED, "Read-back did not verify the requested Task field.",
+                       STATUS_UNVERIFIED)
 
     # ----------------------------------------------------------------- delete
 

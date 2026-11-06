@@ -14,6 +14,7 @@ _REQUIREMENT_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
 
 REQUIRED_IMPORTS = {
     "anyio": "anyio",
+    "curl_cffi": "curl-cffi",
     "gemini_webapi": "gemini-webapi",
     "httpx2": "httpx2",
     "loguru": "loguru",
@@ -38,6 +39,7 @@ OPTIONAL_IMPORTS = {
 
 EXPECTED_REQUIREMENTS = {
     "anyio": "anyio>=4.9,<5",
+    "curl-cffi": "curl-cffi>=0.16.2,<0.17",
     "gemini-webapi": "gemini-webapi>=2.1.1,<3",
     "httpx2": "httpx2>=2.10.0,<3",
     "loguru": "loguru>=0.7.3,<1",

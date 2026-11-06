@@ -21,32 +21,20 @@ def register_task_generation_tools(mcp: MCPServer) -> None:
         input_id: str | None = None,
         input_option_id: str | None = None,
     ) -> list[TextContent]:
-        """Start a Gemini Task in the background and return a persistent operation handle.
+        """Start a background Task for explicit Task, ongoing work, progress or browser operation.
 
-        Use when the user requests Task or delegates a workflow needing ongoing
-        execution, work progress or browser operation. Default to gemini_ask for
-        answers, writing, Notebook analysis and direct app requests supported in
-        Chat; complexity, apps and background execution alone do not require Task.
-        Name apps naturally and check their mode-specific availability if needed.
-        notebook_ids selects exact source notebooks from the account surface.
-        Task models are Flash (default) or Argon. thinking_level accepts low,
-        medium or high; standard/extended remain aliases for low/high. Native
-        browser/permission preferences are managed by account gemini_preferences,
-        independently of this call.
-        Poll the same handle with gemini_get_operation_status/result; never
-        resubmit to check progress. The worker verifies the full answer and
-        complete recognized native file inventory before cleaning the owned
-        thread unless retention or an associated schedule
-        protects it. retain_chat=true requests retention.
-        Task completion does not independently prove an external app mutation.
-        A Task may perform the app changes explicitly requested in its prompt.
-        When result returns input_required, use its input_id and the SAME
-        operation_id with the exact prompt and input_option_id from input_options
-        to answer it once. Native action choices are sent as their exact identities;
-        button text alone does not select a permission scope or browser choice.
+        Default to gemini_ask for Chat, writing, Notebook analysis and supported app
+        requests. Use exact notebook_ids from gemini_notebooks. Flash is default and
+        Argon is supported. Thinking accepts low/medium/high (standard/extended alias
+        low/high). Manage saved browser permissions with gemini_preferences.
+        Use gemini_get_operation_status/result on the original handle. The worker
+        verifies the answer and complete native file inventory before owned cleanup.
+        retain_chat=true or an associated schedule protects the thread. Verify app
+        changes independently. Include only explicitly authorized app mutations.
+        For input_required, send the original operation_id and input_id plus the exact
+        input_option_id and prompt from input_options, with the user's authorization.
+        Repeating that input_id never resends. Model and retention carry forward.
         Unsupported, hidden/disabled or subagent cards require the native UI.
-        Do not approve a card without the user's authorization. Repeating the
-        same input_id never resends it; original model and retention are kept.
         """
         result = await submit_task({
             "prompt": prompt, "model": model, "thinking_level": thinking_level,

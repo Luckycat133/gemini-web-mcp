@@ -33,11 +33,11 @@
 
 | 功能 | 官方范围 | 原生 UI 观察 | MCP 实现范围 | 本轮实测与剩余覆盖 |
 | --- | --- | --- | --- | --- |
-| 委托 Task 与进度 | [Task 帮助](https://support.google.com/gemini/answer/17094507?hl=en)包含持续执行、工作面板、追加指示和文件。 | 已观察 Task 状态、活动面板和等待确认卡片；原生也可在运行中追加指示。 | **已实现**：`gemini_run_task`；持久操作句柄、有限活动元数据、完整回答产物和原操作恢复。活动标签不冒充逐步完成状态。 | **实测通过**：本轮四个浏览器 Task 在各自卡片获授权后完成。任意追加指示、修改运行中计划、Task 暂停／恢复／停止尚无 MCP 入口。 |
+| 委托 Task 与进度 | [Task 帮助](https://support.google.com/gemini/answer/17094507?hl=en)包含持续执行、工作面板、追加指示和文件。 | 已观察 Task 状态、活动面板和等待确认卡片；原生也可在运行中追加指示。 | **已实现**：`gemini_run_task`；持久操作句柄、有限活动元数据、完整回答产物和原操作恢复。活动标签不冒充逐步完成状态。 | **实测通过**：本轮四个浏览器 Task 在各自卡片获授权后完成。已独立读回 Task 改名、置顶和取消置顶，重复改名不发送写请求。任意追加指示、修改运行中计划、Task 暂停／恢复／停止尚无 MCP 入口。 |
 | Task 确认卡续答 | [权限帮助](https://support.google.com/gemini/answer/18766567?hl=en)区分单次、当前线程和跨线程的选择，具体选项随功能变化。 | 真实浏览器卡含浏览器选择和允许／不允许；批准后原生 UI 标注本线程已获许可。 | **已实现**：原句柄、精确 `input_id`、返回的 `input_option_id` 与提示联合续答一次。隐藏、禁用、未知或 subagent 卡片拒绝猜测执行。 | **实测通过**：同一 Task 续答后继续执行；重复消费不重发。按钮文字不能自行解释成 once／thread／always；只发送原卡确切提供的选择。 |
 | Notebook 发现与来源问答 | [Gemini Notebook](https://support.google.com/gemini/answer/16972047?hl=en)支持 Notebook、来源、聊天组织及 Chat／Task 使用。 | 添加 Notebook 的选择器实际显示 Notebook 与来源数量；Notebook 和项目视图属于同一集成产品。 | **已实现**：`gemini_notebooks` 发现；普通 `gemini_ask(notebook_ids=...)` 与 Task 使用相同已发现资源，但保留各自模式。 | 两种模式都有历史来源标记证据。11-06 的 Task 再次从来源取回标记并在断开后保存答案，普通 Notebook Chat 复测返回上游错误。 |
 | 经 Task 管理 Notebook／来源 | [Notebook 帮助](https://support.google.com/gemini/answer/16972047?hl=en)列出创建、修改和删除 Notebook／来源等原生能力。 | 真实删除会要求确认；确认与最终资源不存在分别验证。 | **已实现**：可在用户授权的 Task 请求中使用 Notebook；Task 完成不能替代资源侧核验。 | **实测通过**：合成 Notebook 新增来源、改名、第二来源问答及确认后的删除；不外推为任意用户 Notebook 修改均可靠。 |
-| 专用 Notebook／来源管理 | [Notebook 帮助](https://support.google.com/gemini/answer/16972047?hl=en)还支持原生来源管理。 | 原生 Notebook 的来源管理与来源选择器是不同操作入口；不能猜测资源 ID 转换。 | **已实现**：`gemini_manage_notebook` 的创建、读取、来源列表、添加纯文本、精确删除来源和删除 Notebook。 | **实测通过**：合成 Notebook 与纯文本来源完成创建、读取、删除及独立不存在核验；Notebook Chat 从来源取回查询未包含的随机标记。URL／文件来源及文本更新仍需独立验证。删除 Notebook 会连带其对话，需明确意图。 |
+| 专用 Notebook／来源管理 | [Notebook 帮助](https://support.google.com/gemini/answer/16972047?hl=en)还支持原生来源管理。 | 原生 Notebook 的来源管理与来源选择器是不同操作入口；不能猜测资源 ID 转换。 | **已实现**：`gemini_manage_notebook` 的创建、读取、来源列表、添加纯文本、网页 URL 或 UTF-8 .txt、精确删除来源和删除 Notebook。 | **实测通过**：合成 Notebook 与纯文本来源完成创建、读取、删除及独立不存在核验；Notebook Chat 从来源取回查询未包含的随机标记。网页 URL 已独立读回并索引。合成 UTF-8 .txt 已索引，附带该来源的 Task 取回了随机校验词。其他文件格式、Drive 来源及文本更新待覆盖。删除 Notebook 会连带其对话，需明确意图。 |
 | 原生 Gemini Skills | [Skills 帮助](https://support.google.com/gemini/answer/17094296?hl=en)说明 Chat／Task 可使用保存的技能，支持创建、编辑、启停、上传及删除。 | 已观察原生 Skills 管理页及其读写效果；这与仓库里的 Agent Skill 文件不是同一资源。 | **已实现**：`gemini_skills` 列表、精确读取、创建、修改、启停、删除及独立读回。正文按明确请求读取。 | **实测通过**：本轮合成技能完整 CRUD 并清理。原生文件夹／zip、参考文件、脚本和显式附加 Skill ID 到生成请求尚未完整适配。 |
 | Connected Apps 与自定义 MCP App | [应用支持表](https://support.google.com/gemini/table/17434654?hl=en)逐项区分模式；[自定义 MCP App](https://support.google.com/gemini/answer/17209137?hl=en)也有独立接入条件。 | 已观察 Chat／Task 的 `@` 菜单有重叠也有差异；菜单可见不等于每个动作可执行。 | **已实现**：在提示中自然指定应用；按实际模式、目录和返回的授权请求处理。不要求用户开启联网／工具开关。 | 本轮区分了等待 App 设置的任务；没有授予新连接，类型化实时复测因认证失效受阻。仅指定场景有真实证据，未完成全部 App 的读写矩阵。官方当前 GitHub 仓库导入／代码问答为 Chat-only，Contacts 连接器为 Task-only，不外推到其他浏览器／MCP 路线。 |
 | Canvas | [Canvas 帮助](https://support.google.com/gemini/answer/16047321?hl=en)包含文档、应用、幻灯片、代码编辑与导出。 | 旧轮次已观察 Canvas 入口；本轮未完成原生文档生命周期复测。 | **仅原生／协议未明**：现有探测与普通内容生成不是 Canvas 文档的创建、编辑、版本、导出和分享服务。 | 未验证完整 Canvas 闭环。生成 HTML、应用规格或普通回答不能标为原生 Canvas 项目。 |
@@ -48,7 +48,7 @@
 
 | 功能 | 官方范围 | 原生 UI／行为观察 | MCP 实现范围 | 本轮实测与剩余覆盖 |
 | --- | --- | --- | --- | --- |
-| Task 远程浏览器观察与输入 | [Task](https://support.google.com/gemini/answer/17094507?hl=en)与[浏览器权限](https://support.google.com/gemini/answer/18766567?hl=en)说明委托访问网站及授权。 | 真实远程浏览器显示公开网页；实际点击后页面转到 RFC 2606。 | **已实现**：`gemini_task_browser` 取验证 PNG，显式 click／scroll／key／type；输入绑定精确回合、截图摘要和唯一 action ID。 | **实测通过**：IANA → RFC 2606 的 PNG 独立确认、重复不重发、旧帧拒绝。部分 Task 截图恢复仍待完成；截图、输入已发送与网站实际效果分别判断。 |
+| Task 远程浏览器观察与输入 | [Task](https://support.google.com/gemini/answer/17094507?hl=en)与[浏览器权限](https://support.google.com/gemini/answer/18766567?hl=en)说明委托访问网站及授权。 | 真实远程浏览器显示公开网页；实际点击后页面转到 RFC 2606。 | **已实现**：`gemini_task_browser` 取验证 PNG，显式 click／scroll／key／type；输入绑定精确回合、截图摘要和唯一 action ID。 | **实测通过**：IANA → RFC 2606 的 PNG 独立确认、重复不重发、旧帧拒绝。实测同一帧按哈希观察只返回元数据。部分 Task 截图恢复仍待完成，网站实际效果单独验证。 |
 | 浏览器选择与询问偏好 | [浏览器设置](https://support.google.com/gemini/answer/18766567?hl=en)提供让 Gemini 决定／仅远程及询问／允许偏好。 | 四种组合写入和独立读回曾通过。原生 UI 和 MCP 在已保存「始终允许」时也曾出现许可卡。 | **已实现**：`gemini_preferences` 读写已保存偏好。设置结果用 `effective_permission="unknown"`、`behavior_verified=false` 区分运行时证据。 | **实测通过**：11-06 在「仅远程」及「始终询问」下收到真实许可卡，明确选中「允许一次」后远程浏览器执行，原偏好经读回恢复。 |
 | 按 App／动作的权限偏好 | [应用动作权限](https://support.google.com/gemini/answer/18766567?hl=en)区分跨线程偏好与单次／当前线程批准。 | 已观察动作目录与已存覆盖项不同；服务端可能补充询问标记。 | **已实现**：精确发现可管理动作、单动作修改、旧快照保护和独立读回；不伪造动作 ID，不提供全应用一键放行。 | **设置读回通过**：公开信息动作的 ask → allow，随后撤销测试覆盖并核验原缺省恢复。尚未证明所有 App 的实际行为；偏好读回始终只标记 `stored_preference`。 |
 | 浏览器接管、终端、登录及远程数据清理 | [权限帮助](https://support.google.com/gemini/answer/18766567?hl=en)包含原生远程浏览器数据删除；[Task](https://support.google.com/gemini/answer/17094507?hl=en)描述原生工作体验。 | 本轮观察过原生浏览器与任务设置；没有建立完整接管／终端合同。 | **仅原生／未覆盖**：无独占接管、任意终端命令、自动登录、自动批准未知卡片或远程浏览器数据删除入口。 | 输入接口不代表 Task 已暂停或取得独占控制。保存全局权限不等于获准自动处理任意新任务中的敏感请求。 |
@@ -79,10 +79,10 @@
 - 此前的**连续会话**两轮和 reset 已真实通过，11-06 复测超时，原回合未读到答案。旧的合成 **Research** 对话已按准确 ID 删除并经回读核验。
 <!-- web-feature-live-session-research:end -->
 <!-- web-feature-live-notebook-admin:start -->
-- **专用 Notebook 管理**已验证合成 Notebook 和纯文本来源的创建、精确读取与删除。URL 和文件来源仍待验证。
+- **专用 Notebook 管理**已验证合成 Notebook 和纯文本来源的创建、精确读取与删除。网页 URL 和 UTF-8 .txt 已实测。其他文件格式、Drive 来源和 Notebook Studio 尚未覆盖。
 <!-- web-feature-live-notebook-admin:end -->
 <!-- web-feature-live-browser-recovery:start -->
-- 11-06 的**浏览器 Task**经单次许可后打开公开页面。新截图核验点击、键盘导航、输入地址和滚动的效果，相同动作 ID 重试未重发。原浏览器偏好已独立读回恢复，旧的浏览器控制 Task 和 App 设置 Task 已按准确 ID 删除并核验。始终允许是否能跳过许可卡仍未证实。
+- 11-06 的**浏览器 Task**经单次许可后打开公开页面。新截图核验点击、键盘导航、输入地址和滚动的效果，相同动作 ID 重试未重发。原浏览器偏好已独立读回恢复，旧的浏览器控制 Task 和 App 设置 Task 已按准确 ID 删除并核验。另两组实际走远程浏览器的「始终允许」对照均未弹卡，旧卡的触发原因未定位。
 <!-- web-feature-live-browser-recovery:end -->
 
 11-06 的功能面与账号面均用当前 Chrome 会话自动认证。普通 Flash Chat、续聊、联网、普通 Notebook Chat 和识图仍未取得合格结果。图片生成、编辑和两种远程浏览偏好已取得端到端证据。详情见开发状态。

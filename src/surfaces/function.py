@@ -23,20 +23,16 @@ from .catalogs import FUNCTION_TOOLS
 
 logger = logging.getLogger(__name__)
 mcp = MCPServer(name="Gemini functions", version=__version__, lifespan=server_lifespan, instructions="""
-Use gemini_ask for conversation, current web information and requests to available
-connected apps. Flash is the default conversation model. State the goal and name
-an app naturally in the prompt; no web-search or tool-enable switch is required.
-Use Argon for writing or particularly difficult reasoning when available. Lite
-requires fresh same-account basic Flash quota exhaustion and locks thinking
-strength in the runtime; callers do not need to manage those checks.
-Sources and grounding describe observed evidence. Do not infer that an app action
-completed from response prose. Default to Chat, including complex questions,
-Notebook analysis and direct app requests supported in Chat. Use gemini_run_task
-when the user requests Task or delegates a workflow needing its ongoing execution,
-work progress or browser operation. Apps, Notebooks and background execution alone
-do not require Task; check mode-specific app availability when needed. Task supports
-Flash or Argon. Keep its original operation handle for status/result reads.
-Chat scheduled actions and Task schedules are separate features.
+Default to gemini_ask for Chat, including complex questions, current web,
+Notebook analysis and direct app requests. Name available apps naturally.
+Web and tools need no enable switch. Flash is the default. Use Argon for
+writing or difficult reasoning when available. Lite requires fresh same-account
+basic Flash quota exhaustion and locks thinking strength.
+Use gemini_run_task for explicit Task or delegated ongoing work, tracked progress
+or browser operation. Choose by workflow even for background runs. Check app
+availability in the chosen mode. Task uses Flash or Argon. Keep the original
+handle for status and results. Task and Chat schedules are separate.
+Use observed grounding and verify external app changes independently of prose.
 """)
 
 register_assist_tools(selected_tools(mcp, set(FUNCTION_TOOLS)), notebook_context=True)

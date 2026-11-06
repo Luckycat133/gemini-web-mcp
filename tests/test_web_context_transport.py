@@ -15,7 +15,7 @@ from src.infrastructure.rpc_contracts import (
 from src.infrastructure.rpc_parsers import parse_contract_body
 from src.infrastructure.webchannel import parse_protobuf
 from src.services.web_context_transport import (
-    WebContextUnavailable, delete_task_metadata, fetch_notebooklm_metadata, fetch_task_metadata,
+    WebContextUnavailable, delete_task_metadata, fetch_notebooklm_metadata, fetch_task_metadata, update_task_metadata,
 )
 from src.thinking_client import WebRequestOptions, inject_web_request_options
 
@@ -101,6 +101,43 @@ def test_task_delete_disables_sdk_replay_and_requires_separate_readback():
     assert asyncio.run(delete_task_metadata(client, "c_fixture")) is None
     assert client._batch_execute.await_count == 1
     assert client._batch_execute.await_args.kwargs["current_retry"] == 0
+
+
+@pytest.mark.parametrize(("field", "value", "expected_fields"), [
+    ("description", "Synthetic title", {2: "Synthetic title", 14: "c_fixture"}),
+    ("pinned", True, {14: "c_fixture", 20: 1}),
+    ("pinned", False, {14: "c_fixture", 20: 0}),
+])
+def test_task_update_sends_one_field_mask_and_exact_goal_identity(field, value, expected_fields):
+    goal = [None] * 14
+    goal[13] = "c_fixture"
+    client = SimpleNamespace(_batch_execute=AsyncMock(return_value=_response("tasks.update_metadata", [goal])))
+
+    asyncio.run(update_task_metadata(client, "c_fixture", field, value))
+
+    client._batch_execute.assert_awaited_once()
+    call = client._batch_execute.await_args
+    rpc = call.args[0][0]
+    assert rpc.rpcid == "Dxg8ke" and call.kwargs["current_retry"] == 0
+    goal, mask = json.loads(rpc.payload)
+    assert {index: entry for index, entry in enumerate(goal, 1) if entry is not None} == expected_fields
+    assert mask == [[field]] and call.kwargs["source_path"] == "/app"
+
+
+@pytest.mark.parametrize(("field", "value"), [("status", 8), ("pinned", 1), ("description", " ")])
+def test_task_update_refuses_unknown_or_invalid_mutation_fields(field, value):
+    with pytest.raises(ValueError):
+        get_contract("tasks.update_metadata").build_payload(chat_id="c_fixture", field=field, value=value)
+
+
+def test_task_update_acknowledgment_must_match_the_requested_goal():
+    goal = [None] * 14
+    goal[13] = "c_other"
+    client = SimpleNamespace(_batch_execute=AsyncMock(return_value=_response("tasks.update_metadata", [goal])))
+
+    with pytest.raises(WebContextUnavailable):
+        asyncio.run(update_task_metadata(client, "c_fixture", "pinned", True))
+    client._batch_execute.assert_awaited_once()
 
 
 def test_task_not_found_code_is_distinct_from_missing_or_rejected_evidence():

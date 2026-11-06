@@ -10,6 +10,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- Shorten MCP catalogs while preserving validation rules and tool annotations. Add file-only operation results, conditional browser frames by SHA-256, and optional file-only screenshots.
+- Read current operation databases without a write lock or redundant schema initialization. Verify saved Research files once per read when no cleanup or state change intervenes.
+- Preserve the discovered model number in both SDK capacity layouts when setting a thinking level. Skip re-encoding selectors that already match.
+- Add Notebook web URL and UTF-8 text file sources with an exact receipt, independent source read-back and separate indexing and content evidence.
+- Add exact Task rename, pin, and unpin actions. Verify the changed field independently and skip writes when it already matches.
 - Point the READMEs, client configurations, onboarding examples, and Skill installs to the development branch that exposes the 17-tool function and account surfaces. Document Chrome session discovery and the difference from the published 0.2.2 interfaces.
 - Classify known Gemini generation failure notices in Chat and grounded search while preserving cleanup evidence. Notebook Chat reports its own execution mode and withholds a saved answer if verification fails during cleanup.
 - Decode generated and edited images before returning verified artifacts. Background image work checks for the optional decoder before dispatch and preserves the original chat when the image cannot be verified.

@@ -105,7 +105,7 @@ WEB_UI_CAPABILITIES = {
         "Task browser and action-permission preferences use gemini_preferences. Read-back proves stored_preference only; effective behavior is unknown and native confirmation may still appear.",
         "Local code-file understanding is available; native repository import, Drive pickers, link mutation and memory import are not covered by that file-upload path.",
         "Chat scheduled actions support daily create and explicit delete. Task has separate six-frequency schedule actions; event triggers and notification preferences are not covered.",
-        "Notebook source-picker and project metadata are views of the integrated Gemini Notebook product. gemini_manage_notebook manages exact native Notebooks and plaintext sources; unsupported source types remain explicit.",
+        "Notebook picker and project metadata are two views of Gemini Notebook. gemini_manage_notebook supports plaintext, web URLs and UTF-8 .txt sources with independent read-back.",
         "gemini_manage_gems lists a strictly verified custom Gem catalog, excluding SDK presets; missing custom-list evidence cannot prove an empty list or deletion.",
         "Probe tools intentionally omit raw response bodies and private account content.",
     ],
@@ -238,7 +238,7 @@ TOOL_MANIFEST: list[dict[str, Any]] = [
     {
         "name": "gemini_get_operation_result",
         "group": "research",
-        "purpose": "Recover a research report or verified media artifacts for one saved operation without starting another request.",
+        "purpose": "Recover verified artifacts for one saved operation. Set include_text=false to omit a report or answer preview when its verified file is available.",
         "read_only": False,
         "destructive": True,
         "privacy": "reads_private_report_and_cleans_unretained_chat",
@@ -576,13 +576,13 @@ TOOL_MANIFEST: list[dict[str, Any]] = [
     },
     {
         "name": "gemini_tasks", "group": "account",
-        "purpose": "Manage Task threads, bounded activity and six time-based Task schedule recurrences with independent read-back.",
+        "purpose": "Read Task activity, rename, pin, unpin or delete an exact Task, and manage time schedules with independent read-back.",
         "read_only": False, "destructive": True,
         "privacy": "reads_explicit_task_activity_and_manages_private_task_metadata_and_schedules", "pagination": True,
     },
     {
         "name": "gemini_task_browser", "group": "account",
-        "purpose": "Observe an exact Task browser frame or send an explicit non-replayed input after frame verification.",
+        "purpose": "Observe an exact Task browser frame, omit unchanged images by hash, or send an explicit input without replay.",
         "read_only": False, "destructive": True,
         "privacy": "reads_private_task_browser_frames_and_sends_explicit_inputs", "pagination": False,
     },
@@ -600,8 +600,8 @@ TOOL_MANIFEST: list[dict[str, Any]] = [
     },
     {
         "name": "gemini_manage_notebook", "group": "account",
-        "purpose": "Manage exact native Notebook projects and plaintext sources; deletion includes conversations and requires independent absence verification.",
+        "purpose": "Manage exact Notebook projects and plaintext, web URL or UTF-8 .txt sources. Notebook deletion includes its conversations and requires verified absence.",
         "read_only": False, "destructive": True,
-        "privacy": "manages_explicit_private_notebooks_and_source_text", "pagination": True,
+        "privacy": "manages_explicit_private_notebooks_and_uploads_requested_sources", "pagination": True,
     },
 ]

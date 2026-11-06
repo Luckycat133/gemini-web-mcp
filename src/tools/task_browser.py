@@ -57,24 +57,25 @@ def register_task_browser_tools(mcp: MCPServer) -> None:
         browser_input: dict[str, Any] | None = None,
         action_id: str | None = None,
         expected_frame_sha256: str | None = None,
+        known_frame_sha256: str | None = None,
+        include_image: bool = True,
     ) -> list[TextContent | ImageContent]:
-        """View a Task browser or send one explicitly requested input.
+        """Capture a verified Task browser frame or send one explicitly requested input.
 
-        Without input, obtain a screenshot of the exact response/candidate or the
-        latest Task browser. Input requires the prior screenshot's exact response
-        and candidate IDs, frame hash, and a unique action ID of at least 20
-        characters. browser_input.kind is click, scroll, key, or type; x/y refer
-        to the current frame. Input is allowed only when the Task is completed or
-        waiting for input and remains unchanged before dispatch. Exclusive pause
-        is not established, actions are not automatically replayed, and effects
-        on external websites require independent verification. Install the
-        browser-control extra for remote browser support.
+        Read the latest frame or provide exact response_id and candidate_id.
+        For observation only, pass the last frame hash as known_frame_sha256 to
+        receive metadata when unchanged. Set include_image=false for file only.
+        Input requires both IDs, expected_frame_sha256, a unique action_id (20+
+        characters), and a completed or waiting Task. Use click/scroll/key/type
+        and frame x/y. Actions never replay. Verify website effects independently;
+        exclusive pause is unavailable. Requires the browser-control extra.
         """
         try:
             result = await _service().observe(
                 chat_id, response_id=response_id, candidate_id=candidate_id,
                 browser_input=browser_input, action_id=action_id,
                 expected_frame_sha256=expected_frame_sha256,
+                known_frame_sha256=known_frame_sha256,
             )
         except Exception:
             result = DomainResult.failure(
@@ -83,11 +84,14 @@ def register_task_browser_tools(mcp: MCPServer) -> None:
             )
         artifacts = result.data.artifacts if result.data is not None else ()
         text = 'Task browser observation returned.' if result.ok else domain_failure_text(result)
+        if result.data is not None and result.data.state == 'frame_unchanged':
+            text = 'Task browser frame unchanged.'
         content: list[TextContent | ImageContent] = list(append_artifact_block(
             domain_text(result, text, use_result_data=True), artifacts,
         ))
-        for artifact in artifacts:
-            image = _inline_image(artifact)
-            if image is not None:
-                content.append(image)
+        if include_image:
+            for artifact in artifacts:
+                image = _inline_image(artifact)
+                if image is not None:
+                    content.append(image)
         return content

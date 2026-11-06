@@ -45,7 +45,7 @@
 
 `gemini_history`、`gemini_manage_chat`、`gemini_delete_chat`、`gemini_notebooks`、`gemini_manage_notebook`、`gemini_skills`、`gemini_move_chat_to_notebook`、`gemini_tasks`、`gemini_task_browser`、`gemini_account_inventory`、`gemini_list_scheduled_actions`、`gemini_get_scheduled_action`、`gemini_create_scheduled_action`、`gemini_delete_scheduled_action`、`gemini_manage_gems`、`gemini_cleanup`、`gemini_preferences`。
 
-原生 `gemini_skills` 支持 list/get/create/update/enable/delete，指令正文读取须 `include_instructions=true`；`gemini_manage_notebook` 支持 create/get/list_sources/add_source/delete_source/delete，来源目前限纯文本。Notebook 的删除包含其中对话；列表分页、读回和覆盖边界见[原生账号资源](native-account-resources.md)。
+原生 `gemini_skills` 支持 list/get/create/update/enable/delete，指令正文读取须 `include_instructions=true`。`gemini_manage_notebook` 支持纯文本、网页 URL 和本地 UTF-8 `.txt` 来源，删除 Notebook 包含其中对话。参数和读回方式见[原生账号资源](native-account-resources.md)。
 
 账号面的历史查询默认 `response_format="compact"`，返回 ID、标题、置顶状态和分页信息；普通 read 每轮默认最多 800 字符。`gemini_manage_chat` 用准确 ID 执行 rename/pin/unpin，修改前后读取元数据核验；只发送成功但未读回验证时，`changed=null`。详见[紧凑对话管理](web-chat-management.md)。
 
@@ -421,6 +421,8 @@ Gemini Web 的 Google Drive 选择器。
 
 ### gemini_get_operation_status / gemini_get_operation_result
 
+如果只需要完整文件，给结果工具传 `include_text=false`。已有经校验的本地报告或回答时，结果省略正文预览，仍返回文件、验证和清理状态。等待输入的确认卡照常返回。Assist 的 `gemini_research(action="result")` 和 compact 的 `session(action="operation_result")` 也接受这个参数。
+
 以显式 `operation_id` 查询或取回后台研究、图片、视频、音乐、Task 或 Notebook 普通聊天。媒体任务完成后结果包含经验证的 `artifacts`；研究任务完成后返回报告。Task／Notebook Chat 的 worker 在原回复完成后自动保存并校验完整回答；Task 还须核验完整原生文件清单及支持的文件卡附件，再清理自有线程。附件失败或旧缓存缺少清单时返回部分结果，保留可用回答，不伪造空清单。结果读取可以在清理后或进程重启后校验已保存文件，不依赖调用者先取结果。状态只读元数据，不生成或读取完整回答。
 两个工具由主服务的 `research` / `core` 组提供，并共用本地 SQLite 元数据，因此可跨服务重启恢复。
 报告结果优先读取原账号、原 CID／RID／candidate 对应的已保存产物；没有缓存时只读取该句柄对应的会话，不重新启动研究。只有 ready 且正文非空的研究文档才算完成。正文预览限制 4000 字符，完整报告在已验证的本地 Artifact 中；缓存缺失、被改动或旧记录已清理但未保存文件时返回 partial。status 仅检查元数据／进度，不下载或清理报告。
@@ -694,9 +696,9 @@ JSON 输出中的 `accepted=true` 仅表示 RPC 返回了可解析的确认；�
 
 ### gemini_tasks
 
-账号面提供 `action="list"|"get"|"delete"|"progress"` 和 Task 计划管理操作。`list/get` 只读紧凑元数据，不读取完整回答；`delete` 要求明确删除意图与准确 `c_` ID，并独立核验不存在。聚合工具的整体注解为 destructive。已发送但未核验的删除不可盲目重复。
+账号面提供 `list`、`get`、`rename`、`pin`、`unpin`、`delete`、`progress` 和 Task 计划管理操作。`list/get` 只读紧凑元数据。`rename` 接受 `title`。改名和置顶只写目标字段，独立读回验证，值已匹配时跳过写请求。`delete` 要求明确删除意图与准确 `c_` ID，并独立核验不存在。聚合工具的整体注解为 destructive。已发送但未核验的写入不可盲目重复。
 
-- `chat_id`: str - get/delete 的准确 Task 聊天 ID
+- `chat_id`: str - get/rename/pin/unpin/delete 的准确 Task 聊天 ID
 - `limit`: int - 列表页大小，默认 20
 - `page_token`: str - 继续读取返回的下一页
 - `max_chars`: int - get 描述的字符窗口，默认 800
@@ -1037,5 +1039,7 @@ Task confirmation cards return `input_required`; an explicit result read returns
 App connection setup is separate: `needs_attention`, `setup_required` and `setup_kind` identify a native setup requirement. Open the original Task to connect or decline; text confirmation cannot grant OAuth. A previously observed card in metadata is not fresh verification of its current state.
 
 ### gemini_task_browser
+
+重复观察时可传上一帧的 `known_frame_sha256`。新帧摘要一致时返回 `frame_unchanged`，省去 PNG 和内联图片；摘要变化时照常返回新帧。只要本地文件时传 `include_image=false`。输入动作仍使用 `expected_frame_sha256`，不能同时传 `known_frame_sha256`。
 
 账号工具默认读取已知 Task 浏览器的截图，并返回经校验的 PNG Artifact；不超过 2 MiB 且摘要匹配时附原生图片。`response_id` 与 `candidate_id` 要同时提供，省略时读取最新回合。明确输入须提供 `browser_input`（`kind=click|scroll|key|type`）、原截图两个 ID、`expected_frame_sha256`、至少 20 字符的唯一 `action_id`；坐标对应当前帧。只接受 Task 状态 3 或 5 且发送前复核未变。同 ID 不重发；不自动批准权限、登录或新 App 授权。状态检查不证明独占暂停，帧也不证明网站操作成功。需要 `[browser-control]` 或 `[all]` 依赖。

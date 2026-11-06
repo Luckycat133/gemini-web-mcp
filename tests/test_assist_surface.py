@@ -395,6 +395,7 @@ def test_gemini_research_input_schema_is_deterministic():
         "operation_id",
         "action",
         "background",
+        "include_text",
     }
     assert schema["properties"]["model"]["default"] == "flash"
     assert schema["properties"]["thinking_level"]["default"] == "standard"
@@ -402,6 +403,7 @@ def test_gemini_research_input_schema_is_deterministic():
     # Default research chats are scheduled for cleanup.
     assert schema["properties"]["retain_chat"]["default"] is False
     assert schema["properties"]["background"]["default"] is True
+    assert schema["properties"]["include_text"]["default"] is True
 
 
 def test_assist_surface_exposes_no_account_or_history_tools():

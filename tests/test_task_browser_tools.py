@@ -51,12 +51,26 @@ def test_registration_annotations_schema_and_verified_png(browser_server, tmp_pa
     assert len(tools) == 1 and tools[0].name == 'gemini_task_browser'
     assert tools[0].annotations.destructive_hint is True and tools[0].annotations.read_only_hint is False
     assert tools[0].output_schema is not None
-    assert set(tools[0].input_schema['properties']) == {'chat_id', 'response_id', 'candidate_id', 'browser_input', 'action_id', 'expected_frame_sha256'}
+    assert set(tools[0].input_schema['properties']) == {
+        'chat_id', 'response_id', 'candidate_id', 'browser_input', 'action_id', 'expected_frame_sha256',
+        'known_frame_sha256', 'include_image',
+    }
     domain = domain_result_from_call(result)
     assert domain['ok'] is True and domain['data']['frame_sha256'] == digest
     assert len(result.content) == 2 and result.content[1].type == 'image'
     assert result.content[1].mime_type == 'image/png'
     service.observe.assert_awaited_once()
+
+
+def test_file_only_response_keeps_verified_artifact_and_omits_inline_png(browser_server, tmp_path):
+    mcp, service = browser_server
+    path, digest, artifact = image_artifact(tmp_path)
+    data = TaskBrowserObservation('c_fixture', 'r_fixture', 'rc_fixture', 'frame_ready', digest, (artifact,))
+    service.observe.return_value = DomainResult.success(data)
+    _, result = asyncio.run(call(mcp, {'chat_id': 'c_fixture', 'include_image': False}))
+    domain = domain_result_from_call(result)
+    assert domain['ok'] and domain['data']['artifacts'][0]['local_path'] == str(path)
+    assert len(result.content) == 1 and result.content[0].type == 'text'
 
 
 def test_failure_preserves_fresh_image(browser_server, tmp_path):
@@ -112,4 +126,6 @@ def test_explicit_input_is_delegated_without_replay(browser_server):
                  'action_id': 'action_fixture_123456789', 'expected_frame_sha256': 'a' * 64}
     _, result = asyncio.run(call(mcp, arguments))
     assert domain_result_from_call(result)['ok']
-    service.observe.assert_awaited_once_with('c_fixture', **{k: v for k, v in arguments.items() if k != 'chat_id'})
+    service.observe.assert_awaited_once_with(
+        'c_fixture', known_frame_sha256=None, **{k: v for k, v in arguments.items() if k != 'chat_id'},
+    )

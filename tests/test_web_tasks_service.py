@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 from typing import Any
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -144,7 +145,7 @@ class FakeTransport:
         return None
 
 
-def _service(transport: FakeTransport) -> WebTaskService:
+def _service(transport: FakeTransport, *, update_metadata=None, readback_delays=()) -> WebTaskService:
     return WebTaskService(
         WebTaskDependencies(
             client_provider=transport.client_provider,
@@ -153,8 +154,140 @@ def _service(transport: FakeTransport) -> WebTaskService:
             get_task=transport.get_task,
             delete_task=transport.delete_task,
             account_key_provider=transport.account_key,
+            update_metadata=update_metadata,
+            readback_delays=readback_delays,
         )
     )
+
+
+@pytest.mark.parametrize(("action", "title", "before", "after", "field", "value"), [
+    ("rename", " New title ", _task(), _task(description="New title"), "description", "New title"),
+    ("pin", None, _task(), _task(is_pinned=True), "pinned", True),
+    ("unpin", None, _task(is_pinned=True), _task(), "pinned", False),
+])
+def test_task_metadata_update_verifies_the_one_requested_field(action, title, before, after, field, value):
+    transport = FakeTransport(get_values=[before, after])
+    write = AsyncMock()
+
+    result = _run(_service(transport, update_metadata=write).update_task(action, CHAT_ID, title))
+
+    assert result.ok and result.meta.verification_status == STATUS_VERIFIED
+    assert result.data.changed is True and result.data.mutation_sent is True and result.data.verified
+    assert result.data.description == (value if field == "description" else None)
+    assert result.data.is_pinned is (value if field == "pinned" else None)
+    assert transport.get_calls == [(transport.client, CHAT_ID)] * 2
+    write.assert_awaited_once_with(transport.client, CHAT_ID, field, value)
+    assert transport.delete_calls == []
+
+
+@pytest.mark.parametrize(("action", "title", "before"), [
+    ("rename", " Same title ", _task(description="Same title")),
+    ("pin", None, _task(is_pinned=True)),
+    ("unpin", None, _task(is_pinned=False)),
+])
+def test_task_metadata_update_noop_requires_a_matching_pre_read(action, title, before):
+    transport = FakeTransport(get_values=[before])
+    write = AsyncMock()
+
+    result = _run(_service(transport, update_metadata=write).update_task(action, CHAT_ID, title))
+
+    assert result.ok and result.meta.verification_status == STATUS_NO_OP
+    assert result.data.changed is False and result.data.mutation_sent is False and result.data.verified
+    assert len(transport.get_calls) == 1
+    write.assert_not_awaited()
+
+
+@pytest.mark.parametrize(("action", "chat_id", "title"), [
+    ("stop", CHAT_ID, None), ("pin", "wrong-id", None), ("pin", CHAT_ID, "unused"),
+    ("rename", CHAT_ID, None), ("rename", CHAT_ID, " "), ("rename", CHAT_ID, "x" * 201),
+])
+def test_task_metadata_update_validates_before_reading_or_writing(action, chat_id, title):
+    transport = FakeTransport()
+    write = AsyncMock()
+
+    result = _run(_service(transport, update_metadata=write).update_task(action, chat_id, title))
+
+    assert not result.ok and result.meta.verification_status == STATUS_INVALID_REQUEST
+    assert result.data.changed is False and result.data.mutation_sent is False
+    assert not transport.get_calls and not transport.initializer_calls
+    write.assert_not_awaited()
+
+
+@pytest.mark.parametrize(("before", "expected"), [(None, STATUS_ABSENT), (_task(WRONG_CHAT_ID), STATUS_WRONG_IDENTITY)])
+def test_task_metadata_update_does_not_write_after_missing_or_wrong_pre_read(before, expected):
+    transport = FakeTransport(get_values=[before])
+    write = AsyncMock()
+
+    result = _run(_service(transport, update_metadata=write).update_task("pin", CHAT_ID))
+
+    assert not result.ok and result.meta.verification_status == expected
+    assert result.data.changed is False and not result.data.verified
+    write.assert_not_awaited()
+
+
+@pytest.mark.parametrize(("post", "read_failure", "expected"), [
+    (None, None, STATUS_ABSENT), (_task(WRONG_CHAT_ID, is_pinned=True), None, STATUS_WRONG_IDENTITY),
+    (_task(), None, STATUS_UNVERIFIED), (_task(), 2, STATUS_READ_ERROR),
+])
+def test_task_metadata_update_never_verifies_an_echo_or_failed_read_back(post, read_failure, expected):
+    transport = FakeTransport(get_values=[_task(), post], raise_get_on_call=read_failure)
+    write = AsyncMock(return_value=_task(is_pinned=True))
+
+    result = _run(_service(transport, update_metadata=write).update_task("pin", CHAT_ID))
+
+    assert not result.ok and result.meta.verification_status == expected
+    assert result.data.changed is None and result.data.mutation_sent is True and not result.data.verified
+    assert result.data.description is None and result.data.is_pinned is None
+    write.assert_awaited_once()
+
+
+@pytest.mark.parametrize("changed", [True, False])
+def test_task_metadata_update_reconciles_a_lost_ack_without_replaying(changed):
+    transport = FakeTransport(get_values=[_task(), _task(), _task(is_pinned=changed)])
+    write = AsyncMock(side_effect=TimeoutError)
+
+    result = _run(_service(transport, update_metadata=write, readback_delays=(0,)).update_task("pin", CHAT_ID))
+
+    assert result.ok is changed and result.data.verified is changed
+    assert result.data.changed is (True if changed else None) and result.data.mutation_sent is None
+    assert len(transport.get_calls) == 3
+    write.assert_awaited_once()
+
+
+def test_task_metadata_update_stops_read_back_after_account_switch_during_write():
+    transport = FakeTransport(get_values=[_task()])
+
+    async def switch(*_args):
+        transport.account = "other"
+
+    write = AsyncMock(side_effect=switch)
+    result = _run(_service(transport, update_metadata=write).update_task("pin", CHAT_ID))
+
+    assert not result.ok and result.meta.verification_status == STATUS_ACCOUNT_MISMATCH
+    assert result.data.changed is None and not result.data.verified
+    assert len(transport.get_calls) == 1
+    write.assert_awaited_once()
+
+
+@pytest.mark.parametrize("switch_on", [1, 2])
+def test_task_metadata_update_rejects_reads_from_a_changed_account(switch_on):
+    transport = FakeTransport(get_values=[_task(), _task(is_pinned=True)])
+    get_task = transport.get_task
+
+    async def switch(client, chat_id):
+        task = await get_task(client, chat_id)
+        if len(transport.get_calls) == switch_on:
+            transport.account = "other"
+        return task
+
+    transport.get_task = switch
+    write = AsyncMock()
+    result = _run(_service(transport, update_metadata=write).update_task("pin", CHAT_ID))
+
+    assert not result.ok and result.meta.verification_status == STATUS_ACCOUNT_MISMATCH
+    assert result.data.changed is (False if switch_on == 1 else None)
+    assert result.data.is_pinned is None and not result.data.verified
+    assert write.await_count == switch_on - 1
 
 
 # --------------------------------------------------------------- domain

@@ -27,6 +27,8 @@ _RID = re.compile(r'r_[A-Za-z0-9_-]{1,254}\Z')
 _RCID = re.compile(r'rc_[A-Za-z0-9_-]{1,253}\Z')
 _ACTION = re.compile(r'[A-Za-z0-9_-]{20,128}\Z')
 _HASH = re.compile(r'[0-9a-f]{64}\Z')
+_MAX_FRAME_BYTES = 20 * 1024 * 1024
+_PNG_SIGNATURE = b'\x89PNG\r\n\x1a\n'
 _KEYS = frozenset({'Enter', 'Tab', 'Escape', 'Backspace', 'Delete', 'ArrowLeft', 'ArrowRight', 'ArrowUp',
                    'ArrowDown', 'Home', 'End', 'PageUp', 'PageDown', 'Space', 'Ctrl+l', 'Ctrl+a', 'Ctrl+r',
                    'Alt+Left', 'Alt+Right'})
@@ -58,7 +60,7 @@ def _validate_input(value: Any) -> dict[str, Any]:
 def _save_frame(data: bytes, chat_id: str, rid: str, root: Path) -> tuple[Artifact, str]:
     from PIL import Image
 
-    if not data or len(data) > 20 * 1024 * 1024:
+    if not data or len(data) > _MAX_FRAME_BYTES:
         raise ValueError('The browser frame size is invalid.')
     with Image.open(io.BytesIO(data)) as image:
         width, height = image.size
@@ -70,19 +72,20 @@ def _save_frame(data: bytes, chat_id: str, rid: str, root: Path) -> tuple[Artifa
     directory = root / 'artifacts' / 'task-browser' / identity
     directory.mkdir(parents=True, exist_ok=True, mode=0o700)
     path = directory / (digest + '.png')
-    temporary = None
-    try:
-        with tempfile.NamedTemporaryFile(dir=directory, delete=False) as stream:
-            temporary = Path(stream.name)
-            os.fchmod(stream.fileno(), 0o600)
-            stream.write(data)
+    if not path.exists():
+        temporary = None
         try:
-            os.link(temporary, path)
-        except FileExistsError:
-            pass
-    finally:
-        if temporary is not None:
-            temporary.unlink(missing_ok=True)
+            with tempfile.NamedTemporaryFile(dir=directory, delete=False) as stream:
+                temporary = Path(stream.name)
+                os.fchmod(stream.fileno(), 0o600)
+                stream.write(data)
+            try:
+                os.link(temporary, path)
+            except FileExistsError:
+                pass
+        finally:
+            if temporary is not None:
+                temporary.unlink(missing_ok=True)
     if hashlib.sha256(path.read_bytes()).hexdigest() != digest:
         raise ValueError('The saved browser frame did not verify.')
     artifact = artifact_from_local_path(ArtifactKind.IMAGE, str(path), title='Task browser', source_chat_id=chat_id)
@@ -142,6 +145,7 @@ class TaskBrowserService:
     async def _observe(self, chat_id: str, *, response_id: str | None = None, candidate_id: str | None = None,
                       browser_input: dict[str, Any] | None = None, action_id: str | None = None,
                       expected_frame_sha256: str | None = None,
+                      known_frame_sha256: str | None = None,
                       _bound_owner: list[str] | None = None) -> DomainResult[TaskBrowserObservation]:
         if not isinstance(chat_id, str) or not _CID.fullmatch(chat_id):
             return DomainResult.failure(DomainErrorCode.INVALID_ARGUMENT, 'An exact Task c_ ID is required.')
@@ -150,6 +154,11 @@ class TaskBrowserService:
             return DomainResult.failure(DomainErrorCode.INVALID_ARGUMENT, 'Invalid Task response or candidate ID.')
         if bool(response_id) != bool(candidate_id):
             return DomainResult.failure(DomainErrorCode.INVALID_ARGUMENT, 'Provide both exact response and candidate IDs.')
+        if known_frame_sha256 is not None and (
+            browser_input is not None or not isinstance(known_frame_sha256, str) or not _HASH.fullmatch(known_frame_sha256)
+        ):
+            return DomainResult.failure(DomainErrorCode.INVALID_ARGUMENT,
+                                        'known_frame_sha256 must be a SHA-256 digest for observation without input.')
         if browser_input is not None:
             try:
                 _validate_input(browser_input)
@@ -260,6 +269,13 @@ class TaskBrowserService:
                         return self._account_failure()
                 else:
                     frame = before
+                    if (known_frame_sha256 is not None and len(frame) <= _MAX_FRAME_BYTES
+                            and frame.startswith(_PNG_SIGNATURE)
+                            and hashlib.sha256(frame).hexdigest() == known_frame_sha256):
+                        return DomainResult.success(TaskBrowserObservation(
+                            chat_id, rid, candidate_id or '', 'frame_unchanged',
+                            frame_sha256=known_frame_sha256, upstream_status=status,
+                        ), verification_status='browser_frame_hash_matched')
                 phase = 'save_frame'
                 artifact, digest = _save_frame(frame, chat_id, rid, self.store.path.resolve().parent)
                 if self.dependencies.account_key() != owner:

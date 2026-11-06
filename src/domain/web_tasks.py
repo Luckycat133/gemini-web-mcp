@@ -52,10 +52,13 @@ DEFAULT_TASK_LIST_LIMIT = 20
 MAX_TASK_DESCRIPTION_PREVIEW = 160
 DEFAULT_TASK_GET_CHARS = 800
 MAX_TASK_GET_CHARS = 4000
+MAX_TASK_TITLE_LENGTH = 200
 
 _TRUNCATION_INDICATOR = "…"  # "…"; keeps every preview within its limit
 
 TaskState = Literal["completed", "failed", "input_required", "unknown"]
+TaskMetadataAction = Literal["rename", "pin", "unpin"]
+TaskMetadataField = Literal["description", "pinned"]
 
 
 def truncate_text(text: str, limit: int) -> tuple[str, bool]:
@@ -154,6 +157,19 @@ class WebTaskGetData:
 
 
 @dataclass(frozen=True)
+class WebTaskMetadataUpdateData:
+    """The requested field is exposed only after independent exact Task read-back."""
+
+    action: TaskMetadataAction
+    chat_id: str
+    changed: bool | None = False
+    mutation_sent: bool | None = False
+    verified: bool = False
+    description: str | None = None
+    is_pinned: bool | None = None
+
+
+@dataclass(frozen=True)
 class WebTaskDeleteData:
     """Outcome of one task deletion request with read-back evidence.
 
@@ -177,6 +193,7 @@ __all__ = [
     "DEFAULT_TASK_LIST_LIMIT",
     "MAX_TASK_DESCRIPTION_PREVIEW",
     "MAX_TASK_GET_CHARS",
+    "MAX_TASK_TITLE_LENGTH",
     "STATUS_ABSENT",
     "STATUS_ACCOUNT_MISMATCH",
     "STATUS_ACCOUNT_REQUIRED",
@@ -189,11 +206,14 @@ __all__ = [
     "TASK_STATUS_COMPLETED",
     "TASK_STATUS_FAILED",
     "TASK_STATUS_INPUT_REQUIRED",
+    "TaskMetadataAction",
+    "TaskMetadataField",
     "TaskState",
     "truncate_text",
     "WebTask",
     "WebTaskDeleteData",
     "WebTaskGetData",
+    "WebTaskMetadataUpdateData",
     "WebTaskPage",
     "WebTaskSummary",
     "goal_state_from_upstream_status",

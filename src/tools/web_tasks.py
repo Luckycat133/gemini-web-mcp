@@ -11,8 +11,10 @@ from ..client_wrapper import get_gemini_client, initialize_client
 from ..client_wrapper import finalize_remote_chat_cleanup
 from ..client_wrapper import _cleanup_manager
 from ..domain import DomainResult
-from ..domain.web_tasks import WebTask, WebTaskPage
-from ..services.web_context_transport import delete_task_metadata, fetch_task_metadata, fetch_task_metadata_page, fetch_task_progress_turn
+from ..domain.web_tasks import TaskMetadataAction, WebTask, WebTaskPage
+from ..services.web_context_transport import (
+    delete_task_metadata, fetch_task_metadata, fetch_task_metadata_page, fetch_task_progress_turn, update_task_metadata,
+)
 from ..services.web_tasks import WebTaskDependencies, WebTaskService
 from ..services.task_progress import TaskProgressService
 from ..services.task_schedules import TaskScheduleDependencies, TaskScheduleService
@@ -42,6 +44,7 @@ def _service() -> WebTaskService:
         client_initializer=initialize_client, client_provider=get_gemini_client,
         get_task=_get, list_tasks=_list, delete_task=delete_task_metadata,
         readback_delays=(0.25, 0.75, 1.5, 2.5),
+        update_metadata=update_task_metadata,
     ))
 
 
@@ -68,41 +71,39 @@ def register_web_task_tools(mcp: MCPServer) -> None:
     @mcp.tool(annotations=DESTRUCTIVE_REMOTE)
     @domain_error_boundary("gemini_tasks", logger)
     async def gemini_tasks(
-        action: Literal["list", "get", "delete", "progress", "list_schedules", "get_schedule", "create_schedule",
+        action: Literal["list", "get", "rename", "pin", "unpin", "delete", "progress", "list_schedules", "get_schedule", "create_schedule",
                         "update_schedule", "pause_schedule", "resume_schedule", "delete_schedule"] = "list", chat_id: str | None = None,
         limit: int = 20, page_token: str | None = None, max_chars: int = 800,
         schedule_id: str | None = None, schedule: dict[str, Any] | None = None, offset: int = 0,
         response_id: str | None = None, candidate_id: str | None = None,
+        title: str | None = None,
     ) -> list[TextContent]:
-        """Manage Task threads, compact activity, and Task schedules (separate from Chat schedules).
+        """Manage Task metadata, activity and schedules. Chat schedules are separate.
 
-        list/get are read-only and never read conversation messages. Descriptions
-        are bounded; unrecognized numeric states remain unknown. delete requires
-        explicit user intent and the exact c_ Task ID, with independent absence
-        verification. Sent but unverified deletion must not be blindly repeated.
-        Use gemini_run_task and its operation handle to start work or read its answer.
-
-        progress reads activity labels/tool names, with unknown step statuses. Omit
-        response_id/candidate_id for the latest Task turn, or provide both exact IDs.
-        Schedule actions use schedule_id. create_schedule/update_schedule take a
-        schedule object: title, instructions, timezone (IANA zone), frequency (once/daily/
-        weekly/hourly/monthly/yearly); time HH:MM, ISO weekdays 1..7, days_of_month,
-        month/day, hourly minute, or aware ISO at. Update takes only changed fields.
-        starts_at/ends_at are optional aware ISO bounds. Time windows are optional
-        alongside time. Lists paginate locally with offset/limit. Mutations send
-        once and verify fresh read-back; unknown delivery must not be replayed.
-        Daily example: schedule={"title":"Check","instructions":"Read only",
-        "timezone":"Asia/Shanghai","frequency":"daily","time":"10:00"}.
-        The nested key is timezone, not the Chat schedule tool's timezone_name;
-        a cron expression is not a supported schedule field.
-        Deleting a Task thread can also delete its associated schedules.
+        list/get return bounded metadata without conversation text. Unknown states
+        stay unknown. rename, pin and unpin require explicit intent and an exact
+        c_ Task ID. Provide title only for rename. delete can remove associated
+        schedules and verifies absence. Start work with gemini_run_task and read
+        answers by operation handle.
+        progress returns labels and tool names. Provide both exact response_id and
+        candidate_id or omit both for the latest turn. Step statuses may be unknown.
+        Schedule actions use schedule_id and lists use offset/limit. A schedule uses
+        title, instructions, IANA timezone and frequency once/daily/weekly/hourly/
+        monthly/yearly. Use HH:MM time, ISO weekdays 1..7, days_of_month, month and
+        day, hourly minute or aware ISO at as appropriate. Optional bounds starts_at
+        and ends_at use aware ISO. A window can accompany time. Updates take changed
+        fields only. Send mutations once, verify read-back and never replay unknown delivery.
         """
         service = _service()
         result: DomainResult[Any]
-        if action == "list":
+        if title is not None and action != "rename":
+            result = DomainResult.failure(DomainErrorCode.INVALID_ARGUMENT, "title is only valid for rename.")
+        elif action == "list":
             result = await service.list_tasks(limit=limit, page_token=page_token)
         elif action == "get":
             result = await service.get_task(chat_id or "", max_chars=max_chars)
+        elif action in ("rename", "pin", "unpin"):
+            result = await service.update_task(cast(TaskMetadataAction, action), chat_id or "", title)
         elif action == "delete":
             result = await delete_task_and_reconcile(service, chat_id or '',
                 cleanup_observer=_cleanup_manager.record_explicit_verified_absence)

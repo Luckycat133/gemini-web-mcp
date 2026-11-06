@@ -3,6 +3,7 @@
 import logging
 
 from ..adapters import domain_error_boundary, domain_failure_text, domain_text, append_artifact_block
+from ..adapters.artifacts import omit_saved_preview
 from ..adapters.mcp_sdk import MCPServer, TextContent
 from ..client_wrapper import get_gemini_client, initialize_client, finalize_remote_chat_cleanup
 from ..domain import DomainResult
@@ -18,7 +19,8 @@ def _service() -> OperationService:
     return OperationService(OperationStore(), get_gemini_client, initialize_client, finalize_remote_chat_cleanup)
 
 
-def _present(result: DomainResult[OperationReadData]) -> list[TextContent]:
+def _present(result: DomainResult[OperationReadData], *, include_text: bool = True) -> list[TextContent]:
+    result, preview_omitted = (result, False) if include_text else omit_saved_preview(result)
     data = result.data
     if data is None:
         return domain_text(result, domain_failure_text(result), use_result_data=True)
@@ -52,6 +54,8 @@ def _present(result: DomainResult[OperationReadData]) -> list[TextContent]:
                 text += "\nOpen the Task: " + data.input_url
         elif answer:
             text += "\n\n" + answer
+        elif preview_omitted:
+            text += "\nFull answer in verified local artifact."
         elif data.upstream_status is not None:
             text += f"\nObserved Task status: {data.upstream_status}."
         elif data.operation == "gemini_notebook_chat":
@@ -61,7 +65,10 @@ def _present(result: DomainResult[OperationReadData]) -> list[TextContent]:
             text += "\nTask progress is unverified; no generation was repeated."
     elif data.report_available:
         report = getattr(data, "report", None)
-        text += "\n\n" + (report or "The research report is ready; call gemini_get_operation_result to retrieve it.")
+        if preview_omitted:
+            text += "\nFull report in verified local artifact."
+        else:
+            text += "\n\n" + (report or "The research report is ready; call gemini_get_operation_result to retrieve it.")
     elif data.media_type:
         if data.artifact_state is not None:
             text += f"\nArtifact state: {data.artifact_state.value}."
@@ -81,33 +88,25 @@ def register_operation_tools(mcp: MCPServer) -> None:
     @mcp.tool(annotations=READS_PRIVATE_REMOTE)
     @domain_error_boundary("gemini_get_operation_status", logger)
     async def gemini_get_operation_status(operation_id: str) -> list[TextContent]:
-        """Check one saved operation by its explicit opaque handle without starting new work.
+        """Read status for one saved operation_id across restarts.
 
-        Works across server restarts using the local operation database. Reads
-        only the remote resource recorded for this handle; it never lists account
-        history or repeats a generation or research start. A missing result is unconfirmed
-        progress, not evidence that the provider is still running.
+        Reads only the resource recorded for that handle. Missing results mean
+        unconfirmed progress. Polling never repeats generation or reads account history.
         """
         return _present(await _service().get_status(operation_id))
 
     @mcp.tool(annotations=DESTRUCTIVE_REMOTE)
     @domain_error_boundary("gemini_get_operation_result", logger)
-    async def gemini_get_operation_result(operation_id: str) -> list[TextContent]:
-        """Recover verified media, a research document or a Task answer for one saved handle.
+    async def gemini_get_operation_result(operation_id: str, include_text: bool = True) -> list[TextContent]:
+        """Recover verified media, research, Task or Notebook Chat for one saved operation_id.
 
-        Media results return stable local artifacts, independently reverified from
-        persisted locators after a restart; missing or altered files fail verification.
-        Interrupted media observation resumes read-only and never repeats generation.
-        Research requires a ready nonempty document saved and verified as a full
-        local Artifact before default cleanup. Result reads return a bounded
-        preview plus the complete file, and rehash cached reports after restart
-        without new generation or remote authentication. The metadata database
-        stores locators and digests, never report text. Missing or altered files
-        remain partial. Report derivatives accept this same operation_id.
-        Unknown or expired handles fail before
-        remote access; this call never starts or restarts research.
-        Task answers are read from the exact saved turn and preserved in a verified
-        local artifact before cleanup; the inline preview is bounded. A cached Task
-        artifact remains usable after its remote thread is deleted.
+        Resumes observation without repeating generation. Unknown or expired handles
+        fail before remote access. Media files are reverified after restart.
+        Nonempty research and exact-turn answers return a bounded preview plus the
+        complete verified local artifact before unretained chat cleanup. Cached files
+        are rehashed and remain usable after cleanup. Cached research reads need no
+        remote authentication. Missing or altered files stay unverified. Research
+        derivatives use this same operation_id. Set include_text=false to omit a
+        preview when the full verified file is returned.
         """
-        return _present(await _service().get_result(operation_id))
+        return _present(await _service().get_result(operation_id), include_text=include_text)

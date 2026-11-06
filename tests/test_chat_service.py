@@ -856,6 +856,7 @@ def test_chat_tool_argument_schemas_remain_compatible():
             "thinking_level",
             "learning_mode",
             "image_path",
+            "include_text",
         },
     }
 

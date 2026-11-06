@@ -24,24 +24,15 @@ from ..tools.notebook_admin import register_notebook_admin_tools
 
 logger = logging.getLogger(__name__)
 mcp = MCPServer(name="Gemini account", version=__version__, lifespan=server_lifespan, instructions="""
-Manage Gemini account data only when the user requests it. gemini_history
-defaults to compact metadata and pagination; read conversation text only when
-needed for the requested task. gemini_manage_chat renames, pins or unpins an
-exact chat ID and verifies fresh read-back. A sent mutation with an unknown
-outcome is not confirmed and must not be blindly replayed. Delete chats only
-through explicit deletion intent; gemini_cleanup is limited to the owned ledger.
-gemini_notebooks defaults to NotebookLM/Gemini Notebook source metadata; use
-source=gemini for the legacy project catalog. gemini_tasks manages Task threads,
-which have separate execution state from ordinary chat scheduled actions.
-Task schedules support six time recurrences and fresh read-back verification.
-gemini_task_browser returns a compact verified frame and explicit one-shot inputs;
-it does not claim exclusive takeover or verify website side effects automatically.
-gemini_preferences reads or explicitly changes persistent browser choice and scoped
-app-action permission preferences, with independent read-back and no mutation replay.
-Settings read-back does not prove runtime effects; native confirmations remain separate.
-gemini_skills manages native Gemini Skills; read instructions only on explicit request.
-gemini_manage_notebook manages exact Notebook projects and plaintext sources, with
-independent metadata read-back. Notebook deletion also removes its conversations.
+Manage account data only at the user's request. Start with paginated history
+metadata. Read conversation text only as needed and Skill instructions only on
+explicit request. Mutate exact IDs and verify by fresh read-back. Treat uncertain
+writes as unverified and never blindly replay. Chat deletion requires explicit
+intent. gemini_cleanup is restricted to the MCP ownership ledger.
+gemini_notebooks defaults to NotebookLM source metadata. source=gemini selects
+the project catalog. Notebook deletion also removes its conversations.
+Task schedules and Chat scheduled actions are separate. Saved browser and
+app-action preferences are independent of native confirmation cards.
 """)
 
 register_history_tools(mcp, {"gemini_history", "gemini_delete_chat"}, compact=True)
