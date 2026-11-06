@@ -991,7 +991,8 @@ def test_real_sdk_model_header_and_body_agree_on_thinking_level(
 
 @pytest.mark.parametrize("number", [7, 8])
 @pytest.mark.parametrize("video", [False, True])
-def test_real_sdk_dynamic_model_selector_survives_transport(monkeypatch, number, video):
+@pytest.mark.parametrize("capacity_field", [12, 13])
+def test_real_sdk_dynamic_model_selector_survives_transport(monkeypatch, number, video, capacity_field):
     """The SDK-discovered selector remains aligned with its model header."""
     from contextlib import nullcontext
     from gemini_webapi.constants import MODEL_HEADER_KEY
@@ -1012,6 +1013,7 @@ def test_real_sdk_dynamic_model_selector_survives_transport(monkeypatch, number,
     monkeypatch.setattr(GeminiClient, "_check_account_status", lambda *_a, **_kw: None)
     client = _registry_client(["gemini-pro"])
     client._model_registry["gemini-pro"].model_number = number
+    client._model_registry["gemini-pro"].capacity_field = capacity_field
     client.client = session = FakeSession()
     client._running = True
     client._install_thinking_transport()
@@ -1020,15 +1022,17 @@ def test_real_sdk_dynamic_model_selector_survives_transport(monkeypatch, number,
         with client.video_generation_scope() if video else nullcontext():
             with pytest.raises(CapturedRequest):
                 async for _ in client.generate_content_stream(
-                    "synthetic", model="gemini-3-pro", thinking_level="extended", current_retry=0,
+                    "synthetic", model="gemini-3-pro", thinking_level="high" if video else "medium",
+                    current_retry=0,
                 ):
                     pass
 
     asyncio.run(run())
     header = json.loads(session.kwargs["headers"][MODEL_HEADER_KEY])
     body = _parse_inner(session.kwargs["data"])
-    assert header[-3:-1] == [number, 2]
-    assert body[79:81] == [number, 2]
+    expected_level = 2 if video else 4
+    assert header[-3:-1] == [number, expected_level]
+    assert body[79:81] == [number, expected_level]
     assert body[49] == (11 if video else None)
     if video:
         assert body[0][9][6][0][3] == 1

@@ -205,11 +205,13 @@ def inject_web_request_options(
             raise VideoTransportChanged("Video generation transport request shape changed")
         return request_data
 
-    required_length = 81
-    if options.learning_mode_id:
-        required_length = max(required_length, 56)
-    if len(inner_request) < required_length:
-        inner_request.extend([None] * (required_length - len(inner_request)))
+    if (len(inner_request) >= 81 and not (workflow or options.video_generation or options.learning_mode_id)
+            and type(inner_request[79]) is int and inner_request[79] > 0
+            and type(inner_request[80]) is int and inner_request[80] == options.thinking_level_id):
+        # The SDK already writes low and high to the ordinary request body.
+        return request_data
+    if len(inner_request) < 81:
+        inner_request.extend([None] * (81 - len(inner_request)))
 
     if options.learning_mode_id:
         if not options.learning_x9b_field or options.learning_x9b_value is None:
@@ -694,10 +696,15 @@ class ThinkingLevelGeminiClient(GeminiClient):
                     else:
                         try:
                             model_header = orjson.loads(raw_header)
-                            if not isinstance(model_header, list) or len(model_header) < 16:
+                            # The SDK appends thinking level and session ID to
+                            # model headers with either capacity layout.
+                            if (not isinstance(model_header, list) or len(model_header) < 17
+                                    or type(model_header[-3]) is not int or type(model_header[-2]) is not int
+                                    or not isinstance(model_header[-1], str)):
                                 raise ValueError
-                            model_header[15] = request.thinking_level_id
-                            headers[MODEL_HEADER_KEY] = orjson.dumps(model_header).decode()
+                            if model_header[-2] != request.thinking_level_id:
+                                model_header[-2] = request.thinking_level_id
+                                headers[MODEL_HEADER_KEY] = orjson.dumps(model_header).decode()
                         except (ValueError, TypeError):
                             raise ValueError("Thinking-level model header has changed.") from None
                 headers["x-goog-ext-73010990-jspb"] = "[0,0,0]"
