@@ -32,6 +32,7 @@ _MEDIA_COLUMNS = {
 }
 _V5_COLUMNS = _V4_COLUMNS | _MEDIA_COLUMNS
 _COLUMNS = _V5_COLUMNS | {"account_key", "account_binding_pending"}
+_TABLES = {"operations", "task_schedule_guards", "operation_artifacts", "task_file_manifests", "task_inputs"}
 _MEDIA_TERMINAL = {"completed", "failed", "unavailable", "cancelled"}
 
 
@@ -92,7 +93,7 @@ class OperationStore:
         self.clock = clock
 
     @contextmanager
-    def _connect(self) -> Iterator[sqlite3.Connection]:
+    def _connect(self, *, read_only: bool = False) -> Iterator[sqlite3.Connection]:
         self.path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
         # Creation mode is restrictive even when the process umask is permissive.
         fd = os.open(self.path, os.O_CREAT | os.O_RDWR, 0o600)
@@ -100,10 +101,40 @@ class OperationStore:
         os.close(fd)
         connection = sqlite3.connect(self.path, timeout=10)
         connection.row_factory = sqlite3.Row
+        try:
+            if read_only:
+                connection.execute("BEGIN")
+                if not self._read_schema_ready(connection):
+                    # Release the read snapshot before requesting the migration lock.
+                    connection.rollback()
+                    self._initialize_schema(connection)
+            else:
+                self._initialize_schema(connection)
+            with connection:
+                yield connection
+        finally:
+            connection.close()
+
+    @staticmethod
+    def _read_schema_ready(connection: sqlite3.Connection) -> bool:
+        version = connection.execute("PRAGMA user_version").fetchone()[0]
+        if version > SCHEMA_VERSION:
+            raise RuntimeError("operation database schema is newer than supported")
+        if version < SCHEMA_VERSION:
+            return False
+        tables = {row[0] for row in connection.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        if not _TABLES.issubset(tables):
+            # Version 6 databases created by older builds can lack auxiliary tables.
+            return False
+        if {row[1] for row in connection.execute("PRAGMA table_info(operations)")} != _COLUMNS:
+            raise RuntimeError("operation database schema is incompatible")
+        return True
+
+    @staticmethod
+    def _initialize_schema(connection: sqlite3.Connection) -> None:
         connection.execute("BEGIN IMMEDIATE")
         version = connection.execute("PRAGMA user_version").fetchone()[0]
         if version > SCHEMA_VERSION:
-            connection.close()
             raise RuntimeError("operation database schema is newer than supported")
         connection.execute(
             """CREATE TABLE IF NOT EXISTS operations (
@@ -141,7 +172,6 @@ class OperationStore:
             connection.execute("ALTER TABLE operations ADD COLUMN account_binding_pending INTEGER NOT NULL DEFAULT 0")
             columns = _COLUMNS
         if columns != _COLUMNS:
-            connection.close()
             raise RuntimeError("operation database schema is incompatible")
         if version < SCHEMA_VERSION:
             connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
@@ -171,11 +201,6 @@ class OperationStore:
                 created_at REAL NOT NULL, PRIMARY KEY (operation_id,input_id)
             )"""
         )
-        try:
-            with connection:
-                yield connection
-        finally:
-            connection.close()
 
     def create(self, operation_id: str, operation: str, *, retain_chat: bool = False,
                delete_after_seconds: int | None = None, requested_model: str | None = None,
@@ -225,12 +250,12 @@ class OperationStore:
             return _record_from_row(row), cursor.rowcount == 1
 
     def get(self, operation_id: str) -> OperationRecord | None:
-        with self._connect() as db:
+        with self._connect(read_only=True) as db:
             row = db.execute("SELECT * FROM operations WHERE operation_id = ?", (operation_id,)).fetchone()
         return _record_from_row(row) if row is not None else None
 
     def task_input_dispatched(self, operation_id: str, input_id: str) -> bool:
-        with self._connect() as db:
+        with self._connect(read_only=True) as db:
             return db.execute("SELECT 1 FROM task_inputs WHERE operation_id=? AND input_id=? AND account_key=?",
                               (operation_id, input_id, current_account_key())).fetchone() is not None
 
@@ -239,7 +264,7 @@ class OperationStore:
         account = current_account_key()
         if not account:
             return False
-        with self._connect() as db:
+        with self._connect(read_only=True) as db:
             return db.execute("SELECT 1 FROM task_inputs WHERE operation_id=? AND account_key=? LIMIT 1",
                               (operation_id, account)).fetchone() is not None
 
@@ -623,7 +648,7 @@ class OperationStore:
             return True
 
     def get_media_artifacts(self, operation_id: str) -> tuple[dict, ...]:
-        with self._connect() as db:
+        with self._connect(read_only=True) as db:
             return tuple(dict(row) for row in db.execute(
                 "SELECT artifact_id,kind,mime_type,local_path,size_bytes,sha256 FROM operation_artifacts WHERE operation_id=?",
                 (operation_id,),
@@ -736,7 +761,7 @@ class OperationStore:
                        (operation_id, record['account_key'], response_id, candidate_id, len(rows)))
 
     def task_files_committed(self, operation_id: str) -> bool:
-        with self._connect() as db:
+        with self._connect(read_only=True) as db:
             row = db.execute('''SELECT m.file_count FROM task_file_manifests m JOIN operations o USING(operation_id)
                 WHERE m.operation_id=? AND m.account_key=? AND m.account_key=o.account_key
                   AND m.response_id=o.upstream_response_id AND m.candidate_id=o.upstream_candidate_id''',

@@ -1,9 +1,52 @@
-"""Cleanup guards release only for a recorded failure owned by the current worker."""
+"""Operation snapshots, migrations and cleanup ownership guards."""
+
+import sqlite3
 
 import pytest
 
-from src.infrastructure.operation_store import OperationStore
+from src.infrastructure.operation_store import SCHEMA_VERSION, OperationStore
 from src.services.task_result_storage import save_task_result
+
+
+def test_current_status_reads_use_committed_snapshot_without_writer_lock_or_ddl(tmp_path, monkeypatch):
+    store = OperationStore(tmp_path / "operations.sqlite3")
+    store.create("job", "gemini_generate_image")
+    connect = sqlite3.connect
+    statements = []
+
+    def observe(*args, **kwargs):
+        connection = connect(*args, **{**kwargs, "timeout": 0.05})
+        connection.set_trace_callback(statements.append)
+        return connection
+
+    writer = connect(store.path)
+    try:
+        writer.execute("BEGIN IMMEDIATE")
+        writer.execute("UPDATE operations SET state='running' WHERE operation_id='job'")
+        monkeypatch.setattr(sqlite3, "connect", observe)
+        assert store.get("job").state == "accepted"
+        assert store.get_media_artifacts("job") == ()
+        writer.commit()
+        assert store.get("job").state == "running"
+    finally:
+        writer.close()
+
+    assert statements.count("BEGIN") == 3
+    assert not any(statement.lstrip().startswith(("BEGIN IMMEDIATE", "CREATE TABLE")) for statement in statements)
+
+
+def test_current_version_missing_auxiliary_table_is_repaired_on_read(tmp_path):
+    store = OperationStore(tmp_path / "operations.sqlite3")
+    store.create("job", "gemini_generate_image")
+    connection = sqlite3.connect(store.path)
+    try:
+        with connection:
+            connection.execute("DROP TABLE task_inputs")
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
+        assert store.get("job").state == "accepted"
+        assert connection.execute("SELECT count(*) FROM task_inputs").fetchone()[0] == 0
+    finally:
+        connection.close()
 
 
 @pytest.mark.parametrize(("phase", "code", "released"), [

@@ -36,6 +36,41 @@ def document(text="# Synthetic report\n\nComplete report body."):
     return SimpleNamespace(ready=True, content=text, markdown=text, sources=[])
 
 
+def test_each_read_of_cleaned_report_verifies_full_bytes_once(ledger, monkeypatch):
+    from src.services import research_result_storage
+
+    artifact = save_research_result(ledger, ledger.get("op_report"), document())
+    ledger.release_cleanup("op_report")
+    ledger.update_cleanup("op_report", CleanupState.COMPLETED.value)
+    verify = research_result_storage._read_report_bytes
+    calls = []
+
+    def count(path, **kwargs):
+        calls.append(path)
+        return verify(path, **kwargs)
+
+    monkeypatch.setattr(research_result_storage, "_read_report_bytes", count)
+    initialize = AsyncMock()
+    cleanup = AsyncMock()
+    service = OperationService(ledger, lambda: None, initialize, cleanup)
+    status = asyncio.run(service.get_status("op_report"))
+    assert status.ok and status.data.report_available and status.data.report is None and not status.data.artifacts
+    assert calls == [Path(artifact.local_path)]
+
+    result = asyncio.run(service.get_result("op_report"))
+    assert result.ok and result.data.artifacts[0].id == artifact.id
+    assert result.data.report == document().content
+    assert calls == [Path(artifact.local_path)] * 2
+
+    path = Path(artifact.local_path)
+    path.write_bytes(path.read_bytes()[:-1] + b"!")
+    after_change = asyncio.run(service.get_status("op_report"))
+    assert after_change.data.state == OperationState.PARTIAL and not after_change.data.report_available
+    assert calls == [path] * 3
+    initialize.assert_not_awaited()
+    cleanup.assert_not_awaited()
+
+
 def test_full_report_saved_and_independently_verified_before_cleanup_then_restart_needs_no_auth(ledger):
     text = "# Report\n\n" + "Long research evidence.\n" * 400
     doc = document(text)

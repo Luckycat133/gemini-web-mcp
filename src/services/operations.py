@@ -288,13 +288,16 @@ class OperationService:
         cleanup = (CleanupObservation(state=CleanupState(record.cleanup_state), upstream_chat_id=record.upstream_chat_id)
                    if record.cleanup_state in {state.value for state in CleanupState} else None)
         removed = record.cleanup_state in {CleanupState.COMPLETED.value, CleanupState.ALREADY_COMPLETED.value}
+        reread_after_cleanup = False
         if include_report and not removed:
             if record.retain_chat:
                 cleanup = CleanupObservation(state=CleanupState.RETAINED, upstream_chat_id=record.upstream_chat_id)
                 self.store.update_cleanup(record.operation_id, cleanup.state.value)
+                reread_after_cleanup = True
             elif self.finalize_chat_cleanup is None:
                 warnings.append(DomainWarning(code="cleanup_unverified", message="Cleanup callback unavailable."))
             else:
+                reread_after_cleanup = True
                 try:
                     if not client_ready:
                         await await_before_deadline(self.client_initializer(), timeout=60)
@@ -325,15 +328,16 @@ class OperationService:
                     warnings.append(DomainWarning(code="cleanup_unverified", message="Research chat cleanup was not verified."))
         if not self._research_access(record):
             return _account_mismatch()
-        try:
-            current = load_research_result(self.store, record, include_text=include_report)
-            if current is None:
-                raise ResearchResultUnavailable("The saved report was not available.")
-            artifact, full_text = current
-        except (ResearchResultUnavailable, OSError, UnicodeError):
-            if not self._research_access(record):
-                return _account_mismatch()
-            return self._report_partial(record, "research_artifact_unverified")
+        if reread_after_cleanup:
+            try:
+                current = load_research_result(self.store, record, include_text=include_report)
+                if current is None:
+                    raise ResearchResultUnavailable("The saved report was not available.")
+                artifact, full_text = current
+            except (ResearchResultUnavailable, OSError, UnicodeError):
+                if not self._research_access(record):
+                    return _account_mismatch()
+                return self._report_partial(record, "research_artifact_unverified")
         preview = full_text[:RESEARCH_REPORT_PREVIEW_CHARS] if full_text is not None and include_report else None
         inline = None
         if preview is not None:
