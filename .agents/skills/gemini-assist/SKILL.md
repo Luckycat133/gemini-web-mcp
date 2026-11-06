@@ -51,7 +51,7 @@ The following table describes the five-tool assist compatibility server; on the 
 The dedicated assistance entrypoint is `gemini-mcp-assist`; the MCP server name is `gemini_assist_mcp`.
 
 ```bash
-uvx --from git+https://github.com/Luckycat133/gemini-web-mcp@main gemini-mcp-assist
+uvx --from git+https://github.com/Luckycat133/gemini-web-mcp@codex/gemini-tools-polish-20261101 gemini-mcp-assist
 ```
 
 The catalog is exactly five tools: `gemini_ask`, `gemini_search`, `gemini_understand_image`, `gemini_understand`, and `gemini_research`.

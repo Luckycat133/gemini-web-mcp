@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- Point the READMEs, client configurations, onboarding examples, and Skill installs to the development branch that exposes the 17-tool function and account surfaces. Document Chrome session discovery and the difference from the published 0.2.2 interfaces.
 - Classify known Gemini generation failure notices in Chat and grounded search while preserving cleanup evidence. Notebook Chat reports its own execution mode and withholds a saved answer if verification fails during cleanup.
 - Decode generated and edited images before returning verified artifacts. Background image work checks for the optional decoder before dispatch and preserves the original chat when the image cannot be verified.
 - Bound single-session reset to 30 seconds while an upstream send still holds the session lock. The original session and pending cleanup remain available for recovery.

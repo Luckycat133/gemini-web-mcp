@@ -15,7 +15,7 @@ Use this Skill to change the repository. Use the runtime Skills to operate insta
 
 ```bash
 npx --yes skills@1.5.21 add \
-  https://github.com/Luckycat133/gemini-web-mcp \
+  "https://github.com/Luckycat133/gemini-web-mcp#codex/gemini-tools-polish-20261101" \
   --skill gemini-web-mcp-development \
   --agent codex --copy --yes
 ```

@@ -28,6 +28,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+from scripts.release_metadata import CANONICAL_GIT_SOURCE
 from scripts.smoke_profiles import ASSIST_TOOLS
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -37,7 +38,7 @@ EXPECTED_FILES = {
     Path("agents/openai.yaml"),
 }
 ASSIST_SERVER_NAME = "gemini_assist_mcp"
-ASSIST_ENTRYPOINT_COMMAND = "uvx --from git+https://github.com/Luckycat133/gemini-web-mcp@main gemini-mcp-assist"
+ASSIST_ENTRYPOINT_COMMAND = f"uvx --from {CANONICAL_GIT_SOURCE} gemini-mcp-assist"
 
 # The five assist positives from tool-design.md, each mapped to the activation
 # term that must appear in the trigger description and the owning tool that

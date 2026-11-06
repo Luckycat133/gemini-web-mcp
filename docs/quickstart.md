@@ -11,7 +11,7 @@
 ## 1. 无账号预检
 
 ```bash
-uvx --from git+https://github.com/Luckycat133/gemini-web-mcp@main gemini-mcp-onboarding
+uvx --from git+https://github.com/Luckycat133/gemini-web-mcp@codex/gemini-tools-polish-20261101 gemini-mcp-onboarding
 ```
 
 `uvx` 会创建隔离环境并运行 `gemini-mcp-onboarding`。该客户端启动真实
@@ -19,7 +19,7 @@ uvx --from git+https://github.com/Luckycat133/gemini-web-mcp@main gemini-mcp-onb
 `INVALID_ARGUMENT`。预检会移除 `GEMINI_PSID`、`GEMINI_PSIDTS` 和
 `GEMINI_PSIDCC`，并输出 `mode=offline`、`credentials_accessed=false`；它不会访问 Gemini。
 
-公开文档使用 `@main` 指向当前已审核源码。生产或可复现实验应把它替换为已审核 commit SHA。
+预检应输出 `profile=function`、`enabled_tools=17` 和 `text_tool=gemini_ask`。命令安装 [PR #39 的开发分支](source-update-integration.md)，需要固定版本时，把 `@` 后的分支名换成已审核的 commit SHA。
 
 ## 2. 配置实时账号
 
@@ -39,7 +39,7 @@ export GEMINI_PSIDTS='your __Secure-1PSIDTS value'
 
 ## 3. 配置 MCP 客户端
 
-Claude Desktop 最小配置如下；请仅在本机替换占位符：
+下面的 Claude Desktop 配置会从已授权、已登录的浏览器自动发现会话：
 
 ```json
 {
@@ -49,19 +49,15 @@ Claude Desktop 最小配置如下；请仅在本机替换占位符：
       "command": "uvx",
       "args": [
         "--from",
-        "git+https://github.com/Luckycat133/gemini-web-mcp@main",
+        "gemini-mcp-server[all] @ git+https://github.com/Luckycat133/gemini-web-mcp@codex/gemini-tools-polish-20261101",
         "gemini-mcp-function"
-      ],
-      "env": {
-        "GEMINI_PSID": "REPLACE_WITH_SECURE_1PSID",
-        "GEMINI_PSIDTS": "REPLACE_OR_REMOVE_IF_UNAVAILABLE"
-      }
+      ]
     }
   }
 }
 ```
 
-Codex、Claude Desktop、Claude Code 和 VS Code 的逐文件示例见
+使用手动凭据时，Codex、Claude Desktop、Claude Code 和 VS Code 的逐文件示例见
 [客户端安装与验证](./client-examples.md)。
 
 ## 4. 选择工具面
@@ -77,10 +73,10 @@ Codex、Claude Desktop、Claude Code 和 VS Code 的逐文件示例见
 
 ## 5. 显式实时验证
 
-文本验证使用 temporary chat，必须显式允许账号访问：
+文本验证使用普通 Chat，并启用默认自动清理。命令必须显式允许账号访问：
 
 ```bash
-uvx --from git+https://github.com/Luckycat133/gemini-web-mcp@main \
+uvx --from git+https://github.com/Luckycat133/gemini-web-mcp@codex/gemini-tools-polish-20261101 \
   gemini-mcp-onboarding chat \
   --allow-live-account \
   --prompt 'Reply with exactly: Gemini MCP is connected'
@@ -91,7 +87,7 @@ uvx --from git+https://github.com/Luckycat133/gemini-web-mcp@main \
 
 ```bash
 uvx \
-  --from 'gemini-mcp-server[image] @ git+https://github.com/Luckycat133/gemini-web-mcp@main' \
+  --from 'gemini-mcp-server[image] @ git+https://github.com/Luckycat133/gemini-web-mcp@codex/gemini-tools-polish-20261101' \
   gemini-mcp-onboarding image \
   --allow-live-account \
   --prompt 'A two-color geometric cat icon on a plain background' \

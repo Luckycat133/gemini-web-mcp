@@ -1,6 +1,6 @@
 # 当前工具分支与已发布版本
 
-2026-11-01，本地工具开发分支发现远端 `main` 已发布 `0.2.2`，两边从共同祖先分别发展。当前改动先通过独立分支和 PR 提交；它不是覆盖远端发布版本的升级，也没有创建新标签或发布 Python／Skill 包。
+[PR #39](https://github.com/Luckycat133/gemini-web-mcp/pull/39) 的开发源位于 `codex/gemini-tools-polish-20261101`。`main` 和 [0.2.2 发布](https://github.com/Luckycat133/gemini-web-mcp/releases/tag/v0.2.2) 属于另一条发布线。当前分支包含后续工具与兼容性修复，尚未合入 `main`，也没有发布新包或标签。
 
 ## 两边的合同
 
@@ -17,8 +17,8 @@
 
 ## 安装与验证范围
 
-在本分支验证时，用本分支的准确 commit SHA 替换安装示例中的 `@main`，并使用独立私有状态目录。只读取对应版本签发的句柄；不要把一个版本中的句柄当作另一个版本已经完成、取消或清理的证据。
+[客户端安装示例](client-examples.md)已指向开发分支。固定源码时，把安装地址 `@` 后的分支名换成已审核的完整 commit SHA。切换版本前，为 `GEMINI_OPERATION_DB_PATH` 和 `GEMINI_CLEANUP_DB_PATH` 指定本分支的独立私有路径，只用此版本读取它签发的句柄。
 
-[逐工具质量记录](tool-quality.md)覆盖本分支的 34 个业务工具；[网页版功能矩阵](web-feature-coverage.md)区分真实请求证据与未完成项目。离线、协议和安装检查不能证明远端认证、Research 报告或待处理删除已经完成。
+运行离线预检并核对 `profile=function`、`enabled_tools=17`、`text_tool=gemini_ask`。0.2.2 的预检也可能成功，但验证的是 `model` 工具组。最近一批运行时修复为 [`4e0becd`](https://github.com/Luckycat133/gemini-web-mcp/commit/4e0becd22636eff2987f683cb2975c02bcbca839)，其 [CI](https://github.com/Luckycat133/gemini-web-mcp/actions/runs/42226171553) 与 [真实请求验证](development-status.md#flash-and-browser-permission-follow-up-2026-11-06) 分开记录。[逐工具质量记录](tool-quality.md)覆盖本分支的 34 个业务工具。
 
 合入主线前还需逐项保留已发布入口、请求／结果格式与原生模式；验证旧状态、账号隔离、幂等、取消和清理恢复。这里明确保留这些集成缺口，不用覆盖文件或缺失目录来解决冲突。

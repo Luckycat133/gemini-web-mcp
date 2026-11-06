@@ -372,7 +372,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--server-command",
-        help="Override the sibling gemini-mcp-server entrypoint (primarily for verification)",
+        help="Override the sibling gemini-mcp-function entrypoint (primarily for verification)",
     )
     subparsers = parser.add_subparsers(dest="action")
     subparsers.add_parser("preflight", help="Call a static text tool without Gemini credentials")

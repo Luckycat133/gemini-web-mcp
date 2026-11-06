@@ -7,13 +7,13 @@ Load this reference only when a normal workflow cannot continue.
 The Skill is instructions, not an MCP server installation. First run the credential-free preflight from a trusted source checkout or reviewed Git revision:
 
 ```bash
-uvx --from git+https://github.com/Luckycat133/gemini-web-mcp@main gemini-mcp-onboarding
+uvx --from git+https://github.com/Luckycat133/gemini-web-mcp@codex/gemini-tools-polish-20261101 gemini-mcp-onboarding
 ```
 
 For Codex, connect the compact server as a small default surface:
 
 ```bash
-codex mcp add gemini-compact -- uvx --from git+https://github.com/Luckycat133/gemini-web-mcp@main gemini-mcp-skill-server
+codex mcp add gemini-compact -- uvx --from git+https://github.com/Luckycat133/gemini-web-mcp@codex/gemini-tools-polish-20261101 gemini-mcp-skill-server
 codex mcp list
 ```
 
@@ -22,8 +22,8 @@ Connect `gemini-mcp-function` for assistance, chat, media and Research, or `gemi
 For focused assistance or the primary content surface in Codex:
 
 ```bash
-codex mcp add gemini-function -- uvx --from git+https://github.com/Luckycat133/gemini-web-mcp@main gemini-mcp-function
-codex mcp add gemini-account -- uvx --from git+https://github.com/Luckycat133/gemini-web-mcp@main gemini-mcp-account
+codex mcp add gemini-function -- uvx --from git+https://github.com/Luckycat133/gemini-web-mcp@codex/gemini-tools-polish-20261101 gemini-mcp-function
+codex mcp add gemini-account -- uvx --from git+https://github.com/Luckycat133/gemini-web-mcp@codex/gemini-tools-polish-20261101 gemini-mcp-account
 ```
 
 This setup does not authenticate a Gemini account. Keep Cookie values in the client host's secret environment; never put them in command arguments, committed files, or chat. An authentication error after the offline preflight means the connection works but live Gemini access still needs account setup.

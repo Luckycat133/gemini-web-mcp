@@ -21,7 +21,7 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 SKILL_ASSET_BASENAME = "gemini-web-mcp-skill"
 ASSIST_SKILL_ASSET_BASENAME = "gemini-assist-skill"
-CANONICAL_GIT_SOURCE = "git+https://github.com/Luckycat133/gemini-web-mcp@main"
+CANONICAL_GIT_SOURCE = "git+https://github.com/Luckycat133/gemini-web-mcp@codex/gemini-tools-polish-20261101"
 PROJECT_LICENSE_EXPRESSION = "AGPL-3.0-only"
 PROJECT_LICENSE_FILENAME = "LICENSE"
 

@@ -10,7 +10,7 @@
 
 <p align="center">
   <a href="https://github.com/Luckycat133/gemini-web-mcp/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/Luckycat133/gemini-web-mcp/actions/workflows/ci.yml/badge.svg"></a>
-  <a href="https://github.com/Luckycat133/gemini-web-mcp/tree/main/.agents/skills/gemini-web-mcp"><img alt="Codex Skill" src="https://img.shields.io/badge/Codex%20Skill-installable-0B6BFF"></a>
+  <a href="https://github.com/Luckycat133/gemini-web-mcp/tree/codex/gemini-tools-polish-20261101/.agents/skills/gemini-web-mcp"><img alt="Codex Skill" src="https://img.shields.io/badge/Codex%20Skill-installable-0B6BFF"></a>
   <a href="https://www.gnu.org/licenses/agpl-3.0.html"><img alt="License" src="https://img.shields.io/badge/License-AGPL--3.0--only-blue.svg"></a>
   <a href="docs/changelog.md"><img alt="Verified" src="https://img.shields.io/badge/tests-CI%20verified-1F8A70"></a>
 </p>
@@ -27,7 +27,7 @@
 
 Gemini Web MCP exposes Gemini Web capabilities to MCP-compatible clients such as Codex, Claude Desktop, VS Code MCP clients, and other agent runtimes.
 
-This development branch diverges from the published 0.2.2 interfaces. See [source integration notes](docs/source-update-integration.md) before installing it over an existing release; use a reviewed commit SHA for branch-specific verification.
+These instructions install the development source from [PR #39](https://github.com/Luckycat133/gemini-web-mcp/pull/39). The published 0.2.2 release has different entrypoints and state storage. See the [source integration notes](docs/source-update-integration.md) before switching from an existing release.
 
 The default function surface serves assistance, chat, Task workflows, media and research with 17 tools. `gemini_ask` handles ordinary questions, current-web questions and natural-language requests to available connected apps, with Flash as the default model and no web/tool enable switches. Explicit `notebook_ids` add NotebookLM/Gemini Notebook sources to a background chat; `gemini_run_task` starts the separate Task experience. Both return a persistent operation handle for status and verified answer retrieval. The separate account surface exposes 17 explicit account-management tools, including native Skills, Notebook/text sources, Task progress and schedules, browser observation and saved preferences. Both share services and operation storage; compatibility servers and explicitly selected `GEMINI_TOOLS` profiles remain available.
 
@@ -51,11 +51,11 @@ The repository runtime Skill is `0.2.1`. Install the public listing from ClawHub
 clawhub install gemini-web-mcp
 ```
 
-Or install the current repository copy with the cross-agent `skills` CLI:
+Or install the development branch's copy with the cross-agent `skills` CLI:
 
 ```bash
 npx --yes skills@1.5.21 add \
-  https://github.com/Luckycat133/gemini-web-mcp \
+  "https://github.com/Luckycat133/gemini-web-mcp#codex/gemini-tools-polish-20261101" \
   --skill gemini-web-mcp \
   --agent codex --copy --yes
 ```
@@ -64,14 +64,14 @@ This runtime skill teaches an agent how to operate the installed tools safely. R
 
 ```bash
 npx --yes skills@1.5.21 add \
-  https://github.com/Luckycat133/gemini-web-mcp \
+  "https://github.com/Luckycat133/gemini-web-mcp#codex/gemini-tools-polish-20261101" \
   --skill gemini-web-mcp-development \
   --agent codex --copy --yes
 ```
 
 The two roles are intentionally separate: `gemini-web-mcp` is for tool use; `gemini-web-mcp-development` owns implementation, tests, packaging, compatibility, and releases. `.agents/skills` is the single repository source so clients that scan both `.agents` and `.codex` do not discover duplicate names.
 
-Changes listed under **Unreleased** are available from the current repository source; a published Skill listing may lag behind `main` until its next release.
+Changes listed under **Unreleased** are available from this development branch. Check the public Skill listing for its separately published version.
 
 The runtime skill bundle is released on ClawHub under MIT-0. The MCP server source and the
 repository-development skill remain [AGPL-3.0-only](LICENSE).
@@ -81,12 +81,12 @@ repository-development skill remain [AGPL-3.0-only](LICENSE).
 One-command, credential-free proof (requires [uv](https://docs.astral.sh/uv/)):
 
 ```bash
-uvx --from git+https://github.com/Luckycat133/gemini-web-mcp@main gemini-mcp-onboarding
+uvx --from git+https://github.com/Luckycat133/gemini-web-mcp@codex/gemini-tools-polish-20261101 gemini-mcp-onboarding
 ```
 
-This installs into an isolated environment, starts `gemini-mcp-function`, verifies its 17-tool catalog and checks the typed `INVALID_ARGUMENT` response to an empty `gemini_ask` prompt. It forwards no Gemini Cookies and makes no Gemini request. Pin `@main` to a reviewed commit SHA for immutable installs.
+This installs into an isolated environment, starts `gemini-mcp-function`, verifies its 17-tool catalog and checks the typed `INVALID_ARGUMENT` response to an empty `gemini_ask` prompt. It forwards no Gemini Cookies and makes no Gemini request. Replace the branch after `@` with a reviewed commit SHA for an immutable install.
 
-Minimal MCP client configuration:
+Desktop MCP client configuration for automatic Cookie discovery from an authorized, signed-in Chrome profile. The `all` extra includes browser access, image verification, and Task browser dependencies:
 
 ```json
 {
@@ -95,7 +95,7 @@ Minimal MCP client configuration:
       "command": "uvx",
       "args": [
         "--from",
-        "git+https://github.com/Luckycat133/gemini-web-mcp@main",
+        "gemini-mcp-server[all] @ git+https://github.com/Luckycat133/gemini-web-mcp@codex/gemini-tools-polish-20261101",
         "gemini-mcp-function"
       ]
     }
@@ -106,7 +106,7 @@ Minimal MCP client configuration:
 For local development from source:
 
 ```bash
-git clone https://github.com/Luckycat133/gemini-web-mcp.git
+git clone --branch codex/gemini-tools-polish-20261101 https://github.com/Luckycat133/gemini-web-mcp.git
 cd gemini-web-mcp
 python -m venv .venv
 . .venv/bin/activate
@@ -181,21 +181,13 @@ The function surface is the default for ordinary work; connect the account surfa
 
 ## Development Status
 
-The maintained baseline is usable, but the development skill is not a completed feature checklist. Primary and compact
-history list/search/read/export/delete share typed results; deletion is verified only after positive read-back evidence.
-An authorized 2026-08-08 run checked text, sessions, and history. A separate signed-in Chrome check on 2026-09-26
-produced MCP image and music files and a video through Gemini Web's dedicated Omni page; the generic MCP video call
-returned no video artifact, and a later music retry showed an upstream technical error. These targeted observations are
-not a dedicated-account full canary. A later 2026-10-31 authorized local test verified primary and compact MCP video and music, compact image editing, and cross-process Research report recovery with automatic cleanup. Remaining work includes broader cleanup validation, more account-result
-verification, and the focused creation/account products. The active package and Skill metadata remain `0.2.1`; these
-post-tag changes are recorded under **Unreleased**.
+On 2026-11-06, the signed-in Chrome session verified Flash image generation and editing through MCP, including result retrieval after reconnecting and automatic conversation cleanup. Task browser controls with the saved Always allow setting completed without prompting when the run used a remote browser. Plain Flash Chat, grounded search, session follow-up, ordinary Notebook Chat, and image understanding did not produce verified answers in those checks.
 
-See [Development status and next steps](docs/development-status.md) for the implemented, partial, deferred, and owner-decision
-boundaries. Offline CI or package success is not presented as current live Gemini behavior.
+See the [live verification record](docs/development-status.md#flash-and-browser-permission-follow-up-2026-11-06) and [tool quality matrix](docs/tool-quality.md) for the evidence and remaining gaps. The package and Skill metadata remain `0.2.1`; changes on this branch are listed under [Unreleased](docs/changelog.md#unreleased).
 
 ## Distribution Assets
 
-The current supported one-command path installs the reviewed `main` source (or a pinned commit) through `uvx`. GitHub release history may contain older version lines; use a wheel only when its tag and filename match the source version you intend to run.
+The one-command preflight installs this development branch (or a pinned commit) through `uvx`. For the published interface, use the matching tag and asset from [release history](https://github.com/Luckycat133/gemini-web-mcp/releases).
 
 The tag release workflow builds:
 

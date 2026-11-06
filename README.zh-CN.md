@@ -6,7 +6,7 @@
 
 <p align="center">
   <a href="https://github.com/Luckycat133/gemini-web-mcp/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/Luckycat133/gemini-web-mcp/actions/workflows/ci.yml/badge.svg"></a>
-  <a href="https://github.com/Luckycat133/gemini-web-mcp/tree/main/.agents/skills/gemini-web-mcp"><img alt="Codex Skill" src="https://img.shields.io/badge/Codex%20Skill-installable-0B6BFF"></a>
+  <a href="https://github.com/Luckycat133/gemini-web-mcp/tree/codex/gemini-tools-polish-20261101/.agents/skills/gemini-web-mcp"><img alt="Codex Skill" src="https://img.shields.io/badge/Codex%20Skill-installable-0B6BFF"></a>
   <a href="https://www.gnu.org/licenses/agpl-3.0.html"><img alt="License" src="https://img.shields.io/badge/License-AGPL--3.0--only-blue.svg"></a>
   <a href="docs/changelog.md"><img alt="Verified" src="https://img.shields.io/badge/tests-CI%20verified-1F8A70"></a>
 </p>
@@ -31,7 +31,7 @@
 
 ## ✨ 主要功能
 
-此开发分支与已发布 0.2.2 的接口存在分叉。已有用户切换前请先阅读[源码集成说明](docs/source-update-integration.md)，按准确 commit SHA 验证本分支，不将其当作现有发布的直接覆盖升级。
+本文安装示例使用 [PR #39](https://github.com/Luckycat133/gemini-web-mcp/pull/39) 的开发分支。已发布的 0.2.2 使用不同的入口和状态存储，切换前请先阅读[源码集成说明](docs/source-update-integration.md)。
 
 当前默认功能面提供 17 个工具，账号面提供 17 个工具。功能面的 `gemini_ask(notebook_ids=[...])` 基于 NotebookLM／Gemini Notebook 来源启动后台普通聊天；`gemini_run_task` 明确启动独立 Task。保存返回的 `operation_id`，使用状态／结果工具取回完整回答产物；支持的原生 Task 文件附件也须保存并校验后，才释放默认清理保护。提交连接关闭后可继续，已保存的结果可跨进程读取。
 
@@ -84,7 +84,7 @@
 
 ClawHub 上的运行 skill 包按 MIT-0 分发；MCP 服务器源码和仓库开发 skill 继续使用
 [AGPL-3.0-only](LICENSE)。
-当前仓库 `Unreleased` 的改动可从 `main` 或指定 commit 安装；公开 Skill 列表可能要到下次发布才同步。
+当前开发分支包含 `Unreleased` 的改动；公开 Skill 的版本以发布列表为准。
 
 ---
 
@@ -95,27 +95,14 @@ ClawHub 上的运行 skill 包按 MIT-0 分发；MCP 服务器源码和仓库开
 安装 [uv](https://docs.astral.sh/uv/) 后运行：
 
 ```bash
-uvx --from git+https://github.com/Luckycat133/gemini-web-mcp@main gemini-mcp-onboarding
+uvx --from git+https://github.com/Luckycat133/gemini-web-mcp@codex/gemini-tools-polish-20261101 gemini-mcp-onboarding
 ```
 
-这条命令会在隔离环境中安装当前 `main` 源码，启动 `gemini-mcp-function`，核对 17 个功能工具，并用空 `gemini_ask` 的结构化 `INVALID_ARGUMENT` 响应验证连接。它会从子进程移除 Gemini Cookie，不会向 Gemini 发请求。需要不可变安装时，请把 `@main` 换成已审核的 commit SHA。
+这条命令会在隔离环境中安装开发分支源码，启动 `gemini-mcp-function`，核对 17 个功能工具，并用空 `gemini_ask` 的结构化 `INVALID_ARGUMENT` 响应验证连接。预检不读取 Gemini Cookie，也不向 Gemini 发请求。需要固定版本时，把 `@` 后的分支名换成已审核的 commit SHA。
 
-### 1. 获取 Cookie（仅实时 Gemini 调用需要）
+### 1. 使用已有 Chrome 会话
 
-#### 方法 1: 手动获取
-1. 打开 Chrome，访问 [gemini.google.com](https://gemini.google.com) 并登录
-2. F12 → Application → Cookies → https://gemini.google.com
-3. 复制 `__Secure-1PSID` 的值 (必填)
-4. 复制 `__Secure-1PSIDTS` 的值 (可选)
-
-#### 方法 2: 自动从浏览器获取
-```bash
-pip install browser-cookie3
-```
-然后使用 MCP 工具 `gemini_get_cookie_from_browser(browser="chrome")`
-
-浏览器 Cookie 导出可能在本地缓存敏感的账号认证材料，只能在用户明确授权后执行；应限制文件访问，禁止写入日志、备份或共享，并在不再需要时清理。macOS 首次读取可能弹出系统授权提示。默认最多等待 15 秒；未授权时返回脱敏错误，
-可通过 `GEMINI_BROWSER_COOKIE_TIMEOUT_SECONDS` 调整等待上限。
+Chrome 已登录 [Gemini](https://gemini.google.com) 时，使用下面带 `[all]` 的配置即可让 MCP 自动发现会话。保持 Cookie 环境变量为空，避免占位符被当成手动凭据。macOS 首次读取可能需要钥匙串授权，默认等待 15 秒。读取失败时可查看 `AUTH_REQUIRED` 的 `auth_reason`；具体错误和手动注入方式见 [Cookie 配置](docs/cookie-setup.md)。
 
 ### 2. 配置 (Claude Desktop / 其他 MCP 客户端)
 
@@ -131,7 +118,7 @@ pip install browser-cookie3
       "command": "uvx",
       "args": [
         "--from",
-        "git+https://github.com/Luckycat133/gemini-web-mcp@main",
+        "gemini-mcp-server[all] @ git+https://github.com/Luckycat133/gemini-web-mcp@codex/gemini-tools-polish-20261101",
         "gemini-mcp-function"
       ]
     }
@@ -145,7 +132,7 @@ Codex、Claude Desktop、Claude Code 和 VS Code 的完整可复制配置见
 ### 3. 从源码开发（可选）
 
 ```bash
-git clone https://github.com/Luckycat133/gemini-web-mcp.git
+git clone --branch codex/gemini-tools-polish-20261101 https://github.com/Luckycat133/gemini-web-mcp.git
 cd gemini-web-mcp
 python -m venv .venv
 . .venv/bin/activate
@@ -390,7 +377,7 @@ Gemini Web `学习辅导` 输入模式。
 
 ```bash
 npx --yes skills@1.5.21 add \
-  https://github.com/Luckycat133/gemini-web-mcp \
+  "https://github.com/Luckycat133/gemini-web-mcp#codex/gemini-tools-polish-20261101" \
   --skill gemini-web-mcp \
   --agent codex --copy --yes
 ```
@@ -399,7 +386,7 @@ npx --yes skills@1.5.21 add \
 
 ```bash
 npx --yes skills@1.5.21 add \
-  https://github.com/Luckycat133/gemini-web-mcp \
+  "https://github.com/Luckycat133/gemini-web-mcp#codex/gemini-tools-polish-20261101" \
   --skill gemini-web-mcp-development \
   --agent codex --copy --yes
 ```
@@ -496,15 +483,9 @@ mcp dev src/server.py
 
 ## 📍 开发状态
 
-当前基线可用，但开发 skill 不是已经全部完成的功能清单。history 的 list/search/read/export/delete 已在
-primary/compact 间共享 typed result，删除只有在回读确认后才算已验证。2026-08-08 的授权定向测试覆盖
-文本、会话和历史；2026-09-26 的登录 Chrome 定向测试得到 MCP 图片和音乐文件，并从 Gemini Omni 专用
-网页下载视频。通用 MCP 视频请求没有返回视频文件，稍后的音乐重试遇到上游技术错误。两次测试均不等于
-专用账号全量 canary。2026-10-31 授权本地测试又验证了 primary 与 compact 视频和音乐、compact 图片编辑和研究报告跨进程取回及自动清理。后续仍需媒体长任务的持久恢复、更全面的清理和账号结果验证，以及专注的创作和账号产品。
-当前包与 Skill 元数据仍为 `0.2.1`；此标签之后的改动记在 Changelog 的 `Unreleased` 节。
+2026-11-06 用已有 Chrome 会话实测了 Flash 图片生成、编辑、重连取回和自动删除。Task 使用远程浏览器且保存了「始终允许」时，两组对照均未弹确认。普通 Flash Chat、联网搜索、续聊、Notebook Chat 和识图在这批请求中没有得到可验证答案。
 
-完整的“已实现 / 部分完成 / 延后 / owner 决策”边界见
-[开发状态与下一步](docs/development-status.md)。离线 CI 和打包通过不等于已经观察到当前 Gemini Web 行为。
+详见[真实请求验证记录](docs/development-status.md#flash-and-browser-permission-follow-up-2026-11-06)和[逐工具质量记录](docs/tool-quality.md)。当前包与 Skill 元数据仍为 `0.2.1`，开发分支的改动记在 [Unreleased](docs/changelog.md#unreleased)。
 
 ---
 
