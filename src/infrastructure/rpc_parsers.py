@@ -103,6 +103,19 @@ def parse_rpc_envelope(response_text: str, rpc_id: str) -> RPCEnvelope:
     )
 
 
+def parse_conversation_presence(body: Any, *, chat_id: str = "", **_: Any) -> RPCParseResult:
+    """Verify the identity of one exact turn without returning its content."""
+    raw_type = type(body).__name__
+    turns = _nested(body, [0])
+    if not chat_id.startswith("c_") or not isinstance(turns, list):
+        return RPCParseResult("changed_shape", raw_type=raw_type)
+    if not turns:
+        return RPCParseResult("empty", raw_type=raw_type)
+    if len(turns) != 1 or _nested(turns[0], [0, 0]) != chat_id:
+        return RPCParseResult("changed_shape", raw_type=raw_type)
+    return RPCParseResult("success", raw_type=raw_type)
+
+
 def extract_rpc_bodies(response_text: str, rpc_id: str) -> list[Any]:
     return list(parse_rpc_envelope(response_text, rpc_id).bodies)
 
@@ -1331,6 +1344,7 @@ PARSER_FUNCTIONS: Mapping[str, Callable[..., RPCParseResult]] = {
     "remy_schedule_reply": parse_remy_schedule_reply,
     "remy_schedule_list": parse_remy_schedule_list,
     "workflow_turn": parse_workflow_turn,
+    "conversation_presence": parse_conversation_presence,
     "task_goal": parse_task_goal,
     "task_goal_update": parse_task_goal,
     "task_goal_page": parse_task_goal_page,

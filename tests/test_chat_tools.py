@@ -88,8 +88,11 @@ def _patch_chat_client_env(monkeypatch, client, *, captured_schedule=None,
     monkeypatch.setattr(chat_tools, "schedule_remote_chat_cleanup_from_response",
                         fake_schedule_from_response)
 
-    async def fake_finalize(response, **kwargs):
+    async def fake_finalize(response, *, expected_account, **kwargs):
         from src.domain import CleanupObservation, CleanupState
+        from src.infrastructure.account_identity import current_account_key
+
+        assert expected_account == current_account_key()
         fake_schedule_from_response(response, **kwargs)
         return CleanupObservation(state=CleanupState.RETAINED if kwargs["retain_chat"] else CleanupState.COMPLETED)
     monkeypatch.setattr(chat_tools, "finalize_remote_chat_cleanup_from_response", fake_finalize)

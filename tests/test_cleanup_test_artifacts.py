@@ -242,11 +242,11 @@ def test_payload_chats_dry_run_no_match():
 
 
 def test_payload_chats_dry_run_false_deletes_successfully():
-    """Only a complete remote history read-back counts as deleted."""
-    client = _make_client_with_chats([{"id": "codex-1", "title": "T"}])
-    body = [None, None, []]
+    """Only an exact remote absence read-back counts as deleted."""
+    client = _make_client_with_chats([{"id": "c_codex-1", "title": "T"}])
     client._batch_execute = AsyncMock(return_value=SimpleNamespace(
-        text=json.dumps([["wrb.fr", "MaZiqc", json.dumps(body), None, None, None, "generic"]]),
+        status_code=200,
+        text=json.dumps([["wrb.fr", "hNvQHb", None, None, None, [5], "generic"]]),
     ))
 
     payload = asyncio.run(_cleanup_test_artifacts_payload(
@@ -256,7 +256,7 @@ def test_payload_chats_dry_run_false_deletes_successfully():
     assert payload["deleted_chat_count"] == 1
     assert payload["matched_chats"][0]["deleted"] is True
     assert payload["matched_chats"][0]["delete_error"] == ""
-    client.delete_chat.assert_awaited_once_with("codex-1")
+    client.delete_chat.assert_awaited_once_with("c_codex-1")
 
 
 def test_payload_chats_accepted_without_read_back_is_not_counted_deleted():

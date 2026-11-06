@@ -53,6 +53,12 @@ def _history_page_response(items: list[object], next_page_token: str | None = No
     return SimpleNamespace(text=json.dumps([["wrb.fr", "MaZiqc", json.dumps(body), None, None, None, "generic"]]))
 
 
+def _exact_conversation_response(chat_id: str, *, absent: bool) -> SimpleNamespace:
+    frame = (["wrb.fr", "hNvQHb", None, None, None, [5]] if absent
+             else ["wrb.fr", "hNvQHb", json.dumps([[[[chat_id, "r_fixture"]]]])])
+    return SimpleNamespace(status_code=200, text=json.dumps([frame]))
+
+
 def test_history_list_has_identical_typed_data_on_primary_and_compact(monkeypatch) -> None:
     client = SimpleNamespace(
         list_chats=lambda: [
@@ -302,7 +308,7 @@ def test_history_delete_reports_identical_unverified_acceptance_on_both_surfaces
 def test_history_delete_verifies_absence_on_both_surfaces(monkeypatch) -> None:
     client = SimpleNamespace(
         delete_chat=AsyncMock(),
-        _batch_execute=AsyncMock(return_value=_history_page_response([])),
+        _batch_execute=AsyncMock(return_value=_exact_conversation_response("c_delete", absent=True)),
     )
     _patch_clients(monkeypatch, client)
 
@@ -321,7 +327,7 @@ def test_history_delete_verifies_absence_on_both_surfaces(monkeypatch) -> None:
         "deleted": True,
         "verification": {
             "status": "verified_absent",
-            "source": "history.page",
+            "source": "history.exact",
         },
     }
     assert compact[0].text == "Deleted and verified absent: c_delete"
@@ -330,8 +336,10 @@ def test_history_delete_verifies_absence_on_both_surfaces(monkeypatch) -> None:
 
 @pytest.mark.parametrize("compact, absent", [(False, True), (True, True), (False, False)])
 def test_explicit_delete_reconciles_only_the_verified_owned_row(monkeypatch, tmp_path, compact, absent) -> None:
-    items = [] if absent else [["c_delete", "Still here", False, None, None, [1700000000, 0]]]
-    client = SimpleNamespace(delete_chat=AsyncMock(), _batch_execute=AsyncMock(return_value=_history_page_response(items)))
+    client = SimpleNamespace(
+        delete_chat=AsyncMock(),
+        _batch_execute=AsyncMock(return_value=_exact_conversation_response("c_delete", absent=absent)),
+    )
     _patch_clients(monkeypatch, client)
     path = tmp_path / "owned.sqlite3"
     monkeypatch.setattr(client_wrapper, "_cleanup_manager", RemoteChatCleanupManager(
@@ -356,9 +364,7 @@ def test_explicit_delete_reconciles_only_the_verified_owned_row(monkeypatch, tmp
 def test_history_delete_fails_closed_when_chat_is_still_present(monkeypatch) -> None:
     client = SimpleNamespace(
         delete_chat=AsyncMock(),
-        _batch_execute=AsyncMock(
-            return_value=_history_page_response([["c_delete", "Still here", False, None, None, [1700000000, 0]]])
-        ),
+        _batch_execute=AsyncMock(return_value=_exact_conversation_response("c_delete", absent=False)),
     )
     _patch_clients(monkeypatch, client)
 
@@ -377,7 +383,7 @@ def test_history_delete_fails_closed_when_chat_is_still_present(monkeypatch) -> 
         "deleted": False,
         "verification": {
             "status": "still_present",
-            "source": "history.page",
+            "source": "history.exact",
         },
     }
     assert _domain_result(compact)["ok"] is False
@@ -408,7 +414,7 @@ def test_history_delete_fails_closed_when_read_back_errors(monkeypatch) -> None:
         "deleted": None,
         "verification": {
             "status": "read_back_error",
-            "source": "history.page",
+            "source": "history.exact",
         },
     }
     assert _domain_result(compact)["error"]["code"] == "VERIFICATION_FAILED"

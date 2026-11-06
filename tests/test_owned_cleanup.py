@@ -25,9 +25,10 @@ def _bind_synthetic_account(monkeypatch):
 
 
 class Client:
-    def __init__(self, *, present=(), bad_body=None):
+    def __init__(self, *, present=(), bad_body=None, rejection=5):
         self.present = set(present)
         self.bad_body = bad_body
+        self.rejection = rejection
         self.delete_calls = []
         self.read_calls = 0
 
@@ -35,11 +36,22 @@ class Client:
         self.delete_calls.append(cid)
         self.present.discard(cid)
 
-    async def _batch_execute(self, *args, **kwargs):
+    async def _batch_execute(self, calls, **kwargs):
         self.read_calls += 1
-        body = self.bad_body if self.bad_body is not None else [None, None, [[cid, "Synthetic"] for cid in self.present]]
-        rpc = get_contract("history.page").rpc_id
-        return SimpleNamespace(status_code=200, text=json.dumps([["wrb.fr", rpc, json.dumps(body)]]))
+        call, = calls
+        if call.rpcid == get_contract("history.page").rpc_id:
+            # Project-only chats are missing from the ordinary history index.
+            frame = ["wrb.fr", call.rpcid, json.dumps([None, None, []])]
+        else:
+            assert call.rpcid == get_contract("history.exact").rpc_id
+            cid, limit, *_ = json.loads(call.payload)
+            assert limit == 1
+            if self.bad_body is not None or cid in self.present:
+                body = self.bad_body if self.bad_body is not None else [[[[cid, "r_fixture"]]]]
+                frame = ["wrb.fr", call.rpcid, json.dumps(body)]
+            else:
+                frame = ["wrb.fr", call.rpcid, None, None, None, [self.rejection]]
+        return SimpleNamespace(status_code=200, text=json.dumps([frame]))
 
 
 @pytest.mark.parametrize("body", [
@@ -47,10 +59,8 @@ class Client:
     [None, None, [[42]]], [None, 1, []], [None, False, []], [None, ["cursor"], []],
     [None, {"cursor": "x"}, []],
 ])
-def test_malformed_history_rows_or_cursors_cannot_prove_deletion(body):
+def test_malformed_history_rows_or_cursors_are_rejected(body):
     assert parse_contract_body("history.page", body).status == "changed_shape"
-    with pytest.raises(RuntimeError, match="changed shape"):
-        asyncio.run(observe_chat_absence(Client(bad_body=body), "c_owned"))
 
 
 def manager(tmp_path):
@@ -80,7 +90,7 @@ def test_retry_honors_retention_and_leaves_unrelated_chats_alone(tmp_path):
     assert client.delete_calls == ["c_owned"] and client.present == {"c_retained", "c_user"}
 
 
-def test_recheck_repairs_a_false_completed_record_only_after_positive_presence(tmp_path):
+def test_recheck_repairs_a_false_completed_record_for_a_project_only_chat(tmp_path):
     instance = manager(tmp_path)
     instance._store.schedule("account", "c_owned", 0, "mcp", retain=False)
     token = instance._store.claim("account", "c_owned", force=True)
@@ -106,10 +116,41 @@ def test_unverifiable_completed_record_is_never_reported_freshly_deleted(tmp_pat
     assert result.meta.operation_state.value == "partial" and client.delete_calls == []
 
 
-def test_repeated_cursor_stays_unverified():
-    client = Client(bad_body=[None, "same-token", []])
+def test_empty_turns_stay_unverified():
+    client = Client(bad_body=[[]])
     absent, details = asyncio.run(observe_chat_absence(client, "c_owned"))
-    assert absent is None and details["reason"] == "repeated_page_token"
+    assert absent is None and details["reason"] == "empty_turns"
+    assert client.read_calls == 1
+
+
+def test_exact_read_rejects_a_turn_for_another_chat():
+    with pytest.raises(RuntimeError, match="changed shape"):
+        asyncio.run(observe_chat_absence(Client(bad_body=[[[["c_other", "r_other"]]]]), "c_owned"))
+
+
+def test_permission_rejection_does_not_prove_absence():
+    with pytest.raises(RuntimeError, match="usable RPC envelope"):
+        asyncio.run(observe_chat_absence(Client(rejection=7), "c_owned"))
+
+
+def test_exact_read_does_not_dispatch_under_another_account():
+    client = Client()
+    with pytest.raises(PermissionError):
+        asyncio.run(observe_chat_absence(client, "c_owned", expected_account="a", account_key_provider=lambda: "b"))
+    assert client.read_calls == 0
+
+
+def test_retry_after_a_claim_without_dispatch_deletes_a_project_only_chat(tmp_path):
+    instance = manager(tmp_path)
+    instance._store.schedule("account", "c_owned", 0, "mcp", retain=False)
+    token = instance._store.claim("account", "c_owned", force=True)
+    instance._store.finish("account", "c_owned", token, verified=False, diagnostic_id=None)
+    client = Client(present={"c_owned"})
+
+    observation = asyncio.run(instance.delete_chat_result("c_owned", client=client))
+
+    assert observation.state is CleanupState.COMPLETED
+    assert client.delete_calls == ["c_owned"]
     assert client.read_calls == 2
 
 

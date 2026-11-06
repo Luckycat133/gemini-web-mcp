@@ -1272,6 +1272,13 @@ def test_skill_server_account_and_history_tools(monkeypatch):
             elif rpcid == "MaZiqc":
                 body = ([None, None, [["task-1", "Morning brief", True, None, None, [1781794431, 0], None, "Daily", None, 2]]]
                         if source_path == "/scheduled" else [None, None, []])
+            elif rpcid == "hNvQHb":
+                assert json.loads(payloads[0].serialize()[1])[:2] == ["c_1", 1]
+                assert "c_1" in deleted
+                return SimpleNamespace(
+                    status_code=200,
+                    text=json.dumps([["wrb.fr", rpcid, None, None, None, [5], "generic"]]),
+                )
             elif rpcid == "XPSWpd":
                 body = [[
                     [

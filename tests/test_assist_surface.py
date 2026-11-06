@@ -142,7 +142,7 @@ def _patch_ask_client_env(monkeypatch, client, *, captured_schedule=None):
 
     monkeypatch.setattr(assist, "schedule_remote_chat_cleanup_from_response", fake_schedule_from_response)
 
-    async def fake_finalize_from_response(response, *, retain_chat, delete_after_seconds, source, client):
+    async def fake_finalize_from_response(response, *, retain_chat, delete_after_seconds, source, client, expected_account):
         return fake_schedule_from_response(
             response, retain_chat=retain_chat, delete_after_seconds=delete_after_seconds, source=source,
         )

@@ -225,7 +225,7 @@ class ChatService:
                     )
                 observer.observe(response)
                 if self._dependencies.account_key_provider() == owner:
-                    scheduled = await self._finalize_one_shot(response, request)
+                    scheduled = await self._finalize_one_shot(response, request, expected_account=owner)
                 else:
                     scheduled = CleanupObservation(state=CleanupState.FAILED, upstream_chat_id=self._response_chat_id(response),
                                                    source=request.cleanup_source)
@@ -315,7 +315,7 @@ class ChatService:
                     if not self._response_chat_id(cleanup_response) and known_responses:
                         cleanup_response = next(reversed(known_responses.values()))
                     if self._dependencies.account_key_provider() == owner:
-                        scheduled = await self._finalize_one_shot(cleanup_response, request)
+                        scheduled = await self._finalize_one_shot(cleanup_response, request, expected_account=owner)
                     else:
                         scheduled = CleanupObservation(state=CleanupState.FAILED,
                                                        upstream_chat_id=self._response_chat_id(cleanup_response),
@@ -743,12 +743,14 @@ class ChatService:
         await self._dependencies.cleanup_due_remote_chats(client)
         return client
 
-    async def _finalize_one_shot(self, response: Any, request: ChatRequest) -> CleanupObservation | str | None:
+    async def _finalize_one_shot(
+        self, response: Any, request: ChatRequest, *, expected_account: str,
+    ) -> CleanupObservation | str | None:
         finalize = self._dependencies.finalize_response_cleanup
         kwargs = dict(retain_chat=request.retain_chat, delete_after_seconds=request.delete_after_seconds,
                       source=request.cleanup_source)
         if finalize is not None:
-            return await finalize(response, **kwargs)
+            return await finalize(response, expected_account=expected_account, **kwargs)
         return self._dependencies.schedule_response_cleanup(response, **kwargs)
 
     @staticmethod

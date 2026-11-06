@@ -319,6 +319,7 @@ class RemoteChatCleanupManager:
         client_initializer: Callable[[], Any] | None = None,
         *,
         _expected_account: str | None = None,
+        _force: bool = False,
     ) -> CleanupObservation:
         """Delete once per upstream ID and return public-safe cleanup evidence."""
         if cid is None:
@@ -331,7 +332,8 @@ class RemoteChatCleanupManager:
             return CleanupObservation(state=CleanupState.FAILED, upstream_chat_id=cid)
         if _expected_account is not None and account != _expected_account:
             return CleanupObservation(state=CleanupState.FAILED, upstream_chat_id=cid)
-        if _expected_account is not None:
+        force = _force or _expected_account is None
+        if not force:
             record = self._store.get(account, cid)
             if record is None or record["state"] != "pending":
                 state = {"completed": CleanupState.ALREADY_COMPLETED, "retained": CleanupState.RETAINED}.get(
@@ -349,7 +351,7 @@ class RemoteChatCleanupManager:
                         client=client,
                         client_initializer=client_initializer,
                         account=account,
-                        force=_expected_account is None,
+                        force=force,
                     )
                 )
                 self._inflight_cleanup[cid] = task
@@ -669,6 +671,7 @@ class RemoteChatCleanupManager:
         error: BaseException,
         *,
         source: str = "",
+        expected_account: str | None = None,
     ) -> CleanupObservation:
         """Persist a failure that occurred before the upstream delete call."""
         if cid is None:
@@ -679,6 +682,8 @@ class RemoteChatCleanupManager:
                 source=source,
             )
         account = self._account()
+        if expected_account is not None and account != expected_account:
+            return CleanupObservation(state=CleanupState.FAILED, upstream_chat_id=cid, source=source)
         with self._lock:
             pending = self._pending_cleanup.get(cid)
             attempts = (pending.attempts if pending is not None else 0) + 1

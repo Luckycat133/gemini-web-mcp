@@ -984,8 +984,13 @@ def test_session_late_cid_after_account_switch_uses_original_account(monkeypatch
 
 
 def test_account_change_while_finalizer_awaits_never_reports_cleanup_complete(monkeypatch):
+    from src.infrastructure.account_identity import current_account_key
+
     service, _, _, _ = _make_service()
-    async def switching_finalize(response, **kwargs):
+    owner = current_account_key()
+
+    async def switching_finalize(response, *, expected_account, **kwargs):
+        assert expected_account == owner
         monkeypatch.setenv("GEMINI_PSID", "synthetic-other-account")
         return CleanupObservation(state=CleanupState.COMPLETED, upstream_chat_id="c_service")
     service._dependencies = replace(service._dependencies, finalize_response_cleanup=switching_finalize)

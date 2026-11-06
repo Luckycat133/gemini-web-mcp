@@ -59,9 +59,13 @@ class Client:
                 self.history = False
             body = []
         else:
-            assert rpc_id == get_contract("history.page").rpc_id
+            assert rpc_id == get_contract("history.exact").rpc_id
+            assert json.loads(request.payload)[:2] == [CID, 1]
             self.history_reads += 1
-            body = [None, None, [[CID, "Synthetic"]] if self.history else []]
+            if self.history:
+                body = [[[[CID, "r_fixture"]]]]
+            else:
+                body, rejection = None, [5]
         envelope = ["wrb.fr", rpc_id, json.dumps(body) if body is not None else None, None, None, rejection]
         return SimpleNamespace(status_code=200, text=json.dumps([envelope]))
 
@@ -104,7 +108,7 @@ def test_history_absence_cannot_hide_a_known_task_goal(owned, action):
         result = asyncio.run(owned.delete_chat_result(CID, client=client))
     assert result.state is CleanupState.COMPLETED
     assert client.mutations == ["goal"] and client.goal is None
-    assert client.goal_reads >= 3 and client.history_reads == 2
+    assert client.goal_reads >= 3 and client.history_reads == 1
     assert owned._store.get(account, CID)["state"] == "completed"
 
 

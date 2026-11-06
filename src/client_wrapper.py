@@ -342,12 +342,7 @@ def schedule_remote_chat_cleanup(
 
 async def delete_remote_chat(cid: Optional[str], client: Any = None) -> bool:
     """立即删除远端 Gemini chat。"""
-    if not is_valid_remote_chat_id(cid):
-        return False
-    if client is None:
-        client = get_gemini_client()
-        await initialize_client()
-    observation = await _lifecycle_service.delete_chat_result(cid, client=client)
+    observation = await delete_remote_chat_result(cid, client=client)
     return observation.state in {
         CleanupState.COMPLETED,
         CleanupState.ALREADY_COMPLETED,
@@ -360,30 +355,34 @@ async def finalize_remote_chat_cleanup(
     delete_after_seconds: Optional[int] = None,
     source: str = "",
     client: Any = None,
+    *,
+    expected_account: str | None = None,
 ) -> CleanupObservation:
     """Apply explicit retention or await the default immediate verified deletion."""
     delay = get_default_chat_retention_seconds() if delete_after_seconds is None else max(0, delete_after_seconds)
+    owner = expected_account or _cleanup_manager._account()
+    if not owner and is_valid_remote_chat_id(cid):
+        return CleanupObservation(state=CleanupState.FAILED, upstream_chat_id=cid, source=source)
     try:
         if retain_chat or delay > 0 or not is_valid_remote_chat_id(cid):
             return schedule_remote_chat_cleanup(
                 cid, retain_chat=retain_chat, delete_after_seconds=delete_after_seconds, source=source,
-                reschedule_pending=True,
+                reschedule_pending=True, _owner_account=owner,
             )
         # Apply the latest explicit policy synchronously without launching a
         # competing delete task that might use a different client instance.
         observation = _cleanup_manager.schedule_cleanup_result(
             cid, retain_chat=False, delete_after_seconds=0, source=source, dispatch=False,
-            reschedule_pending=True,
+            reschedule_pending=True, _owner_account=owner,
         )
+        if _cleanup_manager._account_key_provider() != owner:
+            return CleanupObservation(state=CleanupState.FAILED, upstream_chat_id=cid, source=source)
         if observation.state in {CleanupState.COMPLETED, CleanupState.ALREADY_COMPLETED, CleanupState.FAILED}:
             return observation
-        if client is None:
-            client = get_gemini_client()
-            await initialize_client()
-        return await _lifecycle_service.delete_chat_result(cid, client=client)
+        return await delete_remote_chat_result(cid, client=client, expected_account=owner)
     except Exception as error:
         try:
-            return _cleanup_manager.record_cleanup_failure(cid, error, source=source)
+            return _cleanup_manager.record_cleanup_failure(cid, error, source=source, expected_account=owner)
         except Exception as persistence_error:
             diagnostic = new_diagnostic_id()
             logger.warning("Cleanup metadata not persisted diagnostic_id=%s error_type=%s",
@@ -398,29 +397,41 @@ async def finalize_remote_chat_cleanup_from_response(
     delete_after_seconds: Optional[int] = None,
     source: str = "",
     client: Any = None,
+    *,
+    expected_account: str | None = None,
 ) -> CleanupObservation:
     """Finish a one-shot workflow only after its artifacts have been consumed."""
     from .remote_chat_cleanup_manager import extract_remote_chat_id
 
     return await finalize_remote_chat_cleanup(
-        extract_remote_chat_id(response), retain_chat=retain_chat,
-        delete_after_seconds=delete_after_seconds, source=source, client=client,
+        extract_remote_chat_id(response), retain_chat=retain_chat, delete_after_seconds=delete_after_seconds,
+        source=source, client=client, expected_account=expected_account,
     )
 
 
 async def delete_remote_chat_result(
     cid: Optional[str],
     client: Any = None,
+    *,
+    expected_account: str | None = None,
 ) -> CleanupObservation:
     """Immediately delete a chat and retain structured lifecycle evidence."""
     if not is_valid_remote_chat_id(cid):
         return CleanupObservation(
             state=(CleanupState.INVALID_ID if cid is not None else CleanupState.NOT_APPLICABLE),
         )
+    manager = _cleanup_manager
+    if isinstance(manager, RemoteChatCleanupManager):
+        expected_account = expected_account or manager._account()
+        if expected_account is not None and manager._account_key_provider() != expected_account:
+            return CleanupObservation(state=CleanupState.FAILED, upstream_chat_id=cid)
     if client is None:
-        client = get_gemini_client()
         await initialize_client()
-    return await _lifecycle_service.delete_chat_result(cid, client=client)
+        if (isinstance(manager, RemoteChatCleanupManager) and expected_account is not None
+                and manager._account_key_provider() != expected_account):
+            return CleanupObservation(state=CleanupState.FAILED, upstream_chat_id=cid)
+        client = get_gemini_client()
+    return await _lifecycle_service.delete_chat_result(cid, client=client, expected_account=expected_account)
 
 
 async def cleanup_due_remote_chats(client: Any = None) -> int:

@@ -850,6 +850,11 @@ _CONTRACT_LIST = [
         stability="preview",
     ),
     _contract(
+        "history.exact", "history", "conversation_presence", "hNvQHb", "/app",
+        _research_chat_plan_payload, "conversation_presence",
+        "2026-11-06 authenticated ListConversationTurns exact identity and bodyless NOT_FOUND read-back",
+    ),
+    _contract(
         "history.rename",
         "history",
         "rename_chat",

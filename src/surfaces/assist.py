@@ -122,10 +122,10 @@ def _build_chat_service() -> ChatService:
             schedule_chat_cleanup=lambda *args, **kwargs: schedule_remote_chat_cleanup(*args, **kwargs),
             normalize_model=lambda model: normalize_model_alias(model),
             resolve_model=lambda model: resolve_model_name(model),
-            finalize_response_cleanup=lambda response, *, retain_chat, delete_after_seconds, source: (
+            finalize_response_cleanup=lambda response, *, retain_chat, delete_after_seconds, source, expected_account: (
                 finalize_remote_chat_cleanup_from_response(
                     response, retain_chat=retain_chat, delete_after_seconds=delete_after_seconds,
-                    source=source, client=get_gemini_client(),
+                    source=source, client=get_gemini_client(), expected_account=expected_account,
                 )
             ),
         )

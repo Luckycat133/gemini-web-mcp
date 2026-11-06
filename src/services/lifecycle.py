@@ -299,6 +299,7 @@ class ConversationLifecycleService:
         cid: str | None,
         *,
         client: Any = None,
+        expected_account: str | None = None,
     ) -> CleanupObservation:
         if cid is None:
             return CleanupObservation()
@@ -306,7 +307,9 @@ class ConversationLifecycleService:
             return CleanupObservation(state=CleanupState.INVALID_ID)
         cleanup = self._cleanup()
         if isinstance(cleanup, RemoteChatCleanupManager):
-            return await cleanup.delete_chat_result(cid, client=client)
+            return await cleanup.delete_chat_result(
+                cid, client=client, _expected_account=expected_account, _force=True,
+            )
         deleted = await cleanup.delete_chat(cid, client=client)
         return CleanupObservation(
             state=CleanupState.COMPLETED if deleted else CleanupState.FAILED,
@@ -379,6 +382,7 @@ class ConversationLifecycleService:
                     cid,
                     error,
                     source=source,
+                    expected_account=state.account_key,
                 )
             diagnostic_id = new_diagnostic_id()
             logger.warning(

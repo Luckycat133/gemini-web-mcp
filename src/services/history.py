@@ -12,7 +12,7 @@ from typing import Any, Iterator
 
 from ..domain import DomainErrorCode, DomainResult, DomainWarning, OperationState
 from ..infrastructure.account_identity import current_account_key
-from ..infrastructure.rpc_contracts import RawRPCData, get_contract
+from ..infrastructure.rpc_contracts import execute_contract, get_contract
 from ..infrastructure.rpc_parsers import parse_contract_body, parse_rpc_envelope
 
 
@@ -70,11 +70,6 @@ class _AccountReadClient:
 def bind_account_read_client(client: Any) -> Any:
     return _AccountReadClient(client) if _read_account.get() else client
 
-
-_DELETION_HISTORY_FILTERS: tuple[tuple[object, ...], ...] = (
-    (False, None, True),
-    (True, None, True),
-)
 
 
 def format_timestamp(timestamp: object) -> str:
@@ -526,16 +521,16 @@ async def delete_chat_result(
         return DomainResult.failure(
             DomainErrorCode.VERIFICATION_FAILED,
             "The chat deletion request returned, but read-back verification failed.",
-            data=_deletion_payload(normalized_chat_id, None, "read_back_error", "history.page"),
+            data=_deletion_payload(normalized_chat_id, None, "read_back_error", "history.exact"),
             retryable=True,
             suggested_action="Read the chat again before retrying deletion.",
             verification_status="read_back_error",
-            details={"source": "history.page", "error_type": type(error).__name__},
+            details={"source": "history.exact", "error_type": type(error).__name__},
         )
 
     if absent is None:
         return DomainResult.success(
-            _deletion_payload(normalized_chat_id, None, "not_available", "history.page"),
+            _deletion_payload(normalized_chat_id, None, "not_available", "history.exact"),
             operation_state=OperationState.ACCEPTED,
             verification_status="not_available",
             details=observation_details,
@@ -552,7 +547,7 @@ async def delete_chat_result(
                 warnings = (DomainWarning(code="cleanup_ledger_unverified",
                                           message="The chat is absent, but its local cleanup ledger could not be updated."),)
         return DomainResult.success(
-            _deletion_payload(normalized_chat_id, True, "verified_absent", "history.page"),
+            _deletion_payload(normalized_chat_id, True, "verified_absent", "history.exact"),
             verification_status="verified_absent",
             details=observation_details,
             warnings=warnings,
@@ -561,7 +556,7 @@ async def delete_chat_result(
     return DomainResult.failure(
         DomainErrorCode.VERIFICATION_FAILED,
         "The chat is still readable after the deletion request.",
-        data=_deletion_payload(normalized_chat_id, False, "still_present", "history.page"),
+        data=_deletion_payload(normalized_chat_id, False, "still_present", "history.exact"),
         retryable=True,
         suggested_action="Retry later or inspect the chat before issuing another deletion request.",
         verification_status="still_present",
@@ -573,90 +568,35 @@ async def observe_chat_absence(
     client: object,
     chat_id: str,
     *,
-    page_size: int = 100,
-    max_pages_per_source: int = 50,
     expected_account: str | None = None,
     account_key_provider: Callable[[], str | None] = current_account_key,
 ) -> tuple[bool | None, dict[str, Any]]:
-    """Check the canonical recent/pinned metadata buckets without treating ``read_chat(None)`` as absence."""
+    """Verify an exact conversation independently of recent, pinned or Notebook lists."""
+    if expected_account and account_key_provider() != expected_account:
+        raise PermissionError("Gemini account changed or is unavailable.")
     if not hasattr(client, "_batch_execute"):
         return None, {"source": None, "complete": False, "reason": "batch_execute_unavailable"}
 
-    contract = get_contract("history.page")
-    safe_page_size = clamp_int(page_size, default=100, minimum=1, maximum=100)
-    safe_max_pages = clamp_int(max_pages_per_source, default=50, minimum=1, maximum=200)
-    page_count = 0
+    contract = get_contract("history.exact")
+    response = await execute_contract(client, contract.key, chat_id=chat_id, limit=1)
+    if expected_account and account_key_provider() != expected_account:
+        raise PermissionError("Gemini account changed or is unavailable.")
+    if getattr(response, "status_code", None) != 200:
+        raise RuntimeError("Exact conversation read-back failed its HTTP status check.")
 
-    for filter_values in _DELETION_HISTORY_FILTERS:
-        next_page_token: str | None = None
-        seen_tokens: set[str] = set()
-        for _page_index in range(safe_max_pages):
-            response = await client._batch_execute(  # type: ignore[attr-defined]
-                [
-                    RawRPCData(
-                        contract.rpc_id,
-                        contract.build_payload(
-                            filter_payload=list(filter_values),
-                            page_size=safe_page_size,
-                            next_page_token=next_page_token,
-                        ),
-                    )
-                ],
-                source_path=contract.source_path,
-                close_on_error=False,
-            )
-            if expected_account and account_key_provider() != expected_account:
-                raise PermissionError("Gemini account changed or is unavailable.")
-            response_text = str(getattr(response, "text", "") or "")
-            if getattr(response, "status_code", 200) != 200:
-                raise RuntimeError("History metadata read-back failed its HTTP status check.")
-            envelope = parse_rpc_envelope(response_text, contract.rpc_id)
-            if not envelope.parsed or envelope.reject_code is not None or len(envelope.bodies) != 1:
-                raise RuntimeError("History metadata read-back did not return a usable RPC envelope.")
+    envelope = parse_rpc_envelope(str(getattr(response, "text", "") or ""), contract.rpc_id)
+    details = {"source": contract.key, "source_rpc": contract.rpc_id, "complete": True}
+    if envelope.parsed and envelope.reject_code == 5 and not envelope.bodies:
+        return True, details
+    if not envelope.parsed or envelope.reject_code is not None or len(envelope.bodies) != 1:
+        raise RuntimeError("Exact conversation read-back did not return a usable RPC envelope.")
 
-            body = envelope.bodies[0]
-            parsed = parse_contract_body(contract, body)
-            if not parsed.ok or not isinstance(parsed.value, list):
-                raise RuntimeError("History metadata read-back changed shape.")
-            if any(not isinstance(item, dict) or not isinstance(item.get("id"), str)
-                   or not item["id"].startswith("c_") for item in parsed.value):
-                raise RuntimeError("History metadata read-back contained an unrecognized chat identity.")
-
-            page_count += 1
-            if any(str(item.get("id") or "") == chat_id for item in parsed.value if isinstance(item, dict)):
-                return False, {
-                    "source": contract.key,
-                    "source_rpc": contract.rpc_id,
-                    "complete": True,
-                    "pages_checked": page_count,
-                }
-
-            next_page_token = (
-                body[1]
-                if isinstance(body, list) and len(body) > 1 and isinstance(body[1], str) and body[1]
-                else None
-            )
-            if next_page_token is None:
-                break
-            if next_page_token in seen_tokens:
-                return None, {"source": contract.key, "complete": False, "pages_checked": page_count,
-                              "reason": "repeated_page_token"}
-            seen_tokens.add(next_page_token)
-        else:
-            return None, {
-                "source": contract.key,
-                "source_rpc": contract.rpc_id,
-                "complete": False,
-                "pages_checked": page_count,
-                "reason": "page_bound_reached",
-            }
-
-    return True, {
-        "source": contract.key,
-        "source_rpc": contract.rpc_id,
-        "complete": True,
-        "pages_checked": page_count,
-    }
+    parsed = parse_contract_body(contract, envelope.bodies[0], chat_id=chat_id)
+    if parsed.status == "success":
+        return False, details
+    if parsed.status == "empty":
+        return None, {**details, "complete": False, "reason": "empty_turns"}
+    raise RuntimeError("Exact conversation read-back changed shape.")
 
 
 def turn_matches_query(turn: dict[str, str], query: str) -> bool:

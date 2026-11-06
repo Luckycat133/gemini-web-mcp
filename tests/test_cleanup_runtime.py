@@ -4,14 +4,51 @@ import asyncio
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
+import pytest
+
 from src import client_wrapper as cw
-from src.domain import CleanupObservation, CleanupState
+from src.client_manager import ClientInitializationResetError
+from src.domain import CleanupObservation, CleanupState, DomainResult
+from src.remote_chat_cleanup_manager import RemoteChatCleanupManager
+from src.services import history
+
+
+@pytest.mark.parametrize("initialization_resets", [False, True])
+def test_default_cleanup_does_not_register_or_dispatch_under_a_switched_account(
+    monkeypatch, tmp_path, initialization_resets,
+):
+    account = "synthetic-original"
+    manager = RemoteChatCleanupManager(
+        store_path=tmp_path / "cleanup.sqlite3",
+        account_key_provider=lambda: account,
+        cleanup_guard=lambda _cid: False,
+    )
+    delete = AsyncMock(return_value=DomainResult.success({}, verification_status="verified_absent"))
+
+    async def initialize():
+        nonlocal account
+        account = "synthetic-replacement"
+        if initialization_resets:
+            raise ClientInitializationResetError("synthetic account changed")
+
+    monkeypatch.setattr(cw, "_cleanup_manager", manager)
+    monkeypatch.setattr(cw, "get_gemini_client", object)
+    monkeypatch.setattr(cw, "initialize_client", initialize)
+    monkeypatch.setattr(history, "delete_chat_result", delete)
+
+    result = asyncio.run(cw.finalize_remote_chat_cleanup("c_owned", delete_after_seconds=0))
+
+    assert result.state is CleanupState.FAILED
+    assert manager._store.get("synthetic-original", "c_owned")["state"] == "pending"
+    assert manager._store.get("synthetic-replacement", "c_owned") is None
+    delete.assert_not_awaited()
 
 
 def test_default_finalization_awaits_delete_without_dispatch_race(monkeypatch):
     calls = []
 
-    async def delete(cid, *, client):
+    async def delete(cid, *, client, expected_account):
+        assert expected_account == cw._cleanup_manager._account()
         await asyncio.sleep(0)
         calls.append(cid)
         return CleanupObservation(CleanupState.COMPLETED, cid, attempts=1)
