@@ -1,4 +1,4 @@
 interface:
   display_name: "Gemini Web MCP Development"
-  short_description: "Develop Gemini MCP services, Skills, and releases"
-  default_prompt: "Use $gemini-web-mcp-development to implement and verify this repository change."
+  short_description: "Build and verify Gemini generation and content management"
+  default_prompt: "Use $gemini-web-mcp-development to inspect this checkout, execute the two-track development plan in dependency order, and verify each work package with recorded evidence. Preserve existing work and continue all unblocked packages."
