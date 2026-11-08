@@ -29,13 +29,15 @@ Gemini Web MCP exposes Gemini Web capabilities to MCP-compatible clients such as
 
 These instructions install the development source from [PR #39](https://github.com/Luckycat133/gemini-web-mcp/pull/39). The published 0.2.2 release has different entrypoints and state storage. See the [source integration notes](docs/source-update-integration.md) before switching from an existing release.
 
-The default function surface serves assistance, chat, Task workflows, media and research with 17 tools. `gemini_ask` handles ordinary questions, current-web questions and natural-language requests to available connected apps, with Flash as the default model and no web/tool enable switches. Explicit `notebook_ids` add NotebookLM/Gemini Notebook sources to a background chat; `gemini_run_task` starts the separate Task experience. Both return a persistent operation handle for status and verified answer retrieval. The separate account surface exposes 17 explicit account-management tools, including native Skills, Notebook/text sources, Task progress and schedules, browser observation and saved preferences. Both share services and operation storage; compatibility servers and explicitly selected `GEMINI_TOOLS` profiles remain available.
+Configure `gemini-mcp-function` and `gemini-mcp-account` as separate MCP entries. Enable the six function tools for Chat, Task, media, Research and operation recovery. Enable the six account tools when a task calls for existing conversation history, chat management, Notebooks or native Task metadata. Either entry can run on its own. The earlier 17-tool catalogs are available through the explicit `function-full` and `account-full` profiles.
 
-See [Notebook, Chat and Task workflows](docs/notebook-task-workflows.md) for examples, automatic cleanup and restart recovery. Task schedules, bounded progress and explicit browser inputs are available; exclusive browser handoff and automatic app permission approvals are not implemented; completed answer prose alone does not verify an external app change.
+`gemini_ask` handles ordinary questions, current-web questions, mixed inputs and natural-language requests to available connected apps. It defaults to Flash. Explicit `notebook_ids` add NotebookLM/Gemini Notebook sources to a background Chat. `gemini_run_task` starts a separate Task workflow. Keep the original operation handle to read status and recover verified results.
+
+See [Notebook, Chat and Task workflows](docs/notebook-task-workflows.md) for examples, automatic cleanup and restart recovery. The default account surface includes bounded Task progress. The `account-full` profile provides Task schedules and explicit browser inputs. Verify external app changes by reading back their actual effects.
 
 Supported native Task file attachments are saved and verified before cleanup. See [native Skills and Notebook management](docs/native-account-resources.md) and the [Web feature coverage matrix](docs/web-feature-coverage.md) for actual live evidence and remaining gaps. Saved permission read-back does not establish that a Task will skip confirmation.
 
-Account history defaults to compact metadata and bounded explicit text reads. `gemini_manage_chat` renames, pins or unpins an exact chat ID with fresh read-back verification, without a browser DOM or a generation request. See [chat management](docs/web-chat-management.md) and [official model calling distinctions](docs/models.md).
+Account history defaults to compact metadata and bounded explicit text reads. `gemini_manage_chat` renames, pins, unpins or moves an exact chat ID into a Notebook with fresh read-back verification. Deletion uses the separate `gemini_delete_chat` tool. See [chat management](docs/web-chat-management.md) and [official model calling distinctions](docs/models.md).
 
 ## MCP Protocol Compatibility
 
@@ -84,7 +86,7 @@ One-command, credential-free proof (requires [uv](https://docs.astral.sh/uv/)):
 uvx --from git+https://github.com/Luckycat133/gemini-web-mcp@codex/gemini-tools-polish-20261101 gemini-mcp-onboarding
 ```
 
-This installs into an isolated environment, starts `gemini-mcp-function`, verifies its 17-tool catalog and checks the typed `INVALID_ARGUMENT` response to an empty `gemini_ask` prompt. It forwards no Gemini Cookies and makes no Gemini request. Replace the branch after `@` with a reviewed commit SHA for an immutable install.
+This installs into an isolated environment, starts `gemini-mcp-function`, verifies its six-tool catalog and checks the typed `INVALID_ARGUMENT` response to an empty `gemini_ask` prompt. It forwards no Gemini Cookies and makes no Gemini request. Replace the branch after `@` with a reviewed commit SHA for an immutable install.
 
 Desktop MCP client configuration for automatic Cookie discovery from an authorized, signed-in Chrome profile. The `all` extra includes browser access, image verification, and Task browser dependencies:
 
@@ -113,14 +115,14 @@ python -m venv .venv
 pip install -e ".[all,dev]"
 ```
 
-Run the default function surface, or the explicit account surface:
+Use the command for the surface you want to connect.
 
 ```bash
 gemini-mcp-function
 gemini-mcp-account
 ```
 
-`gemini-mcp-server` without `GEMINI_TOOLS` also serves the function surface. An explicitly configured profile retains its compatibility meaning.
+`gemini-mcp-server` without `GEMINI_TOOLS` also serves the function surface. To use either previous 17-tool catalog, run `GEMINI_TOOLS=function-full gemini-mcp-server` or `GEMINI_TOOLS=account-full gemini-mcp-server`. Configure these as separate client entries only when their tools are needed.
 
 Run the compact, low-token facade:
 
@@ -134,14 +136,14 @@ The five-tool assistance server remains available for compatibility:
 gemini-mcp-assist
 ```
 
-Function tools `gemini_generate_image`, `gemini_edit_image`, `gemini_generate_video`, and `gemini_generate_music` always start in the background. Deep Research also defaults to background execution. Preserve the returned `operation_id` and retrieve the same operation with `gemini_get_operation_status` / `gemini_get_operation_result`; use `background=false` for the waiting path where the compatibility tool exposes it. The compact server uses `session(action="operation_status" | "operation_result", session_id=operation_id)`, and assist uses `gemini_research(action="status" | "result", operation_id=...)`.
+`gemini_create_media` starts image generation, image editing, video and music in the background. Deep Research also defaults to background execution. Keep the returned `operation_id`. Use `gemini_get_operation_status` to observe progress and `gemini_get_operation_result` to recover verified files. Result recovery can trigger cleanup of the owned remote conversation, so it has a separate tool annotation. The compact server uses `session(action="operation_status" | "operation_result", session_id=operation_id)` and assist uses `gemini_research(action="status" | "result", operation_id=...)`.
 
 Video defaults to the Gemini App's Create video mode with the Flash chat model. Google identifies the current App generator as Gemini Omni 1.2 Flash and is rolling out 15-second clips to Ultra subscribers. The App selects the video backend for the signed-in account. [Gemini Apps video guide](https://support.google.com/gemini/answer/16126339?hl=en)
 
-To select **Gemini Omni 1.2 Flash** by exact model ID, configure `GEMINI_API_KEY` for a billed Gemini API project, then call `gemini_generate_video`:
+To select **Gemini Omni 1.2 Flash** by exact model ID, configure `GEMINI_API_KEY` for a billed Gemini API project and call `gemini_create_media` with these arguments.
 
 ```json
-{"prompt":"A macro shot of a raindrop sliding down a leaf","model":"gemini-omni-1.2-flash","duration_seconds":15}
+{"kind":"video","prompt":"A macro shot of a raindrop sliding down a leaf","model":"gemini-omni-1.2-flash","duration_seconds":15}
 ```
 
 The explicit API route accepts 3–15 whole seconds and an optional JPEG, PNG or WebP reference. It uses the same background handle and returns a verified local MP4. API interaction cleanup runs after verification unless `retain_chat=true`. See [video routing and usage](docs/models.md#视频生成).
@@ -155,6 +157,8 @@ See [copyable Codex, Claude Desktop, Claude Code, and VS Code configurations plu
 
 | Profile | Use When | Surface |
 | --- | --- | --- |
+| `function-full` | An existing workflow needs the prior function schema | Separate media, understanding and session tools, plus Research derivatives |
+| `account-full` | The task needs advanced account management | Prior account catalog with schedules, browser input, preferences, Skills and cleanup |
 | `model` / `chat` | The agent only needs Gemini model calls | Smallest model-call surface |
 | `history` | The agent is organizing or searching chat history | `gemini_history` facade plus safe helpers |
 | `history-organize` | The agent can move chats into native Gemini notebooks | History facade, notebook facade, explicit move tool |
@@ -167,6 +171,8 @@ See [copyable Codex, Claude Desktop, Claude Code, and VS Code configurations plu
 The function surface is the default for ordinary work; connect the account surface for explicitly requested account operations. Explicit `model`, `core` and other profiles plus the compact server remain compatibility options. `all` is not a general default.
 
 ## Capabilities
+
+The table includes workflows available through the default and explicit compatibility profiles.
 
 | Area | Supported Workflows |
 | --- | --- |
@@ -248,8 +254,16 @@ The account-scoped SQLite cleanup queue survives process exit. Failed or unverif
 
 Do not commit `.env`, `cookies.json`, `prompts.json`, generated media, logs, or browser cookie material. Browser Cookie export can materialize sensitive account-authentication data in a local cache: require explicit approval, restrict access, never log/back up/share it, and remove it when no longer needed. Use the default function surface for ordinary work and the separate account surface for explicitly requested account operations. Treat private chat text and destructive operations as explicit-user-intent actions. On macOS, browser-cookie access is bounded by `GEMINI_BROWSER_COOKIE_TIMEOUT_SECONDS` (15 seconds by default) so an unanswered system authorization request returns a sanitized error instead of hanging the MCP process.
 
-Task schedules are managed through account `gemini_tasks`, separately from Chat scheduled actions. Account `gemini_task_browser` can return a verified PNG and native image preview; explicit browser input uses the exact screenshot identity and frame hash. Install `gemini-web-mcp[browser-control]` for this optional capability. See [Notebook and Task workflows](docs/notebook-task-workflows.md) for limits and verification.
+In `account-full`, use `gemini_tasks` for Task schedules and the Chat scheduled-action tools for recurring Chat content. `gemini_task_browser` can return a verified PNG and native image preview. Explicit browser input uses the exact screenshot identity and frame hash. Install `gemini-web-mcp[browser-control]` for this optional capability. See [Notebook and Task workflows](docs/notebook-task-workflows.md) for limits and verification.
 
 ### Task preferences and thinking strength
 
-Chat and Task accept `thinking_level="low"`, `"medium"` or `"high"`; legacy `standard` / `extended` remain low/high aliases. The account tool `gemini_preferences` manages persistent browser choice and known action permissions with independent read-back. See [the settings workflow](docs/task-preferences.md).
+Chat and Task accept `thinking_level="low"`, `"medium"` or `"high"`. Legacy `standard` / `extended` remain low/high aliases. In `account-full`, `gemini_preferences` manages persistent browser choice and known action permissions with independent read-back. See [the settings workflow](docs/task-preferences.md).
+
+## Frequently Asked Questions (FAQ / GEO Reference)
+
+### Q: How does Gemini Web MCP differ from the official Gemini API?
+Gemini Web MCP provides access to Gemini Web's native browser ecosystem, including NotebookLM integration, Deep Research, background Tasks with media attachments, and official thinking strength options, all exposed cleanly via the standard Model Context Protocol (MCP) Python SDK v2.
+
+### Q: Where can I find more troubleshooting and installation guides?
+Detailed guides are available in [docs/faq.md](docs/faq.md), [docs/quickstart.md](docs/quickstart.md), and [docs/notebook-task-workflows.md](docs/notebook-task-workflows.md).
