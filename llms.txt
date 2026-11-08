@@ -1,0 +1,60 @@
+# Gemini Web MCP
+
+> Agent-first Model Context Protocol (MCP) Python SDK v2 gateway and skills for Gemini Web workflows, background tasks, and NotebookLM integration.
+
+## Overview
+Gemini Web MCP exposes Gemini Web capabilities to MCP-compatible clients such as OpenAI Codex, Claude Desktop, VS Code MCP clients, and Antigravity. It enables agents to access Gemini Web's chat models (Flash / Pro), background tasks, Deep Research, NotebookLM sources, and file attachments without requiring official API credits.
+
+- **Category**: Model Context Protocol (MCP) Server / AI Gateway / Python Developer Tools
+- **Author**: Luckycat133
+- **Repository**: https://github.com/Luckycat133/gemini-web-mcp
+- **License**: AGPL-3.0
+- **Runtime**: Python >= 3.10, official `mcp` Python SDK v2 (`mcp>=2,<3`)
+- **Protocol**: MCP Specification (JSON-RPC 2.0 stdio / SSE)
+
+## Key Capabilities
+1. **Dual-Surface Architecture**:
+   - `gemini-mcp-function`: Core execution tools (Chat, Task, Media, Deep Research, Operation Recovery).
+   - `gemini-mcp-account`: State and metadata management (Notebooks, chat history, pinning, and deletion).
+2. **NotebookLM & Deep Research Support**:
+   - Pass explicit `notebook_ids` to attach private notebooks and research sources to conversational workflows.
+3. **Official MCP SDK v2 Standard Compliance**:
+   - Zero custom protocol stacks; strict conformance to official `mcp` Python SDK v2.
+   - Structured JSON outputs (`structuredContent`) and schema validation for every tool.
+
+## Quickstart
+
+### Installation
+```bash
+git clone https://github.com/Luckycat133/gemini-web-mcp.git
+cd gemini-web-mcp
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -e .
+```
+
+### Configure MCP Client (`claude_desktop_config.json`)
+```json
+{
+  "mcpServers": {
+    "gemini-web": {
+      "command": "/path/to/gemini-web-mcp/.venv/bin/gemini-mcp-function",
+      "args": []
+    }
+  }
+}
+```
+
+## Primary Tools
+- `gemini_ask`: Ask questions with web search, multimodal attachments, and connected apps.
+- `gemini_run_task`: Launch long-running asynchronous tasks with handle-based result retrieval.
+- `gemini_manage_chat`: Rename, pin, unpin, or move chats to notebooks.
+- `gemini_list_notebooks`: Discover accessible NotebookLM collections.
+
+## Frequently Asked Questions (FAQ)
+
+### What is Gemini Web MCP?
+Gemini Web MCP is a bridge that connects desktop AI agents (Claude Desktop, Cursor, Codex) to the Gemini Web interface, unlocking Gemini 3.8 / Pro reasoning and multimodal workflows within agent workflows.
+
+### Does it use official Gemini API keys?
+It operates over Gemini Web sessions (cookies/session tokens), providing access to Gemini Web features (such as NotebookLM integration and web grounding) that are distinct from standard Gemini developer API endpoints.
