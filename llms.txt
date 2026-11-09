@@ -1,60 +1,18 @@
-# Gemini Web MCP
+# gemini-web-mcp
+> Agent-first MCP Python SDK v2 gateway and skills for Gemini Web workflows, Deep Research & NotebookLM.
 
-> Agent-first Model Context Protocol (MCP) Python SDK v2 gateway and skills for Gemini Web workflows, background tasks, and NotebookLM integration.
+Gemini Web MCP exposes Gemini Web capabilities to MCP-compatible clients such as OpenAI Codex, Claude Desktop, VS Code MCP clients, and Antigravity.
 
-## Overview
-Gemini Web MCP exposes Gemini Web capabilities to MCP-compatible clients such as OpenAI Codex, Claude Desktop, VS Code MCP clients, and Antigravity. It enables agents to access Gemini Web's chat models (Flash / Pro), background tasks, Deep Research, NotebookLM sources, and file attachments without requiring official API credits.
+## Documentation
+- [README](https://raw.githubusercontent.com/Luckycat133/gemini-web-mcp/main/README.md): High-level overview, architecture, and client configuration.
+- [Quickstart Guide](https://raw.githubusercontent.com/Luckycat133/gemini-web-mcp/main/docs/quickstart.md): Environment setup, cookie configuration, and MCP server launch.
+- [Tools Reference](https://raw.githubusercontent.com/Luckycat133/gemini-web-mcp/main/docs/tools.md): Complete list of tools in the Function and Account catalogs.
+- [API Reference](https://raw.githubusercontent.com/Luckycat133/gemini-web-mcp/main/docs/api-reference.md): Low-level MCP contract schemas and response data structures.
+- [Notebook & Task Workflows](https://raw.githubusercontent.com/Luckycat133/gemini-web-mcp/main/docs/notebook-task-workflows.md): Managing NotebookLM integrations and background execution.
+- [Troubleshooting & FAQ](https://raw.githubusercontent.com/Luckycat133/gemini-web-mcp/main/docs/faq.md): Cookie refresh, session timeouts, and security considerations.
+- [Full Documentation](https://raw.githubusercontent.com/Luckycat133/gemini-web-mcp/main/llms-full.txt): Complete concatenated reference documentation including tool contracts and schemas.
 
-- **Category**: Model Context Protocol (MCP) Server / AI Gateway / Python Developer Tools
-- **Author**: Luckycat133
-- **Repository**: https://github.com/Luckycat133/gemini-web-mcp
-- **License**: AGPL-3.0
-- **Runtime**: Python >= 3.10, official `mcp` Python SDK v2 (`mcp>=2,<3`)
-- **Protocol**: MCP Specification (JSON-RPC 2.0 stdio / SSE)
-
-## Key Capabilities
-1. **Dual-Surface Architecture**:
-   - `gemini-mcp-function`: Core execution tools (Chat, Task, Media, Deep Research, Operation Recovery).
-   - `gemini-mcp-account`: State and metadata management (Notebooks, chat history, pinning, and deletion).
-2. **NotebookLM & Deep Research Support**:
-   - Pass explicit `notebook_ids` to attach private notebooks and research sources to conversational workflows.
-3. **Official MCP SDK v2 Standard Compliance**:
-   - Zero custom protocol stacks; strict conformance to official `mcp` Python SDK v2.
-   - Structured JSON outputs (`structuredContent`) and schema validation for every tool.
-
-## Quickstart
-
-### Installation
-```bash
-git clone https://github.com/Luckycat133/gemini-web-mcp.git
-cd gemini-web-mcp
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -e .
-```
-
-### Configure MCP Client (`claude_desktop_config.json`)
-```json
-{
-  "mcpServers": {
-    "gemini-web": {
-      "command": "/path/to/gemini-web-mcp/.venv/bin/gemini-mcp-function",
-      "args": []
-    }
-  }
-}
-```
-
-## Primary Tools
-- `gemini_ask`: Ask questions with web search, multimodal attachments, and connected apps.
-- `gemini_run_task`: Launch long-running asynchronous tasks with handle-based result retrieval.
-- `gemini_manage_chat`: Rename, pin, unpin, or move chats to notebooks.
-- `gemini_list_notebooks`: Discover accessible NotebookLM collections.
-
-## Frequently Asked Questions (FAQ)
-
-### What is Gemini Web MCP?
-Gemini Web MCP is a bridge that connects desktop AI agents (Claude Desktop, Cursor, Codex) to the Gemini Web interface, unlocking Gemini 3.8 / Pro reasoning and multimodal workflows within agent workflows.
-
-### Does it use official Gemini API keys?
-It operates over Gemini Web sessions (cookies/session tokens), providing access to Gemini Web features (such as NotebookLM integration and web grounding) that are distinct from standard Gemini developer API endpoints.
+## Optional
+- [Architecture](https://raw.githubusercontent.com/Luckycat133/gemini-web-mcp/main/docs/architecture.md): MCP Python SDK v2 dual-surface architecture.
+- [MCP Compatibility](https://raw.githubusercontent.com/Luckycat133/gemini-web-mcp/main/docs/mcp-sdk-compatibility.md): Client runtime support and compatibility policies.
+- [Smithery Configuration](https://raw.githubusercontent.com/Luckycat133/gemini-web-mcp/main/smithery.yaml): Registry configuration for Smithery.ai CLI and 1-click installation.

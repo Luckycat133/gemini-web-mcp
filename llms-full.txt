@@ -1,0 +1,68 @@
+# Gemini Web MCP Full Documentation
+
+> Agent-first Model Context Protocol (MCP) Python SDK v2 gateway and skills for Gemini Web workflows, background tasks, and NotebookLM integration.
+
+- **Repository**: https://github.com/Luckycat133/gemini-web-mcp
+- **Author**: Luckycat133
+- **License**: AGPL-3.0
+- **Runtime**: Python >= 3.10, official `mcp` Python SDK v2 (`mcp>=2,<3`)
+- **Protocol**: MCP Specification (JSON-RPC 2.0 stdio / SSE)
+
+---
+
+## 1. Architecture Overview
+
+Gemini Web MCP delegates MCP protocol behavior to the official `mcp` Python SDK v2 through a dedicated `MCPServer` adapter. It provides two distinct surfaces:
+1. `gemini-mcp-function`: Core execution tools (Chat, Task, Media, Deep Research, Operation Recovery).
+2. `gemini-mcp-account`: State and metadata management (Notebooks, chat history, pinning, and deletion).
+
+---
+
+## 2. Quickstart & Configuration
+
+### Installation
+```bash
+git clone https://github.com/Luckycat133/gemini-web-mcp.git
+cd gemini-web-mcp
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -e .
+```
+
+### Client Configuration (`claude_desktop_config.json`)
+```json
+{
+  "mcpServers": {
+    "gemini-web": {
+      "command": "/path/to/gemini-web-mcp/.venv/bin/gemini-mcp-function",
+      "args": []
+    }
+  }
+}
+```
+
+---
+
+## 3. Tool Surface
+
+### Function Surface
+- `gemini_ask`: Question answering with web search, multimodal attachments, and thinking level control (`low`, `medium`, `high`).
+- `gemini_run_task`: Launch long-running asynchronous tasks with handle-based result recovery.
+- `gemini_task_status`: Query background task progress.
+- `gemini_media`: Handle image, audio, and video inputs.
+
+### Account Surface
+- `gemini_list_chats`: Enumerate historical chats with metadata.
+- `gemini_manage_chat`: Rename, pin, unpin, or move chats to notebooks.
+- `gemini_delete_chat`: Verified deletion of conversation sessions.
+- `gemini_list_notebooks`: Discover accessible NotebookLM collections.
+
+---
+
+## 4. Frequently Asked Questions (FAQ)
+
+### Q: Does Gemini Web MCP use official developer API keys?
+It operates over authenticated Gemini Web browser sessions, unlocking Gemini 3.8 / Pro reasoning, NotebookLM integration, and web grounding that are distinct from standard developer API endpoints.
+
+### Q: What is the Python SDK compatibility?
+It strictly requires `mcp>=2,<3` and `mcp-types>=2,<3`, returning validated `structuredContent` and JSON Schema validation for every tool.
