@@ -42,9 +42,9 @@ EXPECTED_REQUIREMENTS = {
 
 EXPECTED_OPTIONAL_REQUIREMENTS = {
     ("browser", "browser-cookie3"): "browser-cookie3>=0.19.0,<1",
-    ("image", "pillow"): "pillow>=10.0.0,<13",
+    ("image", "pillow"): "pillow>=10.0.0,<14",
     ("all", "browser-cookie3"): "browser-cookie3>=0.19.0,<1",
-    ("all", "pillow"): "pillow>=10.0.0,<13",
+    ("all", "pillow"): "pillow>=10.0.0,<14",
 }
 
 
