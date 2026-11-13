@@ -1,15 +1,19 @@
 """Opaque account identity shared by the operation and cleanup ledgers."""
 
 import hashlib
-import hmac
 import os
 
 from ..constants import OMNI_VIDEO_API_BACKEND
 
 
 def _opaque_account_id(label: str, secret: str) -> str:
-    """Domain-separated, non-reversible local identifier for one credential."""
-    return hmac.new(label.encode(), secret.encode(), hashlib.sha256).hexdigest()
+    """Domain-separated, non-reversible local identifier for one credential.
+
+    Keyed BLAKE2b is a PRF for keyed derivation, not a password hash: the input
+    is already a high-entropy credential, and the result never leaves the
+    machine.
+    """
+    return hashlib.blake2b(secret.encode(), key=label.encode(), digest_size=32).hexdigest()
 
 
 def current_account_key() -> str | None:
