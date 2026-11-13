@@ -1,14 +1,20 @@
 """Opaque account identity shared by the operation and cleanup ledgers."""
 
 import hashlib
+import hmac
 import os
 
 from ..constants import OMNI_VIDEO_API_BACKEND
 
 
+def _opaque_account_id(label: str, secret: str) -> str:
+    """Domain-separated, non-reversible local identifier for one credential."""
+    return hmac.new(label.encode(), secret.encode(), hashlib.sha256).hexdigest()
+
+
 def current_account_key() -> str | None:
     psid = os.environ.get("GEMINI_PSID", "")
-    return hashlib.sha256(psid.encode()).hexdigest() if psid else None
+    return _opaque_account_id("gemini-psid", psid) if psid else None
 
 
 def account_matches(bound: str | None, current: str | None) -> bool:
@@ -22,7 +28,7 @@ def omni_video_api_key() -> str:
 
 
 def omni_video_owner(api_key: str) -> str | None:
-    return hashlib.sha256(b"gemini-video-api\0" + api_key.encode()).hexdigest() if api_key else None
+    return _opaque_account_id("gemini-video-api", api_key) if api_key else None
 
 
 def uses_omni_video_api(record: object) -> bool:
