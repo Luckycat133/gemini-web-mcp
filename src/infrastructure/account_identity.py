@@ -1,19 +1,22 @@
 """Opaque account identity shared by the operation and cleanup ledgers."""
 
+import functools
 import hashlib
 import os
 
 from ..constants import OMNI_VIDEO_API_BACKEND
 
 
+@functools.lru_cache(maxsize=4)
 def _opaque_account_id(label: str, secret: str) -> str:
     """Domain-separated, non-reversible local identifier for one credential.
 
-    Keyed BLAKE2b is a PRF for keyed derivation, not a password hash: the input
-    is already a high-entropy credential, and the result never leaves the
-    machine.
+    The credential itself is never stored: only this derived identifier is
+    written to the local ledgers. PBKDF2 with the label as salt keeps the
+    derivation one-way and expensive to brute-force; the result is memoised
+    because the credential does not change inside a process.
     """
-    return hashlib.blake2b(secret.encode(), key=label.encode(), digest_size=32).hexdigest()
+    return hashlib.pbkdf2_hmac("sha256", secret.encode(), label.encode(), 10_000).hex()
 
 
 def current_account_key() -> str | None:
