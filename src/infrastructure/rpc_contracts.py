@@ -14,6 +14,122 @@ import json
 import re
 from types import MappingProxyType
 from typing import Any, Callable, Literal, Mapping
+import unicodedata
+from urllib.parse import urlsplit
+# --- ported from main (v0.2.2) for the rebased branch ---
+
+def _native_skill_id_payload(*, skill_id: str) -> str:
+    return _compact([skill_id])
+
+
+def _notebook_get_payload(*, notebook_id: str, locale: str = "zh-CN") -> str:
+    return _compact([notebook_id, [locale or "zh-CN"], False])
+
+
+def _library_page_payload(*, section: str = "all", page_size: int = 30,
+                          next_page_token: str | None = None) -> str:
+    filters = {
+        "all": [True, True, True, True, True, False, True, True, True, True],
+        "documents": [False, False, False, True, True, False, False, True, False, False],
+        "media": [True, True, True, False, False, False, True, False, True, True],
+        "purchases": [False, False, False, False, False, True, False, False, False, False],
+    }
+    value: list[Any] = [filters[section], page_size]
+    if next_page_token:
+        value.append(next_page_token)
+    return _compact(value)
+
+NATIVE_SKILL_PUSH_ID = "feeds/or3baakvdgsg4i"
+
+NATIVE_SKILL_UPLOAD_URL = "https://content-push.googleapis.com/upload/"
+
+def native_skill_name_valid(name: str) -> bool:
+    """lNX4ad:5293/5296 J5m name rule, including non-Latin letters."""
+    if not name or name.startswith("-") or name.endswith("-") or "--" in name:
+        return False
+    if any(char != "-" and unicodedata.category(char) not in {"Ll", "Lo", "Nd", "Nl", "No", "Mn", "Mc", "Me"}
+           for char in name):
+        return False
+    return len(name.encode("utf-16-le")) // 2 <= 64
+
+def native_skill_upload_headers(
+    *, phase: Literal["start", "finalize"], content_size: int, push_id: str, client_pctx: str = "",
+) -> dict[str, str]:
+    """main:4353-4361 tM resumable protocol and 6771 ZIP File MIME."""
+    if type(content_size) is not int or content_size <= 0 or not push_id:
+        raise ValueError("Native Skill upload requires a nonempty ZIP and Push-ID.")
+    headers = {"Push-ID": push_id, "X-Tenant-Id": "agent_skills"}
+    if client_pctx:
+        headers["X-Client-Pctx"] = client_pctx
+    if phase == "start":
+        headers.update({"X-Goog-Upload-Protocol": "resumable", "X-Goog-Upload-Command": "start",
+                        "X-Goog-Upload-Header-Content-Length": str(content_size)})
+    elif phase == "finalize":
+        headers.update({"Content-Type": "application/zip", "X-Goog-Upload-Command": "upload, finalize",
+                        "X-Goog-Upload-Offset": "0"})
+    else:
+        raise ValueError("Unknown native Skill upload phase.")
+    return headers
+
+def native_skill_upload_url_allowed(url: str) -> bool:
+    try:
+        parsed = urlsplit(url)
+        return bool(parsed.scheme == "https" and parsed.hostname in _NATIVE_SKILL_UPLOAD_HOSTS
+                    and not parsed.username and not parsed.password and parsed.port in (None, 443))
+    except ValueError:
+        return False
+
+_NATIVE_SKILL_UPLOAD_HOSTS = {
+    "content-push.googleapis.com", "contribution.usercontent.google.com", "push.clients6.google.com",
+}
+
+def native_notebook_metadata(*, title: str, description: str, instructions: str, subtype: int) -> list[Any]:
+    """ScPWJf xwh -> Vjd; business subtype 4 uses a different creation flow."""
+    if type(subtype) is not int or subtype not in {1, 2, 3}:
+        raise ValueError("Supported native Notebook subtype must be 1, 2 or 3.")
+    metadata: list[Any] = [None] * 17
+    metadata[0], metadata[1], metadata[2] = title, description, instructions
+    metadata[4], metadata[7], metadata[9], metadata[10], metadata[11] = [], [], False, 1, []
+    metadata[16] = [2, None, None, None, subtype, []]
+    return metadata
+
+def native_notebook_source(
+    *, display_name: str, mime_type: str, text: str | None = None,
+    url: str | None = None, upload_reference: str | None = None,
+) -> list[Any]:
+    """lbYGFc jyh source oneof (URL 4 / uploaded file 5 / text 6)."""
+    if sum(value is not None for value in (text, url, upload_reference)) != 1:
+        raise ValueError("Exactly one Notebook source input is required.")
+    source: list[Any] = [None] * 9
+    source[1], source[8] = display_name, mime_type
+    if text is not None:
+        source[5] = [text, 2 if mime_type == "text/markdown" else 1]
+    elif url is not None:
+        source[3] = [url]
+    else:
+        source[4] = [upload_reference, mime_type]
+    return source
+
+def _library_page_payload(*, section: str = "all", page_size: int = 30,
+                          next_page_token: str | None = None) -> str:
+    filters = {
+        "all": [True, True, True, True, True, False, True, True, True, True],
+        "documents": [False, False, False, True, True, False, False, True, False, False],
+        "media": [True, True, True, False, False, False, True, False, True, True],
+        "purchases": [False, False, False, False, False, True, False, False, False, False],
+    }
+    value: list[Any] = [filters[section], page_size]
+    if next_page_token:
+        value.append(next_page_token)
+    return _compact(value)
+
+def _notebook_get_payload(*, notebook_id: str, locale: str = "zh-CN") -> str:
+    return _compact([notebook_id, [locale or "zh-CN"], False])
+
+def _native_skill_id_payload(*, skill_id: str) -> str:
+    return _compact([skill_id])
+
+
 
 
 RPCMode = Literal["read", "mutation"]
@@ -1132,6 +1248,20 @@ _CONTRACT_LIST = [
         _fixed([]),
         "tool_modes",
         "2026-06-19 Pro UI / Canvas and Guided Learning tool mode toggles",
+    ),
+    _contract("library.page", "library", "library_artifact_page", "jGArJ", "/library",
+    _library_page_payload, "library_page",
+    "2026-10-18 public QAfPpb:5275,5331-5339 MyStuffApi.m0a and aFf", stability="preview"),
+    _contract(
+    "notebooks.get", "notebooks", "native_notebook_get", "HcT8bb", "/notebooks/view",
+    _notebook_get_payload, "notebook_get",
+    "2026-10-18 public main:2610-2621 GetBot / nK.s7; lbYGFc:6916 czh",
+    stability="preview",
+    ),
+    _contract(
+    "native_skills.get", "native_skills", "native_skill_get", "pvBRnd", "/customize/skills",
+    _native_skill_id_payload, "native_skill_get", "2026-10-18 public main:2138 getSkill / GetManagedSkill",
+    stability="preview",
     ),
 ]
 

@@ -39,6 +39,69 @@ from .services.lifecycle import (
     LifecycleResetAllData,
 )
 from .session_manager import SessionData, SessionOperationResult, SessionService
+import threading
+from .infrastructure.state_store import authentication_scope, get_default_state_store
+from contextvars import ContextVar
+
+# --- ported from main (v0.2.2) for the rebased branch ---
+async def finalize_generated_chat_cleanup(
+    response: Any,
+    *,
+    owns_chat: bool,
+    retain_chat: bool = False,
+    preserve_for_recovery: bool = False,
+    delete_after_seconds: Optional[int] = None,
+    source: str = "",
+    client: Any = None,
+) -> CleanupObservation:
+    """Finalize a newly generated chat after artifact verification or recovery policy."""
+    return await _lifecycle_service.finalize_generated_chat(
+        response,
+        owns_chat=owns_chat,
+        retain_chat=retain_chat,
+        preserve_for_recovery=preserve_for_recovery,
+        delete_after_seconds=delete_after_seconds,
+        source=source,
+        client=client,
+        client_initializer=_initialize_cleanup_client if client is None else None,
+        authentication_generation=_request_cleanup_generation(),
+    )
+
+def _request_cleanup_generation() -> int | None:
+    request_context = _request_authentication_generation.get()
+    current_context = _cleanup_context()
+    if request_context is not None and current_context is not None and request_context[0] == current_context[0]:
+        return request_context[1]
+    return None
+
+def _bind_cleanup_authentication(client: Any) -> None:
+    if not isinstance(_cleanup_manager, RemoteChatCleanupManager):
+        return
+    cookies = getattr(client, "cookies", None)
+    getter = getattr(cookies, "get", None)
+    psid = getter("__Secure-1PSID") if callable(getter) else None
+    if not isinstance(psid, str):
+        psid = os.environ.get("GEMINI_PSID", "")
+    store = get_default_state_store()
+    _cleanup_manager.bind_authentication_scope(authentication_scope(psid, store=store), state_store=store)
+
+_request_authentication_generation: ContextVar[tuple[str, int] | None] = ContextVar(
+    "gemini_authentication_generation", default=None,
+)
+
+_authentication_lock = threading.RLock()
+
+async def _initialize_cleanup_client() -> Any:
+    """Resolve a current initialized generation inside the cleanup error boundary."""
+    client = get_gemini_client()
+    initialized = await initialize_client()
+    return initialized if initialized is not None else client
+
+def _cleanup_context() -> tuple[str, int] | None:
+    if isinstance(_cleanup_manager, RemoteChatCleanupManager):
+        return _cleanup_manager.authentication_context()
+    return None
+
 
 logger = logging.getLogger(__name__)
 

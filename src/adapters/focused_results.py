@@ -8,7 +8,7 @@ from pydantic import BaseModel, ConfigDict
 
 from ..domain import ArtifactResultData, DomainError, DomainResult, DomainWarning, LongOperationData, ResultMeta
 from .mcp_results import domain_failure_text, domain_text
-from .mcp_sdk import CallToolResult
+from mcp_types import CallToolResult
 
 DataT = TypeVar("DataT")
 

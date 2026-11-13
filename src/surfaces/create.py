@@ -9,7 +9,8 @@ from pydantic import Field
 
 from .. import __version__
 from ..adapters.focused_results import ArtifactToolResult, OperationToolResult, focused_result
-from ..adapters.mcp_sdk import CallToolResult, MCPServer
+from mcp_types import CallToolResult
+from ..adapters.mcp_sdk import MCPServer
 from ..client_wrapper import init_cookie_manager_integration
 from ..domain import DomainResult
 from ..domain.results import result_from_exception

@@ -13,6 +13,179 @@ from ..domain.conversations import is_valid_remote_chat_id
 from .rpc_contracts import GRAPHQL_READ_CONTRACTS, GraphQLReadContract, RPCContract, get_contract
 from .task_confirmation import parse_confirmation_replies
 from .task_setup import parse_app_setup_card
+# --- ported from main (v0.2.2) for the rebased branch ---
+def _native_notebook_detail(record: Any) -> dict[str, Any] | None:
+    if (not isinstance(record, list) or len(record) < 2 or not isinstance(record[0], str)
+            or not record[0].strip() or not isinstance(record[1], list)):
+        return None
+    metadata = record[1]
+    # GetBot also reads Gems. A mutation must never cross that namespace.
+    if len(metadata) <= 12 or not isinstance(metadata[12], list) or not metadata[12] or metadata[12][0] != 2:
+        return None
+    if any(len(metadata) > i and metadata[i] is not None and not isinstance(metadata[i], str) for i in (0, 1)):
+        return None
+    summary = record[2] if len(record) > 2 else None
+    if summary is not None and (not isinstance(summary, list)
+                               or (summary and summary[0] is not None and not isinstance(summary[0], str))
+                               or any(len(summary) > i and summary[i] is not None and not isinstance(summary[i], list)
+                                      for i in (1, 2))):
+        return None
+    for index in (3, 6, 9, 14):
+        if len(metadata) > index and metadata[index] is not None and not isinstance(metadata[index], list):
+            return None
+    context = metadata[10] if len(metadata) > 10 else None
+    if context is not None and not isinstance(context, list):
+        return None
+    if context:
+        associations = context[0]
+        if associations is not None and (not isinstance(associations, list) or any(not isinstance(row, list) for row in associations)):
+            return None
+    source_rows = context[1] if context and len(context) > 1 else []
+    if source_rows is None:
+        source_rows = []
+    if not isinstance(source_rows, list):
+        return None
+    sources = []
+    seen: set[str] = set()
+    for pair in source_rows:
+        if (not isinstance(pair, list) or len(pair) != 2 or not isinstance(pair[0], str) or not pair[0]
+                or pair[0] in seen or not isinstance(pair[1], list)):
+            return None
+        source = pair[1]
+        if (not source or source[0] != pair[0]
+                or any(len(source) > i and source[i] is not None and not isinstance(source[i], str) for i in (1, 8))
+                or any(len(source) > i and source[i] is not None and type(source[i]) is not int for i in (6, 9, 13))):
+            return None
+        seen.add(pair[0])
+        text = source[5] if len(source) > 5 else None
+        url = source[3] if len(source) > 3 else None
+        uploaded = source[4] if len(source) > 4 else None
+        for value in (text, url, uploaded):
+            if value is not None and (not isinstance(value, list) or (value and not isinstance(value[0], str))):
+                return None
+        # Empty text slots can accompany a URL/file source. Only a populated
+        # value identifies the active oneof; two populated variants are unsafe.
+        active_kinds = [kind for kind, value in (("text", text), ("url", url), ("upload", uploaded))
+                        if value and value[0]]
+        if len(active_kinds) > 1:
+            return None
+        text_format = text[1] if text and len(text) > 1 else None
+        if text_format is not None and (type(text_format) is not int or text_format not in {0, 1, 2}):
+            return None
+        sources.append({
+            "name": pair[0], "display_name": source[1] if len(source) > 1 and source[1] else "",
+            "source_kind": active_kinds[0] if active_kinds else None,
+            "text_format": text_format if active_kinds == ["text"] else None,
+            "state": source[6] if len(source) > 6 and source[6] is not None else 0,
+            "failure_reason": source[9] if len(source) > 9 and source[9] is not None else 0,
+            "mime_type": source[8] if len(source) > 8 and source[8] else "",
+            "url": url[0] if url else "", "text": text[0] if text else "",
+            "upload_reference": uploaded[0] if uploaded else "",
+        })
+    item = parse_native_notebook(record)
+    item.update(instructions=(summary[0] or "") if summary else "", sources=sources)
+    return {"item": item, "metadata": notebook_metadata_for_update(record)}
+
+def _native_skill_record(row: Any) -> dict[str, Any] | None:
+    if (not isinstance(row, list) or len(row) < 2 or not isinstance(row[0], str) or not row[0].strip()
+            or not isinstance(row[1], str) or not row[1].strip()):
+        return None
+    if any(len(row) > i and row[i] is not None and not isinstance(row[i], str) for i in (2, 3, 5, 7, 11, 13)):
+        return None
+    if len(row) > 4 and row[4] is not None and type(row[4]) is not bool:
+        return None
+    entries: list[dict[str, Any]] = []
+    if len(row) > 6 and row[6] is not None:
+        bundle = row[6]
+        if not isinstance(bundle, list) or (bundle and not isinstance(bundle[0], list)):
+            return None
+        for entry in bundle[0] if bundle else []:
+            if (not isinstance(entry, list) or not entry or not isinstance(entry[0], str)
+                    or any(len(entry) > i and entry[i] is not None and not isinstance(entry[i], str) for i in (1, 2, 3))):
+                return None
+            external = entry[4] if len(entry) > 4 else None
+            if external is not None and (not isinstance(external, list)
+                                        or sum(bool(external[i]) for i in (0, 2, 3) if len(external) > i) != 1
+                                        or any(value is not None and not isinstance(value, str) for value in external)):
+                return None
+            entries.append({"path": entry[0], "content": entry[1] if len(entry) > 1 and entry[1] else "",
+                            "mime_type": entry[2] if len(entry) > 2 and entry[2] else "",
+                            "bytes_base64": entry[3] if len(entry) > 3 and entry[3] else "",
+                            "external_resource": deepcopy(external)})
+    permissions = None
+    if len(row) > 12 and row[12] is not None:
+        license_metadata = row[12]
+        if not isinstance(license_metadata, list):
+            return None
+        raw_permissions = license_metadata[3] if len(license_metadata) > 3 else None
+        if raw_permissions is not None:
+            if not isinstance(raw_permissions, list) or any(value is not None and type(value) is not bool for value in raw_permissions[:4]):
+                return None
+            permissions = {key: raw_permissions[i] is True if len(raw_permissions) > i else False
+                           for i, key in enumerate(("can_edit", "can_download", "can_share", "can_delete"))}
+    return {
+        "id": row[0], "name": row[1], "description": row[2] if len(row) > 2 and row[2] else "",
+        "instructions": row[3] if len(row) > 3 and row[3] else "",
+        "enabled": row[4] if len(row) > 4 and row[4] is not None else False,
+        "upload_reference": row[5] if len(row) > 5 and row[5] else "", "entries": entries,
+        "skill_markdown": row[7] if len(row) > 7 and row[7] else "",
+        "drive_id": row[11] if len(row) > 11 and row[11] else "",
+        "version_id": row[13] if len(row) > 13 and row[13] else "",
+        "permissions": permissions,
+    }
+
+def notebook_metadata_for_update(record: list[Any]) -> list[Any]:
+    """Mirror Ajd -> Vjd, whose response and request metadata have different fields."""
+    metadata = record[1]
+    summary = record[2] if len(record) > 2 and isinstance(record[2], list) else []
+    request: list[Any] = [None] * 19
+    for source, target in ((0, 0), (1, 1), (3, 4), (8, 8), (7, 9), (11, 15), (12, 16)):
+        if len(metadata) > source:
+            request[target] = deepcopy(metadata[source])
+    request[2] = (summary[0] or "") if summary else ""
+    request[7] = deepcopy(summary[1]) if len(summary) > 1 else []
+    request[10] = 1
+    request[11] = deepcopy(summary[2]) if len(summary) > 2 else []
+    if len(metadata) > 9 and isinstance(metadata[9], list):
+        badge = deepcopy(metadata[9])
+        if badge:
+            badge[0] = None  # Vjd does not write the server's badge label.
+        request[12] = badge
+    if len(metadata) > 6 and isinstance(metadata[6], list) and metadata[6]:
+        request[13] = [metadata[6][0]]
+    if len(metadata) > 10 and isinstance(metadata[10], list) and metadata[10]:
+        # Vjd/Ujd preserves source associations by source id, not source bodies.
+        associations = metadata[10][0] or []
+        request[14] = [[[None, None, None, None, None, row[5]]
+                        for row in associations if isinstance(row, list) and len(row) > 5 and row[5]]]
+    if len(metadata) > 14 and isinstance(metadata[14], list):
+        display = metadata[14]
+        writable: list[Any] = [None] * 9
+        for index in (0, 6, 7, 8):
+            if len(display) > index:
+                writable[index] = deepcopy(display[index])
+        request[18] = writable
+    return request
+
+def parse_native_skill_get(body: Any, *, expected_id: str = "", **_: Any) -> RPCParseResult:
+    if body == []:
+        return RPCParseResult("empty", value=None)
+    item = _native_skill_record(body[0]) if isinstance(body, list) and body else None
+    if item is None or (expected_id and item["id"] != expected_id):
+        return RPCParseResult("changed_shape", warnings=("invalid_native_skill_or_identity",))
+    return RPCParseResult("success", value=item)
+
+def parse_notebook_get(body: Any, *, expected_id: str = "", **_: Any) -> RPCParseResult:
+    if body == []:
+        return RPCParseResult("empty", value=None)
+    if not isinstance(body, list) or not body:
+        return RPCParseResult("changed_shape")
+    detail = _native_notebook_detail(body[0])
+    if detail is None or (expected_id and detail["item"]["id"] != expected_id):
+        return RPCParseResult("changed_shape", warnings=("invalid_notebook_or_identity",))
+    return RPCParseResult("success", value=detail)
+
+
 
 logger = logging.getLogger(__name__)
 
@@ -1332,6 +1505,8 @@ def parse_custom_gems(body: Any, *, include_instructions_for: str | None = None,
 
 
 PARSER_FUNCTIONS: Mapping[str, Callable[..., RPCParseResult]] = {
+    "native_skill_get": parse_native_skill_get,
+    "notebook_get": parse_notebook_get,
     "custom_gems": parse_custom_gems,
     "notebook_admin_created": parse_notebook_admin_created,
     "notebook_admin_project": parse_notebook_admin_project,

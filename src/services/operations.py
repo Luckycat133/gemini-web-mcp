@@ -23,6 +23,139 @@ from .research_result_storage import (
     RESEARCH_OPERATIONS, RESEARCH_REPORT_PREVIEW_CHARS, ResearchResultUnavailable, load_research_result, save_research_result,
 )
 from .deadlines import await_before_deadline
+from ..infrastructure.state_store import ArtifactLocator, StateStoreError
+from ..domain import Artifact
+from pathlib import Path
+import re
+
+
+# --- ported from main (v0.2.2) for the rebased branch ---
+def get_operation_service() -> OperationService:
+    global _service
+    if _service is None:
+        _service = OperationService()
+    return _service
+
+
+# --- ported from main (v0.2.2) for the rebased branch ---
+class OperationContext:
+    """Request-owned locator observer; never carries persisted request content."""
+
+    def __init__(self, service: OperationService, record: OperationRecord):
+        self._service = service
+        self.operation_id = record.operation_id
+        self.scope_id = record.scope_id
+        self._lease_id: str | None = record.lease_id
+
+    def observe_chat_sync(self, cid: str, *, provider_operation_id: str | None = None) -> None:
+        changes: dict[str, Any] = {"upstream_chat_id": cid}
+        if provider_operation_id is not None:
+            changes["provider_operation_id"] = provider_operation_id
+        # Identity comes from start(), not whichever account is current when
+        # an old SDK response arrives. Preserve that old locator without ever
+        # granting the new account access to it.
+        for _attempt in range(8):
+            current = self._service.store.operations.get(self.scope_id, self.operation_id)
+            if current is None:
+                raise StateStoreError("Operation metadata disappeared before source retention.")
+            if current.upstream_chat_id and current.upstream_chat_id != cid:
+                raise ValueError("Observed operation source identity changed.")
+            # Locator observation is monotonic, even if the original worker
+            # releases its lease before a late SDK metadata callback arrives.
+            # CAS protects competing state writes; this never runs a provider
+            # action or replaces a different observed source.
+            if self._service.store.operations.update(self.scope_id, self.operation_id, expected_version=current.version,
+                                                     **changes) is not None:
+                return
+        raise StateStoreError("Operation source could not be retained.")
+
+    def observe_provider_operation_sync(self, provider_operation_id: str) -> None:
+        for _attempt in range(8):
+            current = self._service.store.operations.get(self.scope_id, self.operation_id)
+            if current is None:
+                raise StateStoreError("Operation metadata disappeared before source retention.")
+            if self._service.store.operations.update(self.scope_id, self.operation_id, expected_version=current.version,
+                                                     provider_operation_id=provider_operation_id) is not None:
+                return
+        raise StateStoreError("Operation provider locator could not be retained.")
+
+    async def observe_chat(self, cid: str, *, provider_operation_id: str | None = None) -> None:
+        self.observe_chat_sync(cid, provider_operation_id=provider_operation_id)
+
+    def observe_artifacts_sync(
+        self, artifacts: tuple[Artifact, ...], *, operation_state: OperationState | None = None,
+        verification_status: str | None = None,
+    ) -> None:
+        """Durably save availability before any source cleanup can run."""
+        incoming = tuple(ArtifactLocator.from_artifact(item) for item in artifacts)
+        for _attempt in range(8):
+            current = self._service.store.operations.get(self.scope_id, self.operation_id)
+            if current is None:
+                raise StateStoreError("Operation metadata disappeared before artifact retention.")
+            changes: dict[str, Any] = {"artifacts": _merge_locators(current.artifacts, incoming)}
+            if operation_state is not None:
+                if operation_state == OperationState.COMPLETED and current.operation_type in {"research", "music", "video"} and (
+                    not changes["artifacts"] or any(item.state != "local" or item.verification != "verified" for item in changes["artifacts"])
+                ):
+                    changes["state"] = OperationState.PARTIAL if changes["artifacts"] else OperationState.RUNNING
+                else:
+                    changes["state"] = operation_state
+            if verification_status is not None:
+                changes["verification_status"] = verification_status
+            if self._service.store.operations.update(self.scope_id, self.operation_id, expected_version=current.version,
+                                                     lease_id=self._lease_id, **changes) is not None:
+                return
+        raise StateStoreError("Operation artifact retention lost its execution lease.")
+
+    def observe_destination_sync(self, output_dir: str) -> None:
+        current = self._service.store.operations.get(self.scope_id, self.operation_id)
+        if current is not None:
+            self._service.store.operations.update(self.scope_id, self.operation_id, expected_version=current.version,
+                                                 lease_id=self._lease_id, output_dir=str(Path(output_dir).expanduser().absolute()))
+
+    async def update(
+        self, *, state: OperationState | None = None, artifacts: tuple[Artifact, ...] = (),
+        verification_status: str | None = None,
+    ) -> None:
+        changes: dict[str, Any] = {}
+        if state is not None:
+            changes["state"] = state
+        if artifacts:
+            self.observe_artifacts_sync(artifacts, operation_state=state, verification_status=verification_status)
+            return
+        if verification_status is not None:
+            changes["verification_status"] = verification_status
+        if changes:
+            current = self._service.store.operations.get(self.scope_id, self.operation_id)
+            if current is not None:
+                self._service.store.operations.update(self.scope_id, self.operation_id, expected_version=current.version,
+                                                     lease_id=self._lease_id, **changes)
+
+_TERMINAL = {OperationState.COMPLETED, OperationState.CANCELLED, OperationState.EXPIRED}
+
+Recovery = Callable[[OperationRecord], Awaitable[DomainResult[Any]]]
+
+HEARTBEAT_SECONDS = 30
+
+def _merge_locators(existing: tuple[ArtifactLocator, ...], incoming: tuple[ArtifactLocator, ...]) -> tuple[ArtifactLocator, ...]:
+    locators = {item.id: item for item in existing}
+    for item in incoming:
+        old = locators.get(item.id)
+        if old and old.local_path and old.verification == "verified" and not item.local_path:
+            item = replace(old, uri=item.uri or old.uri)
+        locators[item.id] = item
+    return tuple(locators.values())
+
+LEASE_SECONDS = 270
+
+RECOVERY_TIMEOUT_SECONDS = 240
+
+_IDEMPOTENCY_KEY = re.compile(r"^[A-Za-z0-9_-]{1,128}$")
+
+ProviderCancel = Callable[[OperationRecord], Awaitable[bool]]
+
+Runner = Callable[["OperationContext"], Awaitable[DomainResult[Any]]]
+
 
 logger = logging.getLogger(__name__)
 
