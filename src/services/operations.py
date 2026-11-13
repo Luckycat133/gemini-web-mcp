@@ -27,16 +27,6 @@ from ..infrastructure.state_store import ArtifactLocator, StateStoreError
 from ..domain import Artifact
 from pathlib import Path
 import re
-
-
-# --- ported from main (v0.2.2) for the rebased branch ---
-def get_operation_service() -> OperationService:
-    global _service
-    if _service is None:
-        _service = OperationService()
-    return _service
-
-
 # --- ported from main (v0.2.2) for the rebased branch ---
 class OperationContext:
     """Request-owned locator observer; never carries persisted request content."""
@@ -133,10 +123,6 @@ class OperationContext:
 
 _TERMINAL = {OperationState.COMPLETED, OperationState.CANCELLED, OperationState.EXPIRED}
 
-Recovery = Callable[[OperationRecord], Awaitable[DomainResult[Any]]]
-
-HEARTBEAT_SECONDS = 30
-
 def _merge_locators(existing: tuple[ArtifactLocator, ...], incoming: tuple[ArtifactLocator, ...]) -> tuple[ArtifactLocator, ...]:
     locators = {item.id: item for item in existing}
     for item in incoming:
@@ -146,15 +132,26 @@ def _merge_locators(existing: tuple[ArtifactLocator, ...], incoming: tuple[Artif
         locators[item.id] = item
     return tuple(locators.values())
 
+ProviderCancel = Callable[[OperationRecord], Awaitable[bool]]
+
 LEASE_SECONDS = 270
 
-RECOVERY_TIMEOUT_SECONDS = 240
+HEARTBEAT_SECONDS = 30
+
+Recovery = Callable[[OperationRecord], Awaitable[DomainResult[Any]]]
+
+Runner = Callable[["OperationContext"], Awaitable[DomainResult[Any]]]
+
+def get_operation_service() -> OperationService:
+    global _service
+    if _service is None:
+        _service = OperationService()
+    return _service
 
 _IDEMPOTENCY_KEY = re.compile(r"^[A-Za-z0-9_-]{1,128}$")
 
-ProviderCancel = Callable[[OperationRecord], Awaitable[bool]]
+RECOVERY_TIMEOUT_SECONDS = 240
 
-Runner = Callable[["OperationContext"], Awaitable[DomainResult[Any]]]
 
 
 logger = logging.getLogger(__name__)

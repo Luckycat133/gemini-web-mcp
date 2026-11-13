@@ -42,7 +42,6 @@ from .session_manager import SessionData, SessionOperationResult, SessionService
 import threading
 from .infrastructure.state_store import authentication_scope, get_default_state_store
 from contextvars import ContextVar
-
 # --- ported from main (v0.2.2) for the rebased branch ---
 async def finalize_generated_chat_cleanup(
     response: Any,
@@ -74,6 +73,12 @@ def _request_cleanup_generation() -> int | None:
         return request_context[1]
     return None
 
+_request_authentication_generation: ContextVar[tuple[str, int] | None] = ContextVar(
+    "gemini_authentication_generation", default=None,
+)
+
+_authentication_lock = threading.RLock()
+
 def _bind_cleanup_authentication(client: Any) -> None:
     if not isinstance(_cleanup_manager, RemoteChatCleanupManager):
         return
@@ -85,11 +90,10 @@ def _bind_cleanup_authentication(client: Any) -> None:
     store = get_default_state_store()
     _cleanup_manager.bind_authentication_scope(authentication_scope(psid, store=store), state_store=store)
 
-_request_authentication_generation: ContextVar[tuple[str, int] | None] = ContextVar(
-    "gemini_authentication_generation", default=None,
-)
-
-_authentication_lock = threading.RLock()
+def _cleanup_context() -> tuple[str, int] | None:
+    if isinstance(_cleanup_manager, RemoteChatCleanupManager):
+        return _cleanup_manager.authentication_context()
+    return None
 
 async def _initialize_cleanup_client() -> Any:
     """Resolve a current initialized generation inside the cleanup error boundary."""
@@ -97,10 +101,6 @@ async def _initialize_cleanup_client() -> Any:
     initialized = await initialize_client()
     return initialized if initialized is not None else client
 
-def _cleanup_context() -> tuple[str, int] | None:
-    if isinstance(_cleanup_manager, RemoteChatCleanupManager):
-        return _cleanup_manager.authentication_context()
-    return None
 
 
 logger = logging.getLogger(__name__)

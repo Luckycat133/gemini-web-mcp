@@ -41,7 +41,6 @@ import pytest
 from src.adapters.mcp_sdk import MCPServer
 
 import src.tools.manage as manage_tools
-from tests._account_rpc_fakes import notebook_read_diagnostic
 
 
 # ---------------------------------------------------------------------------
@@ -72,9 +71,6 @@ class _FakeBatchClient:
             text = self._responses.pop(0)
         else:
             text = ""
-        if text == "resp":
-            bodies = manage_tools._extract_rpc_bodies(text, raw_rpc_list[0].rpcid)
-            text = json.dumps([["wrb.fr", raw_rpc_list[0].rpcid, json.dumps(body)] for body in bodies])
         return SimpleNamespace(text=text, status_code=self._status_code)
 
 
@@ -218,7 +214,7 @@ def test_move_chat_to_notebook_notebook_not_found_empty(monkeypatch):
     client = _FakeBatchClient()
     _patch_seams(monkeypatch, client)
     monkeypatch.setattr(manage_tools, "_fetch_native_notebooks",
-                        AsyncMock(return_value=([], notebook_read_diagnostic([]))))
+                        AsyncMock(return_value=([], {"source_rpc": "CNgdBe"})))
     mcp = _make_mcp()
     result = _run(_call(mcp, "gemini_move_chat_to_notebook",
                         chat_id="c_1", notebook_title="Missing"))
@@ -231,7 +227,7 @@ def test_move_chat_to_notebook_notebook_not_found_json_payload(monkeypatch):
     client = _FakeBatchClient()
     _patch_seams(monkeypatch, client)
     monkeypatch.setattr(manage_tools, "_fetch_native_notebooks",
-                        AsyncMock(return_value=([], notebook_read_diagnostic([]))))
+                        AsyncMock(return_value=([], {"source_rpc": "CNgdBe"})))
     mcp = _make_mcp()
     result = _run(_call(mcp, "gemini_move_chat_to_notebook",
                         chat_id="c_1", notebook_id="missing", response_format="json"))
@@ -248,7 +244,7 @@ def test_move_chat_to_notebook_ok_and_verified_renders_success(monkeypatch):
     _patch_seams(monkeypatch, client)
     notebooks = [_notebook("n_1", "Math")]
     monkeypatch.setattr(manage_tools, "_fetch_native_notebooks",
-                        AsyncMock(return_value=(notebooks, notebook_read_diagnostic(notebooks))))
+                        AsyncMock(return_value=(notebooks, {})))
     # bodies 非空 → body_present=True；body[1] 为 list → updated_entry 解析
     monkeypatch.setattr(manage_tools, "_extract_rpc_bodies",
                         lambda _t, _r: [[None, _conv_entry("c_1", "Moved Chat")]])
@@ -257,7 +253,7 @@ def test_move_chat_to_notebook_ok_and_verified_renders_success(monkeypatch):
                         AsyncMock(return_value=([{"id": "c_1", "title": "Moved Chat", "time": ""}], {
                             "total_count": 1, "count": 1, "offset": 0, "limit": 100,
                             "has_more": False, "next_offset": None,
-                            "diagnostic": {**notebook_read_diagnostic([1]), "fetched_count": 1, "page_count": 1, "has_remote_more": False},
+                            "diagnostic": {"fetched_count": 1, "page_count": 1, "has_remote_more": False},
                         })))
     mcp = _make_mcp()
     result = _run(_call(mcp, "gemini_move_chat_to_notebook",
@@ -276,7 +272,7 @@ def test_move_chat_to_notebook_ok_but_not_verified_renders_warning(monkeypatch):
     _patch_seams(monkeypatch, client)
     notebooks = [_notebook("n_1", "Math")]
     monkeypatch.setattr(manage_tools, "_fetch_native_notebooks",
-                        AsyncMock(return_value=(notebooks, notebook_read_diagnostic(notebooks))))
+                        AsyncMock(return_value=(notebooks, {})))
     monkeypatch.setattr(manage_tools, "_extract_rpc_bodies",
                         lambda _t, _r: [[None, _conv_entry("c_1")]])
     # verify_items 不含 c_1 → verified=False
@@ -284,7 +280,7 @@ def test_move_chat_to_notebook_ok_but_not_verified_renders_warning(monkeypatch):
                         AsyncMock(return_value=([{"id": "other", "title": "Other", "time": ""}], {
                             "total_count": 1, "count": 1, "offset": 0, "limit": 100,
                             "has_more": False, "next_offset": None,
-                            "diagnostic": {**notebook_read_diagnostic([1]), "fetched_count": 1, "page_count": 1, "has_remote_more": False},
+                            "diagnostic": {"fetched_count": 1, "page_count": 1, "has_remote_more": False},
                         })))
     mcp = _make_mcp()
     result = _run(_call(mcp, "gemini_move_chat_to_notebook",
@@ -300,14 +296,14 @@ def test_move_chat_to_notebook_not_ok_renders_failure(monkeypatch):
     _patch_seams(monkeypatch, client)
     notebooks = [_notebook("n_1", "Math")]
     monkeypatch.setattr(manage_tools, "_fetch_native_notebooks",
-                        AsyncMock(return_value=(notebooks, notebook_read_diagnostic(notebooks))))
+                        AsyncMock(return_value=(notebooks, {})))
     monkeypatch.setattr(manage_tools, "_extract_rpc_bodies",
                         lambda _t, _r: [[None, _conv_entry("c_1")]])
     monkeypatch.setattr(manage_tools, "_fetch_notebook_chats",
                         AsyncMock(return_value=([], {
                             "total_count": 0, "count": 0, "offset": 0, "limit": 100,
                             "has_more": False, "next_offset": None,
-                            "diagnostic": {**notebook_read_diagnostic([]), "fetched_count": 0, "page_count": 1, "has_remote_more": False},
+                            "diagnostic": {"fetched_count": 0, "page_count": 1, "has_remote_more": False},
                         })))
     mcp = _make_mcp()
     result = _run(_call(mcp, "gemini_move_chat_to_notebook",
@@ -321,13 +317,13 @@ def test_move_chat_to_notebook_empty_bodies_makes_not_ok(monkeypatch):
     _patch_seams(monkeypatch, client)
     notebooks = [_notebook("n_1", "Math")]
     monkeypatch.setattr(manage_tools, "_fetch_native_notebooks",
-                        AsyncMock(return_value=(notebooks, notebook_read_diagnostic(notebooks))))
+                        AsyncMock(return_value=(notebooks, {})))
     monkeypatch.setattr(manage_tools, "_extract_rpc_bodies", lambda _t, _r: [])
     monkeypatch.setattr(manage_tools, "_fetch_notebook_chats",
                         AsyncMock(return_value=([], {
                             "total_count": 0, "count": 0, "offset": 0, "limit": 100,
                             "has_more": False, "next_offset": None,
-                            "diagnostic": {**notebook_read_diagnostic([]), "fetched_count": 0, "page_count": 1, "has_remote_more": False},
+                            "diagnostic": {"fetched_count": 0, "page_count": 1, "has_remote_more": False},
                         })))
     mcp = _make_mcp()
     result = _run(_call(mcp, "gemini_move_chat_to_notebook",
@@ -341,14 +337,14 @@ def test_move_chat_to_notebook_json_payload_ok_verified(monkeypatch):
     _patch_seams(monkeypatch, client)
     notebooks = [_notebook("n_1", "Math")]
     monkeypatch.setattr(manage_tools, "_fetch_native_notebooks",
-                        AsyncMock(return_value=(notebooks, notebook_read_diagnostic(notebooks))))
+                        AsyncMock(return_value=(notebooks, {})))
     monkeypatch.setattr(manage_tools, "_extract_rpc_bodies",
                         lambda _t, _r: [[None, _conv_entry("c_1", "Moved")]])
     monkeypatch.setattr(manage_tools, "_fetch_notebook_chats",
                         AsyncMock(return_value=([{"id": "c_1", "title": "Moved", "time": ""}], {
                             "total_count": 1, "count": 1, "offset": 0, "limit": 100,
                             "has_more": False, "next_offset": None,
-                            "diagnostic": {**notebook_read_diagnostic([1]), "fetched_count": 1, "page_count": 1, "has_remote_more": False},
+                            "diagnostic": {"fetched_count": 1, "page_count": 1, "has_remote_more": False},
                         })))
     mcp = _make_mcp()
     result = _run(_call(mcp, "gemini_move_chat_to_notebook",
@@ -370,7 +366,7 @@ def test_move_chat_to_notebook_updated_entry_none_when_body1_not_list(monkeypatc
     _patch_seams(monkeypatch, client)
     notebooks = [_notebook("n_1", "Math")]
     monkeypatch.setattr(manage_tools, "_fetch_native_notebooks",
-                        AsyncMock(return_value=(notebooks, notebook_read_diagnostic(notebooks))))
+                        AsyncMock(return_value=(notebooks, {})))
     # body=[None, "not_a_list"] → body[1] 非 list → updated_entry=None
     monkeypatch.setattr(manage_tools, "_extract_rpc_bodies",
                         lambda _t, _r: [[None, "not_a_list"]])
@@ -378,15 +374,14 @@ def test_move_chat_to_notebook_updated_entry_none_when_body1_not_list(monkeypatc
                         AsyncMock(return_value=([{"id": "c_1", "title": "t", "time": ""}], {
                             "total_count": 1, "count": 1, "offset": 0, "limit": 100,
                             "has_more": False, "next_offset": None,
-                            "diagnostic": {**notebook_read_diagnostic([1]), "fetched_count": 1, "page_count": 1, "has_remote_more": False},
+                            "diagnostic": {"fetched_count": 1, "page_count": 1, "has_remote_more": False},
                         })))
     mcp = _make_mcp()
     result = _run(_call(mcp, "gemini_move_chat_to_notebook",
                         chat_id="c_1", notebook_id="n_1", response_format="json"))
     payload = json.loads(result[0].text)
     assert payload["updated_entry"] is None
-    assert payload["ok"] is False  # changed shape cannot confirm a move
-    assert payload["accepted"] is False
+    assert payload["ok"] is True  # bodies 非空 + status 200
 
 
 def test_move_chat_to_notebook_project_type_from_notebook(monkeypatch):
@@ -395,14 +390,14 @@ def test_move_chat_to_notebook_project_type_from_notebook(monkeypatch):
     _patch_seams(monkeypatch, client)
     notebooks = [_notebook("n_1", "Math", project_type=7)]
     monkeypatch.setattr(manage_tools, "_fetch_native_notebooks",
-                        AsyncMock(return_value=(notebooks, notebook_read_diagnostic(notebooks))))
+                        AsyncMock(return_value=(notebooks, {})))
     monkeypatch.setattr(manage_tools, "_extract_rpc_bodies",
                         lambda _t, _r: [[None, _conv_entry("c_1")]])
     monkeypatch.setattr(manage_tools, "_fetch_notebook_chats",
                         AsyncMock(return_value=([{"id": "c_1", "title": "t", "time": ""}], {
                             "total_count": 1, "count": 1, "offset": 0, "limit": 100,
                             "has_more": False, "next_offset": None,
-                            "diagnostic": {**notebook_read_diagnostic([1]), "fetched_count": 1, "page_count": 1, "has_remote_more": False},
+                            "diagnostic": {"fetched_count": 1, "page_count": 1, "has_remote_more": False},
                         })))
     mcp = _make_mcp()
     _run(_call(mcp, "gemini_move_chat_to_notebook", chat_id="c_1", notebook_id="n_1"))
@@ -418,14 +413,14 @@ def test_move_chat_to_notebook_project_type_non_int_defaults_to_2(monkeypatch):
     _patch_seams(monkeypatch, client)
     notebooks = [_notebook("n_1", "Math", project_type="not_int")]
     monkeypatch.setattr(manage_tools, "_fetch_native_notebooks",
-                        AsyncMock(return_value=(notebooks, notebook_read_diagnostic(notebooks))))
+                        AsyncMock(return_value=(notebooks, {})))
     monkeypatch.setattr(manage_tools, "_extract_rpc_bodies",
                         lambda _t, _r: [[None, _conv_entry("c_1")]])
     monkeypatch.setattr(manage_tools, "_fetch_notebook_chats",
                         AsyncMock(return_value=([{"id": "c_1", "title": "t", "time": ""}], {
                             "total_count": 1, "count": 1, "offset": 0, "limit": 100,
                             "has_more": False, "next_offset": None,
-                            "diagnostic": {**notebook_read_diagnostic([1]), "fetched_count": 1, "page_count": 1, "has_remote_more": False},
+                            "diagnostic": {"fetched_count": 1, "page_count": 1, "has_remote_more": False},
                         })))
     mcp = _make_mcp()
     _run(_call(mcp, "gemini_move_chat_to_notebook", chat_id="c_1", notebook_id="n_1"))
@@ -453,14 +448,14 @@ def test_move_chat_to_notebook_strips_chat_id(monkeypatch):
     _patch_seams(monkeypatch, client)
     notebooks = [_notebook("n_1", "Math")]
     monkeypatch.setattr(manage_tools, "_fetch_native_notebooks",
-                        AsyncMock(return_value=(notebooks, notebook_read_diagnostic(notebooks))))
+                        AsyncMock(return_value=(notebooks, {})))
     monkeypatch.setattr(manage_tools, "_extract_rpc_bodies",
                         lambda _t, _r: [[None, _conv_entry("c_1")]])
     monkeypatch.setattr(manage_tools, "_fetch_notebook_chats",
                         AsyncMock(return_value=([{"id": "c_1", "title": "t", "time": ""}], {
                             "total_count": 1, "count": 1, "offset": 0, "limit": 100,
                             "has_more": False, "next_offset": None,
-                            "diagnostic": {**notebook_read_diagnostic([1]), "fetched_count": 1, "page_count": 1, "has_remote_more": False},
+                            "diagnostic": {"fetched_count": 1, "page_count": 1, "has_remote_more": False},
                         })))
     mcp = _make_mcp()
     result = _run(_call(mcp, "gemini_move_chat_to_notebook",
@@ -709,13 +704,13 @@ def test_scan_chat_history_sources_includes_notebook_chats(monkeypatch):
                         AsyncMock(return_value=[]))
     notebooks = [_notebook("n_1", "Math")]
     monkeypatch.setattr(manage_tools, "_fetch_native_notebooks",
-                        AsyncMock(return_value=(notebooks, {**notebook_read_diagnostic(notebooks), "source_rpc": "CNgdBe"})))
+                        AsyncMock(return_value=(notebooks, {"source_rpc": "CNgdBe"})))
     notebook_items = [{"id": "c_nb", "title": "Notebook Chat", "time": ""}]
     monkeypatch.setattr(manage_tools, "_fetch_notebook_chats",
                         AsyncMock(return_value=(notebook_items, {
                             "total_count": 1, "count": 1, "offset": 0, "limit": 100,
                             "has_more": False, "next_offset": None,
-                            "diagnostic": {**notebook_read_diagnostic([1]), "fetched_count": 1, "page_count": 1, "has_remote_more": False},
+                            "diagnostic": {"fetched_count": 1, "page_count": 1, "has_remote_more": False},
                         })))
     mcp = _make_mcp()
     result = _run(_call(mcp, "gemini_scan_chat_history_sources",

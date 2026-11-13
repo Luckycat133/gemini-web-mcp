@@ -187,7 +187,9 @@ def test_operation_state_taxonomy_matches_long_running_workflow_contract():
         "completed",
         "partial",
         "timed_out",
+        "cancel_requested",
         "cancelled",
+        "expired",
         "failed",
         "unavailable",
     }

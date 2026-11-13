@@ -1,4 +1,4 @@
 interface:
   display_name: "Gemini Web MCP"
-  short_description: "Use Gemini through focused or compatibility tools"
-  default_prompt: "Use $gemini-web-mcp to complete this task with the available Gemini tools."
+  short_description: "Extend an agent with Gemini assistance, multimodal creation, and explicit account workflows."
+  default_prompt: "Use $gemini-web-mcp to choose the next Gemini capability. Prefer gemini-mcp-function for assistance, chat, media and Research, and gemini-mcp-account for explicitly requested account work. Preserve the operation handle for background tasks; use returned files in the user's task after verification. The account cleanup tool only uses the MCP-owned ledger. Existing profiles, assist and compact are compatibility routes; use the manifest only for discovery or recovery when available."

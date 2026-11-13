@@ -9,10 +9,9 @@ from ..infrastructure.account_identity import current_account_key
 
 from ..infrastructure.rpc_contracts import execute_contract, get_contract
 from ..infrastructure.rpc_parsers import parse_contract_body, parse_rpc_envelope
-from ..infrastructure.rpc_contracts import RawRPCData
 from gemini_webapi import GeminiClient
+from ..infrastructure.rpc_contracts import RawRPCData
 from ..domain import DomainErrorCode, DomainResult, DomainWarning, OperationState
-
 # --- ported from main (v0.2.2) for the rebased branch ---
 async def list_gems(client: Any) -> DomainResult[dict[str, Any]]:
     """Observe both complete registries; never silently omit a missing reply."""
@@ -85,6 +84,7 @@ def _read_gem_registry(response: Any, identifier: str) -> tuple[list[dict[str, A
         return [], diagnostic
     diagnostic["read_back_valid"] = True
     return [{**item, "predefined": identifier == "system"} for item in parsed.value], diagnostic
+
 
 
 

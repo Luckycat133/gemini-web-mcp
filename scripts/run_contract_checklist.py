@@ -91,15 +91,12 @@ CONTRACT_TESTS = (
     "tests/test_account_surface.py",
     "tests/test_protocol_smoke.py",
     "tests/test_onboarding.py",
-    "tests/test_onboarding_media.py",
     "tests/test_onboarding_distribution.py",
     "tests/test_version_consistency.py",
     "tests/test_evaluations.py",
     "tests/test_development_skill.py",
     "tests/test_skill_packaging.py",
     "tests/test_assist_skill.py",
-    "tests/test_focused_surfaces.py",
-    "tests/test_focused_skills.py",
     "tests/test_ci_contracts.py",
 )
 

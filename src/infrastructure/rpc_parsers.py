@@ -13,6 +13,198 @@ from ..domain.conversations import is_valid_remote_chat_id
 from .rpc_contracts import GRAPHQL_READ_CONTRACTS, GraphQLReadContract, RPCContract, get_contract
 from .task_confirmation import parse_confirmation_replies
 from .task_setup import parse_app_setup_card
+import hashlib
+from urllib.parse import quote
+def _result_for_items_guarded(
+    body: Any, index: int, item_parser: Callable[[Any], Any], *, require_id: bool = False,
+    item_validator: Callable[[Any], bool] | None = None,
+) -> RPCParseResult:
+    if not isinstance(body, list) or len(body) <= index or not isinstance(body[index], list):
+        return RPCParseResult("changed_shape", raw_type=type(body).__name__)
+    values = []
+    for row_index, item in enumerate(body[index]):
+        if not isinstance(item, list) or (item_validator is not None and not item_validator(item)):
+            return RPCParseResult("changed_shape", warnings=(f"invalid_entry:{row_index}",), raw_type=type(item).__name__)
+        try:
+            value = item_parser(item)
+        except (TypeError, ValueError, IndexError, OverflowError):
+            return RPCParseResult("changed_shape", warnings=(f"invalid_entry:{row_index}",), raw_type=type(item).__name__)
+        if require_id and (not isinstance(value, dict) or not isinstance(value.get("id"), str) or not value["id"].strip()):
+            return RPCParseResult("changed_shape", warnings=(f"missing_entry_id:{row_index}",), raw_type=type(item).__name__)
+        values.append(value)
+    return RPCParseResult("success" if values else "empty", value=values)
+
+
+# --- ported from main (v0.2.2) for the rebased branch ---
+def parse_sharing_void_ack(body: Any, **_: Any) -> RPCParseResult:
+    # DeleteSharedConversation returns an empty protobuf message. An unrelated
+    # nonempty shape is not an acknowledgement for this contract.
+    if body == []:
+        return RPCParseResult("empty", value=None)
+    if body == [None]:
+        return RPCParseResult("success", value=None)
+    return RPCParseResult("changed_shape")
+
+
+# --- ported from main (v0.2.2) for the rebased branch ---
+def parse_remy_void_ack(body: Any, **_: Any) -> RPCParseResult:
+    """The observed void protobuf response has no fields; never expose its body."""
+    if isinstance(body, list) and not body:
+        return RPCParseResult("success", value=True)
+    if body is None:
+        return RPCParseResult("empty", value=None)
+    return RPCParseResult("changed_shape", raw_type=type(body).__name__)
+
+
+# --- ported from main (v0.2.2) for the rebased branch ---
+def parse_remy_schedule_registry(body: Any, *, max_chars: int = 500, **_: Any) -> RPCParseResult:
+    if body == []:
+        return RPCParseResult("empty", value=[])
+    if not isinstance(body, list) or not body:
+        return RPCParseResult("changed_shape", raw_type=type(body).__name__)
+    if ((len(body) > 1 and body[1] is not None and type(body[1]) is not bool)
+            or (len(body) > 2 and body[2] is not None and (type(body[2]) is not int or body[2] not in range(3)))):
+        return RPCParseResult("changed_shape", warnings=("invalid_registry_metadata",))
+    rows = body[0] if body[0] is not None else []
+    return _result_for_items_guarded([rows], 0, lambda row: _remy_schedule_entry(row, max_chars), require_id=True)
+
+
+# --- ported from main (v0.2.2) for the rebased branch ---
+def parse_remy_schedule_get(
+    body: Any, *, expected_id: str | None = None, max_chars: int = 500, **_: Any,
+) -> RPCParseResult:
+    if body == [] or body == [None]:
+        return RPCParseResult("empty", value=None)
+    if not isinstance(body, list) or not body:
+        return RPCParseResult("changed_shape", raw_type=type(body).__name__)
+    try:
+        item = _remy_schedule_entry(body[0], max_chars)
+    except (TypeError, ValueError, IndexError):
+        return RPCParseResult("changed_shape", warnings=("invalid_schedule",))
+    if expected_id is not None and item["id"] != expected_id:
+        return RPCParseResult("changed_shape", warnings=("returned_id_mismatch",))
+    return RPCParseResult("success", value=item)
+
+def _remy_schedule_entry(row: Any, max_chars: int) -> dict[str, Any]:
+    if not isinstance(row, list) or len(row) < 10 or not isinstance(row[0], str) or not row[0].strip():
+        raise ValueError("Invalid Remy schedule")
+    for index in (1, 6, 7, 8, 11, 26):
+        if len(row) > index and row[index] is not None and not isinstance(row[index], str):
+            raise ValueError("Invalid Remy schedule text")
+    status = row[9] if row[9] is not None else 0
+    if type(status) is not int or status not in range(4):
+        raise ValueError("Invalid Remy schedule status")
+    trigger = _remy_schedule_trigger(row, max_chars)
+    state = ("unspecified", "active", "paused", "completed")[status]
+    return {
+        "backend": "remy", "id": row[0], "title": _truncate(row[1], max_chars),
+        "instructions": _truncate(row[7], max_chars), "timezone_name": row[6] or "",
+        "enabled": True if status == 1 else False if status in {2, 3} else None,
+        # Remy 3 means completed, while legacy Task 3 means running. Keep the
+        # native enum separate from legacy task_state_id/deleted-state evidence.
+        "schedule_status_id": status, "task_state_id": None, "task_state": state,
+        "trigger": trigger, "schedule_label": trigger["type"],
+        "hour": trigger.get("hour"), "minute": trigger.get("minute"),
+        "source_chat_id": row[11] or "" if len(row) > 11 else "",
+        "project_id": row[26] or "" if len(row) > 26 else "",
+        "field_count": len(row),
+    }
+
+def _remy_schedule_trigger(row: list[Any], max_chars: int) -> dict[str, Any]:
+    fields = ((3, "daily"), (4, "weekly"), (5, "event"), (15, "gmail"),
+              (17, "hourly"), (18, "monthly"), (19, "yearly"), (20, "one_off"))
+    populated = [(index, name) for index, name in fields if len(row) > index and row[index] is not None]
+    if not populated:
+        return {"type": "unspecified"}
+    if len(populated) != 1:
+        raise ValueError("Multiple schedule triggers")
+    index, name = populated[0]
+    message = row[index]
+    if not isinstance(message, list):
+        raise ValueError("Invalid schedule trigger")
+    trigger: dict[str, Any] = {"type": name}
+
+    def integer(value: Any, default: int = 0) -> int:
+        if value is None:
+            return default
+        if type(value) is not int:
+            raise ValueError("Invalid schedule integer")
+        return value
+
+    if name in {"daily", "weekly", "monthly", "yearly"}:
+        time_index = 0 if name == "daily" else 1
+        value = message[time_index] if len(message) > time_index else None
+        if value is not None:
+            if not isinstance(value, list):
+                raise ValueError("Invalid schedule time")
+            hour = integer(value[0] if value else None)
+            minute = integer(value[1] if len(value) > 1 else None)
+            if not 0 <= hour <= 23 or not 0 <= minute <= 59:
+                raise ValueError("Invalid schedule time")
+            trigger.update(hour=hour, minute=minute)
+    if name in {"weekly", "monthly"}:
+        days = message[0] if message else None
+        if days is not None and (not isinstance(days, list) or any(type(day) is not int for day in days)):
+            raise ValueError("Invalid schedule days")
+        trigger["days_of_week" if name == "weekly" else "days_of_month"] = days or []
+    elif name == "hourly":
+        trigger["interval"] = integer(message[0] if message else None)
+    elif name == "yearly":
+        date = message[0] if message else None
+        if date is not None:
+            if not isinstance(date, list):
+                raise ValueError("Invalid schedule date")
+            trigger.update(month=integer(date[1] if len(date) > 1 else None),
+                           day=integer(date[2] if len(date) > 2 else None))
+    elif name == "one_off":
+        timestamp = message[0] if message else None
+        if timestamp is not None:
+            if not isinstance(timestamp, list) or not timestamp:
+                raise ValueError("Invalid schedule timestamp")
+            seconds = timestamp[0]
+            if isinstance(seconds, str) and seconds.lstrip("-").isdigit():
+                seconds = int(seconds)
+            trigger["unix_seconds"] = integer(seconds)
+    elif name in {"event", "gmail"}:
+        condition_index = 1 if name == "gmail" else 0
+        condition = message[condition_index] if len(message) > condition_index else None
+        if condition is not None and not isinstance(condition, str):
+            raise ValueError("Invalid schedule condition")
+        trigger["condition"] = _truncate(condition, max_chars)
+    return trigger
+
+
+# --- ported from main (v0.2.2) for the rebased branch ---
+def parse_public_link_create(body: Any, **_: Any) -> RPCParseResult:
+    if body == []:
+        return RPCParseResult("empty", value=None)
+    if (not isinstance(body, list) or len(body) < 3 or not isinstance(body[2], str) or not body[2].strip()):
+        return RPCParseResult("changed_shape")
+    return RPCParseResult("success", value={"id": body[2], "url": "https://gemini.google.com/share/" + quote(body[2], safe="")})
+
+
+# --- ported from main (v0.2.2) for the rebased branch ---
+def parse_notebook_update_ack(body: Any, **_: Any) -> RPCParseResult:
+    # 2026-10-18 owned Notebook update returned the explicit boolean [true].
+    if isinstance(body, list) and len(body) == 1 and type(body[0]) is bool:
+        return RPCParseResult("success" if body[0] else "rejected", value=body[0])
+    if body == []:
+        return RPCParseResult("empty", value=None)
+    return RPCParseResult("changed_shape")
+
+
+# --- ported from main (v0.2.2) for the rebased branch ---
+def parse_notebook_source_created(body: Any, *, expected_id: str = "", **_: Any) -> RPCParseResult:
+    parsed = parse_notebook_get(body, expected_id=expected_id)
+    if parsed.status != "success":
+        return parsed
+    display = _nested(body, [0, 1, 14])
+    source_name = display[3] if isinstance(display, list) and len(display) > 3 else None
+    if not isinstance(source_name, str) or not source_name.strip():
+        return RPCParseResult("changed_shape", warnings=("missing_created_source_name",))
+    return RPCParseResult("success", value={**parsed.value, "source_name": source_name})
+
+
 # --- ported from main (v0.2.2) for the rebased branch ---
 def _native_notebook_detail(record: Any) -> dict[str, Any] | None:
     if (not isinstance(record, list) or len(record) < 2 or not isinstance(record[0], str)
@@ -86,6 +278,103 @@ def _native_notebook_detail(record: Any) -> dict[str, Any] | None:
     item.update(instructions=(summary[0] or "") if summary else "", sources=sources)
     return {"item": item, "metadata": notebook_metadata_for_update(record)}
 
+def parse_notebook_get(body: Any, *, expected_id: str = "", **_: Any) -> RPCParseResult:
+    if body == []:
+        return RPCParseResult("empty", value=None)
+    if not isinstance(body, list) or not body:
+        return RPCParseResult("changed_shape")
+    detail = _native_notebook_detail(body[0])
+    if detail is None or (expected_id and detail["item"]["id"] != expected_id):
+        return RPCParseResult("changed_shape", warnings=("invalid_notebook_or_identity",))
+    return RPCParseResult("success", value=detail)
+
+def notebook_metadata_for_update(record: list[Any]) -> list[Any]:
+    """Mirror Ajd -> Vjd, whose response and request metadata have different fields."""
+    metadata = record[1]
+    summary = record[2] if len(record) > 2 and isinstance(record[2], list) else []
+    request: list[Any] = [None] * 19
+    for source, target in ((0, 0), (1, 1), (3, 4), (8, 8), (7, 9), (11, 15), (12, 16)):
+        if len(metadata) > source:
+            request[target] = deepcopy(metadata[source])
+    request[2] = (summary[0] or "") if summary else ""
+    request[7] = deepcopy(summary[1]) if len(summary) > 1 else []
+    request[10] = 1
+    request[11] = deepcopy(summary[2]) if len(summary) > 2 else []
+    if len(metadata) > 9 and isinstance(metadata[9], list):
+        badge = deepcopy(metadata[9])
+        if badge:
+            badge[0] = None  # Vjd does not write the server's badge label.
+        request[12] = badge
+    if len(metadata) > 6 and isinstance(metadata[6], list) and metadata[6]:
+        request[13] = [metadata[6][0]]
+    if len(metadata) > 10 and isinstance(metadata[10], list) and metadata[10]:
+        # Vjd/Ujd preserves source associations by source id, not source bodies.
+        associations = metadata[10][0] or []
+        request[14] = [[[None, None, None, None, None, row[5]]
+                        for row in associations if isinstance(row, list) and len(row) > 5 and row[5]]]
+    if len(metadata) > 14 and isinstance(metadata[14], list):
+        display = metadata[14]
+        writable: list[Any] = [None] * 9
+        for index in (0, 6, 7, 8):
+            if len(display) > index:
+                writable[index] = deepcopy(display[index])
+        request[18] = writable
+    return request
+
+
+# --- ported from main (v0.2.2) for the rebased branch ---
+def parse_notebook_created(body: Any, **_: Any) -> RPCParseResult:
+    if body == []:
+        return RPCParseResult("empty", value=None)
+    if isinstance(body, list) and body and isinstance(body[0], str) and body[0].strip():
+        return RPCParseResult("success", value={"id": body[0]})
+    return RPCParseResult("changed_shape")
+
+
+# --- ported from main (v0.2.2) for the rebased branch ---
+def parse_native_void_ack(body: Any, **_: Any) -> RPCParseResult:
+    if body == []:
+        return RPCParseResult("success", value=None)
+    if body is None:
+        return RPCParseResult("empty", value=None)
+    return RPCParseResult("changed_shape")
+
+
+# --- ported from main (v0.2.2) for the rebased branch ---
+def parse_native_skill_save(body: Any, *, expected_id: str = "", **_: Any) -> RPCParseResult:
+    if body == []:
+        return RPCParseResult("empty", value=None)
+    if not isinstance(body, list) or not body or not isinstance(body[0], str) or not body[0].strip():
+        return RPCParseResult("changed_shape")
+    if expected_id and body[0] != expected_id:
+        return RPCParseResult("changed_shape", warnings=("native_skill_identity_mismatch",))
+    item = _native_skill_record(body[1]) if len(body) > 1 and body[1] is not None else None
+    if len(body) > 1 and body[1] is not None and (item is None or item["id"] != body[0]):
+        return RPCParseResult("changed_shape", warnings=("invalid_native_skill_save_record",))
+    return RPCParseResult("success", value={"id": body[0], "item": item})
+
+
+# --- ported from main (v0.2.2) for the rebased branch ---
+def parse_native_skill_list(body: Any, **_: Any) -> RPCParseResult:
+    if body == []:
+        return RPCParseResult("empty", value=[])
+    if not isinstance(body, list) or not body or not isinstance(body[0], list):
+        return RPCParseResult("changed_shape")
+    items = [_native_skill_record(row) for row in body[0]]
+    if any(item is None for item in items) or len({item["id"] for item in items if item}) != len(items):
+        return RPCParseResult("changed_shape", warnings=("invalid_or_duplicate_native_skill",))
+    return RPCParseResult("success" if items else "empty", value=items)
+
+
+# --- ported from main (v0.2.2) for the rebased branch ---
+def parse_native_skill_get(body: Any, *, expected_id: str = "", **_: Any) -> RPCParseResult:
+    if body == []:
+        return RPCParseResult("empty", value=None)
+    item = _native_skill_record(body[0]) if isinstance(body, list) and body else None
+    if item is None or (expected_id and item["id"] != expected_id):
+        return RPCParseResult("changed_shape", warnings=("invalid_native_skill_or_identity",))
+    return RPCParseResult("success", value=item)
+
 def _native_skill_record(row: Any) -> dict[str, Any] | None:
     if (not isinstance(row, list) or len(row) < 2 or not isinstance(row[0], str) or not row[0].strip()
             or not isinstance(row[1], str) or not row[1].strip()):
@@ -134,56 +423,159 @@ def _native_skill_record(row: Any) -> dict[str, Any] | None:
         "permissions": permissions,
     }
 
-def notebook_metadata_for_update(record: list[Any]) -> list[Any]:
-    """Mirror Ajd -> Vjd, whose response and request metadata have different fields."""
-    metadata = record[1]
-    summary = record[2] if len(record) > 2 and isinstance(record[2], list) else []
-    request: list[Any] = [None] * 19
-    for source, target in ((0, 0), (1, 1), (3, 4), (8, 8), (7, 9), (11, 15), (12, 16)):
-        if len(metadata) > source:
-            request[target] = deepcopy(metadata[source])
-    request[2] = (summary[0] or "") if summary else ""
-    request[7] = deepcopy(summary[1]) if len(summary) > 1 else []
-    request[10] = 1
-    request[11] = deepcopy(summary[2]) if len(summary) > 2 else []
-    if len(metadata) > 9 and isinstance(metadata[9], list):
-        badge = deepcopy(metadata[9])
-        if badge:
-            badge[0] = None  # Vjd does not write the server's badge label.
-        request[12] = badge
-    if len(metadata) > 6 and isinstance(metadata[6], list) and metadata[6]:
-        request[13] = [metadata[6][0]]
-    if len(metadata) > 10 and isinstance(metadata[10], list) and metadata[10]:
-        # Vjd/Ujd preserves source associations by source id, not source bodies.
-        associations = metadata[10][0] or []
-        request[14] = [[[None, None, None, None, None, row[5]]
-                        for row in associations if isinstance(row, list) and len(row) > 5 and row[5]]]
-    if len(metadata) > 14 and isinstance(metadata[14], list):
-        display = metadata[14]
-        writable: list[Any] = [None] * 9
-        for index in (0, 6, 7, 8):
-            if len(display) > index:
-                writable[index] = deepcopy(display[index])
-        request[18] = writable
-    return request
 
-def parse_native_skill_get(body: Any, *, expected_id: str = "", **_: Any) -> RPCParseResult:
+# --- ported from main (v0.2.2) for the rebased branch ---
+def parse_library_page(body: Any, **_: Any) -> RPCParseResult:
     if body == []:
-        return RPCParseResult("empty", value=None)
-    item = _native_skill_record(body[0]) if isinstance(body, list) and body else None
-    if item is None or (expected_id and item["id"] != expected_id):
-        return RPCParseResult("changed_shape", warnings=("invalid_native_skill_or_identity",))
-    return RPCParseResult("success", value=item)
-
-def parse_notebook_get(body: Any, *, expected_id: str = "", **_: Any) -> RPCParseResult:
-    if body == []:
-        return RPCParseResult("empty", value=None)
-    if not isinstance(body, list) or not body:
+        return RPCParseResult("empty", value={"items": [], "next_page_token": None})
+    if (not isinstance(body, list) or not body or body[0] is not None and not isinstance(body[0], list)
+            or len(body) > 1 and body[1] is not None and not isinstance(body[1], str)):
         return RPCParseResult("changed_shape")
-    detail = _native_notebook_detail(body[0])
-    if detail is None or (expected_id and detail["item"]["id"] != expected_id):
-        return RPCParseResult("changed_shape", warnings=("invalid_notebook_or_identity",))
-    return RPCParseResult("success", value=detail)
+    items = []
+    for row in body[0] or []:
+        if (not isinstance(row, list) or len(row) < 4 or not isinstance(row[0], list)
+                or len(row[0]) < 2 or row[2] is not None and (type(row[2]) is not int or row[2] not in range(14))
+                or row[3] is not None and not isinstance(row[3], str)):
+            return RPCParseResult("changed_shape")
+        chat_id, turn_id = row[0][:2]
+        native_id = row[10] if len(row) > 10 else None
+        if (chat_id is not None and not isinstance(chat_id, str)
+                or turn_id is not None and not isinstance(turn_id, str)
+                or native_id is not None and not isinstance(native_id, str)
+                or not ((chat_id and turn_id) or native_id)):
+            return RPCParseResult("changed_shape")
+        metadata = row[4] if len(row) > 4 else None
+        if metadata is not None and (not isinstance(metadata, list)
+                                    or any(value is not None and not isinstance(value, str) for value in metadata[:2])):
+            return RPCParseResult("changed_shape")
+        response_id = row[5] if len(row) > 5 else None
+        if response_id is not None and not isinstance(response_id, str):
+            return RPCParseResult("changed_shape")
+        # Older rows can contain several distinct documents from the same
+        # draft, without the newer native bytes ID. A local snapshot handle
+        # keeps each row distinct; it is never used as an upstream selector.
+        snapshot = [chat_id, turn_id, row[2] or 0, response_id, row[3], metadata]
+        snapshot_id = "library_" + hashlib.sha256(json.dumps(snapshot, ensure_ascii=False, separators=(",", ":")).encode()).hexdigest()
+        items.append({
+            "id": native_id or snapshot_id,
+            "id_kind": "native" if native_id else "content_snapshot",
+            "native_id": native_id, "chat_id": chat_id, "turn_id": turn_id,
+            "type_id": row[2] or 0, "title": row[3] or "",
+            "text": metadata[0] if metadata else None,
+            "thumbnail_url": metadata[1] if metadata and len(metadata) > 1 else None,
+            "response_id": response_id,
+        })
+    ids = [item["id"] for item in items]
+    if len(ids) != len(set(ids)):
+        return RPCParseResult("changed_shape", warnings=("duplicate_asset_identity",))
+    return RPCParseResult("success" if items else "empty", value={
+        "items": items, "next_page_token": body[1] if len(body) > 1 and body[1] else None,
+    })
+
+
+# --- ported from main (v0.2.2) for the rebased branch ---
+def parse_library_delete(body: Any, **_: Any) -> RPCParseResult:
+    if body == []:
+        return RPCParseResult("empty", value={"failures": []})
+    if (not isinstance(body, list) or len(body) < 2
+            or body[1] is not None and not (type(body[1]) is int or isinstance(body[1], str) and body[1].isdigit())
+            or len(body) > 2 and body[2] is not None and not isinstance(body[2], list)):
+        return RPCParseResult("changed_shape")
+    return RPCParseResult("success", value={"affected_count": body[1], "failures": body[2] if len(body) > 2 and body[2] else []})
+
+
+# --- ported from main (v0.2.2) for the rebased branch ---
+def parse_canvas_versions(body: Any, **_: Any) -> RPCParseResult:
+    if body == []:
+        return RPCParseResult("empty", value=[])
+    if not isinstance(body, list) or not body or body[0] is not None and not isinstance(body[0], list):
+        return RPCParseResult("changed_shape")
+    items = []
+    for version in body[0] or []:
+        parsed = parse_canvas_artifact(version)
+        if parsed.status != "success":
+            return RPCParseResult("changed_shape")
+        items.append(parsed.value)
+    if len({item["artifact_id"] for item in items}) != len(items):
+        return RPCParseResult("changed_shape", warnings=("duplicate_version_identity",))
+    return RPCParseResult("success" if items else "empty", value=items)
+
+
+# --- ported from main (v0.2.2) for the rebased branch ---
+def parse_canvas_chat_artifacts(body: Any, **arguments: Any) -> RPCParseResult:
+    parsed = _parse_canvas_chat_artifact_items(body, **arguments)
+    if not parsed.ok:
+        return parsed
+    token = body[1] if len(body) > 1 else None
+    if token is not None and not isinstance(token, str):
+        return RPCParseResult("changed_shape", warnings=("invalid_continuation",))
+    return RPCParseResult(parsed.status, value={"items": parsed.value, "next_page_token": token or None})
+
+def _parse_canvas_chat_artifact_items(body: Any, *, expected_chat_id: str | None = None, **_: Any) -> RPCParseResult:
+    if not isinstance(body, list) or not body or not isinstance(body[0], list):
+        return RPCParseResult("changed_shape")
+    items = []
+    for turn in body[0]:
+        source = _nested(turn, [0])
+        candidates = _nested(turn, [3, 0])
+        if (not isinstance(source, list) or len(source) < 2
+                or not all(isinstance(value, str) and value for value in source[:2])
+                or expected_chat_id is not None and source[0] != expected_chat_id
+                or candidates is not None and not isinstance(candidates, list)):
+            return RPCParseResult("changed_shape")
+        for candidate in candidates or []:
+            if not isinstance(candidate, list) or not candidate or not isinstance(candidate[0], str) or not candidate[0]:
+                return RPCParseResult("changed_shape")
+            artifacts = _asset_proto_field(candidate, 30)
+            if artifacts is not None and not isinstance(artifacts, list):
+                return RPCParseResult("changed_shape")
+            for artifact in artifacts or []:
+                parsed = parse_canvas_artifact(artifact)
+                if parsed.status != "success":
+                    return RPCParseResult("changed_shape")
+                items.append({**parsed.value, "chat_id": source[0], "turn_id": source[1], "response_id": candidate[0]})
+    return RPCParseResult("success" if items else "empty", value=items)
+
+def _asset_proto_field(message: list[Any], index: int) -> Any:
+    """Read both dense and sparse JSPB fields (sparse keys use proto numbering)."""
+    if index < len(message) and not (index == len(message) - 1 and isinstance(message[index], dict)):
+        return message[index]
+    return message[-1].get(str(index + 1)) if message and isinstance(message[-1], dict) else None
+
+
+# --- ported from main (v0.2.2) for the rebased branch ---
+def parse_canvas_artifact(body: Any, *, expected_id: str | None = None, **_: Any) -> RPCParseResult:
+    if body == []:
+        return RPCParseResult("empty", value=None)
+    if (not isinstance(body, list) or len(body) < 5 or not isinstance(body[0], str) or not body[0].strip()
+            or body[2] is not None and not isinstance(body[2], str)
+            or body[4] is not None and not isinstance(body[4], str)):
+        return RPCParseResult("changed_shape")
+    if expected_id is not None and body[0] != expected_id:
+        return RPCParseResult("changed_shape", warnings=("returned_id_mismatch",))
+    # Native document/code oneofs have their own text and language; older
+    # artifacts keep text at f5/type at f11. Preserve neither unknown proto nor
+    # attachments in a public diagnostic.
+    kind, text, language = None, body[4], None
+    for index, label, language_index in ((13, "document", 4), (17, "code", 2)):
+        if len(body) > index and body[index] is not None:
+            value = body[index]
+            if (kind is not None or not isinstance(value, list)
+                    or value and value[0] is not None and not isinstance(value[0], str)
+                    or len(value) > language_index and value[language_index] is not None and not isinstance(value[language_index], str)):
+                return RPCParseResult("changed_shape")
+            kind = label
+            if value and value[0] is not None:
+                text = value[0]
+            language = value[language_index] if len(value) > language_index else None
+    type_id = body[10] if len(body) > 10 else None
+    if type_id is not None and type(type_id) is not int:
+        return RPCParseResult("changed_shape")
+    return RPCParseResult("success", value={
+        "artifact_id": body[0], "title": body[2] or "", "text": text or "",
+        "kind": kind, "type_id": type_id, "language": language,
+        "latest_version_id": body[6] if len(body) > 6 and isinstance(body[6], str) else None,
+    })
 
 
 
@@ -1505,8 +1897,24 @@ def parse_custom_gems(body: Any, *, include_instructions_for: str | None = None,
 
 
 PARSER_FUNCTIONS: Mapping[str, Callable[..., RPCParseResult]] = {
-    "native_skill_get": parse_native_skill_get,
+    "sharing_void_ack": parse_sharing_void_ack,
+    "remy_void_ack": parse_remy_void_ack,
+    "remy_schedule_registry": parse_remy_schedule_registry,
+    "remy_schedule_get": parse_remy_schedule_get,
+    "public_link_create": parse_public_link_create,
+    "notebook_update_ack": parse_notebook_update_ack,
+    "notebook_source_created": parse_notebook_source_created,
     "notebook_get": parse_notebook_get,
+    "notebook_created": parse_notebook_created,
+    "native_void_ack": parse_native_void_ack,
+    "native_skill_save": parse_native_skill_save,
+    "native_skill_list": parse_native_skill_list,
+    "native_skill_get": parse_native_skill_get,
+    "library_page": parse_library_page,
+    "library_delete": parse_library_delete,
+    "canvas_versions": parse_canvas_versions,
+    "canvas_chat_artifacts": parse_canvas_chat_artifacts,
+    "canvas_artifact": parse_canvas_artifact,
     "custom_gems": parse_custom_gems,
     "notebook_admin_created": parse_notebook_admin_created,
     "notebook_admin_project": parse_notebook_admin_project,

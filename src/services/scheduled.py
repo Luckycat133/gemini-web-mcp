@@ -20,6 +20,32 @@ from ..domain import DomainErrorCode, DomainResult, DomainWarning, OperationStat
 from dataclasses import replace
 from datetime import date
 import logging
+# --- ported from main (v0.2.2) for the rebased branch ---
+async def update_remy_schedule_result(
+    client: Any, *, action_id: str, title: str | None = None, instructions: str | None = None,
+    trigger: dict[str, Any] | None = None, timezone_name: str | None = None, enabled: bool | None = None,
+) -> DomainResult[dict[str, Any]]:
+    """Read/modify/write the native full message; preserve every omitted field."""
+    if not isinstance(action_id, str) or not action_id.strip():
+        return _remy_input_failure()
+    try:
+        changes = _remy_changes([None] * 27, title=title, instructions=instructions, trigger=trigger,
+                                timezone_name=timezone_name, enabled=enabled)
+    except (ValueError, TypeError, ZoneInfoNotFoundError):
+        return _remy_input_failure()
+    if not changes:
+        return _remy_input_failure()
+    try:
+        row, diagnostic = await _read_remy_row(client, action_id)
+    except Exception as error:
+        return result_from_exception(error, logger=logger, operation="scheduled.remy_update.pre_read")
+    if row is None:
+        return DomainResult.failure(DomainErrorCode.VERIFICATION_FAILED, "The native schedule cannot be read before update.",
+                                    verification_status="read_back_unavailable", details=diagnostic)
+    row.extend([None] * max(0, 27 - len(row)))
+    _remy_changes(row, title=title, instructions=instructions, trigger=trigger, timezone_name=timezone_name, enabled=enabled)
+    return await _write_remy_schedule_result(client, "scheduled.remy_update", row, changes)
+
 
 # --- ported from main (v0.2.2) for the rebased branch ---
 async def delete_remy_schedule_result(client: Any, action_id: str) -> DomainResult[dict[str, Any]]:
@@ -58,31 +84,8 @@ async def delete_remy_schedule_result(client: Any, action_id: str) -> DomainResu
         return DomainResult.success(payload, verification_status="verified_deleted_registry_absence", details=diagnostic)
     return _remy_unverified(payload, diagnostic)
 
-async def update_remy_schedule_result(
-    client: Any, *, action_id: str, title: str | None = None, instructions: str | None = None,
-    trigger: dict[str, Any] | None = None, timezone_name: str | None = None, enabled: bool | None = None,
-) -> DomainResult[dict[str, Any]]:
-    """Read/modify/write the native full message; preserve every omitted field."""
-    if not isinstance(action_id, str) or not action_id.strip():
-        return _remy_input_failure()
-    try:
-        changes = _remy_changes([None] * 27, title=title, instructions=instructions, trigger=trigger,
-                                timezone_name=timezone_name, enabled=enabled)
-    except (ValueError, TypeError, ZoneInfoNotFoundError):
-        return _remy_input_failure()
-    if not changes:
-        return _remy_input_failure()
-    try:
-        row, diagnostic = await _read_remy_row(client, action_id)
-    except Exception as error:
-        return result_from_exception(error, logger=logger, operation="scheduled.remy_update.pre_read")
-    if row is None:
-        return DomainResult.failure(DomainErrorCode.VERIFICATION_FAILED, "The native schedule cannot be read before update.",
-                                    verification_status="read_back_unavailable", details=diagnostic)
-    row.extend([None] * max(0, 27 - len(row)))
-    _remy_changes(row, title=title, instructions=instructions, trigger=trigger, timezone_name=timezone_name, enabled=enabled)
-    return await _write_remy_schedule_result(client, "scheduled.remy_update", row, changes)
 
+# --- ported from main (v0.2.2) for the rebased branch ---
 async def _write_remy_schedule_result(client: Any, contract_key: str, row: list[Any], changes: list[str]) -> DomainResult[dict[str, Any]]:
     action_id = row[0]
     response, failure = await _remy_mutate_once(client, contract_key, schedule=row)
@@ -138,28 +141,6 @@ async def create_remy_schedule_result(
         return _remy_input_failure()
     return await _write_remy_schedule_result(client, "scheduled.remy_create", row, changes)
 
-async def fetch_remy_schedule_by_id(
-    client: Any,
-    action_id: str,
-    max_chars: int = 500,
-) -> tuple[dict[str, Any] | None, dict[str, Any]]:
-    """Read one current schedule by exact ID; do not generate or mutate it."""
-    contract = get_contract("scheduled.remy_get")
-    response = await execute_contract(client, contract.key, action_id=action_id)
-    parsed, diagnostic = _parse_observation(response, contract.key, max_chars=max_chars, expected_id=action_id)
-    entry = parsed.value if isinstance(parsed.value, dict) else None
-    matched = bool(_valid_read_back(diagnostic) and entry is not None and entry.get("id") == action_id)
-    diagnostic.update({"backend": "remy", "matched_task": matched})
-    return (entry if matched else None), diagnostic
-
-async def _read_remy_row(client: Any, action_id: str) -> tuple[list[Any] | None, dict[str, Any]]:
-    response = await execute_contract(client, "scheduled.remy_get", action_id=action_id)
-    parsed, diagnostic = _parse_observation(response, "scheduled.remy_get", expected_id=action_id, max_chars=20000)
-    if not _valid_read_back(diagnostic) or parsed.status != "success":
-        return None, diagnostic
-    envelope = parse_rpc_envelope(str(getattr(response, "text", "") or ""), get_contract("scheduled.remy_get").rpc_id)
-    return copy.deepcopy(envelope.bodies[0][0]), diagnostic
-
 def _remy_changes(row: list[Any], *, title: str | None, instructions: str | None,
                   trigger: dict[str, Any] | None, timezone_name: str | None,
                   enabled: bool | None) -> list[str]:
@@ -189,28 +170,18 @@ def _remy_changes(row: list[Any], *, title: str | None, instructions: str | None
         changes.append("trigger")
     return changes
 
-async def fetch_remy_schedule_registry(
-    client: Any,
-    max_chars: int = 500,
-) -> tuple[list[dict[str, Any]], dict[str, Any]]:
-    """Read the current /scheduled registry without consulting legacy Tasks.
-
-    Its IDs/status enum belong to Remy schedules and are never verification
-    evidence for the legacy daily-create/delete mutations below.
-    """
-    contract = get_contract("scheduled.remy_registry")
-    response = await execute_contract(client, contract.key)
-    parsed, diagnostic = _parse_observation(response, contract.key, max_chars=max_chars)
-    entries = parsed.value if _valid_read_back(diagnostic) and isinstance(parsed.value, list) else []
-    envelope = parse_rpc_envelope(str(getattr(response, "text", "") or ""), contract.rpc_id)
-    body = envelope.bodies[0] if envelope.single_body else None
-    # L6d uses an empty request and reads all schedules from field 1; fields
-    # 2/3 are metadata, not a cursor. Unknown fields cannot prove coverage.
-    known_shape = isinstance(body, list) and not any(value is not None for value in body[3:])
-    complete = bool(_valid_read_back(diagnostic) and known_shape
-                    and len({item["id"] for item in entries}) == len(entries))
-    diagnostic.update({"backend": "remy", "raw_entry_count": len(entries), "complete": complete})
-    return entries, diagnostic
+async def _remy_mutate_once(client: Any, key: str, **arguments: Any) -> tuple[Any, DomainResult[dict[str, Any]] | None]:
+    if not hasattr(client, "_batch_execute"):
+        return None, DomainResult.failure(DomainErrorCode.CAPABILITY_UNAVAILABLE, "Native schedule mutations are unavailable.")
+    try:
+        return await execute_contract(client, key, **arguments), None
+    except Exception as error:
+        result = result_from_exception(error, logger=logger, operation=key)
+        assert result.error is not None
+        action_id = arguments.get("action_id") or (arguments.get("schedule") or [None])[0]
+        return None, replace(result, data={"backend": "remy", "id": action_id, "accepted": None, "verified": False},
+                             error=replace(result.error, retryable=False,
+                                           suggested_action="Read the native schedule registry/by-ID state; do not automatically repeat this mutation."))
 
 def _remy_trigger(trigger: dict[str, Any]) -> tuple[int, list[Any]]:
     if not isinstance(trigger, dict):
@@ -241,34 +212,72 @@ def _remy_trigger(trigger: dict[str, Any]) -> tuple[int, list[Any]]:
         raise ValueError("A nonempty unique day list is required.")
     return index, [[_remy_integer(day, 1, maximum) for day in days], time]
 
-async def _remy_mutate_once(client: Any, key: str, **arguments: Any) -> tuple[Any, DomainResult[dict[str, Any]] | None]:
-    if not hasattr(client, "_batch_execute"):
-        return None, DomainResult.failure(DomainErrorCode.CAPABILITY_UNAVAILABLE, "Native schedule mutations are unavailable.")
-    try:
-        return await execute_contract(client, key, **arguments), None
-    except Exception as error:
-        result = result_from_exception(error, logger=logger, operation=key)
-        assert result.error is not None
-        action_id = arguments.get("action_id") or (arguments.get("schedule") or [None])[0]
-        return None, replace(result, data={"backend": "remy", "id": action_id, "accepted": None, "verified": False},
-                             error=replace(result.error, retryable=False,
-                                           suggested_action="Read the native schedule registry/by-ID state; do not automatically repeat this mutation."))
+async def _read_remy_row(client: Any, action_id: str) -> tuple[list[Any] | None, dict[str, Any]]:
+    response = await execute_contract(client, "scheduled.remy_get", action_id=action_id)
+    parsed, diagnostic = _parse_observation(response, "scheduled.remy_get", expected_id=action_id, max_chars=20000)
+    if not _valid_read_back(diagnostic) or parsed.status != "success":
+        return None, diagnostic
+    envelope = parse_rpc_envelope(str(getattr(response, "text", "") or ""), get_contract("scheduled.remy_get").rpc_id)
+    return copy.deepcopy(envelope.bodies[0][0]), diagnostic
+
+_REMY_TRIGGER_FIELDS = (3, 4, 5, 15, 17, 18, 19, 20)
+
+logger = logging.getLogger(__name__)
+
+def _remy_integer(value: Any, minimum: int, maximum: int) -> int:
+    if type(value) is not int or not minimum <= value <= maximum:
+        raise ValueError("Invalid schedule integer.")
+    return value
 
 def _remy_unverified(payload: dict[str, Any], diagnostic: dict[str, Any]) -> DomainResult[dict[str, Any]]:
     return DomainResult.success(payload, operation_state=OperationState.ACCEPTED,
                                 verification_status="read_back_unverified", details=diagnostic,
                                 warnings=(DomainWarning("MUTATION_UNVERIFIED", "The native schedule mutation lacks independent matching read-back."),))
 
-logger = logging.getLogger(__name__)
-
 def _remy_input_failure() -> DomainResult[dict[str, Any]]:
     return DomainResult.failure(DomainErrorCode.INVALID_ARGUMENT, "Provide a native schedule ID and supported schedule fields/trigger.",
                                 verification_status="input_rejected")
 
-def _remy_integer(value: Any, minimum: int, maximum: int) -> int:
-    if type(value) is not int or not minimum <= value <= maximum:
-        raise ValueError("Invalid schedule integer.")
-    return value
+
+# --- ported from main (v0.2.2) for the rebased branch ---
+async def fetch_remy_schedule_registry(
+    client: Any,
+    max_chars: int = 500,
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """Read the current /scheduled registry without consulting legacy Tasks.
+
+    Its IDs/status enum belong to Remy schedules and are never verification
+    evidence for the legacy daily-create/delete mutations below.
+    """
+    contract = get_contract("scheduled.remy_registry")
+    response = await execute_contract(client, contract.key)
+    parsed, diagnostic = _parse_observation(response, contract.key, max_chars=max_chars)
+    entries = parsed.value if _valid_read_back(diagnostic) and isinstance(parsed.value, list) else []
+    envelope = parse_rpc_envelope(str(getattr(response, "text", "") or ""), contract.rpc_id)
+    body = envelope.bodies[0] if envelope.single_body else None
+    # L6d uses an empty request and reads all schedules from field 1; fields
+    # 2/3 are metadata, not a cursor. Unknown fields cannot prove coverage.
+    known_shape = isinstance(body, list) and not any(value is not None for value in body[3:])
+    complete = bool(_valid_read_back(diagnostic) and known_shape
+                    and len({item["id"] for item in entries}) == len(entries))
+    diagnostic.update({"backend": "remy", "raw_entry_count": len(entries), "complete": complete})
+    return entries, diagnostic
+
+
+# --- ported from main (v0.2.2) for the rebased branch ---
+async def fetch_remy_schedule_by_id(
+    client: Any,
+    action_id: str,
+    max_chars: int = 500,
+) -> tuple[dict[str, Any] | None, dict[str, Any]]:
+    """Read one current schedule by exact ID; do not generate or mutate it."""
+    contract = get_contract("scheduled.remy_get")
+    response = await execute_contract(client, contract.key, action_id=action_id)
+    parsed, diagnostic = _parse_observation(response, contract.key, max_chars=max_chars, expected_id=action_id)
+    entry = parsed.value if isinstance(parsed.value, dict) else None
+    matched = bool(_valid_read_back(diagnostic) and entry is not None and entry.get("id") == action_id)
+    diagnostic.update({"backend": "remy", "matched_task": matched})
+    return (entry if matched else None), diagnostic
 
 def _parse_observation(response: Any, contract_key: str, **arguments: Any) -> tuple[RPCParseResult, dict[str, Any]]:
     contract = get_contract(contract_key)
@@ -312,7 +321,6 @@ def _valid_read_back(diagnostic: dict[str, Any]) -> bool:
         and not diagnostic.get("parser_warnings")
     )
 
-_REMY_TRIGGER_FIELDS = (3, 4, 5, 15, 17, 18, 19, 20)
 
 
 

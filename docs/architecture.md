@@ -1,8 +1,16 @@
 # 技术架构
 
-深入了解 Gemini MCP Server v0.2.2 的设计与实现。
+深入了解 Gemini MCP Server v0.2.1 的设计与实现。
 
 ---
+
+## 两类业务工具面
+
+`gemini-mcp-function` 提供 17 个功能工具；`gemini-mcp-account` 提供 17 个显式账号工具。普通问答、联网和自然语言应用请求使用默认 Flash 的 `gemini_ask`，不暴露联网或工具启用开关。带 `notebook_ids` 的 Ask 是后台普通聊天；`gemini_run_task` 明确启动 Gemini Task，两者通过共享持久句柄读取状态和完整回答产物。Task 完成不替代应用侧修改核验，Task 计划也不等同于聊天 scheduled actions。五工具 assist、compact 和显式 profile 保持兼容。
+
+账号 `gemini_notebooks` 默认返回 NotebookLM／Gemini Notebook 来源目录，`source="gemini"` 保留同一产品的项目投影；移动聊天要在该投影中精确解析目标。`gemini_tasks` 提供紧凑 Task 元数据、有限进度、独立 Task 计划管理与经核验的显式删除；`gemini_task_browser` 提供截图和显式浏览器输入。Cookie、Doctor、本地 Prompts 不进入业务面；`gemini_cleanup` 只处理登记的 MCP 自有聊天。
+
+[Notebook、聊天与 Task 工作流](notebook-task-workflows.md)说明完整回答保存、后台恢复、自动清理和未适配的丰富控制。生产请求合同集中在 registry；ProcessSession 仍是实验，不作为这些路径的完成依据。
 
 ## 🏗️ 系统架构
 
@@ -66,8 +74,8 @@ gemini-mcp-server/
 │   ├── adapters/          # MCP 文本兼容、artifact 展示和结构化结果适配
 │   ├── infrastructure/    # Gemini Web RPC registry、payload builder 与纯 parser
 │   ├── services/          # 各表面共用的应用服务与读回验证（chat/artifact/history/research/search/understanding 等）
-│   ├── surfaces/          # 聚焦型独立 MCP 表面（assist/create/account：5/7/7 工具，三个独立 stdio 入口）
-│   ├── thinking_client.py # Thinking/Learning/原生媒体模式传输层
+│   ├── surfaces/          # 聚焦型独立 MCP 表面（assist.py：五工具 gemini_assist_mcp，入口 gemini-mcp-assist）
+│   ├── thinking_client.py # Thinking/Learning 模式传输层
 │   ├── error_handler.py   # 错误处理装饰器
 │   ├── constants.py       # 模型常量与配置
 │   ├── remote_chat_cleanup_manager.py  # 远程聊天清理
@@ -190,10 +198,9 @@ MODEL_CONFIG = {
 - 报告格式化
 
 #### Media Tools (media.py)
-- primary 的兼容参数与展示适配；compact create/edit 复用共享媒体服务
-- `services/media_generation.py` 统一原生请求选择、生成产物过滤、音乐恢复、保存与验证
-- `infrastructure/web_request_contracts.py` 保存当前公开前端支持的模式字段，`thinking_client.py` 按请求注入；模型 header 与模式选择分开
-- `services/lifecycle.py` 只清理当前请求新建且不再需要恢复的源聊天；10 秒等待预算与正向删除读回状态独立于本地产物成功
+- 图像生成
+- 视频生成
+- 音乐生成
 
 #### File Tools (file.py)
 - 文件上传
@@ -202,8 +209,11 @@ MODEL_CONFIG = {
 #### Management Services and Adapter
 - `services/history.py`：历史 list/search/read/export/delete 的共享规范化、分页、typed result，以及基于完整 fresh recent/pinned 元数据分页的删除回读验证；`read_chat(None)` 不被当作缺失证据
 - `services/account.py`：账号 inventory parser 与只读 feature probe
-- `services/notebooks.py`：原生 Notebook 读取及带读回校验的 chat move
-- `services/scheduled.py`：legacy 每日定时操作及 registry/GetTask 双读回；`backend=remy` 只读新版 Task schedule，ID/状态和 mutation 验证保持分离
+- `services/notebooks.py`：Gemini Notebook 项目视图读取及带读回校验的 chat move
+- `services/notebooklm.py`：同一 Notebook 产品的来源目录与准确 ID 解析
+- `services/web_tasks.py`：Task 元数据 list/get/delete、账号约束和删除核验
+- Task／Notebook 后台操作：共享 operation store、完整回答产物、精确原回复读取及产物保存后的自有线程清理
+- `services/scheduled.py`：定时操作读取、创建、删除与 registry/GetTask 双读回
 - `services/gems.py`：Gem CRUD 与 mutation 后读回比较
 - `services/manifest.py` / `services/doctor.py`：工具清单、Web 能力和本地预检
 - `tools/manage.py`：保留既有 primary 工具名、参数和展示文本的注册/兼容层
@@ -247,13 +257,8 @@ compact: src/skill_server.py┘
 适配器差异是显式配置：primary 继续传递 `gem` / `temporary`，compact 继续保持原有精简请求形状；
 两边共享同一类型化 `DomainResult[ChatOperationData]`。迁移后的聊天处理器不再复制上游请求与清理逻辑。
 history 的 list/search/read/export/delete 也由 `src/services/history.py` 统一执行；primary 与 compact
-只保留展示差异。Prompt 存储由 `src/services/prompts.py` 统一管理原子替换、失败回滚和跨进程事务锁；两个表面保留参数/文本兼容适配。
-
-Cookie 更新的通知发生在数据锁之外，单独的更新锁保持通知顺序，避免与客户端锁反向等待。
-认证上下文用无凭据的 generation 标识：真正切换账号时退役旧客户端、拆离旧会话并取消旧清理；迟到响应和后台任务核对 generation，不能把旧资源排到新账号。相同材料刷新不变更 generation。
-清理任务以新鲜 metadata read-back 为删除依据，调用方取消通过 shield 与共用删除隔离。会话过期时跳过正在发送的会话，发送完成后恢复清理资格。
-
-媒体超时/watchdog 使用按任务和客户端实例隔离的 ContextVar scope，重连不把单次参数写回全局默认。生成、恢复、异步保存和在线程中执行的本地验证共同消耗操作 deadline。
+只保留展示差异。`skill_server.py` 中仍有 account、prompt、cookie、doctor、cleanup 等管理域的
+adapter-owned 逻辑，将在后续 bounded slice 中处理。
 
 `cookie_manager.py` 在 macOS 调用 `browser-cookie3` 时临时安装带锁、可恢复的 Keychain reader，
 用 `GEMINI_BROWSER_COOKIE_TIMEOUT_SECONDS` 限制依赖中原本无界的 `security` 子进程等待。超时结果只保留
@@ -288,8 +293,6 @@ primary / compact MCP adapters
 `src/services/artifacts.py` 是唯一的身份、响应提取、合并、文件验证和结果分类实现；两个 MCP
 入口不再各自猜测媒体 URI。相同类型和远端 URI 会生成相同 `artifact_<sha256-prefix>` ID，因此
 primary `gemini_generate_media` 与 compact `create` 可稳定引用同一产物。
-
-creation 专用响应视图排除搜索 `WebImage`；chat/理解仍可展示它。保存前快照原始 URI，避免上游图片下载器修改为 full-size URI 后拆成两个产物。primary 与 compact 均默认保存验证，源聊天只有在上游已结束且全部输出保存验证或明确空结果时才立即清理；queued/remote/partial 和失败读回仍保留恢复。原子文件名预留和禁用未请求的 SDK 缩略图防止下载覆盖已有文件。模式字段的公开证据和实测状态见 [原生媒体模式](native-media-mode.md)。
 
 远端 URI 的验证状态是 `unverified`，只表示在上游响应中观测到 URI，不声称已经下载或解码。
 本地文件只有在路径存在且大小非零时才是 `local/verified`；同时记录 MIME、字节数，并在可用时
@@ -342,6 +345,8 @@ delivery=collected                   queued/running/completed/timed_out
 按状态归一化显式 delta、累计全文和混合片段，忽略重复或过时的累计 chunk；公开元数据只描述
 观测到的语义与计数。
 
+图片、视频、音乐和 Deep Research 默认后台运行；功能面媒体、Task 和带 Notebook 的 Ask 始终后台启动。使用同一持久 `operation_id` 查询状态并取回经验证的本地产物或报告。Task／Notebook Chat worker 核验原 CID/RID/候选回复已完成，保存并验证完整回答文件后自动清理自有线程；Task 还要求同 CID 目标已完成。调用者无需先取结果，重启后仍可读取已保存产物。仅暴露该参数的兼容工具可用 `background=false` 选择等待路径。compact 使用 session 的 operation_status / operation_result，assist 使用 gemini_research 的 status / result。取消功能尚未实现。
+
 Deep Research 使用 `LongOperationData` 保存上游 research/chat ID、最新状态、轮询次数和报告
 可用性。超时是本次等待的终态，不会被取消后迟到的协程结果改写；如果已经拿到上游 ID，
 `continuation_possible` 仍为 true。调用方取消会继续向子任务传播，不会被一般异常边界吞掉。
@@ -354,13 +359,7 @@ Deep Research 使用 `LongOperationData` 保存上游 research/chat ID、最新�
 服务之上的薄适配层——搜索与理解逻辑在 `src/services/search.py` 与 `src/services/understanding.py`，
 Deep Research 启动阶段由 `src/services/research.py` 与兼容面 `gemini_deep_research` 复用；
 表面自身只做参数校验和文本渲染。`scripts/smoke_profiles.py` 与 `scripts/smoke_mcp_protocol.py`
-把 assist/create/account 面纳入与 primary/facade 相同的工具面快照和 stdio 握手验证。
-
-`src/services/creation.py` 统一所有创建表面的生成、保存、恢复和完成清理；
-`src/services/operations.py` 提供显式任务句柄和租约。`src/infrastructure/state_store.py`
-是 metadata-only SQLite 唯一所有者。恢复先保存产物 locator，再删除源会话，
-多个客户端通过 CAS 与租约避免重复保存/清理。账号动作由 `account_facade.py` 分派到共享服务。
-凭据隔离、保留期限和恢复状态详见 [任务与清理](operations-and-cleanup.md)。
+把 assist 面纳入与 primary/facade 相同的工具面快照和 stdio 握手验证。
 
 ---
 
@@ -467,7 +466,7 @@ client = GeminiClient(psid, psidts, ...)
 
 聊天、文件、媒体和研究工具会先解析这些 MCP 别名；别名之外的模型
 字符串会原样交给 `gemini-webapi` 的运行时模型注册表处理。网页端
-`low` / `medium` / `high`（兼容 `standard` / `extended`） 思考等级作为独立 `thinking_level` 传输字段处理。
+`standard` / `extended` 思考等级作为独立 `thinking_level` 传输字段处理。
 
 ### 媒体模型绑定
 
@@ -538,7 +537,8 @@ workflow 不引用这些 secrets，也不调用 live canary。
 | Python | >= 3.11 | 开发语言（受 `pyproject.toml` 约束） |
 | MCPServer | mcp >= 2, < 3 | MCP SDK v2 服务器框架（`@mcp.tool(annotations=...)` 注册工具） |
 | mcp-types | >= 2, < 3 | 独立协议模型、snake_case Python 字段与 wire alias |
-| gemini-webapi | >= 2.1.1, < 3 | Gemini Web API 封装；支持当前模型注册、无 final marker 的已知会话恢复及 sparse 音乐卡解析 |
+| gemini-webapi | >= 2.1.1, < 3 | Gemini Web API 封装，含当前研究计划、报告与媒体读回接口 |
+| loguru | >= 0.7.3, < 1 | 定向抑制 SDK 认证日志，避免缓存文件名中的凭据外泄 |
 | orjson | >= 3.11.7, < 4 | 媒体和 Thinking 请求的直接 JSON 编解码依赖 |
 
 ---
@@ -549,11 +549,8 @@ workflow 不引用这些 secrets，也不调用 live canary。
 - 更新文档与示例
 - 测试功能完整性
 
-### 当前模型、历史与任务边界
+### 研究和媒体的完成证据
 
-`services/history.py` 统一严格 fresh 元数据读取；`history_mutations.py` 以字段掩码
-更新 title/pinned，独立读回后确认。`services/tasks.py` 只按已有 conversation ID
-读取原生 Task 状态，Task 创建仍走共享 `ChatService`，不会在状态查询中重交提示。
-request-local `task_scope` 与 media/learning 选择互斥；模型类别来自初始化目录，
-正文和 header 的思考等级同步。Task pending 元数据保护本地 reset/expire 时的
-来源；状态未知、超时和流结束都不能独自解除该保护。
+研究通过持久句柄跨进程读回；只有最新轮次的上游运行证据才标为 running，只有 ready 且正文非空的文档才标为报告完成。获取报告后按策略清理，删除前已组装但若返回途中断开则正文可能无法重取。视频使用专用请求模式；视频文件和缩略图独立归类，只有预览不代表视频成功。
+
+Task 进度解析位于 infrastructure，返回有界标签、工具名和数量，精确绑定账号与回合，未知状态不推断成功。Task 计划独立于 Chat scheduled actions；只读回证据可确认写入，关联计划保护 MCP 自有线程。浏览器通过可选 WebRTC/RFB 依赖保存并校验 PNG；输入前核对精确回合、帧摘要和新 action ID，SQLite 只保存动作元数据。同一 action ID 不重放，截图不能证明网站效果，也不建立独占暂停。

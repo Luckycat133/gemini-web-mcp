@@ -43,7 +43,6 @@ from .cleanup_scope import observe_cleanup_frames
 from .deadlines import await_before_deadline, consume_finished_task as consume_finished_task
 from .model_policy import model_policy_scope
 from ..thinking_client import client_generation_once
-
 # --- ported from main (v0.2.2) for the rebased branch ---
 async def wait_for_deep_research_by_chat(
     client: Any,
@@ -116,6 +115,15 @@ async def wait_for_deep_research_by_chat(
         f"research_id was not present in Gemini's plan; checked chat history {checks} times; report not observed",
     )
 
+
+def is_research_completion_message(text: str) -> bool:
+    lower = text.lower()
+    return any(marker in lower for marker in (
+        "i've finished the research", "i have finished the research", "我已经完成了研究",
+    ))
+
+
+# --- ported from main (v0.2.2) for the rebased branch ---
 def research_report_body(output: Any, *, provider_completed: bool = False) -> str | None:
     """Require a typed document or a report-bearing completion observation."""
     document = getattr(output, "deep_research_document", None)
@@ -151,13 +159,6 @@ def _followup_report_observed(output: Any) -> bool:
         and re.search(r"^#{1,6}\s+\S", text, re.MULTILINE)
         and re.search(r"https?://[^\s<>]+", text)
     )
-
-
-def is_research_completion_message(text: str) -> bool:
-    lower = text.lower()
-    return any(marker in lower for marker in (
-        "i've finished the research", "i have finished the research", "我已经完成了研究",
-    ))
 
 def is_research_start_message(text: str) -> bool:
     lower = text.lower()

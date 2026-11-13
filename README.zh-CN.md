@@ -2,11 +2,11 @@
   <img src="docs/assets/gemini-web-mcp-banner.svg" alt="Gemini Web MCP" width="100%">
 </p>
 
-<h1 align="center">Gemini Web MCP Server (v0.2.2)</h1>
+<h1 align="center">Gemini Web MCP Server (v0.2.1)</h1>
 
 <p align="center">
   <a href="https://github.com/Luckycat133/gemini-web-mcp/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/Luckycat133/gemini-web-mcp/actions/workflows/ci.yml/badge.svg"></a>
-  <a href="https://github.com/Luckycat133/gemini-web-mcp/tree/main/.agents/skills/gemini-web-mcp"><img alt="Codex Skill" src="https://img.shields.io/badge/Codex%20Skill-installable-0B6BFF"></a>
+  <a href="https://github.com/Luckycat133/gemini-web-mcp/tree/codex/gemini-tools-polish-20261101/.agents/skills/gemini-web-mcp"><img alt="Codex Skill" src="https://img.shields.io/badge/Codex%20Skill-installable-0B6BFF"></a>
   <a href="https://www.gnu.org/licenses/agpl-3.0.html"><img alt="License" src="https://img.shields.io/badge/License-AGPL--3.0--only-blue.svg"></a>
   <a href="docs/changelog.md"><img alt="Verified" src="https://img.shields.io/badge/tests-CI%20verified-1F8A70"></a>
 </p>
@@ -21,10 +21,6 @@
 
 ---
 
-当前模型、三档思考等级和原生任务模式见 [模型与模式](docs/models.md)。
-历史记录支持 fresh 列表/搜索、读取/导出、重命名/固定/取消固定及回读验证删除；
-实际调用范围见 [实测记录](docs/live-ui-coverage.md)。
-
 ## MCP 协议兼容性
 
 本服务器通过专用 `MCPServer` 适配层，把 discovery、版本协商、JSON-RPC 帧、旧式 `initialize` 握手、结果校验和结构化协议错误委托给官方 `mcp` Python SDK v2。仓库不自建协议栈；`error_handler.py` 里的 `NO_COOKIE` / `INVALID_COOKIE` / `SESSION_NOT_FOUND` 等是工具结果中的应用层错误，不是 JSON-RPC 协议错误。
@@ -35,19 +31,29 @@
 
 ## ✨ 主要功能
 
+本文安装示例使用 [PR #39](https://github.com/Luckycat133/gemini-web-mcp/pull/39) 的开发分支。已发布的 0.2.2 使用不同的入口和状态存储，切换前请先阅读[源码集成说明](docs/source-update-integration.md)。
+
+当前默认功能面提供 17 个工具，账号面提供 17 个工具。功能面的 `gemini_ask(notebook_ids=[...])` 基于 NotebookLM／Gemini Notebook 来源启动后台普通聊天；`gemini_run_task` 明确启动独立 Task。保存返回的 `operation_id`，使用状态／结果工具取回完整回答产物；支持的原生 Task 文件附件也须保存并校验后，才释放默认清理保护。提交连接关闭后可继续，已保存的结果可跨进程读取。
+
+账号 `gemini_notebooks` 默认返回 Notebook 来源目录，`source="gemini"` 保留同一产品的项目视图；`gemini_tasks` 提供 Task 元数据、进度和独立 Task 计划管理；`gemini_task_browser` 提供截图与显式浏览器输入。原生 Skills 与 Notebook／文本来源管理见[账号资源工具](docs/native-account-resources.md)。`gemini_preferences` 管理已保存偏好，读回不证明后续 Task 会省略确认。Task 计划与聊天定时操作不同；浏览器输入不证明独占接管或网站操作成功。详见 [Notebook、聊天与 Task 工作流](docs/notebook-task-workflows.md)和[网页版功能实测矩阵](docs/web-feature-coverage.md)。
+
 ### 🤖 模型支持
 - **flash-lite** → Web UI `3.5 Flash-Lite`
 - **flash** / **fast** → Web UI `3.8 Flash`
 - **pro** → Web UI `3.1 Pro`
-- 当前目录还包含 `4 Argon`；用模型盘点工具核对当前账号，名称动态解析。
-- 思考等级为 `low` / `medium` / `high`，兼容 `standard` / `extended`
+- **argon** → Web UI `4 Argon`，按需用于写作与特别困难的推理；默认仍用 Flash
+- 思考等级接受 `low` / `medium` / `high`，请求体与模型请求头同步使用已验证的三档选择；`standard` / `extended` 兼容低／高
+- 不自动选择 3.1 Pro；Flash-Lite 由运行时限制为基础 Flash 额度耗尽后的快速文本／搜索降级，且不可选思考强度
 - **thinking** 仍保留为旧兼容别名
 - `learning_mode` 可触发网页 `学习辅导` companion：互动测验、抽认卡、模拟测试、备考/学习指南
 
 ### 🎨 媒体生成
 - **图像**: Flash-Lite 首轮使用 Nano Banana 2 Lite，Flash / Pro 首轮使用 Nano Banana 2；Pro redo 是后续网页操作
-- **视频**: 专用 MCP 原生模式已生成并完整解码 1280×720、10 秒 MP4，完成后重启取回通过
-- **音乐**: 专用 MCP 已保存并完整解码约 73 秒 MP3 和配套 MP4，完成后重启取回通过；响应未标明实际 Lyria 版本
+- **视频**: 功能面的 `gemini_generate_video` 默认 Flash；本轮取回经独立解码的 10 秒视频和音轨。历史请求也出现过拒绝，不自动改用 Pro，缩略图不能当作视频完成
+- **音乐**: 本轮 Flash 已取回约 175.6 秒的 MP3、MP4 与单独封面；具体 Lyria 版本仍以返回证据为准，不把单次成功外推为所有模型、时长和账号均可用
+
+音乐和 Deep Research 新请求默认 `thinking_level="standard"`，显式 `extended` 会保留；研究恢复沿用原请求等级。思考等级不标识 Lyria、Veo 或 Research 的具体版本。
+一次授权本地 Flash/standard 音乐测试和另一次研究测试分别返回了经验证的文件与报告，清理后均独立确认对话不存在；其他请求和账号条件可能得到不同结果。
 
 ### 💬 对话功能
 - 单次对话（支持图片输入，并可收集 Gemini 上游流）
@@ -69,20 +75,16 @@
 ### 📦 Skill 分发
 - 运行时 skill：`.agents/skills/gemini-web-mcp`（兼容路由）
 - 专注 assistance skill：`.agents/skills/gemini-assist`（第二意见、有据搜索、图像/混合输入理解、异步 Deep Research，入口 `gemini-mcp-assist`）
-- 专注创作 skill：`.agents/skills/gemini-create`（图片/编辑、视频/音乐异步生成与恢复，入口 `gemini-mcp-create`）
-- 专注账号 skill：`.agents/skills/gemini-account`（类型化账号动作与持久化清理，入口 `gemini-mcp-account`）
 - 仓库开发 skill：`.agents/skills/gemini-web-mcp-development`
-- 当前仓库运行时 skill 元数据为 `0.2.2`；可使用 `clawhub install gemini-web-mcp` 安装公开版本，实际版本以 ClawHub 列表为准
+- 当前仓库运行时 skill 元数据为 `0.2.1`；可使用 `clawhub install gemini-web-mcp` 安装公开版本，实际版本以 ClawHub 列表为准
 - `.agents/skills` 是唯一仓库来源，避免同时扫描 `.agents` 与 `.codex` 的客户端重复发现同名 skill
 - 各 skill 都可直接从 GitHub 安装，并在 CI 中验证
-- Tag release 工作流构建 standalone skill zip（兼容、assist、create、account 四个 Runtime Skill）、wheel 和源码包
+- Tag release 工作流构建 standalone skill zip（`gemini-web-mcp` 与 `gemini-assist`）、wheel 和源码包
 - `docs/launch-kit.md` 提供社交媒体发布文案和分发清单
 
-运行时 Skill 包按 MIT-0 分发；MCP 服务器源码和仓库开发 Skill 继续使用
+ClawHub 上的运行 skill 包按 MIT-0 分发；MCP 服务器源码和仓库开发 skill 继续使用
 [AGPL-3.0-only](LICENSE)。
-`0.2.2` 目前在 [PR #34](https://github.com/Luckycat133/gemini-web-mcp/pull/34) 中准备发布。
-这些改动位于 `codex/release-v0.2.2`；合并前测试请使用该分支或指定 commit。
-默认安装示例使用 `main`，公开 Skill 列表可能仍是较早版本。
+当前开发分支包含 `Unreleased` 的改动；公开 Skill 的版本以发布列表为准。
 
 ---
 
@@ -93,39 +95,21 @@
 安装 [uv](https://docs.astral.sh/uv/) 后运行：
 
 ```bash
-uvx --from git+https://github.com/Luckycat133/gemini-web-mcp@main gemini-mcp-onboarding
+uvx --from git+https://github.com/Luckycat133/gemini-web-mcp@codex/gemini-tools-polish-20261101 gemini-mcp-onboarding
 ```
 
-这条命令会在隔离环境中安装当前 `main` 源码、启动真实 stdio 服务器，并调用静态文本工具
-`gemini_get_tool_manifest`。它会从子进程移除 Gemini Cookie，不会向 Gemini 发请求。需要不可变安装时，请把 `@main` 换成已审核的 commit SHA。
+这条命令会在隔离环境中安装开发分支源码，启动 `gemini-mcp-function`，核对 17 个功能工具，并用空 `gemini_ask` 的结构化 `INVALID_ARGUMENT` 响应验证连接。预检不读取 Gemini Cookie，也不向 Gemini 发请求。需要固定版本时，把 `@` 后的分支名换成已审核的 commit SHA。
 
-### 1. 获取 Cookie（仅实时 Gemini 调用需要）
+### 1. 使用已有 Chrome 会话
 
-#### 方法 1: 手动获取
-1. 打开 Chrome，访问 [gemini.google.com](https://gemini.google.com) 并登录
-2. F12 → Application → Cookies → https://gemini.google.com
-3. 复制 `__Secure-1PSID` 的值 (必填)
-4. 复制 `__Secure-1PSIDTS` 的值 (可选)
-
-#### 方法 2: 自动从浏览器获取
-```bash
-pip install browser-cookie3
-```
-然后使用 MCP 工具 `gemini_get_cookie_from_browser(browser="chrome")`
-
-浏览器 Cookie 导出可能在本地缓存敏感的账号认证材料，只能在用户明确授权后执行；应限制文件访问，禁止写入日志、备份或共享，并在不再需要时清理。macOS 首次读取可能弹出系统授权提示。默认最多等待 15 秒；未授权时返回脱敏错误，
-可通过 `GEMINI_BROWSER_COOKIE_TIMEOUT_SECONDS` 调整等待上限。
+Chrome 已登录 [Gemini](https://gemini.google.com) 时，使用下面带 `[all]` 的配置即可让 MCP 自动发现会话。保持 Cookie 环境变量为空，避免占位符被当成手动凭据。macOS 首次读取可能需要钥匙串授权，默认等待 15 秒。读取失败时可查看 `AUTH_REQUIRED` 的 `auth_reason`；具体错误和手动注入方式见 [Cookie 配置](docs/cookie-setup.md)。
 
 ### 2. 配置 (Claude Desktop / 其他 MCP 客户端)
 
 编辑配置文件 (Claude Desktop):
 - macOS: `~/Library/Application Support/Claude/claude_desktop_config.json`
-- Windows（仅配置格式参考）：`%APPDATA%\Claude\claude_desktop_config.json`
+- Windows: `%APPDATA%\Claude\claude_desktop_config.json`
 - Linux: `~/.config/Claude/claude_desktop_config.json`
-
-当前本地认证服务支持 macOS/Linux；Windows 的私密 SQLite 文件权限机制尚未实现，
-不支持在 Windows 本地运行认证调用。客户端配置格式可参考下例，实际支持范围见
-[客户端和系统验证](docs/client-examples.md#client-and-os-evidence)。
 
 ```json
 {
@@ -134,12 +118,9 @@ pip install browser-cookie3
       "command": "uvx",
       "args": [
         "--from",
-        "git+https://github.com/Luckycat133/gemini-web-mcp@main",
-        "gemini-mcp-server"
-      ],
-      "env": {
-        "GEMINI_TOOLS": "model"
-      }
+        "gemini-mcp-server[all] @ git+https://github.com/Luckycat133/gemini-web-mcp@codex/gemini-tools-polish-20261101",
+        "gemini-mcp-function"
+      ]
     }
   }
 }
@@ -151,7 +132,7 @@ Codex、Claude Desktop、Claude Code 和 VS Code 的完整可复制配置见
 ### 3. 从源码开发（可选）
 
 ```bash
-git clone https://github.com/Luckycat133/gemini-web-mcp.git
+git clone --branch codex/gemini-tools-polish-20261101 https://github.com/Luckycat133/gemini-web-mcp.git
 cd gemini-web-mcp
 python -m venv .venv
 . .venv/bin/activate
@@ -173,13 +154,14 @@ GEMINI_TOOLS=core python -m src.server
 # 完整维护/验证工具面
 GEMINI_TOOLS=all python -m src.server
 
-# 安装后的主入口（等价于 python -m src.server）
-GEMINI_TOOLS=core gemini-mcp-server
+# 默认功能面（17 个工具）
+gemini-mcp-function
 
-# 三个专注入口：按任务选择
-gemini-mcp-assist
-gemini-mcp-create
+# 账号管理面（11 个工具，按需连接）
 gemini-mcp-account
+
+# 未设置 GEMINI_TOOLS 的主入口同样使用功能面
+gemini-mcp-server
 
 # 安装后的低 token facade 入口
 gemini-mcp-skill-server
@@ -187,16 +169,7 @@ gemini-mcp-skill-server
 
 ---
 
-## 原生账号与 Canvas 功能
-
-`gemini-mcp-account` 和主服务 `all`/`manage` 的 typed facade 支持 Notebook
-及来源管理、原生 Skills 与 ZIP 导入、公开分享链接、Library 资产分页和支持的媒体类型精确删除，
-以及 Canvas 创建、读取、版本列表、全文编辑和本地导出。
-Canvas 全文编辑会替换富文本格式，保留空白，不创建新版本。
-Notebook 与 NotebookLM 是不同产品；理解输入的 `kind="notebook"` 指 NotebookLM。
-原生 Remy 计划任务支持六类时间触发、修改、暂停、恢复与删除。
-详情和参数见 [API 参考](docs/api-reference.md#typed-account-workflows)，
-实际账号验证范围见 [最新验收记录](docs/live-ui-coverage.md)。
+功能面包含协助理解、聊天会话、媒体生成、研究报告与任务状态；账号面单独提供历史、笔记本、定时任务、Gems、清理等显式操作。媒体专用工具始终后台启动，同一 `operation_id` 用状态和结果工具取回；`gemini_cleanup` 只处理 MCP 自己登记的聊天，不按标题匹配。原主服务显式 `GEMINI_TOOLS` 配置、assist 和 compact 入口继续兼容。
 
 ## 📦 环境变量
 
@@ -206,9 +179,10 @@ Notebook 与 NotebookLM 是不同产品；理解输入的 `kind="notebook"` 指 
 | GEMINI_PSIDTS | ❌ | Cookie __Secure-1PSIDTS | - |
 | GEMINI_PROXY | ❌ | 代理地址 | - |
 | GEMINI_AUTO_REFRESH | ❌ | 自动刷新 Cookie | true |
+| GEMINI_BROWSER_AUTO_LOAD | ❌ | 启动时无 Cookie 则尝试读取浏览器；设为 false 可禁用 | true |
 | GEMINI_BROWSER_COOKIE_TIMEOUT_SECONDS | ❌ | macOS 浏览器 Cookie 读取等待 Keychain 的单次超时（秒） | 15 |
-| GEMINI_TOOLS | ❌ | 加载的工具组 | core |
-| GEMINI_CHAT_RETENTION_SECONDS | ❌ | 默认远端对话保留时间；到期自动删除，设为 0 表示尽快删除 | 1800 |
+| GEMINI_TOOLS | ❌ | 显式选择兼容工具组 | 未设置时为功能面 |
+| GEMINI_CHAT_RETENTION_SECONDS | ❌ | 一次性请求完成后的清理延迟；默认等待删除验证 | 0 |
 
 ---
 
@@ -218,17 +192,17 @@ Notebook 与 NotebookLM 是不同产品；理解输入的 `kind="notebook"` 指 
 |--------|---------|------|-----------|
 | `model` / `chat` | 仅对话和会话工具 | 只想调用 Gemini 模型的 AI agent | 低 |
 | `history` | `gemini_history` 聚合 list/scan/search/read/export + manifest | 只整理或导出对话历史，不暴露删除/账号写操作 | 低 |
-| `history-organize` | `gemini_history` + 重命名/固定 + `gemini_notebooks` + Notebook move | 重命名、固定选定对话或整理进 Gemini 原生 Notebook | 中 |
+| `history-organize` | `gemini_history` + `gemini_notebooks` + Notebook move | 把选定对话整理进 Gemini 原生 Notebook | 中 |
 | `account-read` | `gemini_account_inventory` 聚合账号只读盘点 | 账号能力和 Web surface 审计 | 低 |
-| `scheduled-admin` | 原生 Remy 计划任务读写、暂停、恢复和旧版 scheduled 工具 | 明确授权后管理定时操作 | 中 |
+| `scheduled-admin` | scheduled list/get/create/delete | 明确授权后管理定时操作 | 中 |
 | `core` | 对话 + 媒体 + 文件/URL + Deep Research | 通用内容工作流 | 中 |
 | `manage` | 聚合入口 + 历史、账号、scheduled、Gems 颗粒工具 | 兼容旧配置；普通 agent 不建议默认使用 | 高 |
 | `prompts` | 本地提示词库存取 | 可选附加能力 | 低 |
 | `all` | `core` + `manage` | 完整维护/验证工具面 | 高 |
 
 文本调用优先从 `model` 开始；图片、音乐、文件、URL 或 Deep Research 使用 `core`；
-视频使用已验证的 Gemini Web 专用 Omni 页面，直到 MCP 路线有可用视频产物；
-需要固定十一工具、低 token facade 时使用 `gemini-mcp-skill-server`；`all` 只适合维护验证，不是通用默认值。
+视频使用 `core` 的专用视频模式并检查视频 Artifact；
+需要低 token facade 时使用 `gemini-mcp-skill-server`（默认四工具，`GEMINI_SKILL_MODE=full` 启用八工具）；`all` 只适合维护验证，不是通用默认值。
 
 ---
 
@@ -238,7 +212,7 @@ Notebook 与 NotebookLM 是不同产品；理解输入的 `kind="notebook"` 指 
 
 按当前代码和 `list_tools()` 实际输出整理如下。
 
-#### 默认启用 (`GEMINI_TOOLS=core`)
+#### 显式兼容配置 (`GEMINI_TOOLS=core`)
 
 - `gemini_chat`
 - `gemini_chat_stream`
@@ -298,7 +272,7 @@ Notebook 与 NotebookLM 是不同产品；理解输入的 `kind="notebook"` 指 
 - `GEMINI_TOOLS=history`: 暴露 `gemini_history`，只读整理历史，不暴露删除、scheduled 写操作或 Gems
 - `GEMINI_TOOLS=history-organize`: 在 `history` 基础上增加 `gemini_notebooks` 和 move 到 native Notebook
 - `GEMINI_TOOLS=account-read`: 暴露 `gemini_account_inventory`，只读盘点账号 Web surface
-- `GEMINI_TOOLS=scheduled-admin`: 提供原生 Remy 的 create/update/pause/resume/delete 及旧版定时操作
+- `GEMINI_TOOLS=scheduled-admin`: 只暴露定时操作 list/get/create/delete
 
 `GEMINI_TOOLS=prompts` 会额外提供：
 
@@ -318,17 +292,18 @@ Notebook 与 NotebookLM 是不同产品；理解输入的 `kind="notebook"` 指 
 - `gemini_list_sessions`: 列会话
 - `gemini_reset_session`: 重置会话
 
-对话工具支持 `thinking_level=low|medium|high`（兼容 `standard|extended`），并可选
+对话工具支持 `thinking_level=standard|extended`，并可选
 `learning_mode=interactive_quiz|flashcards|practice_test|study_guide` 来对齐
 Gemini Web `学习辅导` 输入模式。
 
-普通对话工具默认按保留时间自动清理网页端对话。需要保留时传入 `retain_chat=true`；需要调整本次调用保留时间时传入 `delete_after_seconds`。
+默认情况下，一次性请求在结果和产物提取后自动尝试删除远端对话并等待验证，再返回清理状态。`retain_chat=true` 可明确保留，`delete_after_seconds` 可指定延迟。活跃会话为后续对话暂时保留，结束后清理；未读取的研究报告受保护，服务端读取并组装报告后再清理。清理发生时尚未确认客户端收到结果，响应中断且远端已删除时可能无法再次取回报告。后台媒体操作的句柄和状态元数据持久保存在 SQLite；排队或结果未确认的任务保持清理保护，可用同一句柄查询或恢复。
+
+清理队列保存在按账号隔离的 SQLite 中；删除失败或无法验证时保持待处理，在服务运行期间或使用同一账号重启后重试。服务每 15 秒扫描到期任务，失败后按退避间隔重试；执行中被强制终止时，领取的租约最长 600 秒后才可重新领取。这些间隔不保证删除完成时间，请查看返回的清理状态。
 
 ### 媒体工具
-- `gemini_generate_media`: 图像/视频/音乐生成；显式原生模式仍须实际产物验证
+- `gemini_generate_media`: 图像、视频和音乐生成；视频需检查实际视频产物
+- 兼容的 `gemini_generate_media` 和 compact `create` 可显式传 `model="pro"` 使用本次视频实测路线；其默认值保持不变
 - `gemini_generate_music`: 音乐生成便捷工具；不要从模型别名推断精确 Lyria 版本
-
-图片/编辑、视频和音乐显式选择网页原生模式，primary 与 compact 默认保存到本地。上游已结束且文件全部验证通过，或响应明确为空时，会立即尝试清理本次新建的源会话，并返回独立删除读回状态。排队、未保存和恢复读取失败会保留会话；primary 可显式保留或延迟。任务与延迟清理使用本地 metadata-only SQLite，重启可通过同一凭据恢复；当前视频完成状态仍需验证，详见[原生媒体与清理](docs/native-media-mode.md)。
 
 ### 文件和 URL
 - `gemini_upload_file`: 上传并分析本地文件
@@ -340,7 +315,7 @@ Gemini Web `学习辅导` 输入模式。
 ### 账户和内容管理
 - `gemini_history`: 历史对话只读聚合入口，支持 `action=list|scan|search|read|export`
 - `gemini_account_inventory`: 账号 Web surface 只读聚合入口，支持 capabilities/status/features/links/usage/library/notebooks/scheduled/modes/models
-- `gemini_notebooks`: Gemini Web 原生笔记本聚合入口，支持列表、读写、来源管理和移动对话；按 `request.action` 校验参数
+- `gemini_notebooks`: 账号面默认列出 NotebookLM／Gemini Notebook 来源元数据；`source=gemini` 保留项目 list/chats 视图
 - `gemini_inspect_account`: 检查当前账号 Web RPC/能力状态
 - `gemini_get_tool_manifest`: 返回工具安全/隐私/分页/推荐工作流清单，供 agent 规划调用
 - `gemini_get_web_capabilities`: 返回实测 Pro 网页模型、思考等级、工具菜单、设置入口和 MCP 覆盖清单
@@ -386,12 +361,12 @@ Gemini Web `学习辅导` 输入模式。
 - `create`: 图片/视频/音乐生成
 - `edit`: 图片编辑
 - `session`: 本地多轮会话
+以下工具仅在 `GEMINI_SKILL_MODE=full` 注册：
+
 - `history`: Gemini Web 历史对话 list/search/read/export/delete
-- `cleanup`: 默认 dry-run 清理匹配 marker 的测试聊天和测试定时任务
 - `account`: 账号状态、工具清单、模型列表、功能探测、公开链接、用量、Library 能力和定时操作
 - `scheduled`: 定时操作 list/get/create/delete，create 仅支持每日固定小时
 - `prompts`: 本地提示词库
-- `cookie`: Cookie 状态和浏览器获取
 
 ### 运行时 Skill 与开发 Skill
 `.agents/skills/gemini-web-mcp` 只指导 agent 安全操作已安装的 MCP 工具；
@@ -402,7 +377,7 @@ Gemini Web `学习辅导` 输入模式。
 
 ```bash
 npx --yes skills@1.5.21 add \
-  https://github.com/Luckycat133/gemini-web-mcp \
+  "https://github.com/Luckycat133/gemini-web-mcp#codex/gemini-tools-polish-20261101" \
   --skill gemini-web-mcp \
   --agent codex --copy --yes
 ```
@@ -411,7 +386,7 @@ npx --yes skills@1.5.21 add \
 
 ```bash
 npx --yes skills@1.5.21 add \
-  https://github.com/Luckycat133/gemini-web-mcp \
+  "https://github.com/Luckycat133/gemini-web-mcp#codex/gemini-tools-polish-20261101" \
   --skill gemini-web-mcp-development \
   --agent codex --copy --yes
 ```
@@ -490,7 +465,7 @@ python -c "import sys; sys.path.insert(0, '.'); from src import client_wrapper, 
 pytest -q
 ```
 
-`evaluations/gemini_web_mcp_contract.xml` 提供 17 个只读、稳定答案的 MCP 评估问题，
+`evaluations/gemini_web_mcp_contract.xml` 提供只读、稳定答案的 MCP 评估问题，
 覆盖工具安全清单、历史记录工作流、Web 能力映射和分页/隐私元数据。
 
 构建发布包:
@@ -508,15 +483,9 @@ mcp dev src/server.py
 
 ## 📍 开发状态
 
-当前基线可用，但开发 skill 不是已经全部完成的功能清单。history 的 list/search/read/export/delete 已在
-primary/compact 间共享 typed result，删除只有在回读确认后才算已验证。2026-08-08 的授权定向测试覆盖
-文本、会话和历史；2026-09-26 的登录 Chrome 定向测试得到 MCP 图片和音乐文件，并从 Gemini Omni 专用
-网页下载视频。通用 MCP 视频请求没有返回视频文件，稍后的音乐重试遇到上游技术错误。两次测试均不等于
-专用账号全量 canary。持久化任务/清理恢复、账号动作类型化与专注创作/账号产品现已实现；当前原生 MCP 视频产物及专用账号全量 live 基线仍需验证。详见[任务与清理](docs/operations-and-cleanup.md)。
-当前包与 Skill 元数据为 `0.2.2`；2026-09-26 定向实测带来的改动记在 Changelog 的 `0.2.2` 节。
+2026-11-06 用已有 Chrome 会话实测了 Flash 图片生成、编辑、重连取回和自动删除。Task 使用远程浏览器且保存了「始终允许」时，两组对照均未弹确认。普通 Flash Chat、联网搜索、续聊、Notebook Chat 和识图在这批请求中没有得到可验证答案。
 
-完整的“已实现 / 部分完成 / 延后 / owner 决策”边界见
-[开发状态与下一步](docs/development-status.md)。离线 CI 和打包通过不等于已经观察到当前 Gemini Web 行为。
+详见[真实请求验证记录](docs/development-status.md#flash-and-browser-permission-follow-up-2026-11-06)和[逐工具质量记录](docs/tool-quality.md)。当前包与 Skill 元数据仍为 `0.2.1`，开发分支的改动记在 [Unreleased](docs/changelog.md#unreleased)。
 
 ---
 
@@ -538,4 +507,4 @@ primary/compact 间共享 typed result，删除只有在回读确认后才算已
 
 ## 📄 许可证
 
-MCP 服务器源码与仓库开发 skill 使用 [AGPL-3.0-only](LICENSE)。ClawHub 上的三文件运行 skill 包使用 MIT-0。
+MCP 服务器源码与仓库开发 skill 使用 [AGPL-3.0-only](LICENSE)。ClawHub 上的运行 skill 包使用 MIT-0。

@@ -8,13 +8,13 @@ import inspect
 from typing import Any, Callable
 
 from ..constants import OMNI_VIDEO_MODEL, normalize_model_alias
-from gemini_webapi.exceptions import APIError
 from ..domain import CleanupObservation, CleanupState, DomainResult, DomainWarning
 from .artifacts import response_chat_id
 from .client_timeouts import client_timeout_scope
 from .cleanup_scope import observe_cleanup_frames
 from .model_policy import model_policy_scope
 from ..thinking_client import MediaRequestObservation, ThinkingLevelGeminiClient
+from gemini_webapi.exceptions import APIError
 from types import SimpleNamespace
 from ..domain import DomainErrorCode
 from .artifacts import media_operation_timeout
@@ -32,103 +32,119 @@ import logging
 from .artifacts import artifact_from_local_path, artifact_id, detect_image_mime_type, extract_response_artifacts, media_artifacts, merge_artifacts, observed_backend_from_response
 import re
 import asyncio
-from ..domain import ArtifactResultData, OperationState
-from .artifacts import artifact_result, is_response_queued
-from dataclasses import replace
+from ..domain import ArtifactResultData
 from .artifacts import artifact_exception_result
+from dataclasses import replace
+from .artifacts import is_response_queued
+from .artifacts import artifact_result
+from ..domain import OperationState
 from typing import TypeVar
+# --- ported from main (v0.2.2) for the rebased branch ---
+def with_media_cleanup(
+    result: DomainResult[_T], observation: CleanupObservation,
+) -> DomainResult[_T]:
+    """Attach public cleanup evidence without changing media availability.
+
+    Domain serialization excludes the observation's private source and timing
+    fields, so the adapters need no independent serialization rules.
+    """
+    return replace(result, meta=replace(result.meta, details={
+        **result.meta.details,
+        "cleanup": observation,
+    }))
+
+_T = TypeVar("_T")
+
 
 # --- ported from main (v0.2.2) for the rebased branch ---
-def media_generation_kwargs(
-    prompt: str,
-    media_type: str,
+def media_artifact_result(
+    data: ArtifactResultData,
     *,
-    model: str | None,
-    thinking_level: str,
-    files: Sequence[str] | None = None,
-    timeout_seconds: int | None = None,
-) -> dict[str, Any]:
-    """Build the same supported Web request for every media surface.
+    response: Any,
+    save_failures: Sequence[str] = (),
+    empty_suggested_action: str | None = None,
+    empty_retryable: bool = True,
+) -> DomainResult[ArtifactResultData]:
+    """Keep ready artifacts usable without declaring a queued request complete."""
+    result = artifact_result(
+        data, save_failures=save_failures,
+        empty_suggested_action=empty_suggested_action, empty_retryable=empty_retryable,
+    )
+    if result.ok and is_response_queued(response):
+        return replace(result, meta=replace(
+            result.meta, operation_state=OperationState.QUEUED,
+            details={**result.meta.details, "upstream_queued": True},
+        ))
+    if result.ok and any(artifact.state == ArtifactState.REMOTE for artifact in data.artifacts):
+        return replace(result, warnings=(*result.warnings, DomainWarning(
+            code="ARTIFACT_DOWNLOAD_PENDING",
+            message="At least one creation output is still remote and has not been verified locally.",
+            suggested_action="Recover the existing operation before starting another generation request.",
+        )), meta=replace(result.meta, operation_state=OperationState.PARTIAL))
+    return result
 
-    Only parameters understood by our client belong here. Upstream forwards
-    unknown keywords to its HTTP transport; they cannot select a native tool.
-    """
-    if media_type not in _MEDIA_PROMPTS:
-        raise ValueError(f"Unsupported media type: {media_type}")
-    request = {
-        "prompt": _MEDIA_PROMPTS[media_type].format(prompt=prompt),
-        "files": list(files) if files else None,
-        "model": model,
-        "thinking_level": thinking_level,
-        "timeout": media_operation_timeout(media_type, timeout_seconds),
-    }
-    if media_type in {"image", "image_edit"}:
-        request["media_mode"] = "image"
-    elif media_type in {"video", "music"}:
-        request["media_mode"] = media_type
-    return request
 
-class MediaGenerationAttempt:
-    """One shared media attempt, retaining only its observed new-chat CID."""
-
-    observation: MediaRequestObservation = field(default_factory=MediaRequestObservation)
-
-    async def generate(self, client: Any, **request: Any) -> Any:
-        if request.get("chat") is not None:
-            raise ValueError("Owned media generation cannot use an existing chat.")
-        if isinstance(client, ThinkingLevelGeminiClient):
-            request = {**request, "media_observation": self.observation}
-        try:
-            return await client.generate_content(**request)
-        except APIError as error:
-            raise _safe_generation_error(error) from None
-
-    @property
-    def recovery_response(self) -> Any | None:
-        if self.observation.chat_id is None:
-            return None
-        # This is evidence of an allocated chat, not of a completed/empty
-        # generation. Callers attach it only to failures and always retain it.
-        return SimpleNamespace(
-            metadata=[self.observation.chat_id], text="", images=[], videos=[], media=[],
-        )
-
-def _safe_generation_error(error: APIError) -> MediaGenerationError:
-    # These phrases are SDK-produced messages in both supported 2.0/2.1
-    # versions. Never copy an arbitrary HTTP body/exception into the result.
-    text = str(error).lower()
-    if "failed to parse response body from google" in text:
-        return MediaGenerationError(
-            DomainErrorCode.UPSTREAM_CHANGED,
-            "Gemini Web returned a media response the supported SDK could not parse.",
-            "response_parse_failed",
-        )
-    if "silently aborted by google" in text:
-        return MediaGenerationError(
-            DomainErrorCode.UPSTREAM_REJECTED,
-            "The media request ended without a complete result; the SDK reported a possible upstream interruption.",
-            "request_interrupted",
-        )
-    return MediaGenerationError(
-        DomainErrorCode.UPSTREAM_REJECTED,
-        "Gemini Web failed to complete the media request.",
-        "upstream_api_failed",
+# --- ported from main (v0.2.2) for the rebased branch ---
+def media_requires_recovery(
+    data: ArtifactResultData,
+    *,
+    response: Any = None,
+    save_failed: bool = False,
+    operation_failed: bool = False,
+) -> bool:
+    """Keep a generated chat until its relevant outputs are verified locally."""
+    if save_failed or operation_failed or is_response_queued(response):
+        return True
+    outputs = media_artifacts(data.artifacts, data.media_type or "")
+    if data.state == ArtifactState.EMPTY:
+        # An absent required stream can coexist with an unsaved auxiliary
+        # stream (for example a music visualization without audio).
+        return bool(outputs)
+    if data.state != ArtifactState.LOCAL:
+        return True
+    return not outputs or any(
+        artifact.state != ArtifactState.LOCAL
+        or not artifact.local_path
+        or artifact.verification.status != ArtifactVerificationStatus.VERIFIED
+        for artifact in outputs
     )
 
-_MEDIA_PROMPTS = {
-    "image": "Generate an image. Prompt: {prompt}",
-    "image_edit": "Edit this image: {prompt}",
-    "video": "Generate a video using Gemini's video generation capability. Prompt: {prompt}",
-    "music": "Create music/audio using Gemini's music generation capability. Prompt: {prompt}",
-}
 
-class MediaGenerationError(RuntimeError):
-    """A public-safe SDK API failure, without an unsupported quota claim."""
+# --- ported from main (v0.2.2) for the rebased branch ---
+def media_exception_result(
+    error: BaseException,
+    data: ArtifactResultData,
+    *,
+    logger: logging.Logger,
+    operation: str,
+) -> DomainResult[ArtifactResultData]:
+    """Use the stable domain vocabulary with specific safe API-failure evidence."""
+    if isinstance(error, APIError):
+        error = normalize_media_exception(error)
+    result = artifact_exception_result(error, data, logger=logger, operation=operation)
+    if not isinstance(error, MediaGenerationError) or result.error is None:
+        return result
+    return replace(
+        result,
+        error=replace(
+            result.error, code=error.code, message=str(error), retryable=False,
+            suggested_action=(
+                "Inspect the retained chat and observed artifacts before deciding whether to make another request."
+                if data.source_chat_id
+                else "No chat ID was observed. Check Gemini Web request status before deciding whether to make another request."
+            ),
+        ),
+        meta=replace(result.meta, details={
+            **result.meta.details, "upstream_failure_kind": error.failure_kind,
+            "request_chat_observed": data.source_chat_id is not None,
+        }),
+    )
 
-    def __init__(self, code: DomainErrorCode, message: str, failure_kind: str) -> None:
-        self.code = code
-        self.failure_kind = failure_kind
-        super().__init__(message)
+def normalize_media_exception(error: Exception) -> Exception:
+    """Keep SDK API failures safe across initialization and recovery phases."""
+    return _safe_generation_error(error) if isinstance(error, APIError) else error
+
+
 # --- ported from main (v0.2.2) for the rebased branch ---
 async def save_generated_media(
     response,
@@ -339,6 +355,57 @@ async def materialize_generated_media(
         media_artifacts(merge_artifacts(remote, recovered, saved.artifacts), media_type), saved,
     )
 
+def normalize_saved_image_extension(path: str) -> str:
+    """Keep a saved image's filename consistent with its actual bytes."""
+    source = Path(path)
+    mime_type = detect_image_mime_type(source)
+    suffixes = {
+        "image/jpeg": (".jpg", ".jpeg"),
+        "image/png": (".png",),
+        "image/gif": (".gif",),
+        "image/webp": (".webp",),
+        "image/bmp": (".bmp",),
+        "image/tiff": (".tif", ".tiff"),
+        "image/heic": (".heic",),
+        "image/heif": (".heif",),
+    }.get(mime_type or "")
+    if suffixes is None or source.suffix.lower() in suffixes:
+        return path
+    try:
+        reservation = _reserve_media_filename(source.parent, source.with_suffix(suffixes[0]).name)
+    except OSError as error:
+        logger.warning("Could not align saved image extension with MIME: %r", error)
+        return path
+    try:
+        source.rename(reservation.path)
+    except OSError as error:
+        reservation.release(keep_output=False)
+        logger.warning("Could not align saved image extension with MIME: %r", error)
+        return path
+    reservation.release(keep_output=True)
+    return str(reservation.path)
+
+async def _save_reserved_media(media: Any, destination: Path, filename: str, kwargs: dict[str, Any]) -> Any:
+    reservation = _reserve_media_filename(destination, filename)
+    keep_output = False
+    try:
+        # The SDK writes unrequested thumbnails to additional, unreserved
+        # names. Suppress those downloads on a request-local model copy; never
+        # mutate a returned object shared with another surface or task.
+        if isinstance(media, GeneratedVideo):
+            updates = {"thumbnail": ""}
+            if isinstance(media, GeneratedMedia):
+                updates["mp3_thumbnail"] = ""
+            media = media.model_copy(update=updates)
+        saved = await media.save(**{**kwargs, "filename": reservation.path.name})
+        paths = _normalize_saved_paths(saved, "media")
+        keep_output = bool(paths and any(
+            path and Path(path).expanduser().resolve() == reservation.path for path in paths.values()
+        ))
+        return saved
+    finally:
+        reservation.release(keep_output=keep_output)
+
 async def fetch_music_media_from_chat(client, cid: str) -> list[GeneratedMedia]:
     if not cid or not hasattr(client, "_batch_execute"):
         raise MusicRecoveryError(DomainErrorCode.UPSTREAM_CHANGED, "Music read-back transport is unavailable.")
@@ -370,57 +437,6 @@ async def fetch_music_media_from_chat(client, cid: str) -> list[GeneratedMedia]:
                 media_items.append(media)
     return media_items
 
-async def _save_reserved_media(media: Any, destination: Path, filename: str, kwargs: dict[str, Any]) -> Any:
-    reservation = _reserve_media_filename(destination, filename)
-    keep_output = False
-    try:
-        # The SDK writes unrequested thumbnails to additional, unreserved
-        # names. Suppress those downloads on a request-local model copy; never
-        # mutate a returned object shared with another surface or task.
-        if isinstance(media, GeneratedVideo):
-            updates = {"thumbnail": ""}
-            if isinstance(media, GeneratedMedia):
-                updates["mp3_thumbnail"] = ""
-            media = media.model_copy(update=updates)
-        saved = await media.save(**{**kwargs, "filename": reservation.path.name})
-        paths = _normalize_saved_paths(saved, "media")
-        keep_output = bool(paths and any(
-            path and Path(path).expanduser().resolve() == reservation.path for path in paths.values()
-        ))
-        return saved
-    finally:
-        reservation.release(keep_output=keep_output)
-
-def normalize_saved_image_extension(path: str) -> str:
-    """Keep a saved image's filename consistent with its actual bytes."""
-    source = Path(path)
-    mime_type = detect_image_mime_type(source)
-    suffixes = {
-        "image/jpeg": (".jpg", ".jpeg"),
-        "image/png": (".png",),
-        "image/gif": (".gif",),
-        "image/webp": (".webp",),
-        "image/bmp": (".bmp",),
-        "image/tiff": (".tif", ".tiff"),
-        "image/heic": (".heic",),
-        "image/heif": (".heif",),
-    }.get(mime_type or "")
-    if suffixes is None or source.suffix.lower() in suffixes:
-        return path
-    try:
-        reservation = _reserve_media_filename(source.parent, source.with_suffix(suffixes[0]).name)
-    except OSError as error:
-        logger.warning("Could not align saved image extension with MIME: %r", error)
-        return path
-    try:
-        source.rename(reservation.path)
-    except OSError as error:
-        reservation.release(keep_output=False)
-        logger.warning("Could not align saved image extension with MIME: %r", error)
-        return path
-    reservation.release(keep_output=True)
-    return str(reservation.path)
-
 def _reserve_media_filename(destination: Path, filename: str) -> _FilenameReservation:
     """Claim a path atomically across tasks, event loops, and processes."""
     destination = destination.expanduser().resolve()
@@ -440,16 +456,6 @@ def _reserve_media_filename(destination: Path, filename: str) -> _FilenameReserv
             os.close(descriptor)
         return _FilenameReservation(candidate, (status.st_dev, status.st_ino))
 
-def response_media_items(response, media_type: str) -> list:
-    if media_type in {"image", "image_edit"}:
-        return list(media_creation_response(response).images)
-    if media_type == "video":
-        videos = getattr(response, "videos", None)
-        if videos:
-            return list(videos)
-        return [item for item in getattr(response, "media", None) or [] if getattr(item, "url", None)]
-    return list(getattr(response, "media", None) or [])
-
 class _FilenameReservation:
     path: Path
     identity: tuple[int, int]
@@ -465,17 +471,19 @@ class _FilenameReservation:
         except OSError as error:
             logger.warning("Could not release media filename reservation: %r", error)
 
-def _safe_recovery_error(error: Exception) -> MusicRecoveryError:
-    # Do not copy exception text: HTTP/RPC exceptions may contain account data.
-    if isinstance(error, TimeoutError):
-        return MusicRecoveryError(DomainErrorCode.TIMED_OUT, "Music read-back timed out.")
-    if isinstance(error, ConnectionError):
-        return MusicRecoveryError(DomainErrorCode.NETWORK_ERROR, "Music read-back network operation failed.")
-    return MusicRecoveryError(DomainErrorCode.INTERNAL_ERROR, "Music read-back recovery failed.")
-
 class MediaMaterialization:
     artifacts: tuple[Artifact, ...]
     saved: MediaSaveOutcome
+
+def response_media_items(response, media_type: str) -> list:
+    if media_type in {"image", "image_edit"}:
+        return list(media_creation_response(response).images)
+    if media_type == "video":
+        videos = getattr(response, "videos", None)
+        if videos:
+            return list(videos)
+        return [item for item in getattr(response, "media", None) or [] if getattr(item, "url", None)]
+    return list(getattr(response, "media", None) or [])
 
 class _CreationResponse:
     """Filter search reference images without mutating the original output."""
@@ -487,14 +495,17 @@ class _CreationResponse:
     def __getattr__(self, name: str) -> Any:
         return getattr(self._response, name)
 
+def _safe_recovery_error(error: Exception) -> MusicRecoveryError:
+    # Do not copy exception text: HTTP/RPC exceptions may contain account data.
+    if isinstance(error, TimeoutError):
+        return MusicRecoveryError(DomainErrorCode.TIMED_OUT, "Music read-back timed out.")
+    if isinstance(error, ConnectionError):
+        return MusicRecoveryError(DomainErrorCode.NETWORK_ERROR, "Music read-back network operation failed.")
+    return MusicRecoveryError(DomainErrorCode.INTERNAL_ERROR, "Music read-back recovery failed.")
+
 def media_creation_response(response: Any) -> Any:
     """Provide a creation-only view; chat and understanding keep WebImages."""
     return response if isinstance(response, _CreationResponse) else _CreationResponse(response)
-
-def _saved_artifact_uri(media, kind: ArtifactKind) -> str | None:
-    if kind == ArtifactKind.AUDIO:
-        return getattr(media, "mp3_url", None) or getattr(media, "url", None)
-    return getattr(media, "url", None)
 
 class MusicRecoveryError(RuntimeError):
     """Unavailable music read-back is different from a verified empty result."""
@@ -502,6 +513,10 @@ class MusicRecoveryError(RuntimeError):
     def __init__(self, code: DomainErrorCode, message: str) -> None:
         self.code = code.value
         super().__init__(message)
+
+def safe_media_filename(prompt: str, media_type: str) -> str:
+    stem = re.sub(r"[^A-Za-z0-9._-]+", "_", prompt.strip())[:48].strip("._-")
+    return stem or media_type
 
 def _media_from_music_card(card_data: Mapping[str, str], *, client, cid: str) -> Optional[GeneratedMedia]:
     title = card_data.get("title") or "[Media]"
@@ -539,19 +554,6 @@ def _normalize_saved_paths(saved, media_type: str) -> dict[str, str | None] | No
         return normalized
     return None
 
-def _is_created_image(item: Any) -> bool:
-    """Use the SDK's provenance distinction while accepting adapter fixtures."""
-    return not isinstance(item, Image) or isinstance(item, GeneratedImage)
-
-def safe_media_filename(prompt: str, media_type: str) -> str:
-    stem = re.sub(r"[^A-Za-z0-9._-]+", "_", prompt.strip())[:48].strip("._-")
-    return stem or media_type
-
-class MediaSaveOutcome:
-    lines: tuple[str, ...] = ()
-    artifacts: tuple[Artifact, ...] = ()
-    failures: tuple[str, ...] = ()
-
 def _saved_artifact_kind(media_type: str, saved_kind: str) -> ArtifactKind:
     normalized = saved_kind.lower()
     if normalized in {"video", "mp4", "webm"}:
@@ -566,105 +568,117 @@ def _saved_artifact_kind(media_type: str, saved_kind: str) -> ArtifactKind:
         return ArtifactKind.IMAGE
     return ArtifactKind.VIDEO
 
+def _is_created_image(item: Any) -> bool:
+    """Use the SDK's provenance distinction while accepting adapter fixtures."""
+    return not isinstance(item, Image) or isinstance(item, GeneratedImage)
+
 logger = logging.getLogger(__name__)
-# --- ported from main (v0.2.2) for the rebased branch ---
-def media_artifact_result(
-    data: ArtifactResultData,
-    *,
-    response: Any,
-    save_failures: Sequence[str] = (),
-    empty_suggested_action: str | None = None,
-    empty_retryable: bool = True,
-) -> DomainResult[ArtifactResultData]:
-    """Keep ready artifacts usable without declaring a queued request complete."""
-    result = artifact_result(
-        data, save_failures=save_failures,
-        empty_suggested_action=empty_suggested_action, empty_retryable=empty_retryable,
-    )
-    if result.ok and is_response_queued(response):
-        return replace(result, meta=replace(
-            result.meta, operation_state=OperationState.QUEUED,
-            details={**result.meta.details, "upstream_queued": True},
-        ))
-    if result.ok and any(artifact.state == ArtifactState.REMOTE for artifact in data.artifacts):
-        return replace(result, warnings=(*result.warnings, DomainWarning(
-            code="ARTIFACT_DOWNLOAD_PENDING",
-            message="At least one creation output is still remote and has not been verified locally.",
-            suggested_action="Recover the existing operation before starting another generation request.",
-        )), meta=replace(result.meta, operation_state=OperationState.PARTIAL))
-    return result
-# --- ported from main (v0.2.2) for the rebased branch ---
-def media_exception_result(
-    error: BaseException,
-    data: ArtifactResultData,
-    *,
-    logger: logging.Logger,
-    operation: str,
-) -> DomainResult[ArtifactResultData]:
-    """Use the stable domain vocabulary with specific safe API-failure evidence."""
-    if isinstance(error, APIError):
-        error = normalize_media_exception(error)
-    result = artifact_exception_result(error, data, logger=logger, operation=operation)
-    if not isinstance(error, MediaGenerationError) or result.error is None:
-        return result
-    return replace(
-        result,
-        error=replace(
-            result.error, code=error.code, message=str(error), retryable=False,
-            suggested_action=(
-                "Inspect the retained chat and observed artifacts before deciding whether to make another request."
-                if data.source_chat_id
-                else "No chat ID was observed. Check Gemini Web request status before deciding whether to make another request."
-            ),
-        ),
-        meta=replace(result.meta, details={
-            **result.meta.details, "upstream_failure_kind": error.failure_kind,
-            "request_chat_observed": data.source_chat_id is not None,
-        }),
-    )
 
-def normalize_media_exception(error: Exception) -> Exception:
-    """Keep SDK API failures safe across initialization and recovery phases."""
-    return _safe_generation_error(error) if isinstance(error, APIError) else error
-# --- ported from main (v0.2.2) for the rebased branch ---
-def media_requires_recovery(
-    data: ArtifactResultData,
-    *,
-    response: Any = None,
-    save_failed: bool = False,
-    operation_failed: bool = False,
-) -> bool:
-    """Keep a generated chat until its relevant outputs are verified locally."""
-    if save_failed or operation_failed or is_response_queued(response):
-        return True
-    outputs = media_artifacts(data.artifacts, data.media_type or "")
-    if data.state == ArtifactState.EMPTY:
-        # An absent required stream can coexist with an unsaved auxiliary
-        # stream (for example a music visualization without audio).
-        return bool(outputs)
-    if data.state != ArtifactState.LOCAL:
-        return True
-    return not outputs or any(
-        artifact.state != ArtifactState.LOCAL
-        or not artifact.local_path
-        or artifact.verification.status != ArtifactVerificationStatus.VERIFIED
-        for artifact in outputs
-    )
-# --- ported from main (v0.2.2) for the rebased branch ---
-def with_media_cleanup(
-    result: DomainResult[_T], observation: CleanupObservation,
-) -> DomainResult[_T]:
-    """Attach public cleanup evidence without changing media availability.
+def _saved_artifact_uri(media, kind: ArtifactKind) -> str | None:
+    if kind == ArtifactKind.AUDIO:
+        return getattr(media, "mp3_url", None) or getattr(media, "url", None)
+    return getattr(media, "url", None)
 
-    Domain serialization excludes the observation's private source and timing
-    fields, so the adapters need no independent serialization rules.
+class MediaSaveOutcome:
+    lines: tuple[str, ...] = ()
+    artifacts: tuple[Artifact, ...] = ()
+    failures: tuple[str, ...] = ()
+
+
+# --- ported from main (v0.2.2) for the rebased branch ---
+def media_generation_kwargs(
+    prompt: str,
+    media_type: str,
+    *,
+    model: str | None,
+    thinking_level: str,
+    files: Sequence[str] | None = None,
+    timeout_seconds: int | None = None,
+) -> dict[str, Any]:
+    """Build the same supported Web request for every media surface.
+
+    Only parameters understood by our client belong here. Upstream forwards
+    unknown keywords to its HTTP transport; they cannot select a native tool.
     """
-    return replace(result, meta=replace(result.meta, details={
-        **result.meta.details,
-        "cleanup": observation,
-    }))
+    if media_type not in _MEDIA_PROMPTS:
+        raise ValueError(f"Unsupported media type: {media_type}")
+    request = {
+        "prompt": _MEDIA_PROMPTS[media_type].format(prompt=prompt),
+        "files": list(files) if files else None,
+        "model": model,
+        "thinking_level": thinking_level,
+        "timeout": media_operation_timeout(media_type, timeout_seconds),
+    }
+    if media_type in {"image", "image_edit"}:
+        request["media_mode"] = "image"
+    elif media_type in {"video", "music"}:
+        request["media_mode"] = media_type
+    return request
 
-_T = TypeVar("_T")
+_MEDIA_PROMPTS = {
+    "image": "Generate an image. Prompt: {prompt}",
+    "image_edit": "Edit this image: {prompt}",
+    "video": "Generate a video using Gemini's video generation capability. Prompt: {prompt}",
+    "music": "Create music/audio using Gemini's music generation capability. Prompt: {prompt}",
+}
+
+
+# --- ported from main (v0.2.2) for the rebased branch ---
+class MediaGenerationAttempt:
+    """One shared media attempt, retaining only its observed new-chat CID."""
+
+    observation: MediaRequestObservation = field(default_factory=MediaRequestObservation)
+
+    async def generate(self, client: Any, **request: Any) -> Any:
+        if request.get("chat") is not None:
+            raise ValueError("Owned media generation cannot use an existing chat.")
+        if isinstance(client, ThinkingLevelGeminiClient):
+            request = {**request, "media_observation": self.observation}
+        try:
+            return await client.generate_content(**request)
+        except APIError as error:
+            raise _safe_generation_error(error) from None
+
+    @property
+    def recovery_response(self) -> Any | None:
+        if self.observation.chat_id is None:
+            return None
+        # This is evidence of an allocated chat, not of a completed/empty
+        # generation. Callers attach it only to failures and always retain it.
+        return SimpleNamespace(
+            metadata=[self.observation.chat_id], text="", images=[], videos=[], media=[],
+        )
+
+def _safe_generation_error(error: APIError) -> MediaGenerationError:
+    # These phrases are SDK-produced messages in both supported 2.0/2.1
+    # versions. Never copy an arbitrary HTTP body/exception into the result.
+    text = str(error).lower()
+    if "failed to parse response body from google" in text:
+        return MediaGenerationError(
+            DomainErrorCode.UPSTREAM_CHANGED,
+            "Gemini Web returned a media response the supported SDK could not parse.",
+            "response_parse_failed",
+        )
+    if "silently aborted by google" in text:
+        return MediaGenerationError(
+            DomainErrorCode.UPSTREAM_REJECTED,
+            "The media request ended without a complete result; the SDK reported a possible upstream interruption.",
+            "request_interrupted",
+        )
+    return MediaGenerationError(
+        DomainErrorCode.UPSTREAM_REJECTED,
+        "Gemini Web failed to complete the media request.",
+        "upstream_api_failed",
+    )
+
+class MediaGenerationError(RuntimeError):
+    """A public-safe SDK API failure, without an unsupported quota claim."""
+
+    def __init__(self, code: DomainErrorCode, message: str, failure_kind: str) -> None:
+        self.code = code
+        self.failure_kind = failure_kind
+        super().__init__(message)
+
 
 
 IN_PROGRESS_CLEANUP_SECONDS = 1800

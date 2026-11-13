@@ -17,7 +17,7 @@ CI_WORKFLOW = PROJECT_ROOT / ".github" / "workflows" / "ci.yml"
 RELEASE_WORKFLOW = PROJECT_ROOT / ".github" / "workflows" / "release.yml"
 LIVE_CANARY_WORKFLOW = PROJECT_ROOT / ".github" / "workflows" / "live-canary.yml"
 SKILLS_REF_SHA = "38a2ff82958afee88dadf4831509e6f7e9d8ef4e"
-SETUP_UV_SHA = "20cfd1bf945f4377ade1205e4dbc17946fc9a30d"
+SETUP_UV_SHA = "68559e99cc807c1eb7e9238fd43a15bba460eec2"
 SKILLS_CLI_VERSION = "1.5.21"
 
 
@@ -210,7 +210,7 @@ def test_ci_pins_reference_skill_validator_and_checks_single_public_sources() ->
     workflow = CI_WORKFLOW.read_text(encoding="utf-8")
 
     assert SKILLS_REF_SHA in workflow
-    assert workflow.count("skills-ref validate") == 3
+    assert workflow.count("skills-ref validate") == 5
     assert ".codex/skills" not in workflow
     assert f"skills@{SKILLS_CLI_VERSION} add \"$GITHUB_WORKSPACE\" --skill gemini-web-mcp-development" in workflow
     assert (

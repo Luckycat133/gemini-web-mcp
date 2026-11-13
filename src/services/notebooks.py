@@ -5,12 +5,7 @@ from __future__ import annotations
 from typing import Any, Awaitable, Callable
 
 from ..infrastructure.account_identity import current_account_key
-from ..infrastructure.rpc_contracts import (
-    execute_contract,
-    get_contract,
-    native_notebook_metadata,
-    native_notebook_source,
-)
+from ..infrastructure.rpc_contracts import execute_contract, get_contract
 from ..infrastructure.rpc_parsers import (
     extract_rpc_bodies,
     parse_contract_body,
@@ -23,27 +18,183 @@ from .history import clamp_int
 from ..domain import DomainErrorCode, DomainResult
 from .account import account_contract_result
 from ..domain import DomainWarning, OperationState
+from ..infrastructure.rpc_contracts import native_notebook_metadata
 from ..infrastructure.rpc_parsers import RPCParseResult
+from ..infrastructure.rpc_contracts import native_notebook_source
 from pathlib import Path
 import mimetypes
+# --- ported from main (v0.2.2) for the rebased branch ---
+async def remove_notebook_source(
+    client: Any, notebook_id: str, source_name: str, *, locale: str = "zh-CN",
+) -> DomainResult[dict[str, Any]]:
+    if (not isinstance(notebook_id, str) or not notebook_id.strip()
+            or not isinstance(source_name, str) or not source_name.strip()):
+        return _notebook_argument_error("Provide notebook_id and source_name.")
+    before = await list_notebook_sources(client, notebook_id, locale=locale)
+    if not before.ok:
+        return before
+    if not any(s["name"] == source_name for s in (before.data or {}).get("items", [])):
+        return _notebook_argument_error("Source was not found in this Notebook; no mutation was sent.")
+    response = await execute_contract(client, "notebooks.remove_source", source_name=source_name)
+    ack = account_contract_result(response, "notebooks.remove_source")
+    if not ack.ok:
+        return ack
+    data = {"notebook_id": notebook_id, "source_name": source_name}
+    try:
+        read = await list_notebook_sources(client, notebook_id, locale=locale)
+        verified = read.ok and all(s["name"] != source_name for s in (read.data or {}).get("items", []))
+        return _notebook_mutation_result(data, ack, verified, dict(read.meta.details))
+    except Exception as exc:
+        return _notebook_mutation_result(data, ack, False, {"error_type": type(exc).__name__},
+                                         verification_status="read_back_error")
+
 
 # --- ported from main (v0.2.2) for the rebased branch ---
-async def get_notebook(client: Any, notebook_id: str, *, locale: str = "zh-CN") -> DomainResult[dict[str, Any]]:
-    if not isinstance(notebook_id, str) or not notebook_id.strip():
-        return _notebook_argument_error("notebook_id is required.")
-    result = await _read_notebook(client, notebook_id, locale)
-    if not result.ok:
-        return result
-    value = (result.data or {}).get("value")
-    return DomainResult.success({"item": value["item"] if value else None},
-                                verification_status="observed", details=result.meta.details)
+async def add_notebook_source(
+    client: Any, notebook_id: str, *, display_name: str, text: str | None = None,
+    url: str | None = None, upload_reference: str | None = None, file_path: str | None = None,
+    mime_type: str = "text/plain",
+    locale: str = "zh-CN",
+) -> DomainResult[dict[str, Any]]:
+    from urllib.parse import urlsplit
 
-def _notebook_argument_error(message: str) -> DomainResult[dict[str, Any]]:
-    return DomainResult.failure(DomainErrorCode.INVALID_ARGUMENT, message)
+    supplied = [v for v in (text, url, upload_reference, file_path) if v is not None]
+    if (not isinstance(notebook_id, str) or not notebook_id.strip() or not isinstance(display_name, str)
+            or not display_name.strip() or len(supplied) != 1 or not isinstance(supplied[0], str)
+            or not supplied[0].strip() or not isinstance(mime_type, str) or not mime_type.strip()):
+        return _notebook_argument_error("Provide notebook_id, display_name and exactly one nonempty text, URL, upload_reference or file_path.")
+    if url is not None:
+        try:
+            parsed_url = urlsplit(url)
+            valid_url = parsed_url.scheme in {"http", "https"} and bool(parsed_url.hostname)
+        except ValueError:
+            valid_url = False
+        if not valid_url:
+            return _notebook_argument_error("Notebook source URL must be HTTP(S).")
+    source_file = Path(file_path).expanduser() if file_path is not None else None
+    if source_file is not None and not source_file.is_file():
+        return _notebook_argument_error("file_path must name an existing source file.")
+    current = await get_notebook(client, notebook_id, locale=locale)
+    if not current.ok:
+        return current
+    if not (current.data or {}).get("item"):
+        return _notebook_argument_error("Notebook was not found; no source was added.")
+    if source_file is not None:
+        # Notebook file sources use the ordinary SDK uploader, unlike native
+        # Skill ZIPs. Validate target ownership before uploading any bytes.
+        from gemini_webapi.utils import upload_file
 
-async def _read_notebook(client: Any, notebook_id: str, locale: str) -> DomainResult[dict[str, Any]]:
-    response = await execute_contract(client, "notebooks.get", notebook_id=notebook_id, locale=locale)
-    return account_contract_result(response, "notebooks.get", expected_id=notebook_id)
+        session = getattr(client, "client", None)
+        push_id = getattr(client, "push_id", None)
+        if session is None or not push_id:
+            return DomainResult.failure(DomainErrorCode.CAPABILITY_UNAVAILABLE,
+                                        "Client has no initialized source-file upload session.")
+        upload_reference = await upload_file(source_file, client=session, push_id=push_id)
+        if not isinstance(upload_reference, str) or not upload_reference.strip():
+            return DomainResult.failure(DomainErrorCode.UPSTREAM_CHANGED,
+                                        "Notebook source file upload returned no usable reference.")
+        if mime_type == "text/plain":
+            mime_type = mimetypes.guess_type(source_file.name)[0] or "application/octet-stream"
+    source = native_notebook_source(display_name=display_name, mime_type=mime_type, text=text,
+                                    url=url, upload_reference=upload_reference)
+    response = await execute_contract(client, "notebooks.add_source", notebook_id=notebook_id, source=source)
+    ack = account_contract_result(response, "notebooks.add_source", expected_id=notebook_id)
+    if not ack.ok:
+        return ack
+    created = (ack.data or {}).get("value") or {}
+    source_name = created.get("source_name", "")
+    data = {"notebook_id": notebook_id, "source_name": source_name, "item": None}
+    try:
+        read = await list_notebook_sources(client, notebook_id, locale=locale)
+        item = next((s for s in (read.data or {}).get("items", []) if s["name"] == source_name), None)
+        data["item"] = item
+        retained = bool(source_name and read.ok and item and item["display_name"] == display_name)
+        kind, field, expected = ("text", "text", text) if text is not None else (
+            ("url", "url", url) if url is not None else ("upload", "upload_reference", upload_reference)
+        )
+        content_matches = bool(item and item.get("source_kind") == kind and item.get(field) == expected)
+        if text is not None:
+            content_matches = content_matches and bool(item and item.get("text_format") == source[5][1])
+        elif upload_reference is not None:
+            content_matches = content_matches and bool(item and item.get("mime_type") == mime_type)
+        # lbYGFc:6930 xzh: 2 succeeds; 1/4 continue processing. Retention alone
+        # cannot prove that Gemini can already use an asynchronously indexed file.
+        verified = retained and content_matches and bool(item and item["state"] == 2)
+        status = "read_back_not_observed"
+        if retained and item:
+            status = ("source_processing" if item["state"] in {1, 4} else
+                      "source_content_unobserved" if item["state"] == 2 and item.get("source_kind") is None else
+                      "source_content_mismatch" if item["state"] == 2 and not content_matches else "source_not_ready")
+        return _notebook_mutation_result(data, ack, verified, dict(read.meta.details), verification_status=status)
+    except Exception as exc:
+        return _notebook_mutation_result(data, ack, False, {"error_type": type(exc).__name__},
+                                         verification_status="read_back_error")
+
+
+# --- ported from main (v0.2.2) for the rebased branch ---
+async def list_notebook_sources(
+    client: Any, notebook_id: str, *, locale: str = "zh-CN",
+) -> DomainResult[dict[str, Any]]:
+    read = await get_notebook(client, notebook_id, locale=locale)
+    if not read.ok:
+        return read
+    item = (read.data or {}).get("item")
+    if item is None:
+        return _notebook_argument_error("Notebook was not found.")
+    return DomainResult.success({"notebook_id": notebook_id, "items": item["sources"]},
+                                verification_status="observed", details=read.meta.details)
+
+
+# --- ported from main (v0.2.2) for the rebased branch ---
+async def delete_notebook(
+    client: Any, notebook_id: str, *, delete_chats: bool = False, locale: str = "zh-CN",
+) -> DomainResult[dict[str, Any]]:
+    if not isinstance(notebook_id, str) or not notebook_id.strip() or type(delete_chats) is not bool:
+        return _notebook_argument_error("Provide notebook_id and a boolean delete_chats.")
+    current = await get_notebook(client, notebook_id, locale=locale)
+    if not current.ok:
+        return current
+    if not (current.data or {}).get("item"):
+        return _notebook_argument_error("Notebook was not found; no mutation was sent.")
+    key = "notebooks.delete_with_chats" if delete_chats else "notebooks.delete"
+    response = await execute_contract(client, key, notebook_id=notebook_id)
+    ack = account_contract_result(response, key)
+    if not ack.ok:
+        return ack
+    data = {"id": notebook_id, "delete_chats": delete_chats}
+    try:
+        items, diagnostic = await fetch_native_notebooks(client, locale)
+        absent = _valid_read_back(diagnostic) and all(item["id"] != notebook_id for item in items)
+        # Notebook absence cannot prove deletion of its conversations.
+        return _notebook_mutation_result(
+            data, ack, absent and not delete_chats, {**diagnostic, "notebook_absent": absent},
+            verification_status="notebook_absent_chats_unverified" if absent and delete_chats else "read_back_not_observed",
+        )
+    except Exception as exc:
+        return _notebook_mutation_result(data, ack, False, {"error_type": type(exc).__name__},
+                                         verification_status="read_back_error")
+
+def _parse_observation(response: Any, contract_key: str, **arguments: Any) -> tuple[RPCParseResult, dict[str, Any]]:
+    contract = get_contract(contract_key)
+    text = str(getattr(response, "text", "") or "")
+    envelope = parse_rpc_envelope(text, contract.rpc_id)
+    if envelope.reject_code is not None:
+        parsed = RPCParseResult("rejected", reject_code=envelope.reject_code)
+    elif envelope.single_body:
+        parsed = parse_contract_body(contract, envelope.bodies[0], **arguments)
+    else:
+        parsed = RPCParseResult("changed_shape", warnings=("missing_or_ambiguous_body",))
+    valid = bool(getattr(response, "status_code", None) == 200 and envelope.parsed
+                 and envelope.reject_code is None and envelope.single_body and parsed.ok and not parsed.warnings)
+    return parsed, {"source_rpc": contract.rpc_id, "contract_key": contract.key, "observed": contract.observed,
+                    "parser_status": parsed.status, "parser_warnings": list(parsed.warnings),
+                    "status_code": getattr(response, "status_code", None), "body_present": bool(envelope.bodies),
+                    "reject_code": envelope.reject_code, "response_length": len(text), "read_back_valid": valid}
+
+def _valid_read_back(diagnostic: dict[str, Any]) -> bool:
+    return diagnostic.get("read_back_valid") is True and diagnostic.get("parser_status") in {"success", "empty"}
+
+
 # --- ported from main (v0.2.2) for the rebased branch ---
 async def create_notebook(
     client: Any, *, title: str, description: str = "", instructions: str = "",
@@ -143,170 +294,26 @@ def _notebook_mutation_result(
         ),),
         details={"mutation": dict(ack.meta.details), "verification": verification},
     )
-# --- ported from main (v0.2.2) for the rebased branch ---
-async def delete_notebook(
-    client: Any, notebook_id: str, *, delete_chats: bool = False, locale: str = "zh-CN",
-) -> DomainResult[dict[str, Any]]:
-    if not isinstance(notebook_id, str) or not notebook_id.strip() or type(delete_chats) is not bool:
-        return _notebook_argument_error("Provide notebook_id and a boolean delete_chats.")
-    current = await get_notebook(client, notebook_id, locale=locale)
-    if not current.ok:
-        return current
-    if not (current.data or {}).get("item"):
-        return _notebook_argument_error("Notebook was not found; no mutation was sent.")
-    key = "notebooks.delete_with_chats" if delete_chats else "notebooks.delete"
-    response = await execute_contract(client, key, notebook_id=notebook_id)
-    ack = account_contract_result(response, key)
-    if not ack.ok:
-        return ack
-    data = {"id": notebook_id, "delete_chats": delete_chats}
-    try:
-        items, diagnostic = await fetch_native_notebooks(client, locale)
-        absent = _valid_read_back(diagnostic) and all(item["id"] != notebook_id for item in items)
-        # Notebook absence cannot prove deletion of its conversations.
-        return _notebook_mutation_result(
-            data, ack, absent and not delete_chats, {**diagnostic, "notebook_absent": absent},
-            verification_status="notebook_absent_chats_unverified" if absent and delete_chats else "read_back_not_observed",
-        )
-    except Exception as exc:
-        return _notebook_mutation_result(data, ack, False, {"error_type": type(exc).__name__},
-                                         verification_status="read_back_error")
 
-def _parse_observation(response: Any, contract_key: str, **arguments: Any) -> tuple[RPCParseResult, dict[str, Any]]:
-    contract = get_contract(contract_key)
-    text = str(getattr(response, "text", "") or "")
-    envelope = parse_rpc_envelope(text, contract.rpc_id)
-    if envelope.reject_code is not None:
-        parsed = RPCParseResult("rejected", reject_code=envelope.reject_code)
-    elif envelope.single_body:
-        parsed = parse_contract_body(contract, envelope.bodies[0], **arguments)
-    else:
-        parsed = RPCParseResult("changed_shape", warnings=("missing_or_ambiguous_body",))
-    valid = bool(getattr(response, "status_code", None) == 200 and envelope.parsed
-                 and envelope.reject_code is None and envelope.single_body and parsed.ok and not parsed.warnings)
-    return parsed, {"source_rpc": contract.rpc_id, "contract_key": contract.key, "observed": contract.observed,
-                    "parser_status": parsed.status, "parser_warnings": list(parsed.warnings),
-                    "status_code": getattr(response, "status_code", None), "body_present": bool(envelope.bodies),
-                    "reject_code": envelope.reject_code, "response_length": len(text), "read_back_valid": valid}
 
-def _valid_read_back(diagnostic: dict[str, Any]) -> bool:
-    return diagnostic.get("read_back_valid") is True and diagnostic.get("parser_status") in {"success", "empty"}
 # --- ported from main (v0.2.2) for the rebased branch ---
-async def list_notebook_sources(
-    client: Any, notebook_id: str, *, locale: str = "zh-CN",
-) -> DomainResult[dict[str, Any]]:
-    read = await get_notebook(client, notebook_id, locale=locale)
-    if not read.ok:
-        return read
-    item = (read.data or {}).get("item")
-    if item is None:
-        return _notebook_argument_error("Notebook was not found.")
-    return DomainResult.success({"notebook_id": notebook_id, "items": item["sources"]},
-                                verification_status="observed", details=read.meta.details)
-# --- ported from main (v0.2.2) for the rebased branch ---
-async def add_notebook_source(
-    client: Any, notebook_id: str, *, display_name: str, text: str | None = None,
-    url: str | None = None, upload_reference: str | None = None, file_path: str | None = None,
-    mime_type: str = "text/plain",
-    locale: str = "zh-CN",
-) -> DomainResult[dict[str, Any]]:
-    from urllib.parse import urlsplit
+async def get_notebook(client: Any, notebook_id: str, *, locale: str = "zh-CN") -> DomainResult[dict[str, Any]]:
+    if not isinstance(notebook_id, str) or not notebook_id.strip():
+        return _notebook_argument_error("notebook_id is required.")
+    result = await _read_notebook(client, notebook_id, locale)
+    if not result.ok:
+        return result
+    value = (result.data or {}).get("value")
+    return DomainResult.success({"item": value["item"] if value else None},
+                                verification_status="observed", details=result.meta.details)
 
-    supplied = [v for v in (text, url, upload_reference, file_path) if v is not None]
-    if (not isinstance(notebook_id, str) or not notebook_id.strip() or not isinstance(display_name, str)
-            or not display_name.strip() or len(supplied) != 1 or not isinstance(supplied[0], str)
-            or not supplied[0].strip() or not isinstance(mime_type, str) or not mime_type.strip()):
-        return _notebook_argument_error("Provide notebook_id, display_name and exactly one nonempty text, URL, upload_reference or file_path.")
-    if url is not None:
-        try:
-            parsed_url = urlsplit(url)
-            valid_url = parsed_url.scheme in {"http", "https"} and bool(parsed_url.hostname)
-        except ValueError:
-            valid_url = False
-        if not valid_url:
-            return _notebook_argument_error("Notebook source URL must be HTTP(S).")
-    source_file = Path(file_path).expanduser() if file_path is not None else None
-    if source_file is not None and not source_file.is_file():
-        return _notebook_argument_error("file_path must name an existing source file.")
-    current = await get_notebook(client, notebook_id, locale=locale)
-    if not current.ok:
-        return current
-    if not (current.data or {}).get("item"):
-        return _notebook_argument_error("Notebook was not found; no source was added.")
-    if source_file is not None:
-        # Notebook file sources use the ordinary SDK uploader, unlike native
-        # Skill ZIPs. Validate target ownership before uploading any bytes.
-        from gemini_webapi.utils import upload_file
+def _notebook_argument_error(message: str) -> DomainResult[dict[str, Any]]:
+    return DomainResult.failure(DomainErrorCode.INVALID_ARGUMENT, message)
 
-        session = getattr(client, "client", None)
-        push_id = getattr(client, "push_id", None)
-        if session is None or not push_id:
-            return DomainResult.failure(DomainErrorCode.CAPABILITY_UNAVAILABLE,
-                                        "Client has no initialized source-file upload session.")
-        upload_reference = await upload_file(source_file, client=session, push_id=push_id)
-        if not isinstance(upload_reference, str) or not upload_reference.strip():
-            return DomainResult.failure(DomainErrorCode.UPSTREAM_CHANGED,
-                                        "Notebook source file upload returned no usable reference.")
-        if mime_type == "text/plain":
-            mime_type = mimetypes.guess_type(source_file.name)[0] or "application/octet-stream"
-    source = native_notebook_source(display_name=display_name, mime_type=mime_type, text=text,
-                                    url=url, upload_reference=upload_reference)
-    response = await execute_contract(client, "notebooks.add_source", notebook_id=notebook_id, source=source)
-    ack = account_contract_result(response, "notebooks.add_source", expected_id=notebook_id)
-    if not ack.ok:
-        return ack
-    created = (ack.data or {}).get("value") or {}
-    source_name = created.get("source_name", "")
-    data = {"notebook_id": notebook_id, "source_name": source_name, "item": None}
-    try:
-        read = await list_notebook_sources(client, notebook_id, locale=locale)
-        item = next((s for s in (read.data or {}).get("items", []) if s["name"] == source_name), None)
-        data["item"] = item
-        retained = bool(source_name and read.ok and item and item["display_name"] == display_name)
-        kind, field, expected = ("text", "text", text) if text is not None else (
-            ("url", "url", url) if url is not None else ("upload", "upload_reference", upload_reference)
-        )
-        content_matches = bool(item and item.get("source_kind") == kind and item.get(field) == expected)
-        if text is not None:
-            content_matches = content_matches and bool(item and item.get("text_format") == source[5][1])
-        elif upload_reference is not None:
-            content_matches = content_matches and bool(item and item.get("mime_type") == mime_type)
-        # lbYGFc:6930 xzh: 2 succeeds; 1/4 continue processing. Retention alone
-        # cannot prove that Gemini can already use an asynchronously indexed file.
-        verified = retained and content_matches and bool(item and item["state"] == 2)
-        status = "read_back_not_observed"
-        if retained and item:
-            status = ("source_processing" if item["state"] in {1, 4} else
-                      "source_content_unobserved" if item["state"] == 2 and item.get("source_kind") is None else
-                      "source_content_mismatch" if item["state"] == 2 and not content_matches else "source_not_ready")
-        return _notebook_mutation_result(data, ack, verified, dict(read.meta.details), verification_status=status)
-    except Exception as exc:
-        return _notebook_mutation_result(data, ack, False, {"error_type": type(exc).__name__},
-                                         verification_status="read_back_error")
-# --- ported from main (v0.2.2) for the rebased branch ---
-async def remove_notebook_source(
-    client: Any, notebook_id: str, source_name: str, *, locale: str = "zh-CN",
-) -> DomainResult[dict[str, Any]]:
-    if (not isinstance(notebook_id, str) or not notebook_id.strip()
-            or not isinstance(source_name, str) or not source_name.strip()):
-        return _notebook_argument_error("Provide notebook_id and source_name.")
-    before = await list_notebook_sources(client, notebook_id, locale=locale)
-    if not before.ok:
-        return before
-    if not any(s["name"] == source_name for s in (before.data or {}).get("items", [])):
-        return _notebook_argument_error("Source was not found in this Notebook; no mutation was sent.")
-    response = await execute_contract(client, "notebooks.remove_source", source_name=source_name)
-    ack = account_contract_result(response, "notebooks.remove_source")
-    if not ack.ok:
-        return ack
-    data = {"notebook_id": notebook_id, "source_name": source_name}
-    try:
-        read = await list_notebook_sources(client, notebook_id, locale=locale)
-        verified = read.ok and all(s["name"] != source_name for s in (read.data or {}).get("items", []))
-        return _notebook_mutation_result(data, ack, verified, dict(read.meta.details))
-    except Exception as exc:
-        return _notebook_mutation_result(data, ack, False, {"error_type": type(exc).__name__},
-                                         verification_status="read_back_error")
+async def _read_notebook(client: Any, notebook_id: str, locale: str) -> DomainResult[dict[str, Any]]:
+    response = await execute_contract(client, "notebooks.get", notebook_id=notebook_id, locale=locale)
+    return account_contract_result(response, "notebooks.get", expected_id=notebook_id)
+
 
 
 

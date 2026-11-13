@@ -14,8 +14,58 @@ from ..domain import DomainErrorCode, DomainResult, DomainWarning, OperationStat
 from ..infrastructure.account_identity import current_account_key
 from ..infrastructure.rpc_contracts import execute_contract, get_contract
 from ..infrastructure.rpc_parsers import parse_contract_body, parse_rpc_envelope
+# --- ported from main (v0.2.2) for the rebased branch ---
+async def search_chat_history_result(
+    client: Any, query: str, limit: int, offset: int, *, scan_turns: bool = False,
+    turns_per_chat: int = 20, max_chars_per_turn: int = 1000, max_limit: int = 50,
+    max_turns_per_chat: int = 50, max_chars: int = 4000,
+) -> DomainResult[dict[str, Any]]:
+    if not str(query or "").strip() or (scan_turns and not hasattr(client, "read_chat")):
+        return await search_chats_result(client, [], query, limit, offset, scan_turns=scan_turns)
+    target = clamp_int(limit, default=10, minimum=1, maximum=max_limit) + clamp_int(offset, 0, 0, 5000)
+    fetched = await fetch_history_metadata(client, target)
+    if not fetched.ok:
+        return fetched
+    assert fetched.data is not None
+    return await search_chats_result(
+        client, fetched.data["items"], query, limit, offset,
+        scan_turns=scan_turns, turns_per_chat=turns_per_chat, max_chars_per_turn=max_chars_per_turn,
+        diagnostic=fetched.data["diagnostic"], max_limit=max_limit,
+        max_turns_per_chat=max_turns_per_chat, max_chars=max_chars,
+    )
+
 
 # --- ported from main (v0.2.2) for the rebased branch ---
+async def list_chat_history_result(
+    client: Any, limit: int, offset: int, *, max_limit: int = 50,
+) -> DomainResult[dict[str, Any]]:
+    target = clamp_int(limit, default=10, minimum=1, maximum=max_limit) + clamp_int(offset, 0, 0, 5000)
+    fetched = await fetch_history_metadata(client, target)
+    if not fetched.ok:
+        return fetched
+    assert fetched.data is not None
+    return list_chats_result(fetched.data["items"], limit, offset,
+                             diagnostic=fetched.data["diagnostic"], max_limit=max_limit)
+
+async def read_history_metadata_page(
+    client: Any, *, contract_key: str = "history.page", **arguments: Any,
+) -> DomainResult[dict[str, Any]]:
+    contract = get_contract(contract_key)
+    response = await execute_contract(client, contract.key, **arguments)
+    response_text = str(getattr(response, "text", "") or "")
+    envelope = parse_rpc_envelope(response_text, contract.rpc_id)
+    diagnostic = {"contract_key": contract.key, "status_code": getattr(response, "status_code", None),
+                  "reject_code": envelope.reject_code, "response_length": len(response_text)}
+    if diagnostic["status_code"] == 200 and envelope.parsed and envelope.reject_code is None and envelope.single_body:
+        body = envelope.bodies[0]
+        parsed = parse_contract_body(contract, body)
+        diagnostic["parser_status"] = parsed.status
+        token = body[1] if isinstance(body, list) and len(body) > 1 else None
+        if parsed.ok and not parsed.warnings and isinstance(parsed.value, list) and (token is None or isinstance(token, str)):
+            return DomainResult.success({"items": parsed.value, "continuation": token},
+                                        verification_status="observed", details=diagnostic)
+    return history_metadata_failure(diagnostic)
+
 async def fetch_history_metadata(client: Any, target_count: int) -> DomainResult[dict[str, Any]]:
     """Refresh both history buckets, keeping cache-only compatibility explicit."""
     if not hasattr(client, "_batch_execute"):
@@ -68,36 +118,6 @@ async def fetch_history_metadata(client: Any, target_count: int) -> DomainResult
         "max_offset": 5000, "fetched_count": len(items),
     }}, verification_status="observed")
 
-async def list_chat_history_result(
-    client: Any, limit: int, offset: int, *, max_limit: int = 50,
-) -> DomainResult[dict[str, Any]]:
-    target = clamp_int(limit, default=10, minimum=1, maximum=max_limit) + clamp_int(offset, 0, 0, 5000)
-    fetched = await fetch_history_metadata(client, target)
-    if not fetched.ok:
-        return fetched
-    assert fetched.data is not None
-    return list_chats_result(fetched.data["items"], limit, offset,
-                             diagnostic=fetched.data["diagnostic"], max_limit=max_limit)
-
-async def read_history_metadata_page(
-    client: Any, *, contract_key: str = "history.page", **arguments: Any,
-) -> DomainResult[dict[str, Any]]:
-    contract = get_contract(contract_key)
-    response = await execute_contract(client, contract.key, **arguments)
-    response_text = str(getattr(response, "text", "") or "")
-    envelope = parse_rpc_envelope(response_text, contract.rpc_id)
-    diagnostic = {"contract_key": contract.key, "status_code": getattr(response, "status_code", None),
-                  "reject_code": envelope.reject_code, "response_length": len(response_text)}
-    if diagnostic["status_code"] == 200 and envelope.parsed and envelope.reject_code is None and envelope.single_body:
-        body = envelope.bodies[0]
-        parsed = parse_contract_body(contract, body)
-        diagnostic["parser_status"] = parsed.status
-        token = body[1] if isinstance(body, list) and len(body) > 1 else None
-        if parsed.ok and not parsed.warnings and isinstance(parsed.value, list) and (token is None or isinstance(token, str)):
-            return DomainResult.success({"items": parsed.value, "continuation": token},
-                                        verification_status="observed", details=diagnostic)
-    return history_metadata_failure(diagnostic)
-
 def history_metadata_failure(diagnostic: dict[str, Any]) -> DomainResult[dict[str, Any]]:
     code = DomainErrorCode.UPSTREAM_REJECTED if diagnostic.get("reject_code") is not None else DomainErrorCode.UPSTREAM_CHANGED
     return DomainResult.failure(code, "The history metadata response could not be verified.",
@@ -124,25 +144,7 @@ def _remote_pagination(pagination: dict[str, Any], diagnostic: dict[str, Any]) -
         "The bounded history source has more remote records, but this page cannot advance.",
         "Use the deeper history metadata scan with a larger source bound.",
     ),)
-# --- ported from main (v0.2.2) for the rebased branch ---
-async def search_chat_history_result(
-    client: Any, query: str, limit: int, offset: int, *, scan_turns: bool = False,
-    turns_per_chat: int = 20, max_chars_per_turn: int = 1000, max_limit: int = 50,
-    max_turns_per_chat: int = 50, max_chars: int = 4000,
-) -> DomainResult[dict[str, Any]]:
-    if not str(query or "").strip() or (scan_turns and not hasattr(client, "read_chat")):
-        return await search_chats_result(client, [], query, limit, offset, scan_turns=scan_turns)
-    target = clamp_int(limit, default=10, minimum=1, maximum=max_limit) + clamp_int(offset, 0, 0, 5000)
-    fetched = await fetch_history_metadata(client, target)
-    if not fetched.ok:
-        return fetched
-    assert fetched.data is not None
-    return await search_chats_result(
-        client, fetched.data["items"], query, limit, offset,
-        scan_turns=scan_turns, turns_per_chat=turns_per_chat, max_chars_per_turn=max_chars_per_turn,
-        diagnostic=fetched.data["diagnostic"], max_limit=max_limit,
-        max_turns_per_chat=max_turns_per_chat, max_chars=max_chars,
-    )
+
 
 
 

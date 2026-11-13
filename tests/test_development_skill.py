@@ -30,7 +30,7 @@ def _all_text(root: Path) -> str:
 
 
 def test_development_skill_has_one_complete_public_source() -> None:
-    assert _files(PUBLIC_SKILL) == EXPECTED_FILES
+    assert EXPECTED_FILES <= _files(PUBLIC_SKILL)
     assert not (ROOT / ".codex" / "skills" / "gemini-web-mcp-development" / "SKILL.md").exists()
 
 

@@ -34,6 +34,17 @@ from .infrastructure.model_policy_store import ModelPolicyStore
 from .services.model_policy import ModelPolicyError, ModelSelection, current_model_policy
 from dataclasses import field
 from .domain.conversations import is_valid_remote_chat_id
+# --- ported from main (v0.2.2) for the rebased branch ---
+def client_request_timeout(client: object, timeout_seconds: float) -> Iterator[None]:
+    """Scope upstream watchdog/recovery settings to one request and its tasks."""
+    token = _request_timeout.set((client, timeout_seconds))
+    try:
+        yield
+    finally:
+        _request_timeout.reset(token)
+
+_request_timeout: ContextVar[tuple[object, float] | None] = ContextVar("gemini_request_timeout", default=None)
+
 
 # --- ported from main (v0.2.2) for the rebased branch ---
 class _OwnedMediaChatSession(ChatSession):
@@ -101,24 +112,8 @@ class _OwnedMediaChatSession(ChatSession):
     def rcid(self, value: str) -> None:
         self._request_metadata[2] = value
 
-def client_generation_once(client: object) -> Iterator[None]:
-    """Prevent SDK submission retries inside one client-owned workflow.
 
-    The SDK's generation decorator can repost an uncertain request after an
-    API/parse failure. Research plan and confirmation are mutations whose
-    recovery must read the existing source rather than generate again. This
-    scope affects only generation; initialization and read-back keep their own
-    retry policies. Child tasks inherit the scope without changing the shared
-    client or another client's concurrent request.
-    """
-    token = _generation_once.set(client)
-    try:
-        yield
-    finally:
-        _generation_once.reset(token)
-
-_generation_once: ContextVar[object | None] = ContextVar("gemini_generation_once", default=None)
-
+# --- ported from main (v0.2.2) for the rebased branch ---
 class MediaRequestObservation:
     """Remember only the chat allocated by one fresh media request.
 
@@ -142,16 +137,27 @@ class MediaRequestObservation:
             self.chat_id = metadata[0]
             if changed and self.on_chat_observed is not None:
                 self.on_chat_observed(self.chat_id)
+
+
 # --- ported from main (v0.2.2) for the rebased branch ---
-def client_request_timeout(client: object, timeout_seconds: float) -> Iterator[None]:
-    """Scope upstream watchdog/recovery settings to one request and its tasks."""
-    token = _request_timeout.set((client, timeout_seconds))
+def client_generation_once(client: object) -> Iterator[None]:
+    """Prevent SDK submission retries inside one client-owned workflow.
+
+    The SDK's generation decorator can repost an uncertain request after an
+    API/parse failure. Research plan and confirmation are mutations whose
+    recovery must read the existing source rather than generate again. This
+    scope affects only generation; initialization and read-back keep their own
+    retry policies. Child tasks inherit the scope without changing the shared
+    client or another client's concurrent request.
+    """
+    token = _generation_once.set(client)
     try:
         yield
     finally:
-        _request_timeout.reset(token)
+        _generation_once.reset(token)
 
-_request_timeout: ContextVar[tuple[object, float] | None] = ContextVar("gemini_request_timeout", default=None)
+_generation_once: ContextVar[object | None] = ContextVar("gemini_generation_once", default=None)
+
 
 
 

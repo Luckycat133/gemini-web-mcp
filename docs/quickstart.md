@@ -11,22 +11,22 @@
 ## 1. 无账号预检
 
 ```bash
-uvx --from git+https://github.com/Luckycat133/gemini-web-mcp@main gemini-mcp-onboarding
+uvx --from git+https://github.com/Luckycat133/gemini-web-mcp@codex/gemini-tools-polish-20261101 gemini-mcp-onboarding
 ```
 
 `uvx` 会创建隔离环境并运行 `gemini-mcp-onboarding`。该客户端启动真实
-`gemini-mcp-server`，协商 MCP 协议，然后调用静态文本工具
-`gemini_get_tool_manifest`。预检会移除 `GEMINI_PSID`、`GEMINI_PSIDTS` 和
+`gemini-mcp-function`，核对 17 个工具并验证空提示的 `gemini_ask` 返回
+`INVALID_ARGUMENT`。预检会移除 `GEMINI_PSID`、`GEMINI_PSIDTS` 和
 `GEMINI_PSIDCC`，并输出 `mode=offline`、`credentials_accessed=false`；它不会访问 Gemini。
 
-公开文档使用 `@main` 指向当前已审核源码。生产或可复现实验应把它替换为已审核 commit SHA。
+预检应输出 `profile=function`、`enabled_tools=17` 和 `text_tool=gemini_ask`。命令安装 [PR #39 的开发分支](source-update-integration.md)，需要固定版本时，把 `@` 后的分支名换成已审核的 commit SHA。
 
 ## 2. 配置实时账号
 
-1. 登录 [gemini.google.com](https://gemini.google.com)。
-2. 在浏览器开发者工具的 Application → Cookies 中复制 `__Secure-1PSID`；
-   `__Secure-1PSIDTS` 可选但推荐。
-3. 把 Cookie 放入客户端的密码输入或宿主环境变量，不要写入命令行、仓库或日志。
+安装 `browser` extra 后，运行时可从用户已授权的本机浏览器自动发现 Cookie；默认开启自动发现与刷新。
+完整桌面功能可使用 `gemini-mcp-server[all]`，其中包含浏览器 Cookie、图像校验和 Task 浏览器依赖。
+本机系统可能要求解锁 Cookie 存储。若改用手动注入，从目标账号的浏览器开发者工具复制
+`__Secure-1PSID` 和匹配的 `__Secure-1PSIDTS`，通过宿主秘密环境提供：
 
 ```bash
 export GEMINI_PSID='your __Secure-1PSID value'
@@ -39,7 +39,7 @@ export GEMINI_PSIDTS='your __Secure-1PSIDTS value'
 
 ## 3. 配置 MCP 客户端
 
-Claude Desktop 最小配置如下；请仅在本机替换占位符：
+下面的 Claude Desktop 配置会从已授权、已登录的浏览器自动发现会话：
 
 ```json
 {
@@ -49,52 +49,45 @@ Claude Desktop 最小配置如下；请仅在本机替换占位符：
       "command": "uvx",
       "args": [
         "--from",
-        "git+https://github.com/Luckycat133/gemini-web-mcp@main",
-        "gemini-mcp-server"
-      ],
-      "env": {
-        "GEMINI_PSID": "REPLACE_WITH_SECURE_1PSID",
-        "GEMINI_PSIDTS": "REPLACE_OR_REMOVE_IF_UNAVAILABLE",
-        "GEMINI_TOOLS": "model",
-        "GEMINI_AUTO_REFRESH": "false"
-      }
+        "gemini-mcp-server[all] @ git+https://github.com/Luckycat133/gemini-web-mcp@codex/gemini-tools-polish-20261101",
+        "gemini-mcp-function"
+      ]
     }
   }
 }
 ```
 
-Codex、Claude Desktop、Claude Code 和 VS Code 的逐文件示例见
+使用手动凭据时，Codex、Claude Desktop、Claude Code 和 VS Code 的逐文件示例见
 [客户端安装与验证](./client-examples.md)。
 
 ## 4. 选择工具面
 
 | 工具面 | 使用场景 |
 | --- | --- |
-| `GEMINI_TOOLS=model` | 文本/模型调用的首选起点 |
-| `GEMINI_TOOLS=core` | 图片、音乐、文件、URL 或 Deep Research；视频暂用 Gemini Web 专用页面 |
-| `gemini-mcp-create` | 专注图片生成/编辑、视频/音乐异步任务和重启恢复的七工具面 |
-| `gemini-mcp-account` | 明确请求历史、Notebook、Scheduled、Gem、Prompt 或已登记清理任务的七入口 |
-| `gemini-mcp-skill-server` | 需要固定十一工具、低 token facade |
+| `gemini-mcp-function` | 默认 17 个功能工具：问答、理解、会话、Task、图像／视频／音乐及 Research |
+| `gemini-mcp-account` | 显式账号管理：历史、Notebook、Skills、偏好、Task 计划及浏览器 |
+| `gemini-mcp-skill-server` | 固定四工具兼容入口：chat/create/edit/session |
 | `gemini-mcp-assist` | 只需要第二意见、有据搜索、图像/混合输入理解或异步 Deep Research 的专注五工具面 |
+| `GEMINI_TOOLS=model` / `core` | 在 `gemini-mcp-server` 中显式选择旧版模型／完整内容工具组 |
 | `GEMINI_TOOLS=all` | 维护者验证账号、历史和管理能力；不适合作为通用默认 |
 
 ## 5. 显式实时验证
 
-文本验证使用 temporary chat，必须显式允许账号访问：
+文本验证使用普通 Chat，并启用默认自动清理。命令必须显式允许账号访问：
 
 ```bash
-uvx --from git+https://github.com/Luckycat133/gemini-web-mcp@main \
+uvx --from git+https://github.com/Luckycat133/gemini-web-mcp@codex/gemini-tools-polish-20261101 \
   gemini-mcp-onboarding chat \
   --allow-live-account \
   --prompt 'Reply with exactly: Gemini MCP is connected'
 ```
 
-图像验证安装 `image` extra，并要求返回位于指定目录内的真实文件、非零大小、
+图像验证安装 `image` extra，通过同一后台句柄取回结果，并要求返回位于指定目录内的真实文件、非零大小、
 `image/*` MIME、正数尺寸和 `verification=verified`：
 
 ```bash
 uvx \
-  --from 'gemini-mcp-server[image] @ git+https://github.com/Luckycat133/gemini-web-mcp@main' \
+  --from 'gemini-mcp-server[image] @ git+https://github.com/Luckycat133/gemini-web-mcp@codex/gemini-tools-polish-20261101' \
   gemini-mcp-onboarding image \
   --allow-live-account \
   --prompt 'A two-color geometric cat icon on a plain background' \
