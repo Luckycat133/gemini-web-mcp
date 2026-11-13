@@ -1,0 +1,93 @@
+{
+  "managed_skills_list": {
+    "contract_key": "managed_skills.list",
+    "cases": {
+      "success": {
+        "body": [
+          [
+            [
+              "skill-fixture",
+              "Synthetic skill",
+              "Synthetic description",
+              "private instructions",
+              true
+            ]
+          ]
+        ]
+      },
+      "empty": {
+        "body": [
+          []
+        ]
+      },
+      "rejected": {
+        "body": [],
+        "reject_code": 403
+      },
+      "changed_shape": {
+        "body": [
+          {}
+        ]
+      }
+    }
+  },
+  "managed_skills_get": {
+    "contract_key": "managed_skills.get",
+    "cases": {
+      "success": {
+        "body": [
+          [
+            "skill-fixture",
+            "Synthetic skill",
+            "Synthetic description",
+            "private instructions",
+            true
+          ]
+        ],
+        "arguments": {
+          "skill_id": "skill-fixture"
+        }
+      },
+      "empty": {
+        "body": [],
+        "arguments": {
+          "skill_id": "skill-fixture"
+        }
+      },
+      "rejected": {
+        "body": [],
+        "reject_code": 403
+      },
+      "changed_shape": {
+        "body": [
+          {}
+        ],
+        "arguments": {
+          "skill_id": "skill-fixture"
+        }
+      }
+    }
+  },
+  "managed_skills_saved": {
+    "contract_key": "managed_skills.save",
+    "cases": {
+      "success": {
+        "body": [
+          "skill-fixture"
+        ]
+      },
+      "empty": {
+        "body": []
+      },
+      "rejected": {
+        "body": [],
+        "reject_code": 403
+      },
+      "changed_shape": {
+        "body": [
+          {}
+        ]
+      }
+    }
+  }
+}

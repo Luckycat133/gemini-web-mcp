@@ -173,7 +173,7 @@ async def _cleanup_matching_chats(
                         matched_markers.extend(hits)
                         break
             except Exception as exc:
-                errors.append({"target": f"chat:{item.get('id')}", "error": f"{type(exc).__name__}: {exc}"})
+                errors.append({"target": f"chat:{item.get('id')}", "error": type(exc).__name__})
         if matched_fields:
             deleted = False
             delete_error = ""
@@ -190,7 +190,7 @@ async def _cleanup_matching_chats(
                         if not result.ok and result.error is not None:
                             delete_error = f"{result.error.code.value}: {result.error.message}"
                     except Exception as exc:
-                        delete_error = f"{type(exc).__name__}: {exc}"
+                        delete_error = type(exc).__name__
                         verification_status = "delete_error"
             matched_chats.append(
                 {
@@ -251,7 +251,7 @@ async def _cleanup_matching_scheduled(
                         )
                     )
                 except Exception as exc:
-                    delete_error = f"{type(exc).__name__}: {exc}"
+                    delete_error = type(exc).__name__
                     verification_status = "delete_error"
             matched_scheduled.append(
                 {
@@ -265,7 +265,7 @@ async def _cleanup_matching_scheduled(
                 }
             )
     except Exception as exc:
-        errors.append({"target": "scheduled", "error": f"{type(exc).__name__}: {exc}"})
+        errors.append({"target": "scheduled", "error": type(exc).__name__})
     return matched_scheduled, errors
 
 

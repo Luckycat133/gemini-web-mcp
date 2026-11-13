@@ -28,6 +28,8 @@
   * 返回 response.text
 """
 
+import pytest
+
 import asyncio
 
 from src.adapters.mcp_sdk import MCPServer
@@ -204,7 +206,7 @@ def _patch_send_message_env(monkeypatch, session_data, *, captured_schedule=None
     monkeypatch.setattr(chat_tools, "lookup_session", fake_lookup)
     monkeypatch.setattr(chat_tools, "send_session_message", fake_send)
 
-    def fake_schedule(cid, *, retain_chat, delete_after_seconds, source):
+    def fake_schedule(cid, *, retain_chat, delete_after_seconds, source, reschedule_pending=False):
         if captured_schedule is not None:
             captured_schedule.append({
                 "cid": cid,
@@ -458,8 +460,8 @@ def test_send_message_delete_after_seconds_explicit_overrides_session_data(monke
     assert schedule_calls[0]["delete_after_seconds"] == 300
 
 
-def test_send_message_delete_after_seconds_double_none_passes_none(monkeypatch):
-    """delete_after_seconds=None + session 无该 key → schedule cleanup delete_after_seconds=None。"""
+def test_active_session_without_explicit_delay_gets_finite_hold(monkeypatch):
+    """Active multi-turn sessions survive until reset, shutdown or idle expiry."""
     fake_session = _FakeSession()
     session_data = {"session": fake_session, "thinking_level": "standard"}
     schedule_calls = []
@@ -472,7 +474,7 @@ def test_send_message_delete_after_seconds_double_none_passes_none(monkeypatch):
                                 session_id="s1", message="hi")
 
     asyncio.run(run())
-    assert schedule_calls[0]["delete_after_seconds"] is None
+    assert schedule_calls[0]["delete_after_seconds"] == 1800
 
 
 def test_send_message_thinking_level_taken_from_session_data(monkeypatch):
@@ -558,3 +560,8 @@ def test_send_message_passes_prompt_and_files_to_send_message(monkeypatch):
     assert fake_session.captured_kwargs["prompt"] == "what is 2+2"
     # image_paths=None → safe_image_paths=[] → files=None
     assert fake_session.captured_kwargs["files"] is None
+
+
+@pytest.fixture(autouse=True)
+def _synthetic_chat_account(monkeypatch):
+    monkeypatch.setenv("GEMINI_PSID", "synthetic-chat-test-account")

@@ -16,7 +16,7 @@ _BLANK_SEARCH_DOMAIN_FAILURE = {
 }
 
 
-def test_compact_handshake_uses_auth_free_static_manifest_call(monkeypatch, tmp_path) -> None:
+def test_compact_handshake_uses_auth_free_blank_prompt_rejection(monkeypatch, tmp_path) -> None:
     calls: list[tuple[str, dict]] = []
 
     class FakeClient:
@@ -31,7 +31,7 @@ def test_compact_handshake_uses_auth_free_static_manifest_call(monkeypatch, tmp_
 
         async def list_tools(self):
             return SimpleNamespace(
-                tools=[SimpleNamespace(name="account"), SimpleNamespace(name="doctor")]
+                tools=[SimpleNamespace(name="create")]
             )
 
         async def call_tool(self, name, arguments):
@@ -39,7 +39,7 @@ def test_compact_handshake_uses_auth_free_static_manifest_call(monkeypatch, tmp_
             return SimpleNamespace(
                 is_error=False,
                 result_type="complete",
-                structured_content={"ok": True},
+                structured_content={"result": [{"_meta": {"domain_result": _BLANK_SEARCH_DOMAIN_FAILURE}}]},
             )
 
     monkeypatch.setattr(protocol_smoke, "_resolve_executable", lambda _command: "/tmp/fake-mcp")
@@ -50,14 +50,14 @@ def test_compact_handshake_uses_auth_free_static_manifest_call(monkeypatch, tmp_
         protocol_smoke._handshake(
             "gemini-mcp-skill-server",
             profile="model",
-            expected_tools=frozenset({"account", "doctor"}),
+            expected_tools=frozenset({"create"}),
             cwd=tmp_path,
             mode="auto",
         )
     )
 
-    assert calls == [("account", {"action": "manifest"})]
-    assert result["representative_tool"] == "account"
+    assert calls == [("create", {"prompt": ""})]
+    assert result["representative_tool"] == "create"
 
 
 def _install_fake_assist_client(
@@ -147,3 +147,30 @@ def test_assist_handshake_rejects_non_invalid_argument_domain_failure(
                 mode="auto",
             )
         )
+
+
+@pytest.mark.parametrize("tool,arguments,code", [
+    ("gemini_ask", {"prompt": ""}, "INVALID_ARGUMENT"),
+    ("gemini_cleanup", {"action": "list"}, "AUTH_REQUIRED"),
+])
+def test_function_and_account_smokes_assert_typed_auth_free_responses(monkeypatch, tmp_path, tool, arguments, code):
+    calls = []
+    _install_fake_assist_client(
+        monkeypatch, tools=[tool],
+        structured_content={"result": [{"_meta": {"domain_result": {"ok": False, "error": {"code": code}}}}]},
+        calls=calls,
+    )
+    result = asyncio.run(protocol_smoke._handshake(
+        "test-entrypoint", profile="function", expected_tools=frozenset({tool}), cwd=tmp_path, mode="auto",
+    ))
+    assert calls == [(tool, arguments)]
+    assert result["representative_tool"] == tool
+
+
+def test_default_protocol_smoke_unsets_legacy_profile_and_credentials(monkeypatch, tmp_path):
+    monkeypatch.setenv("GEMINI_TOOLS", "all")
+    monkeypatch.setenv("GEMINI_PSID", "synthetic")
+    environment = protocol_smoke._safe_environment(None, tmp_path)
+    assert "GEMINI_TOOLS" not in environment and "GEMINI_PSID" not in environment
+    assert environment["GEMINI_BROWSER_AUTO_LOAD"] == "false"
+    assert environment["GEMINI_CLEANUP_DB_PATH"] == str(tmp_path / "cleanup.sqlite3")

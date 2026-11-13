@@ -1,0 +1,13 @@
+{
+  "task_goal_update": {
+    "contract_key": "tasks.update_metadata",
+    "cases": {
+      "success": {
+        "body": [[null, "Synthetic Task", 3, null, null, null, null, null, null, null, null, null, null, "c_fixture"]]
+      },
+      "empty": {"body": []},
+      "rejected": {"body": [], "reject_code": 7},
+      "changed_shape": {"body": [[null, "Synthetic Task", 3]]}
+    }
+  }
+}

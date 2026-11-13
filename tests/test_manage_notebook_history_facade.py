@@ -63,7 +63,7 @@ class _FakeBatchClient:
         self.call_count = 0
         self.captured_payloads = []
 
-    async def _batch_execute(self, raw_rpc_list, *, source_path=None, close_on_error=False):
+    async def _batch_execute(self, raw_rpc_list, *, source_path=None, close_on_error=False, current_retry=None):
         self.call_count += 1
         self.captured_payloads.append(raw_rpc_list)
         if self._raise_exc is not None:
@@ -107,6 +107,7 @@ class _ReadChatClient(_ListChatsClient):
 
 
 def _patch_seams(monkeypatch, client):
+    monkeypatch.setenv("GEMINI_PSID", "synthetic-test-account")
     monkeypatch.setattr(manage_tools, "get_gemini_client", lambda: client)
 
     async def fake_init():
@@ -442,8 +443,8 @@ def test_move_chat_to_notebook_top_level_exception(monkeypatch):
     mcp = _make_mcp()
     result = _run(_call(mcp, "gemini_move_chat_to_notebook",
                         chat_id="c_1", notebook_id="n_1"))
-    assert "❌ 移动 Gemini Notebook 聊天失败" in result[0].text
-    assert "rpc down" in result[0].text
+    assert "移动结果未验证" in result[0].text
+    assert "rpc down" not in result[0].text
 
 
 def test_move_chat_to_notebook_strips_chat_id(monkeypatch):

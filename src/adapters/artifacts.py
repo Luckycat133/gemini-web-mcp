@@ -3,10 +3,30 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from dataclasses import replace
 
 from .mcp_sdk import TextContent
 
-from ..domain import Artifact
+from ..domain import Artifact, DomainResult
+from ..domain.artifacts import ArtifactKind, ArtifactState, ArtifactVerificationStatus
+from ..domain.operations import OperationReadData
+
+
+def omit_saved_preview(
+    result: DomainResult[OperationReadData],
+) -> tuple[DomainResult[OperationReadData], bool]:
+    """Omit inline answer text only when a full, verified local report is available."""
+    data = result.data
+    if not result.ok or data is None or not (data.report or data.answer or data.task_response):
+        return result, False
+    if not any(artifact.kind is ArtifactKind.REPORT and artifact.state is ArtifactState.LOCAL
+               and artifact.verification.status is ArtifactVerificationStatus.VERIFIED and artifact.local_path
+               for artifact in data.artifacts):
+        return result, False
+    warnings = tuple(warning for warning in result.warnings
+                     if warning.code not in {"report_preview_truncated", "task_answer_truncated"})
+    return replace(result, data=replace(data, report=None, artifact=None, answer=None, task_response=None),
+                   warnings=warnings), True
 
 
 def format_artifact_block(

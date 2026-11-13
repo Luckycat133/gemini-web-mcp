@@ -59,6 +59,7 @@ def test_payload_scheduled_rpc_accepted_but_not_deleted_state(monkeypatch):
     删除 RPC 已被接受（bodies 非空），但 registry 复检仍包含该 action，
     因此删除未被验证 -> deleted=False，verification_status='still_visible_in_registry'。
     """
+    monkeypatch.setenv("GEMINI_PSID", "synthetic-test-account")
     client = MagicMock()
     # _batch_execute 返回非空 response（_extract_rpc_bodies 会返回非空 bodies）
     client._batch_execute = AsyncMock(return_value=scheduled_ack_response())
@@ -92,6 +93,7 @@ def test_payload_scheduled_rpc_accepted_with_task_after_none(monkeypatch):
     RPC 已接受，但 registry 复检仍包含该 action -> 删除未被验证，
     deleted=False，verification_status='still_visible_in_registry'。
     """
+    monkeypatch.setenv("GEMINI_PSID", "synthetic-test-account")
     client = MagicMock()
     client._batch_execute = AsyncMock(return_value=scheduled_ack_response())
 
@@ -131,7 +133,7 @@ def test_payload_scheduled_registry_exception_records_error(monkeypatch):
 
     monkeypatch.setattr(
         manage_tools, "_fetch_scheduled_registry",
-        AsyncMock(side_effect=RuntimeError("registry boom")),
+        AsyncMock(side_effect=RuntimeError("synthetic-private-body")),
     )
 
     payload = asyncio.run(_cleanup_test_artifacts_payload(
@@ -142,9 +144,10 @@ def test_payload_scheduled_registry_exception_records_error(monkeypatch):
     assert payload["matched_scheduled_count"] == 0
     # errors 记录外层异常
     assert any(
-        err.get("target") == "scheduled" and "RuntimeError: registry boom" in err.get("error", "")
+        err.get("target") == "scheduled" and err.get("error") == "RuntimeError"
         for err in payload["errors"]
     )
+    assert "synthetic-private-body" not in str(payload)
 
 
 # ===========================================================================

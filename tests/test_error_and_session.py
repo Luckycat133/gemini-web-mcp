@@ -95,7 +95,8 @@ def test_handle_error_image_load_failed_for_pillow_keyword():
 def test_handle_error_falls_back_to_generic_for_unknown_errors():
     err = Exception("something totally unexpected happened")
     info = handle_error(err)
-    assert info["message"] == "something totally unexpected happened"
+    assert info["message"] == "请求失败，请查看诊断信息。"
+    assert info["error_type"] == "Exception"
     assert info["actionable"] is False
     assert info["tool"] is None
 

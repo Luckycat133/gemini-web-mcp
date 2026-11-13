@@ -1,0 +1,11 @@
+{
+  "conversation_presence": {
+    "contract_key": "history.exact",
+    "cases": {
+      "success": {"body": [[[["c_fixture", "r_fixture"]]]], "arguments": {"chat_id": "c_fixture"}},
+      "empty": {"body": [[]], "arguments": {"chat_id": "c_fixture"}},
+      "rejected": {"body": null, "reject_code": 5, "arguments": {"chat_id": "c_fixture"}},
+      "changed_shape": {"body": [[[["c_different", "r_fixture"]]]], "arguments": {"chat_id": "c_fixture"}}
+    }
+  }
+}

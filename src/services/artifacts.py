@@ -3,13 +3,12 @@
 from __future__ import annotations
 
 import hashlib
-import json
 import logging
-import math
 import mimetypes
+import json
 import shutil
 import subprocess
-import wave
+import sys
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import replace
 from pathlib import Path
@@ -150,138 +149,27 @@ def _unavailable_local_artifact(
     )
 
 
-def _verify_image(path: str, mime_type: str, methods: list[str]) -> tuple[ArtifactVerificationStatus, int | None, int | None]:
-    try:
-        from PIL import Image
-    except ImportError:
-        methods.append("image_decoder_unavailable")
-        return ArtifactVerificationStatus.UNVERIFIED, None, None
-    Image.init()
-    if mime_type in {"image/heic", "image/heif"} and not ({"HEIF", "HEIC"} & Image.OPEN.keys()):
-        methods.append("image_decoder_unavailable")
-        return ArtifactVerificationStatus.UNVERIFIED, None, None
-    try:
-        with Image.open(path) as image:
-            image.verify()
-        # verify() checks the container; load() also checks the encoded pixels.
-        with Image.open(path) as image:
-            image.load()
-            width, height = image.size
-        if width <= 0 or height <= 0:
-            raise ValueError("empty image dimensions")
-    except (OSError, ValueError, SyntaxError):
-        methods.append("image_decode_failed")
-        return ArtifactVerificationStatus.FAILED, None, None
-    methods.extend(("image_decoded", "image_dimensions"))
-    return ArtifactVerificationStatus.VERIFIED, int(width), int(height)
+def _probe_media_metadata(
+    kind: ArtifactKind,
+    resolved_path: str,
+    methods: list[str],
+    duration_probe: Callable[[str], float | None] | None,
+    dimensions_probe: Callable[[str], tuple[int, int] | None] | None,
+) -> tuple[int | None, int | None, float | None]:
+    width = height = None
+    if kind == ArtifactKind.IMAGE:
+        probe = dimensions_probe or _probe_image_dimensions
+        dimensions = probe(resolved_path)
+        if dimensions is not None:
+            width, height = dimensions
+            methods.append("image_dimensions")
 
-
-def _probe_av_metadata(path: str) -> dict[str, Any] | None:
-    """Return parsed stream evidence, or None when no decoder is installed."""
-    ffprobe = shutil.which("ffprobe")
-    if not ffprobe:
-        return None
-    try:
-        probe = subprocess.run(
-            [ffprobe, "-v", "error", "-show_entries", "stream=codec_type,width,height:format=duration,format_name",
-             "-of", "json", path],
-            capture_output=True,
-            text=True,
-            check=False,
-            timeout=15,
-        )
-        if probe.returncode != 0:
-            return {}
-        payload = json.loads(probe.stdout)
-        return payload if isinstance(payload, dict) else {}
-    except (OSError, subprocess.TimeoutExpired):
-        return None
-    except ValueError:
-        return {}
-
-
-def _av_signature(path: str) -> str | None:
-    try:
-        with Path(path).open("rb") as media_file:
-            header = media_file.read(16)
-    except OSError:
-        return None
-    if header[:4] == b"RIFF" and header[8:12] == b"WAVE":
-        return "audio/wav"
-    if header[:4] == b"RIFF" and header[8:12] == b"AVI ":
-        return "video/x-msvideo"
-    if header.startswith(b"ID3") or (len(header) >= 2 and header[0] == 0xFF and header[1] & 0xE0 == 0xE0):
-        return "audio/mpeg"
-    if header[4:8] == b"ftyp":
-        return "video/mp4"
-    if header.startswith(b"OggS"):
-        return "application/ogg"
-    if header.startswith(b"fLaC"):
-        return "audio/flac"
-    if header.startswith(b"\x1a\x45\xdf\xa3"):
-        return "video/webm"
-    return None
-
-
-def _verify_av(
-    kind: ArtifactKind, path: str, methods: list[str],
-) -> tuple[ArtifactVerificationStatus, str | None, int | None, int | None, float | None]:
-    image_mime = detect_image_mime_type(path)
-    if image_mime is not None:
-        methods.append("media_kind_mismatch")
-        return ArtifactVerificationStatus.FAILED, image_mime, None, None, None
-    mime = _av_signature(path)
-    if mime == "audio/wav":
-        try:
-            with wave.open(path, "rb") as audio:
-                frame_count = audio.getnframes()
-                frame_size = audio.getnchannels() * audio.getsampwidth()
-                rate = audio.getframerate()
-                actual_bytes = 0
-                while chunk := audio.readframes(65536):
-                    actual_bytes += len(chunk)
-                if kind != ArtifactKind.AUDIO or rate <= 0 or frame_count <= 0 or actual_bytes != frame_count * frame_size:
-                    raise ValueError("invalid WAV stream")
-                wav_duration = frame_count / rate
-            methods.extend(("audio_stream_decoded", "duration_probe"))
-            return ArtifactVerificationStatus.VERIFIED, mime, None, None, wav_duration
-        except (OSError, EOFError, wave.Error, ValueError):
-            methods.append("media_decode_failed")
-            return ArtifactVerificationStatus.FAILED, mime, None, None, None
-
-    payload = _probe_av_metadata(path)
-    if payload is None:
-        # A recognizable container is not proof of a playable media stream.
-        if kind == ArtifactKind.VIDEO and mime is not None and mime.startswith("audio/"):
-            methods.append("media_kind_mismatch")
-            return ArtifactVerificationStatus.FAILED, mime, None, None, None
-        methods.append("media_decoder_unavailable" if mime else "media_format_invalid")
-        status = ArtifactVerificationStatus.UNVERIFIED if mime else ArtifactVerificationStatus.FAILED
-        return status, mime, None, None, None
-    streams = payload.get("streams", [])
-    expected = "audio" if kind == ArtifactKind.AUDIO else "video"
-    matching = [
-        stream for stream in streams if isinstance(stream, dict) and stream.get("codec_type") == expected
-    ] if isinstance(streams, list) else []
-    if not matching:
-        methods.append("media_stream_missing")
-        return ArtifactVerificationStatus.FAILED, mime, None, None, None
-    stream = matching[0]
-    format_data = payload.get("format", {})
-    duration: float | None = None
-    if isinstance(format_data, dict):
-        try:
-            duration = _positive_float(float(format_data.get("duration", 0)))
-        except (TypeError, ValueError):
-            pass
-    width, height = _positive_int(stream.get("width")), _positive_int(stream.get("height"))
-    if expected == "video" and (width is None or height is None):
-        methods.append("media_dimensions_invalid")
-        return ArtifactVerificationStatus.FAILED, mime, None, None, duration
-    methods.append(f"{expected}_stream_probed")
-    if duration is not None:
-        methods.append("duration_probe")
-    return ArtifactVerificationStatus.VERIFIED, mime or _guess_mime_type(path), width, height, duration
+    duration_seconds = None
+    if kind in {ArtifactKind.AUDIO, ArtifactKind.VIDEO} and duration_probe is not None:
+        duration_seconds = _positive_float(duration_probe(resolved_path))
+        if duration_seconds is not None:
+            methods.append("duration_probe")
+    return width, height, duration_seconds
 
 
 def artifact_from_local_path(
@@ -343,32 +231,23 @@ def artifact_from_local_path(
     else:
         methods.append("size_nonzero")
 
-    width: int | None = None
-    height: int | None = None
-    duration_seconds: float | None = None
-    mime_type = _guess_mime_type(resolved_path)
-    if size_bytes > 0 and kind == ArtifactKind.IMAGE:
-        mime_type = detect_image_mime_type(file_path)
-        if mime_type is None:
+    width, height, duration_seconds = _probe_media_metadata(
+        kind,
+        resolved_path,
+        methods,
+        duration_probe,
+        dimensions_probe,
+    )
+
+    detected_image_mime = detect_image_mime_type(file_path) if kind in {
+        ArtifactKind.IMAGE, ArtifactKind.AUDIO, ArtifactKind.VIDEO
+    } else None
+    if detected_image_mime:
+        methods.append("image_mime_signature")
+        if kind in {ArtifactKind.AUDIO, ArtifactKind.VIDEO}:
+            state = ArtifactState.FAILED
             status = ArtifactVerificationStatus.FAILED
-            methods.append("image_format_invalid")
-        else:
-            methods.append("image_mime_signature")
-            status, width, height = _verify_image(resolved_path, mime_type, methods)
-            if status == ArtifactVerificationStatus.VERIFIED and dimensions_probe is not None:
-                dimensions = dimensions_probe(resolved_path)
-                if dimensions is not None:
-                    width, height = dimensions
-    elif size_bytes > 0 and kind in {ArtifactKind.AUDIO, ArtifactKind.VIDEO}:
-        status, mime_type, width, height, duration_seconds = _verify_av(kind, resolved_path, methods)
-        if status == ArtifactVerificationStatus.VERIFIED and duration_probe is not None:
-            probed_duration = _positive_float(duration_probe(resolved_path))
-            if probed_duration is not None:
-                duration_seconds = probed_duration
-                if "duration_probe" not in methods:
-                    methods.append("duration_probe")
-    if status == ArtifactVerificationStatus.FAILED:
-        state = ArtifactState.FAILED
+            methods.append("media_type_mismatch")
 
     return Artifact(
         id=identity,
@@ -377,7 +256,7 @@ def artifact_from_local_path(
         title=title,
         uri=uri,
         local_path=resolved_path,
-        mime_type=mime_type,
+        mime_type=detected_image_mime or _guess_mime_type(resolved_path),
         size_bytes=size_bytes,
         width=width,
         height=height,
@@ -389,6 +268,23 @@ def artifact_from_local_path(
         observed_backend=observed_backend,
         verification=ArtifactVerification(status, methods=tuple(methods)),
     )
+
+
+def response_image_items(response: Any, *, generated_only: bool = False) -> list[Any]:
+    """Select generated images when the upstream exposes candidate provenance.
+
+    Older adapters and test doubles expose only ``images``; preserve that
+    compatibility when candidate provenance is unavailable.
+    """
+    candidates = getattr(response, "candidates", None)
+    if generated_only and candidates is not None:
+        chosen = getattr(response, "chosen", 0)
+        if not isinstance(chosen, int) or chosen < 0 or chosen >= len(candidates):
+            return []
+        candidate = candidates[chosen]
+        if hasattr(candidate, "generated_images"):
+            return list(candidate.generated_images or ())
+    return list(getattr(response, "images", None) or ())
 
 
 def extract_response_artifacts(
@@ -404,7 +300,8 @@ def extract_response_artifacts(
     observed_backend = observed_backend or observed_backend_from_response(response)
     artifacts: list[Artifact] = []
 
-    for item in getattr(response, "images", None) or ():
+    image_items = response_image_items(response, generated_only=media_type in {"image", "image_edit"})
+    for item in image_items if media_type in {None, "image", "image_edit"} else ():
         uri = _string_attr(item, "url")
         if uri:
             artifacts.append(
@@ -419,7 +316,7 @@ def extract_response_artifacts(
                     observed_backend=observed_backend,
                 )
             )
-    for item in getattr(response, "videos", None) or ():
+    for item in (getattr(response, "videos", None) or ()) if media_type in {None, "video"} else ():
         uri = _string_attr(item, "url")
         if uri:
             artifacts.append(
@@ -434,7 +331,7 @@ def extract_response_artifacts(
                     observed_backend=observed_backend,
                 )
             )
-    for item in getattr(response, "media", None) or ():
+    for item in (getattr(response, "media", None) or ()) if media_type in {None, "music"} else ():
         for attribute in ("mp3_url", "url"):
             uri = _string_attr(item, attribute)
             if uri:
@@ -456,6 +353,10 @@ def extract_response_artifacts(
         ("video_url", ArtifactKind.VIDEO),
         ("audio_url", ArtifactKind.AUDIO),
     ):
+        allowed = {"image_url": {None, "image", "image_edit"}, "video_url": {None, "video"},
+                   "audio_url": {None, "music"}}
+        if media_type not in allowed[attribute]:
+            continue
         uri = _string_attr(response, attribute)
         if uri:
             artifacts.append(
@@ -484,17 +385,16 @@ def merge_artifacts(*groups: Iterable[Artifact]) -> tuple[Artifact, ...]:
             continue
         prefer = artifact if _state_rank(artifact.state) >= _state_rank(current.state) else current
         other = current if prefer is artifact else artifact
-        usable_other = other.state != ArtifactState.FAILED
         merged[artifact.id] = replace(
             prefer,
             title=prefer.title or other.title,
             uri=prefer.uri or other.uri,
             local_path=prefer.local_path or (other.local_path if other.state == ArtifactState.LOCAL else None),
-            mime_type=prefer.mime_type or (other.mime_type if usable_other else None),
-            size_bytes=prefer.size_bytes or (other.size_bytes if usable_other else None),
-            width=prefer.width or (other.width if usable_other else None),
-            height=prefer.height or (other.height if usable_other else None),
-            duration_seconds=prefer.duration_seconds or (other.duration_seconds if usable_other else None),
+            mime_type=prefer.mime_type or other.mime_type,
+            size_bytes=prefer.size_bytes or other.size_bytes,
+            width=prefer.width or other.width,
+            height=prefer.height or other.height,
+            duration_seconds=prefer.duration_seconds or other.duration_seconds,
             source_chat_id=prefer.source_chat_id or other.source_chat_id,
             requested_backend=prefer.requested_backend or other.requested_backend,
             request_model=prefer.request_model or other.request_model,
@@ -517,37 +417,6 @@ def classify_artifact_state(
     if artifacts and all(artifact.state == ArtifactState.FAILED for artifact in artifacts):
         return ArtifactState.FAILED
     return ArtifactState.EMPTY
-
-
-def media_artifacts(artifacts: Iterable[Artifact], media_type: str) -> tuple[Artifact, ...]:
-    """Select the requested creation outputs without narrowing understanding."""
-    kinds = {
-        "image": {ArtifactKind.IMAGE},
-        "image_edit": {ArtifactKind.IMAGE},
-        "video": {ArtifactKind.VIDEO},
-        "music": {ArtifactKind.AUDIO, ArtifactKind.VIDEO},
-    }.get(media_type, set())
-    return tuple(artifact for artifact in artifacts if artifact.kind in kinds)
-
-
-def media_operation_timeout(media_type: str, timeout_seconds: int | None = None) -> int:
-    if timeout_seconds is not None and timeout_seconds > 0:
-        return timeout_seconds
-    return 180 if media_type in {"image", "image_edit"} else 600
-
-
-def classify_media_artifact_state(
-    response: Any, artifacts: Sequence[Artifact], media_type: str,
-) -> ArtifactState:
-    # A music visualization is auxiliary; music completion requires audio.
-    required_kind = {
-        "image": ArtifactKind.IMAGE,
-        "image_edit": ArtifactKind.IMAGE,
-        "video": ArtifactKind.VIDEO,
-        "music": ArtifactKind.AUDIO,
-    }.get(media_type)
-    matching = tuple(artifact for artifact in artifacts if artifact.kind == required_kind)
-    return classify_artifact_state(response, matching)
 
 
 def is_response_queued(response: Any) -> bool:
@@ -628,38 +497,10 @@ def artifact_result(
                 suggested_action="Use a verified remote URI or retry the local save.",
             ),
         )
-    unverified_local = any(
-        artifact.state == ArtifactState.LOCAL and artifact.verification.status == ArtifactVerificationStatus.UNVERIFIED
-        for artifact in (*data.input_artifacts, *data.artifacts)
-    )
-    if unverified_local:
-        operation_state = OperationState.PARTIAL
-        warnings += (
-            DomainWarning(
-                code="ARTIFACT_VERIFICATION_UNAVAILABLE",
-                message="A local media file exists, but its media content could not be decoded or probed.",
-                suggested_action="Install the image decoder or ffprobe and verify the saved file before using it.",
-            ),
-        )
-    if any(
-        artifact.state == ArtifactState.LOCAL and artifact.verification.status == ArtifactVerificationStatus.UNVERIFIED
-        for artifact in data.artifacts
-    ):
-        verification_status = "artifact_saved_unverified"
-    elif any(
-        artifact.state == ArtifactState.LOCAL and artifact.verification.status == ArtifactVerificationStatus.VERIFIED
-        for artifact in data.artifacts
-    ):
+    if any(artifact.state == ArtifactState.LOCAL for artifact in data.artifacts):
         verification_status = "artifact_saved_and_verified"
-    elif any(artifact.state == ArtifactState.LOCAL for artifact in data.artifacts):
-        verification_status = "artifact_saved_unverified"
-    elif any(
-        artifact.state == ArtifactState.LOCAL and artifact.verification.status == ArtifactVerificationStatus.VERIFIED
-        for artifact in data.input_artifacts
-    ):
-        verification_status = "input_artifact_verified"
     elif any(artifact.state == ArtifactState.LOCAL for artifact in data.input_artifacts):
-        verification_status = "input_artifact_unverified"
+        verification_status = "input_artifact_verified"
     else:
         verification_status = "remote_uri_observed_unverified"
     return DomainResult.success(
@@ -777,17 +618,62 @@ def detect_image_mime_type(path: str | Path) -> str | None:
         return "image/jpeg"
     if header.startswith((b"GIF87a", b"GIF89a")):
         return "image/gif"
-    if header.startswith(b"BM"):
-        return "image/bmp"
-    if header.startswith((b"II*\x00", b"MM\x00*")):
-        return "image/tiff"
     if header.startswith(b"RIFF") and header[8:12] == b"WEBP":
         return "image/webp"
-    if header[4:8] == b"ftyp":
-        if header[8:12] in {b"heic", b"heix", b"hevc", b"hevx"}:
-            return "image/heic"
-        if header[8:12] in {b"mif1", b"msf1"}:
-            return "image/heif"
+    return None
+
+
+def detect_av_mime_type(path: str | Path) -> str | None:
+    """Recognize MP3 frames or an ISO BMFF container from local bytes."""
+    try:
+        with Path(path).open("rb") as stream:
+            head = stream.read(10)
+            if len(head) >= 8 and head[4:8] == b"ftyp" and int.from_bytes(head[:4], "big") >= 8:
+                return "video/mp4"
+            if len(head) >= 10 and head[:3] == b"ID3":
+                sizes = head[6:10]
+                if any(size & 0x80 for size in sizes):
+                    return None
+                offset = 10 + sum(byte << shift for byte, shift in zip(sizes, (21, 14, 7, 0)))
+                stream.seek(offset)
+                head = stream.read(4)
+            if len(head) >= 4 and head[0] == 0xff and (head[1] & 0xe0) == 0xe0:
+                version, layer, bitrate, sample_rate = (head[1] >> 3) & 3, (head[1] >> 1) & 3, head[2] >> 4, (head[2] >> 2) & 3
+                if version != 1 and layer != 0 and bitrate not in {0, 15} and sample_rate != 3:
+                    return "audio/mpeg"
+    except (OSError, ValueError):
+        return None
+    return None
+
+
+def probe_playable_av_tracks(path: str | Path) -> frozenset[str] | None:
+    """Inspect playable tracks with an available platform tool, if any."""
+    ffprobe = shutil.which("ffprobe")
+    if ffprobe:
+        command = [ffprobe, "-v", "error", "-show_entries", "stream=codec_type", "-of", "json", str(path)]
+        try:
+            result = subprocess.run(command, check=True, capture_output=True, text=True, timeout=20)
+            payload = json.loads(result.stdout)
+            return frozenset(item.get("codec_type") for item in payload.get("streams", [])
+                             if item.get("codec_type") in {"audio", "video"})
+        except (OSError, subprocess.SubprocessError, ValueError, TypeError, AttributeError):
+            return None
+    swift = shutil.which("swift") if sys.platform == "darwin" else None
+    if swift:
+        script = (
+            'import Foundation; import AVFoundation; '
+            'let a = AVURLAsset(url: URL(fileURLWithPath: CommandLine.arguments[1])); '
+            'let x = try await a.loadTracks(withMediaType: .audio); '
+            'let y = try await a.loadTracks(withMediaType: .video); '
+            'print("\\(x.count),\\(y.count)")'
+        )
+        try:
+            result = subprocess.run([swift, "-e", script, str(path)], check=True, capture_output=True,
+                                    text=True, timeout=20)
+            audio, video = (int(item) for item in result.stdout.strip().split(","))
+            return frozenset(name for name, count in (("audio", audio), ("video", video)) if count > 0)
+        except (OSError, subprocess.SubprocessError, ValueError):
+            return None
     return None
 
 
@@ -808,9 +694,22 @@ def _positive_int(value: Any) -> int | None:
 
 
 def _positive_float(value: Any) -> float | None:
-    if isinstance(value, (int, float)) and not isinstance(value, bool) and value > 0 and math.isfinite(value):
+    if isinstance(value, (int, float)) and not isinstance(value, bool) and value > 0:
         return float(value)
     return None
+
+
+def _probe_image_dimensions(path: str) -> tuple[int, int] | None:
+    try:
+        from PIL import Image
+    except ImportError:
+        return None
+    try:
+        with Image.open(path) as image:
+            width, height = image.size
+            return int(width), int(height)
+    except (OSError, ValueError):
+        return None
 
 
 def _state_rank(state: ArtifactState) -> int:

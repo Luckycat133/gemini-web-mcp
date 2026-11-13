@@ -125,6 +125,37 @@ def sanitize_account_status(status: object) -> dict[str, Any]:
     }
 
 
+async def inspect_account_status_compat(client: Any) -> dict[str, Any] | None:
+    """Read the legacy inspection result or the newer SDK's cached status.
+
+    The SDK initializes its enum to AVAILABLE even when the status RPC yields
+    no parseable body, so this fallback cannot prove a fresh authenticated
+    observation. Do not infer tier, features, or quota from the enum.
+    """
+    inspect = getattr(client, "inspect_account_status", None)
+    if callable(inspect):
+        return sanitize_account_status(await inspect())
+
+    try:
+        from gemini_webapi.constants import AccountStatus
+    except ImportError:
+        return None
+    status = getattr(client, "account_status", None)
+    if not isinstance(status, AccountStatus):
+        return None
+    return {
+        "source_path": None,
+        "account_path": None,
+        "summary": {
+            "account_status": status.name,
+            "account_status_code": int(status),
+            "account_status_description": status.description,
+            "status_evidence": "sdk_cached_unverified",
+        },
+        "rpc": {},
+    }
+
+
 async def execute_observed_rpc(client: Any, probe: dict[str, str]) -> Any:
     """Execute a registry-derived probe; custom probes remain testable."""
 

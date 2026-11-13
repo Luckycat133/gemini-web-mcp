@@ -39,6 +39,8 @@ export GEMINI_PSIDTS='REPLACE_LOCALLY'
 pip install -e ".[browser]"
 ```
 
+启动 MCP 时省略 `GEMINI_PSID`、`GEMINI_PSIDTS` 的占位值，服务默认从浏览器读取 Cookie。候选会话通过 Google 认证后才加载，来源会显示实际浏览器和可识别的 Profile。启动时读取失败，后续请求会在短暂间隔后重试。显式配置的账号会话失效时，派发前只尝试恢复与原 PSID 匹配的浏览器会话。
+
 先列出不含 Cookie 原值的 profile 诊断：
 
 ```text
@@ -84,13 +86,15 @@ Chrome profile 数据库复制进仓库。
 
 浏览器 profile 中存在 PSID 只证明本地凭据可读，不证明 Cookie 仍有效，也不证明这是专用测试账号。
 
+默认功能面的结构化 `AUTH_REQUIRED` 结果包含 `meta.details.auth_reason`。常见原因包括宿主无法读取浏览器数据 `BROWSER_COOKIE_ACCESS_DENIED`、缺少浏览器依赖 `BROWSER_COOKIE_DEPENDENCY_MISSING`、没有可读取的会话 `BROWSER_COOKIE_NOT_FOUND` 和 Google 拒绝已配置的会话 `GEMINI_SESSION_REJECTED`。已配置会话失败后，浏览器恢复的原因单独出现在 `browser_auth_reason`。
+
 ## 常见问题
 
 ### 没有找到 profile 或 PSID
 
 - 确认目标账号已在浏览器中登录 Gemini。
-- 关闭 Chrome 后重试，排除 Cookie 数据库锁。
-- macOS 检查终端或 MCP 宿主的完全磁盘访问和系统凭据授权。
+- 如有 `BROWSER_COOKIE_ACCESS_DENIED`，检查实际运行 MCP 的宿主是否有权限读取目标 Profile。终端与桌面客户端的权限分别生效。
+- 如有 `BROWSER_COOKIE_ACCESS_TIMEOUT`，检查是否有待处理的 macOS 密钥串授权提示。
 - 多 profile 场景先用 `gemini_list_browser_cookie_profiles`，再显式传入 `profile`。
 
 ### 返回系统授权 timeout
@@ -100,6 +104,8 @@ Chrome profile 数据库复制进仓库。
 - 无法确认授权来源时改用手动 Cookie 注入，不要禁用系统安全机制。
 
 ### 认证突然失效
+
+当现有 Chrome Profile 正常访问 Gemini 并刷新了会话凭据，MCP 可在下一次自动加载时验证新会话。旧操作仍按原认证绑定读回。需要清理旧测试资源时，先用当前账号独立核对准确资源身份。
 
 - 同时刷新 `__Secure-1PSID` 与 `__Secure-1PSIDTS`。
 - 重启 MCP 宿主或调用 `gemini_reset` 让客户端使用新凭据。

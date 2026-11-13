@@ -4,16 +4,21 @@ Gemini 客户端封装 - 门面模式
 """
 
 import inspect
+import asyncio
+import time
+from contextlib import asynccontextmanager, suppress
 import logging
 import os
-import threading
 from collections.abc import Mapping
 from functools import wraps
-from contextvars import ContextVar
 from typing import Any, Dict, Optional, Self
 
+import anyio
+
 from .client_manager import (
+    ClientAuthenticationRequired,
     ClientManager,
+    browser_cookie_auto_load_enabled,
     get_configured_proxy,  # noqa: F401  (re-exported as public facade API)
     get_default_chat_retention_seconds,
     validate_config,  # noqa: F401  (re-exported as public facade API)
@@ -25,10 +30,10 @@ from .domain import (
     CleanupObservation,
     CleanupState,
     DomainResult,
+    new_diagnostic_id,
     is_valid_remote_chat_id,
 )
 from .remote_chat_cleanup_manager import RemoteChatCleanupManager
-from .infrastructure.state_store import authentication_scope, get_default_state_store
 from .services.lifecycle import (
     ConversationLifecycleService,
     LifecycleResetAllData,
@@ -38,7 +43,7 @@ from .session_manager import SessionData, SessionOperationResult, SessionService
 logger = logging.getLogger(__name__)
 
 try:
-    from .cookie_manager import CookieData, CookieManager, get_cookie_manager, init_cookie_manager
+    from .cookie_manager import CookieData, get_cookie_manager, init_cookie_manager
     COOKIE_MANAGER_AVAILABLE = True
 except ImportError:
     COOKIE_MANAGER_AVAILABLE = False
@@ -48,31 +53,13 @@ except ImportError:
 _client_manager = ClientManager()
 _session_manager = SessionService()
 _cleanup_manager = RemoteChatCleanupManager(
-    client_provider=lambda: _initialize_cleanup_client(),
+    client_provider=lambda: _client_manager.get_client(),
     retention_provider=get_default_chat_retention_seconds,
 )
 _lifecycle_service = ConversationLifecycleService(
     session_provider=lambda: _session_manager,
     cleanup_provider=lambda: _cleanup_manager,
 )
-_authentication_lock = threading.RLock()
-_request_authentication_generation: ContextVar[tuple[str, int] | None] = ContextVar(
-    "gemini_authentication_generation", default=None,
-)
-
-
-def _cleanup_context() -> tuple[str, int] | None:
-    if isinstance(_cleanup_manager, RemoteChatCleanupManager):
-        return _cleanup_manager.authentication_context()
-    return None
-
-
-def _request_cleanup_generation() -> int | None:
-    request_context = _request_authentication_generation.get()
-    current_context = _cleanup_context()
-    if request_context is not None and current_context is not None and request_context[0] == current_context[0]:
-        return request_context[1]
-    return None
 
 
 class _AttributeMapping(dict[str, Any]):
@@ -176,45 +163,7 @@ def _session_data_to_dict(data: Optional[SessionData]) -> Optional[Dict[str, Any
 
 def get_gemini_client() -> Any:
     """获取 GeminiClient，并规范化混合对象/映射历史返回值。"""
-    with _authentication_lock:
-        client = _install_history_compatibility(_client_manager.get_client())
-        _bind_cleanup_authentication(client)
-        _request_authentication_generation.set(_cleanup_context())
-        return client
-
-
-def _bind_cleanup_authentication(client: Any) -> None:
-    if not isinstance(_cleanup_manager, RemoteChatCleanupManager):
-        return
-    cookies = getattr(client, "cookies", None)
-    getter = getattr(cookies, "get", None)
-    psid = getter("__Secure-1PSID") if callable(getter) else None
-    if not isinstance(psid, str):
-        psid = os.environ.get("GEMINI_PSID", "")
-    store = get_default_state_store()
-    _cleanup_manager.bind_authentication_scope(authentication_scope(psid, store=store), state_store=store)
-
-
-def get_remote_chat_cleanup_manager(client: Any = None) -> RemoteChatCleanupManager:
-    """Return the shared owner bound to the explicitly selected credentials."""
-    with _authentication_lock:
-        if client is None:
-            client = get_gemini_client()
-        else:
-            _bind_cleanup_authentication(client)
-        return _cleanup_manager
-
-
-def get_authentication_scope() -> str | None:
-    """Read the selected client's private scope without initializing or sending RPCs."""
-    try:
-        get_gemini_client()
-    except ValueError:
-        return None
-    if isinstance(_cleanup_manager, RemoteChatCleanupManager):
-        return _cleanup_manager.authentication_scope_id()
-    # A legacy test/lifecycle replacement must not invent persistent authority.
-    return None
+    return _install_history_compatibility(_client_manager.get_client())
 
 
 async def initialize_client() -> Any:
@@ -233,7 +182,7 @@ async def reset_client_async() -> Optional[DomainResult[LifecycleResetAllData]]:
     reset_result: Optional[DomainResult[LifecycleResetAllData]] = None
     if isinstance(_session_manager, SessionService):
         reset_result = await _lifecycle_service.reset_all(
-            delete_callback=lambda cid: delete_remote_chat_result(cid),
+            delete_callback=lambda cid: delete_remote_chat(cid),
         )
     else:
         _lifecycle_service.clear_sessions()
@@ -253,25 +202,15 @@ def create_session(
     delete_after_seconds: Optional[int] = None,
 ) -> SessionOperationResult:
     """创建带不可碰撞本地 ID 的共享会话。"""
-    with _authentication_lock:
-        generation = _request_cleanup_generation()
-        current_context = _cleanup_context()
-        if generation is not None and current_context is not None and generation != current_context[1]:
-            state = SessionData(session=session, model=model, retain_chat=retain_chat)
-            result = SessionOperationResult.authentication_changed(state)
-            return _lifecycle_service.record_cancelled_session_result(result, generation=generation)
-        result = _lifecycle_service.create_session(
-            session,
-            model,
-            thinking_level=thinking_level,
-            learning_mode=learning_mode,
-            temporary=temporary,
-            retain_chat=retain_chat,
-            delete_after_seconds=delete_after_seconds,
-        )
-        if result.session is not None and current_context is not None:
-            result.session._authentication_generation = current_context[1]
-        return result
+    return _lifecycle_service.create_session(
+        session,
+        model,
+        thinking_level=thinking_level,
+        learning_mode=learning_mode,
+        temporary=temporary,
+        retain_chat=retain_chat,
+        delete_after_seconds=delete_after_seconds,
+    )
 
 
 def store_session(
@@ -285,23 +224,16 @@ def store_session(
     delete_after_seconds: Optional[int] = None,
 ) -> None:
     """存储会话"""
-    with _authentication_lock:
-        generation, current_context = _request_cleanup_generation(), _cleanup_context()
-        if generation is not None and current_context is not None and generation != current_context[1]:
-            _cleanup_manager.record_authentication_context_change(getattr(session, "cid", None), generation=generation)
-            raise RuntimeError("Authentication context changed before the session could be stored.")
-        state = _lifecycle_service.store_session(
-            session_id,
-            session,
-            model,
-            thinking_level=thinking_level,
-            learning_mode=learning_mode,
-            temporary=temporary,
-            retain_chat=retain_chat,
-            delete_after_seconds=delete_after_seconds,
-        )
-        if isinstance(state, SessionData) and current_context is not None:
-            state._authentication_generation = current_context[1]
+    _lifecycle_service.store_session(
+        session_id,
+        session,
+        model,
+        thinking_level=thinking_level,
+        learning_mode=learning_mode,
+        temporary=temporary,
+        retain_chat=retain_chat,
+        delete_after_seconds=delete_after_seconds,
+    )
 
 
 def get_session(session_id: str) -> Optional[Dict[str, Any]]:
@@ -328,7 +260,7 @@ async def reset_session(session_id: str) -> SessionOperationResult:
     """只重置指定会话，并按保留策略清理其远端聊天。"""
     return await _lifecycle_service.reset_one(
         session_id,
-        delete_callback=lambda cid: delete_remote_chat_result(cid),
+        delete_callback=lambda cid: delete_remote_chat(cid),
     )
 
 
@@ -376,7 +308,6 @@ def schedule_remote_chat_cleanup_from_response(
         retain_chat=retain_chat,
         delete_after_seconds=delete_after_seconds,
         source=source,
-        authentication_generation=_request_cleanup_generation(),
     )
     if observation.upstream_chat_id is None:
         return None
@@ -391,45 +322,21 @@ def schedule_remote_chat_cleanup(
     retain_chat: bool = False,
     delete_after_seconds: Optional[int] = None,
     source: str = "",
+    reschedule_pending: bool = False,
+    _owner_account: str | None = None,
 ) -> CleanupObservation:
     """登记远端 Gemini chat 的自动删除任务。"""
+    if _owner_account is not None:
+        return _cleanup_manager.schedule_cleanup_result(
+            cid, retain_chat=retain_chat, delete_after_seconds=delete_after_seconds,
+            source=source, reschedule_pending=reschedule_pending, _owner_account=_owner_account,
+        )
     return _lifecycle_service.schedule_cleanup(
         cid,
         retain_chat=retain_chat,
         delete_after_seconds=delete_after_seconds,
         source=source,
-        authentication_generation=_request_cleanup_generation(),
-    )
-
-
-async def _initialize_cleanup_client() -> Any:
-    """Resolve a current initialized generation inside the cleanup error boundary."""
-    client = get_gemini_client()
-    initialized = await initialize_client()
-    return initialized if initialized is not None else client
-
-
-async def finalize_generated_chat_cleanup(
-    response: Any,
-    *,
-    owns_chat: bool,
-    retain_chat: bool = False,
-    preserve_for_recovery: bool = False,
-    delete_after_seconds: Optional[int] = None,
-    source: str = "",
-    client: Any = None,
-) -> CleanupObservation:
-    """Finalize a newly generated chat after artifact verification or recovery policy."""
-    return await _lifecycle_service.finalize_generated_chat(
-        response,
-        owns_chat=owns_chat,
-        retain_chat=retain_chat,
-        preserve_for_recovery=preserve_for_recovery,
-        delete_after_seconds=delete_after_seconds,
-        source=source,
-        client=client,
-        client_initializer=_initialize_cleanup_client if client is None else None,
-        authentication_generation=_request_cleanup_generation(),
+        reschedule_pending=reschedule_pending,
     )
 
 
@@ -442,30 +349,97 @@ async def delete_remote_chat(cid: Optional[str], client: Any = None) -> bool:
     }
 
 
+async def finalize_remote_chat_cleanup(
+    cid: Optional[str],
+    retain_chat: bool = False,
+    delete_after_seconds: Optional[int] = None,
+    source: str = "",
+    client: Any = None,
+    *,
+    expected_account: str | None = None,
+) -> CleanupObservation:
+    """Apply explicit retention or await the default immediate verified deletion."""
+    delay = get_default_chat_retention_seconds() if delete_after_seconds is None else max(0, delete_after_seconds)
+    owner = expected_account or _cleanup_manager._account()
+    if not owner and is_valid_remote_chat_id(cid):
+        return CleanupObservation(state=CleanupState.FAILED, upstream_chat_id=cid, source=source)
+    try:
+        if retain_chat or delay > 0 or not is_valid_remote_chat_id(cid):
+            return schedule_remote_chat_cleanup(
+                cid, retain_chat=retain_chat, delete_after_seconds=delete_after_seconds, source=source,
+                reschedule_pending=True, _owner_account=owner,
+            )
+        # Apply the latest explicit policy synchronously without launching a
+        # competing delete task that might use a different client instance.
+        observation = _cleanup_manager.schedule_cleanup_result(
+            cid, retain_chat=False, delete_after_seconds=0, source=source, dispatch=False,
+            reschedule_pending=True, _owner_account=owner,
+        )
+        if _cleanup_manager._account_key_provider() != owner:
+            return CleanupObservation(state=CleanupState.FAILED, upstream_chat_id=cid, source=source)
+        if observation.state in {CleanupState.COMPLETED, CleanupState.ALREADY_COMPLETED, CleanupState.FAILED}:
+            return observation
+        return await delete_remote_chat_result(cid, client=client, expected_account=owner)
+    except Exception as error:
+        try:
+            return _cleanup_manager.record_cleanup_failure(cid, error, source=source, expected_account=owner)
+        except Exception as persistence_error:
+            diagnostic = new_diagnostic_id()
+            logger.warning("Cleanup metadata not persisted diagnostic_id=%s error_type=%s",
+                           diagnostic, type(persistence_error).__name__)
+            return CleanupObservation(state=CleanupState.FAILED, upstream_chat_id=cid,
+                                      attempts=1, diagnostic_id=diagnostic, source=source)
+
+
+async def finalize_remote_chat_cleanup_from_response(
+    response: Any,
+    retain_chat: bool = False,
+    delete_after_seconds: Optional[int] = None,
+    source: str = "",
+    client: Any = None,
+    *,
+    expected_account: str | None = None,
+) -> CleanupObservation:
+    """Finish a one-shot workflow only after its artifacts have been consumed."""
+    from .remote_chat_cleanup_manager import extract_remote_chat_id
+
+    return await finalize_remote_chat_cleanup(
+        extract_remote_chat_id(response), retain_chat=retain_chat, delete_after_seconds=delete_after_seconds,
+        source=source, client=client, expected_account=expected_account,
+    )
+
+
 async def delete_remote_chat_result(
     cid: Optional[str],
     client: Any = None,
+    *,
+    expected_account: str | None = None,
 ) -> CleanupObservation:
     """Immediately delete a chat and retain structured lifecycle evidence."""
     if not is_valid_remote_chat_id(cid):
         return CleanupObservation(
             state=(CleanupState.INVALID_ID if cid is not None else CleanupState.NOT_APPLICABLE),
         )
-    return await _lifecycle_service.delete_chat_result(
-        cid,
-        client=client,
-        client_initializer=_initialize_cleanup_client if client is None else None,
-        authentication_generation=_request_cleanup_generation(),
-    )
+    manager = _cleanup_manager
+    if isinstance(manager, RemoteChatCleanupManager):
+        expected_account = expected_account or manager._account()
+        if expected_account is not None and manager._account_key_provider() != expected_account:
+            return CleanupObservation(state=CleanupState.FAILED, upstream_chat_id=cid)
+    if client is None:
+        await initialize_client()
+        if (isinstance(manager, RemoteChatCleanupManager) and expected_account is not None
+                and manager._account_key_provider() != expected_account):
+            return CleanupObservation(state=CleanupState.FAILED, upstream_chat_id=cid)
+        client = get_gemini_client()
+    return await _lifecycle_service.delete_chat_result(cid, client=client, expected_account=expected_account)
 
 
 async def cleanup_due_remote_chats(client: Any = None) -> int:
     """清理已经到期的远端 Gemini chat。"""
-    return await _lifecycle_service.cleanup_due_chats(
-        client=client,
-        client_initializer=_initialize_cleanup_client if client is None else None,
-        authentication_generation=_request_cleanup_generation(),
-    )
+    if client is None:
+        client = get_gemini_client()
+        await initialize_client()
+    return await _lifecycle_service.cleanup_due_chats(client=client)
 
 
 def list_pending_remote_chat_cleanup() -> Dict[str, Dict[str, Any]]:
@@ -482,32 +456,92 @@ def list_pending_remote_chat_cleanup() -> Dict[str, Dict[str, Any]]:
     }
 
 
+async def _drain_due_cleanup() -> None:
+    cleanup_expired_sessions()
+    pending = _cleanup_manager.list_pending_cleanup()
+    if not any(task.delete_at <= time.time() for task in pending.values()):
+        return
+    try:
+        await cleanup_due_remote_chats()
+    except Exception as error:
+        logger.warning("Deferred cleanup could not run error_type=%s", type(error).__name__)
+
+
+@asynccontextmanager
+async def server_lifespan(_server: Any):
+    """Resume durable cleanup while serving and finish active sessions on exit."""
+    async def maintain() -> None:
+        while True:
+            try:
+                from .infrastructure.operation_store import OperationStore
+                from .services.background import maintain_background_operations, repair_operation_cleanup
+                await maintain_background_operations()
+                repair_operation_cleanup(
+                    OperationStore(), _cleanup_manager.get_cleanup_observation, schedule_remote_chat_cleanup,
+                )
+                await _drain_due_cleanup()
+            except Exception as error:
+                logger.warning("Cleanup queue remains unverified error_type=%s", type(error).__name__)
+            await asyncio.sleep(15)
+
+    maintenance = asyncio.create_task(maintain())
+    try:
+        yield {}
+    finally:
+        maintenance.cancel()
+        # Stdio EOF normally cancels the serving scope; shield finalization so
+        # a short-lived caller cannot discard its non-retained conversations.
+        with anyio.CancelScope(shield=True):
+            deadline = asyncio.get_running_loop().time() + 30
+            try:
+                with suppress(asyncio.CancelledError):
+                    await _await_shutdown_step(maintenance, deadline)
+                if asyncio.get_running_loop().time() < deadline:
+                    from .services.task_browser_sessions import close_task_browser_sessions
+                    await _await_shutdown_step(close_task_browser_sessions(), deadline)
+                if asyncio.get_running_loop().time() < deadline:
+                    await _await_shutdown_step(
+                        _lifecycle_service.reset_all(delete_callback=delete_remote_chat_result), deadline,
+                    )
+                if asyncio.get_running_loop().time() < deadline:
+                    await _await_shutdown_step(_drain_due_cleanup(), deadline)
+            except Exception as error:
+                logger.warning("Shutdown cleanup remains unverified error_type=%s", type(error).__name__)
+            finally:
+                if asyncio.get_running_loop().time() < deadline:
+                    await _await_shutdown_step(_client_manager.reset_async(), deadline)
+
+
+async def _await_shutdown_step(awaitable: Any, deadline: float) -> bool:
+    """Honor one shared deadline even if an upstream coroutine ignores cancel."""
+    task = asyncio.ensure_future(awaitable)
+    remaining = max(0.0, deadline - asyncio.get_running_loop().time())
+    done, _ = await asyncio.wait({task}, timeout=remaining)
+    if done:
+        await task
+        return True
+    task.cancel()
+
+    def consume(finished: asyncio.Future) -> None:
+        with suppress(BaseException):
+            finished.result()
+
+    task.add_done_callback(consume)
+    logger.warning("Shutdown deadline reached; cleanup remains in the durable queue")
+    return False
+
+
 # ============ Cookie 管理接口 ============
 
 def _on_cookie_update(cookie_data: CookieData) -> None:
     """Cookie 更新回调"""
-    with _authentication_lock:
-        authentication = dict(getattr(cookie_data, "extra_cookies", {}))
-        authentication["__Secure-1PSID"] = cookie_data.psid
-        if cookie_data.psidts:
-            authentication["__Secure-1PSIDTS"] = cookie_data.psidts
-        else:
-            authentication.pop("__Secure-1PSIDTS", None)
-        changed = not _client_manager.authentication_matches(authentication)
-        same_scope = _cleanup_manager.credentials_match_scope(cookie_data.psid) if isinstance(_cleanup_manager, RemoteChatCleanupManager) else None
-        identity_changed = not same_scope if same_scope is not None else cookie_data.psid != os.environ.get("GEMINI_PSID", "")
-        if identity_changed:
-            _lifecycle_service.invalidate_authentication_context()
-        os.environ["GEMINI_PSID"] = cookie_data.psid
-        for name, env in (("__Secure-1PSIDTS", "GEMINI_PSIDTS"), ("__Secure-1PSIDCC", "GEMINI_PSIDCC")):
-            value = authentication.get(name, "")
-            if value:
-                os.environ[env] = value
-            else:
-                os.environ.pop(env, None)
-        if changed:
-            logger.info("🔄 认证已更新，已重置客户端 identity_changed=%s", identity_changed)
-            _client_manager.reset()
+    logger.info("🔄 Cookie 已更新，重置客户端...")
+    os.environ["GEMINI_PSID"] = cookie_data.psid
+    if cookie_data.psidts:
+        os.environ["GEMINI_PSIDTS"] = cookie_data.psidts
+    else:
+        os.environ.pop("GEMINI_PSIDTS", None)
+    reset_client()
 
 
 def init_cookie_manager_integration() -> None:
@@ -526,27 +560,26 @@ def get_cookie_from_browser(browser: str = "chrome", profile: str = "") -> bool:
     if not COOKIE_MANAGER_AVAILABLE:
         logger.error("❌ Cookie Manager 不可用")
         return False
-    _prepare_browser_cookie_cache(force=True)
     cm = get_cookie_manager()
-    cookies = cm.get_cookies_from_browser(browser, profile=profile)
+    discovery = cm.discover_browser_cookies(browser, profile=profile)
+    cookies = discovery.cookies
+    _client_manager.browser_auth_reason = discovery.reason
     psid = cookies.get("__Secure-1PSID")
     psidts = cookies.get("__Secure-1PSIDTS", "")
     if psid:
-        source = f"browser_{browser}"
-        if profile:
-            source += f":{profile}"
-        update_kwargs: dict[str, Any] = {"source": source, "extra_cookies": cookies}
-        if isinstance(cm, CookieManager):
-            update_kwargs["notify"] = _on_cookie_update
-        success = cm.update_cookie(psid, psidts, **update_kwargs)
+        source = discovery.source or f"browser_{browser}"
+        success = cm.update_cookie(
+            psid,
+            psidts,
+            source=source,
+            extra_cookies=cookies,
+        )
         if success:
-            # Library callers and compact startup may not have installed the
-            # monitor callback. Authentication publication always retires the
-            # old client and clears stale fields, independent of that setup.
-            if not isinstance(cm, CookieManager) and getattr(cm, "on_cookie_update", None) is not _on_cookie_update:
-                _on_cookie_update(
-                    CookieData(psid=psid, psidts=psidts, extra_cookies=cookies, source=source),
-                )
+            os.environ["GEMINI_PSID"] = psid
+            if psidts:
+                os.environ["GEMINI_PSIDTS"] = psidts
+            else:
+                os.environ.pop("GEMINI_PSIDTS", None)
             logger.info("✅ 已从浏览器获取 Cookie 并更新")
         return success
     return False
@@ -561,9 +594,33 @@ def list_browser_cookie_profiles(browser: str = "chrome", validate: bool = True)
     return get_cookie_manager().list_browser_cookie_profiles(browser, validate=validate)
 
 
+def init_startup_infrastructure() -> None:
+    """服务器启动时的基础设施自动化（AI 不可见）。
+
+    初始化 Cookie Manager，并在未配置 Cookie 时尝试从已登录浏览器自动获取。
+    所有 MCP 服务器入口（server.py、skill_server.py、assist.py）均应调用，
+    以保证启动行为一致，无需用户每次确认。
+    """
+    init_cookie_manager_integration()
+
+    if browser_cookie_auto_load_enabled() and not os.environ.get("GEMINI_PSID"):
+        logger.info("🍪 环境变量未设置 Cookie，尝试从 Chrome 自动获取...")
+        try:
+            _client_manager.ensure_browser_cookie()
+        except ClientAuthenticationRequired as error:
+            logger.warning("Browser cookie autoload unavailable reason=%s", error.auth_reason)
+
+
+def ensure_web_cookie() -> None:
+    """Make browser acquisition available to background submissions before they claim an account."""
+    _client_manager.ensure_browser_cookie()
+
+
 def get_cookie_status() -> Dict[str, Any]:
     """获取 Cookie 状态"""
     if not COOKIE_MANAGER_AVAILABLE:
         return {"available": False, "message": "Cookie Manager 不可用"}
     status, info = get_cookie_manager().get_cookie_status()
-    return {"available": True, "status": status.value, **info}
+    return {**info, "available": True, "status": status.value,
+            "browser_auto_load": browser_cookie_auto_load_enabled(),
+            "browser_auth_reason": _client_manager.browser_auth_reason}

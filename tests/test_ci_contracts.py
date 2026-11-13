@@ -10,14 +10,14 @@ import tomllib
 from pathlib import Path
 
 from scripts.run_contract_checklist import CONTRACT_TESTS
-from scripts.smoke_profiles import ACCOUNT_TOOLS, ASSIST_TOOLS, COMPACT_TOOLS, CREATE_TOOLS, PRIMARY_PROFILE_TOOLS
+from scripts.smoke_profiles import ACCOUNT_TOOLS, ASSIST_TOOLS, COMPACT_TOOLS, FUNCTION_TOOLS, PRIMARY_PROFILE_TOOLS
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 CI_WORKFLOW = PROJECT_ROOT / ".github" / "workflows" / "ci.yml"
 RELEASE_WORKFLOW = PROJECT_ROOT / ".github" / "workflows" / "release.yml"
 LIVE_CANARY_WORKFLOW = PROJECT_ROOT / ".github" / "workflows" / "live-canary.yml"
 SKILLS_REF_SHA = "38a2ff82958afee88dadf4831509e6f7e9d8ef4e"
-SETUP_UV_SHA = "68559e99cc807c1eb7e9238fd43a15bba460eec2"
+SETUP_UV_SHA = "20cfd1bf945f4377ade1205e4dbc17946fc9a30d"
 SKILLS_CLI_VERSION = "1.5.21"
 
 
@@ -42,30 +42,101 @@ def test_targeted_contract_checklist_covers_stable_architecture_boundaries() -> 
         "tests/test_mcp_sdk_v2.py",
         "tests/test_conversation_lifecycle.py",
         "tests/test_chat_service.py",
+        "tests/test_chat_timeouts.py",
+        "tests/test_session_sdk_recovery.py",
+        "tests/test_session_cleanup_guards.py",
+        "tests/test_model_policy.py",
+        "tests/test_model_policy_integration.py",
+        "tests/test_chat_management_service.py",
+        "tests/test_chat_metadata.py",
+        "tests/test_chat_management_tools.py",
+        "tests/test_history_compact.py",
+        "tests/test_cleanup_store.py",
+        "tests/test_cleanup_runtime.py",
+        "tests/test_remote_chat_cleanup_manager.py",
+        "tests/test_task_owned_cleanup.py",
+        "tests/test_owned_cleanup.py",
+        "tests/test_operations.py",
+        "tests/test_operation_store.py",
+        "tests/test_research_identity.py",
+        "tests/test_research_legacy_identity.py",
+        "tests/test_research_result_storage.py",
+        "tests/test_saved_research_derivatives.py",
+        "tests/test_research_worker_recovery.py",
+        "tests/test_background_operations.py",
+        "tests/test_media_jobs.py",
+        "tests/test_task_jobs.py",
+        "tests/test_task_inputs.py",
+        "tests/test_task_confirmation.py",
+        "tests/test_task_setup.py",
+        "tests/test_task_files.py",
+        "tests/test_managed_skills.py",
+        "tests/test_managed_skill_transport.py",
+        "tests/test_notebook_admin.py",
+        "tests/test_notebooklm_service.py",
+        "tests/test_web_tasks_service.py",
+        "tests/test_web_context_transport.py",
+        "tests/test_task_progress.py",
+        "tests/test_task_schedules_service.py",
+        "tests/test_task_schedule_transport.py",
+        "tests/test_remy_schedule_contracts.py",
+        "tests/test_task_schedule_guards.py",
+        "tests/test_task_schedule_lifecycle.py",
+        "tests/test_task_schedule_timestamps.py",
+        "tests/test_task_schedule_bounds.py",
+        "tests/test_task_browser_service.py",
+        "tests/test_task_browser_sessions.py",
+        "tests/test_task_browser_turn.py",
+        "tests/test_task_browser_retries.py",
+        "tests/test_task_account_lifecycle.py",
+        "tests/test_task_delete_readback.py",
+        "tests/test_task_browser_transport.py",
+        "tests/test_task_browser_tools.py",
+        "tests/test_preference_transport.py",
+        "tests/test_preferences_service.py",
+        "tests/test_preference_tools.py",
+        "tests/test_browser_action_store.py",
+        "tests/test_rfb.py",
+        "tests/test_rfb_regressions.py",
+        "tests/test_operation_tools.py",
         "tests/test_compact_history_contract.py",
         "tests/test_artifacts.py",
         "tests/test_manage_gem_verification_contract.py",
+        "tests/test_gem_custom_catalog.py",
+        "tests/test_gem_mutation_retry_scope.py",
+        "tests/test_history_mutation_fencing.py",
+        "tests/test_account_read_fencing.py",
+        "tests/test_notebook_move_fencing.py",
+        "tests/test_scheduled_mutation_evidence.py",
         "tests/test_rpc_contracts.py",
+        "tests/test_candidate_attribution.py",
         "tests/test_upstream_compatibility.py",
         "tests/test_live_canary.py",
         "tests/test_package_integrity.py",
+        "tests/test_function_surface.py",
+        "tests/test_account_surface.py",
+        "tests/test_protocol_smoke.py",
         "tests/test_onboarding.py",
-        "tests/test_onboarding_media.py",
         "tests/test_onboarding_distribution.py",
         "tests/test_version_consistency.py",
         "tests/test_evaluations.py",
         "tests/test_development_skill.py",
         "tests/test_skill_packaging.py",
         "tests/test_assist_skill.py",
-        "tests/test_focused_surfaces.py",
-        "tests/test_focused_skills.py",
         "tests/test_ci_contracts.py",
     } == set(CONTRACT_TESTS)
 
 
 def test_representative_profile_snapshots_are_explicit_and_exhaustive() -> None:
+    from src.surfaces import catalogs
+
+    assert FUNCTION_TOOLS == catalogs.FUNCTION_TOOLS
+    assert ACCOUNT_TOOLS == catalogs.ACCOUNT_TOOLS
+    assert len(FUNCTION_TOOLS) == 17 and len(ACCOUNT_TOOLS) == 17
+    assert not FUNCTION_TOOLS & ACCOUNT_TOOLS
     assert set(PRIMARY_PROFILE_TOOLS) == {
         "core",
+        "media",
         "model",
         "history",
         "history-organize",
@@ -74,18 +145,12 @@ def test_representative_profile_snapshots_are_explicit_and_exhaustive() -> None:
         "all",
     }
     assert all(PRIMARY_PROFILE_TOOLS.values())
-    assert len(PRIMARY_PROFILE_TOOLS["all"]) == 49
+    assert len(PRIMARY_PROFILE_TOOLS["all"]) == 48
+    assert {"gemini_get_operation_status", "gemini_get_operation_result"} <= PRIMARY_PROFILE_TOOLS["all"]
     assert COMPACT_TOOLS == {
-        "account",
         "chat",
-        "cleanup",
-        "cookie",
         "create",
-        "doctor",
         "edit",
-        "history",
-        "prompts",
-        "scheduled",
         "session",
     }
     assert ASSIST_TOOLS == {
@@ -95,8 +160,6 @@ def test_representative_profile_snapshots_are_explicit_and_exhaustive() -> None:
         "gemini_understand",
         "gemini_understand_image",
     }
-    assert len(CREATE_TOOLS) == 7
-    assert len(ACCOUNT_TOOLS) == 7
 
 
 def test_profile_snapshot_smoke_passes_from_the_installed_environment() -> None:
@@ -119,7 +182,7 @@ def test_profile_snapshot_smoke_passes_from_the_installed_environment() -> None:
 def test_ci_workflow_has_separate_diagnostic_offline_gates() -> None:
     workflow = CI_WORKFLOW.read_text(encoding="utf-8")
 
-    assert 'branches: [main, "agent/**"]' in workflow
+    assert 'branches: [main, "agent/**", "codex/**"]' in workflow
     assert "concurrency:" in workflow
     assert "group: ${{ github.workflow }}-${{ github.ref }}" in workflow
     assert "cancel-in-progress: true" in workflow
@@ -140,13 +203,14 @@ def test_ci_workflow_has_separate_diagnostic_offline_gates() -> None:
         assert command in workflow
     assert workflow.count("cache: pip") == 7
     assert 'GEMINI_AUTO_REFRESH: "false"' in workflow
+    assert 'GEMINI_BROWSER_AUTO_LOAD: "false"' in workflow
 
 
 def test_ci_pins_reference_skill_validator_and_checks_single_public_sources() -> None:
     workflow = CI_WORKFLOW.read_text(encoding="utf-8")
 
     assert SKILLS_REF_SHA in workflow
-    assert workflow.count("skills-ref validate") == 5
+    assert workflow.count("skills-ref validate") == 3
     assert ".codex/skills" not in workflow
     assert f"skills@{SKILLS_CLI_VERSION} add \"$GITHUB_WORKSPACE\" --skill gemini-web-mcp-development" in workflow
     assert (

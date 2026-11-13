@@ -18,26 +18,28 @@ SKILLS_CLI = "skills@1.5.21"
 
 def _server_from_json(name: str, root_key: str) -> tuple[dict, dict]:
     payload = json.loads((CLIENTS / name).read_text(encoding="utf-8"))
+    assert set(payload[root_key]) == {"gemini"}
     server = payload[root_key]["gemini"]
     return payload, server
 
 
-def _assert_primary_model_server(server: dict) -> None:
+def _assert_function_server(server: dict) -> None:
     if "type" in server:
         assert server["type"] == "stdio"
     assert server["command"] == "uvx"
-    assert server["args"] == ["--from", CANONICAL_GIT_SOURCE, "gemini-mcp-server"]
-    assert server["env"]["GEMINI_TOOLS"] == "model"
+    assert server["args"] == ["--from", CANONICAL_GIT_SOURCE, "gemini-mcp-function"]
+    assert "GEMINI_TOOLS" not in server["env"]
     assert server["env"]["GEMINI_AUTO_REFRESH"] == "false"
 
 
 def test_codex_configuration_parses_and_forwards_host_secrets() -> None:
     payload = tomllib.loads((CLIENTS / "codex.config.toml").read_text(encoding="utf-8"))
+    assert set(payload["mcp_servers"]) == {"gemini"}
     server = payload["mcp_servers"]["gemini"]
 
     assert server["command"] == "uvx"
-    assert server["args"] == ["--from", CANONICAL_GIT_SOURCE, "gemini-mcp-server"]
-    assert server["env"] == {"GEMINI_TOOLS": "model", "GEMINI_AUTO_REFRESH": "false"}
+    assert server["args"] == ["--from", CANONICAL_GIT_SOURCE, "gemini-mcp-function"]
+    assert server["env"] == {"GEMINI_AUTO_REFRESH": "false"}
     assert server["env_vars"] == ["GEMINI_PSID", "GEMINI_PSIDTS", "GEMINI_PSIDCC"]
     assert server["startup_timeout_sec"] == 60
     assert server["tool_timeout_sec"] == 720
@@ -46,7 +48,7 @@ def test_codex_configuration_parses_and_forwards_host_secrets() -> None:
 def test_claude_desktop_configuration_uses_explicit_local_placeholders() -> None:
     _, server = _server_from_json("claude-desktop.json", "mcpServers")
 
-    _assert_primary_model_server(server)
+    _assert_function_server(server)
     assert server["env"]["GEMINI_PSID"] == "REPLACE_WITH_SECURE_1PSID"
     assert server["env"]["GEMINI_PSIDTS"] == "REPLACE_OR_REMOVE_IF_UNAVAILABLE"
 
@@ -54,7 +56,7 @@ def test_claude_desktop_configuration_uses_explicit_local_placeholders() -> None
 def test_claude_code_configuration_expands_environment_variables() -> None:
     _, server = _server_from_json("claude-code.mcp.json", "mcpServers")
 
-    _assert_primary_model_server(server)
+    _assert_function_server(server)
     assert server["env"]["GEMINI_PSID"] == "${GEMINI_PSID}"
     assert server["env"]["GEMINI_PSIDTS"] == "${GEMINI_PSIDTS:-}"
     assert server["timeout"] == 720000
@@ -63,7 +65,7 @@ def test_claude_code_configuration_expands_environment_variables() -> None:
 def test_vscode_configuration_uses_password_inputs_and_servers_root() -> None:
     payload, server = _server_from_json("vscode.mcp.json", "servers")
 
-    _assert_primary_model_server(server)
+    _assert_function_server(server)
     assert {item["id"] for item in payload["inputs"]} == {"gemini-psid", "gemini-psidts"}
     assert all(item["type"] == "promptString" and item["password"] is True for item in payload["inputs"])
     assert server["env"]["GEMINI_PSID"] == "${input:gemini-psid}"
@@ -117,3 +119,11 @@ def test_public_readme_badges_do_not_hardcode_volatile_test_counts() -> None:
         text = path.read_text(encoding="utf-8")
         assert "tests-CI%20verified" in text
         assert re.search(r"tests-[0-9]+", text) is None
+
+
+def test_client_document_explains_optional_account_and_offline_function_preflight() -> None:
+    text = (PROJECT_ROOT / "docs" / "client-examples.md").read_text(encoding="utf-8")
+    assert "gemini-mcp-function" in text and "gemini-mcp-account" in text
+    assert "not enabled by the supplied default files" in text
+    assert "INVALID_ARGUMENT" in text and "gemini_ask" in text
+    assert "MCP-owned ledger" in text and "never title matches" in text

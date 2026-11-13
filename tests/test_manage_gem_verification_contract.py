@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import pytest
 from types import SimpleNamespace
 
 from tests._fastmcp_shim import FastMCP
@@ -35,6 +36,15 @@ async def _call(mcp, **kwargs):
     content, _structured = await mcp.call_tool("gemini_manage_gems", kwargs)
     return content[0].text
 
+
+
+@pytest.fixture(autouse=True)
+def _synthetic_gem_account_and_catalog(monkeypatch):
+    monkeypatch.setenv("GEMINI_PSID", "synthetic-test-account")
+    async def read_catalog(client, **_kwargs):
+        return await client.fetch_gems()
+    monkeypatch.setattr("src.services.gems.read_custom_gems", read_catalog)
+    monkeypatch.setattr("src.tools.manage.read_custom_gems", read_catalog)
 
 def test_mapping_backed_gems_render_name_id_and_description(monkeypatch):
     class Client:

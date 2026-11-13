@@ -1,5 +1,7 @@
 """Cross-adapter evidence for the single shared session lifecycle."""
 
+import pytest
+
 import asyncio
 from types import SimpleNamespace
 
@@ -155,3 +157,11 @@ def test_unknown_single_reset_never_clears_other_adapter_sessions(monkeypatch):
 
     session_id = asyncio.run(run())
     assert service.lookup_session(session_id).ok is True
+
+
+@pytest.fixture(autouse=True)
+def _synthetic_chat_account(monkeypatch):
+    monkeypatch.setenv("GEMINI_PSID", "synthetic-chat-test-account")
+    from src.infrastructure.account_identity import current_account_key
+
+    monkeypatch.setattr(client_wrapper._cleanup_manager, "_account_key_provider", current_account_key)

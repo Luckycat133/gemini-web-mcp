@@ -238,6 +238,54 @@ def new_operation_id() -> str:
     return f"op_{uuid.uuid4().hex}"
 
 
+_WEB_AUTH_REASONS = {
+    "BROWSER_COOKIE_ACCESS_DENIED": (
+        "The host denied this process access to the browser's Cookie storage.",
+        "Allow the app running MCP to read the intended browser profile, then retry.",
+    ),
+    "BROWSER_COOKIE_ACCESS_TIMEOUT": (
+        "Browser Cookie access timed out while waiting for system authorization.",
+        "Complete the browser storage permission prompt, then retry.",
+    ),
+    "BROWSER_COOKIE_DEPENDENCY_MISSING": (
+        "The browser Cookie reader is missing from this MCP installation.",
+        "Install gemini-web-mcp with the browser extra, then restart the MCP host.",
+    ),
+    "BROWSER_COOKIE_AUTO_LOAD_DISABLED": (
+        "Browser Cookie autoload is disabled and no Web session is configured.",
+        "Enable GEMINI_BROWSER_AUTO_LOAD in the MCP environment or configure a valid Web Cookie.",
+    ),
+    "BROWSER_COOKIE_NOT_FOUND": (
+        "No Gemini Web session Cookie was found in the readable browser profiles.",
+        "Check the signed-in browser profile or configure a valid Web Cookie.",
+    ),
+    "BROWSER_COOKIE_ACCOUNT_MISMATCH": (
+        "Browser Cookie discovery did not find the bound Gemini account.",
+        "Use the browser profile for the original account.",
+    ),
+    "BROWSER_COOKIE_AUTH_REJECTED": (
+        "Google rejected the Gemini session read from the browser.",
+        "Check the Gemini sign-in state in the intended browser profile.",
+    ),
+    "BROWSER_COOKIE_AUTH_UNVERIFIED": (
+        "The browser's Gemini session could not be verified.",
+        "Check the connection and the Gemini sign-in state in the intended browser profile.",
+    ),
+    "BROWSER_COOKIE_ACCESS_FAILED": (
+        "The browser's Cookie storage could not be read.",
+        "Check browser profile access with gemini_list_browser_cookie_profiles.",
+    ),
+    "GEMINI_SESSION_REJECTED": (
+        "Google did not accept the configured Gemini Web session.",
+        "Check the Gemini sign-in state in the intended browser profile.",
+    ),
+    "GEMINI_SESSION_UNVERIFIED": (
+        "The configured Gemini Web session could not be verified.",
+        "Check the connection and the Gemini sign-in state in the intended browser profile.",
+    ),
+}
+
+
 def result_from_exception(
     error: BaseException,
     *,
@@ -245,18 +293,25 @@ def result_from_exception(
     operation: str,
     request_id: str | None = None,
 ) -> DomainResult[Any]:
-    """Classify one exception, log raw evidence, and return a public-safe failure."""
+    """Classify one exception and correlate failures without logging private text."""
     request_id = request_id or new_request_id()
     diagnostic_id = new_diagnostic_id()
     code, message, retryable, suggested_action, state = _classify_exception(error)
+    details = {"operation": operation}
+    if code == DomainErrorCode.AUTH_REQUIRED:
+        for field in ("auth_reason", "browser_auth_reason"):
+            reason = getattr(error, field, None)
+            if isinstance(reason, str) and reason in _WEB_AUTH_REASONS:
+                details[field] = reason
+                description, suggested_action = _WEB_AUTH_REASONS[reason]
+                message = description if field == "auth_reason" else f"{message} {description}"
     logger.error(
-        "Domain operation failed operation=%s request_id=%s diagnostic_id=%s error_type=%s error=%r",
+        "Domain operation failed operation=%s request_id=%s diagnostic_id=%s error_type=%s code=%s",
         operation,
         request_id,
         diagnostic_id,
         type(error).__name__,
-        error,
-        exc_info=(type(error), error, error.__traceback__),
+        code.value,
     )
     return DomainResult.failure(
         code,
@@ -267,7 +322,7 @@ def result_from_exception(
         request_id=request_id,
         diagnostic_id=diagnostic_id,
         verification_status="exception_classified",
-        details={"operation": operation},
+        details=details,
     )
 
 
@@ -359,7 +414,7 @@ def _matches_network_error(legacy_code: str, error_text: str) -> bool:
 
 
 def _matches_model_unavailable(legacy_code: str, error_text: str) -> bool:
-    return legacy_code == "MODEL_UNAVAILABLE" or (
+    return legacy_code in {"MODEL_UNAVAILABLE", "CAPABILITY_UNAVAILABLE"} or (
         "model" in error_text and any(marker in error_text for marker in ("unavailable", "not available"))
     )
 
@@ -370,6 +425,13 @@ def _contains_any(error_text: str, *markers: str) -> bool:
 
 # Ordered text/legacy-code rules; first match wins, mirroring the original ladder.
 _TEXT_CLASSIFICATION_RULES: tuple[_TextRule, ...] = (
+    ((lambda code, text: code == "UPSTREAM_LIMIT_EXCEEDED"), (
+        DomainErrorCode.RATE_LIMITED,
+        "The requested model quota was exhausted.",
+        False,
+        "Do not replay this request; quota fallback is considered for new queries only.",
+        OperationState.FAILED,
+    )),
     (_matches_no_cookie, (
         DomainErrorCode.AUTH_REQUIRED,
         "Gemini Web authentication is not configured.",

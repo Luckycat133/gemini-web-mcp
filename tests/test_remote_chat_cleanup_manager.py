@@ -20,12 +20,13 @@
 """
 
 import asyncio
-import json
 import time
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
-from src.infrastructure.rpc_contracts import get_contract
+import pytest
+
+from src.domain import DomainErrorCode, DomainResult
 from src.remote_chat_cleanup_manager import (
     CleanupTask,
     RemoteChatCleanupManager,
@@ -33,20 +34,29 @@ from src.remote_chat_cleanup_manager import (
 )
 
 
+@pytest.fixture(autouse=True)
+def fake_verified_delete(monkeypatch, tmp_path):
+    """Legacy manager tests model a verified read-back, without external RPCs."""
+    monkeypatch.setenv("GEMINI_CLEANUP_DB_PATH", str(tmp_path / "cleanup.sqlite3"))
+    monkeypatch.setattr("src.remote_chat_cleanup_manager.default_account_key", lambda: "test-account")
+    async def verified(client, cid, *, expected_account, account_key_provider):
+        assert expected_account == account_key_provider()
+        if not hasattr(client, "delete_chat"):
+            return DomainResult.failure(DomainErrorCode.CAPABILITY_UNAVAILABLE, "missing delete")
+        await client.delete_chat(cid)
+        return DomainResult.success({}, verification_status="verified_absent")
+    monkeypatch.setattr("src.services.history.delete_chat_result", verified)
+    monkeypatch.setattr("src.services.history.observe_chat_absence", AsyncMock(return_value=(False, {})))
+
+
 def _run(coro):
     return asyncio.run(coro)
 
 
 def _async_delete_client(*, side_effect=None):
-    """Construct a client with confirmed-empty history metadata read-back."""
+    """构造带 async delete_chat 的假 client。"""
     client = SimpleNamespace()
     client.delete_chat = AsyncMock(side_effect=side_effect)
-    client._batch_execute = AsyncMock(
-        return_value=SimpleNamespace(
-            status_code=200,
-            text=json.dumps([["wrb.fr", get_contract("history.page").rpc_id, json.dumps([None, None, []])]]),
-        ),
-    )
     return client
 
 
@@ -141,7 +151,7 @@ def test_delete_after_delay_returns_early_when_pending_delete_at_mismatch():
     """pending 任务 delete_at 与调用时 delete_at 不匹配 → 早退不删除（line 112）。"""
     manager = RemoteChatCleanupManager()
     # 直接注入一个 delete_at 不同的 pending 任务
-    manager._pending_cleanup["c_1"] = CleanupTask(delete_at=99999.0, source="overwritten")
+    manager.schedule_cleanup("c_1", delete_after_seconds=99999, source="overwritten")
     # 用过去的 delete_at 调用（sleep(0)），guard 检测到 delete_at 不匹配 → return
     _run(manager._delete_after_delay("c_1", delete_at=1.0))
     # pending 任务仍存在（未被删除）
@@ -160,6 +170,7 @@ def test_delete_after_delay_happy_path_calls_delete_chat():
     client = _async_delete_client()
     manager = RemoteChatCleanupManager(client_provider=lambda: client)
     delete_at = time.time() - 1  # 过去时间 → sleep(0) 立即返回
+    manager._store.schedule(manager._account(), "c_1", delete_at, "s", retain=False)
     manager._pending_cleanup["c_1"] = CleanupTask(delete_at=delete_at, source="s")
     _run(manager._delete_after_delay("c_1", delete_at=delete_at))
     client.delete_chat.assert_awaited_once_with("c_1")
@@ -231,7 +242,7 @@ def test_delete_chat_returns_false_when_client_delete_raises():
 def test_delete_chat_success_removes_pending_and_returns_true():
     """删除成功 → 从 _pending_cleanup 移除 + 返回 True（happy path 回归）。"""
     manager = RemoteChatCleanupManager()
-    manager._pending_cleanup["c_1"] = CleanupTask(delete_at=99999.0, source="s")
+    manager.schedule_cleanup("c_1", delete_after_seconds=99999, source="s")
     client = _async_delete_client()
     result = _run(manager.delete_chat("c_1", client=client))
     assert result is True
@@ -245,7 +256,7 @@ def test_delete_chat_success_removes_pending_and_returns_true():
 
 def _register_due(manager, cid):
     """注册一个已到期的清理任务（delete_at 在过去）。"""
-    manager._pending_cleanup[cid] = CleanupTask(delete_at=time.time() - 10, source="due")
+    manager.schedule_cleanup(cid, delete_after_seconds=0, source="due")
 
 
 def test_cleanup_due_chats_uses_client_initializer():
@@ -284,15 +295,15 @@ def test_cleanup_due_chats_loops_over_multiple_due_and_counts_success():
 def test_cleanup_due_chats_counts_only_successful_deletes():
     """部分删除失败（delete_chat 抛异常）→ 不计入 deleted。"""
     manager = RemoteChatCleanupManager()
-    manager._pending_cleanup["c_ok"] = CleanupTask(delete_at=time.time() - 10, source="s")
-    manager._pending_cleanup["c_fail"] = CleanupTask(delete_at=time.time() - 10, source="s")
+    _register_due(manager, "c_ok")
+    _register_due(manager, "c_fail")
 
     # cleanup_due_chats 用同一 client 删所有 due cid；让 delete_chat 对 c_fail 抛异常
     async def selective_delete(cid):
         if cid == "c_fail":
             raise RuntimeError("nope")
 
-    selective_client = _async_delete_client(side_effect=selective_delete)
+    selective_client = SimpleNamespace(delete_chat=selective_delete)
     deleted = _run(manager.cleanup_due_chats(client=selective_client))
     assert deleted == 1  # 仅 c_ok 成功
 

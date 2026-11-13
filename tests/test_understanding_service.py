@@ -15,6 +15,7 @@ import asyncio
 from tests.media_fixtures import write_image
 from types import SimpleNamespace
 
+from src.constants import GEMINI_GENERIC_FAILURE_REPLY
 from src.domain import DomainErrorCode, DomainResult
 from src.services import (
     ChatOperationData,
@@ -514,6 +515,20 @@ def test_understand_marks_accepted_inputs_failed_when_the_chat_errors():
     assert _outcomes(result) == [("notes", "text", UnderstandingOutcome.FAILED)]
     assert result.meta.verification_status == "exception_classified"
     assert result.meta.details["failed"] == 1
+
+
+def test_understand_classifies_the_exact_gemini_failure_reply():
+    inputs = (UnderstandInput(id="notes", kind=UnderstandInputKind.TEXT, text="some notes"),)
+    stub = _StubChatService(response=_response(text=GEMINI_GENERIC_FAILURE_REPLY))
+    result = _understand(stub, task="Analyze.", inputs=inputs)
+    assert not result.ok and result.error.code is DomainErrorCode.UPSTREAM_REJECTED
+    assert result.meta.verification_status == "upstream_analysis_failure_observed"
+    assert result.data is not None and result.data.analysis == ""
+    assert _outcomes(result) == [("notes", "text", UnderstandingOutcome.FAILED)]
+
+    quoted = _StubChatService(response=_response(text=f"An example error is: {GEMINI_GENERIC_FAILURE_REPLY}"))
+    result = _understand(quoted, task="Analyze.", inputs=inputs)
+    assert result.ok and _outcomes(result) == [("notes", "text", UnderstandingOutcome.ANALYZED)]
 
 
 def test_understand_preserves_chat_failure_errors_and_marks_inputs_failed():

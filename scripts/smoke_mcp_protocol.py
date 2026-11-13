@@ -1,4 +1,4 @@
-"""Perform real MCP handshakes against all five stdio capability surfaces."""
+"""Verify functional/account and legacy MCP stdio entrypoints without Gemini requests."""
 
 from __future__ import annotations
 
@@ -15,13 +15,13 @@ from typing import Any
 from mcp import Client, StdioServerParameters, stdio_client
 
 if __package__:
-    from .smoke_profiles import ACCOUNT_TOOLS, ASSIST_TOOLS, COMPACT_TOOLS, CREATE_TOOLS, PRIMARY_PROFILE_TOOLS
+    from .smoke_profiles import ACCOUNT_TOOLS, ASSIST_TOOLS, COMPACT_TOOLS, FUNCTION_TOOLS, PRIMARY_PROFILE_TOOLS
 else:
     from smoke_profiles import (  # type: ignore[import-not-found,no-redef]
-        ASSIST_TOOLS,
         ACCOUNT_TOOLS,
+        ASSIST_TOOLS,
         COMPACT_TOOLS,
-        CREATE_TOOLS,
+        FUNCTION_TOOLS,
         PRIMARY_PROFILE_TOOLS,
     )
 
@@ -46,13 +46,20 @@ def _resolve_executable(command: str) -> str:
     return resolved
 
 
-def _safe_environment(profile: str) -> dict[str, str]:
+def _safe_environment(profile: str | None, state_directory: Path | None = None) -> dict[str, str]:
     environment = os.environ.copy()
     environment.pop("PYTHONPATH", None)
-    for name in ("GEMINI_PSID", "GEMINI_PSIDTS", "GEMINI_PSIDCC"):
+    for name in ("GEMINI_PSID", "GEMINI_PSIDTS", "GEMINI_PSIDCC", "GEMINI_API_KEY"):
         environment.pop(name, None)
     environment["GEMINI_AUTO_REFRESH"] = "false"
-    environment["GEMINI_TOOLS"] = profile
+    environment["GEMINI_BROWSER_AUTO_LOAD"] = "false"
+    if profile is None:
+        environment.pop("GEMINI_TOOLS", None)
+    else:
+        environment["GEMINI_TOOLS"] = profile
+    if state_directory is not None:
+        environment["GEMINI_OPERATION_DB_PATH"] = str(state_directory / "operations.sqlite3")
+        environment["GEMINI_CLEANUP_DB_PATH"] = str(state_directory / "cleanup.sqlite3")
     return environment
 
 
@@ -73,8 +80,6 @@ def _structured_domain_result(structured: object) -> dict[str, Any] | None:
     """Return the ``domain_result`` payload carried by one assist structured result."""
     if not isinstance(structured, dict):
         return None
-    if isinstance(structured.get("ok"), bool) and isinstance(structured.get("meta"), dict):
-        return structured
     blocks = structured.get("result")
     if not (isinstance(blocks, list) and blocks and isinstance(blocks[0], dict)):
         return None
@@ -88,7 +93,7 @@ def _structured_domain_result(structured: object) -> dict[str, Any] | None:
 async def _handshake(
     command: str,
     *,
-    profile: str,
+    profile: str | None,
     expected_tools: frozenset[str],
     cwd: Path,
     mode: str,
@@ -96,7 +101,7 @@ async def _handshake(
     executable = _resolve_executable(command)
     parameters = StdioServerParameters(
         command=executable,
-        env={**_safe_environment(profile), "GEMINI_STATE_DB_PATH": str(cwd / "state.sqlite3")},
+        env=_safe_environment(profile, cwd),
         cwd=cwd,
     )
     async with asyncio.timeout(30):
@@ -109,6 +114,15 @@ async def _handshake(
             elif "account" in actual_tools:
                 representative_name = "account"
                 representative_arguments = {"action": "manifest"}
+            elif "create" in actual_tools:
+                representative_name = "create"
+                representative_arguments = {"prompt": ""}
+            elif "gemini_ask" in actual_tools:
+                representative_name = "gemini_ask"
+                representative_arguments = {"prompt": ""}
+            elif "gemini_cleanup" in actual_tools:
+                representative_name = "gemini_cleanup"
+                representative_arguments = {"action": "list"}
             else:
                 raise RuntimeError(f"{command} exposes no auth-free static representative tool")
             representative = await client.call_tool(representative_name, representative_arguments)
@@ -123,10 +137,16 @@ async def _handshake(
         )
     if not isinstance(representative.structured_content, dict):
         raise RuntimeError(f"{command} did not return MCP v2 structured content in {mode} mode")
+    if representative_name in {"create", "gemini_ask", "gemini_cleanup"}:
+        domain = _structured_domain_result(representative.structured_content)
+        error = domain.get("error") if domain else None
+        expected_code = "AUTH_REQUIRED" if representative_name == "gemini_cleanup" else "INVALID_ARGUMENT"
+        if not domain or domain.get("ok") is not False or not isinstance(error, dict) or error.get("code") != expected_code:
+            raise RuntimeError(f"{command} did not return typed {expected_code} rejection in {mode} mode")
     return {
         "command": command,
         "mode": mode,
-        "profile": profile,
+        "profile": profile if profile is not None else "default",
         "protocol_version": protocol_version,
         "server_name": server_name,
         "representative_tool": representative_name,
@@ -152,7 +172,7 @@ async def _assist_handshake(
     executable = _resolve_executable(command)
     parameters = StdioServerParameters(
         command=executable,
-        env={**_safe_environment(profile), "GEMINI_STATE_DB_PATH": str(cwd / "state.sqlite3")},
+        env=_safe_environment(profile, cwd),
         cwd=cwd,
     )
     async with asyncio.timeout(30):
@@ -193,48 +213,12 @@ async def _assist_handshake(
     }
 
 
-async def _focused_handshake(command: str, *, surface: str, profile: str, cwd: Path, mode: str) -> dict[str, object]:
-    """Validate direct domain output schemas with credential-free tool calls."""
-    expected = CREATE_TOOLS if surface == "create" else ACCOUNT_TOOLS
-    server_expected = f"gemini_{surface}_mcp"
-    name = "gemini_generate_image" if surface == "create" else "gemini_account"
-    arguments: dict[str, Any] = {"prompt": ""} if surface == "create" else {"request": {"action": "capabilities"}}
-    parameters = StdioServerParameters(
-        command=_resolve_executable(command), cwd=cwd,
-        env={**_safe_environment(profile), "GEMINI_STATE_DB_PATH": str(cwd / "state.sqlite3")},
-    )
-    async with asyncio.timeout(30):
-        async with Client(stdio_client(parameters), mode=mode, cache=None) as client:
-            listed = await client.list_tools()
-            actual = frozenset(tool.name for tool in listed.tools)
-            if any(not tool.output_schema for tool in listed.tools):
-                raise RuntimeError(f"{surface}: all tools need typed output schemas")
-            representative = await client.call_tool(name, arguments)
-            server_name = client.server_info.name if client.server_info else None
-            protocol_version = client.protocol_version
-    _require_exact_tool_contract(command, expected, actual)
-    if server_name != server_expected or representative.is_error or representative.result_type != "complete":
-        raise RuntimeError(f"{surface}: focused handshake failed")
-    payload = _structured_domain_result(representative.structured_content)
-    if payload is None:
-        raise RuntimeError(f"{surface}: direct structured domain result is missing")
-    if surface == "create":
-        error = payload.get("error")
-        if payload.get("ok") is not False or not isinstance(error, dict) or error.get("code") != "INVALID_ARGUMENT":
-            raise RuntimeError("create: blank prompt must return typed INVALID_ARGUMENT before auth")
-    elif payload.get("ok") is not True or payload["meta"].get("verification_status") != "documented_contract":
-        raise RuntimeError("account: capabilities must report auth-free documented evidence")
-    return {"command": command, "mode": mode, "profile": profile, "protocol_version": protocol_version,
-            "server_name": server_name, "representative_tool": name, "result_type": representative.result_type,
-            "tools": len(actual)}
-
-
 async def _run(
     primary_command: str,
     compact_command: str,
     assist_command: str,
     profile: str,
-    create_command: str = "gemini-mcp-create",
+    function_command: str = "gemini-mcp-function",
     account_command: str = "gemini-mcp-account",
 ) -> list[dict[str, object]]:
     with tempfile.TemporaryDirectory(prefix="gemini-protocol-smoke-") as directory:
@@ -263,8 +247,15 @@ async def _run(
                         cwd=cwd,
                         mode=mode,
                     ),
-                    await _focused_handshake(create_command, surface="create", profile=profile, cwd=cwd, mode=mode),
-                    await _focused_handshake(account_command, surface="account", profile=profile, cwd=cwd, mode=mode),
+                    await _handshake(
+                        function_command, profile="function", expected_tools=FUNCTION_TOOLS, cwd=cwd, mode=mode,
+                    ),
+                    await _handshake(
+                        account_command, profile="function", expected_tools=ACCOUNT_TOOLS, cwd=cwd, mode=mode,
+                    ),
+                    await _handshake(
+                        primary_command, profile=None, expected_tools=FUNCTION_TOOLS, cwd=cwd, mode=mode,
+                    ),
                 ]
             )
         return results
@@ -275,14 +266,14 @@ def main() -> None:
     parser.add_argument("--primary-command", default="gemini-mcp-server")
     parser.add_argument("--compact-command", default="gemini-mcp-skill-server")
     parser.add_argument("--assist-command", default="gemini-mcp-assist")
-    parser.add_argument("--create-command", default="gemini-mcp-create")
+    parser.add_argument("--function-command", default="gemini-mcp-function")
     parser.add_argument("--account-command", default="gemini-mcp-account")
     parser.add_argument("--profile", choices=sorted(PRIMARY_PROFILE_TOOLS), default="model")
     args = parser.parse_args()
 
     results = asyncio.run(
         _run(args.primary_command, args.compact_command, args.assist_command, args.profile,
-             args.create_command, args.account_command)
+             args.function_command, args.account_command)
     )
     print(json.dumps({"handshakes": results, "status": "ok"}, sort_keys=True))
 

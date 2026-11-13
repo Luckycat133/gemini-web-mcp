@@ -14,6 +14,11 @@ import tempfile
 from pathlib import Path
 
 PRIMARY_PROFILE_TOOLS = {
+    "media": frozenset({
+        "gemini_generate_media", "gemini_generate_music", "gemini_get_operation_status", "gemini_get_operation_result",
+        "gemini_doctor", "gemini_get_cookie_from_browser", "gemini_get_cookie_status", "gemini_get_tool_manifest",
+        "gemini_list_browser_cookie_profiles", "gemini_reset",
+    }),
     "core": frozenset(
         {
             "gemini_analyze_url",
@@ -29,6 +34,8 @@ PRIMARY_PROFILE_TOOLS = {
             "gemini_get_tool_manifest",
             "gemini_list_browser_cookie_profiles",
             "gemini_list_research_report_actions",
+            "gemini_get_operation_status",
+            "gemini_get_operation_result",
             "gemini_list_sessions",
             "gemini_reset",
             "gemini_reset_session",
@@ -57,27 +64,40 @@ PRIMARY_PROFILE_TOOLS = {
     ),
     "history": frozenset(
         {
+            "gemini_delete_chat",
             "gemini_doctor",
+            "gemini_export_chat",
             "gemini_get_cookie_from_browser",
             "gemini_get_cookie_status",
             "gemini_get_tool_manifest",
             "gemini_history",
             "gemini_list_browser_cookie_profiles",
+            "gemini_list_chats",
+            "gemini_read_chat",
             "gemini_reset",
+            "gemini_scan_chat_history_sources",
+            "gemini_search_chats",
         }
     ),
     "history-organize": frozenset(
         {
+            "gemini_delete_chat",
             "gemini_doctor",
+            "gemini_export_chat",
             "gemini_get_cookie_from_browser",
             "gemini_get_cookie_status",
             "gemini_get_tool_manifest",
             "gemini_history",
             "gemini_list_browser_cookie_profiles",
+            "gemini_list_chats",
+            "gemini_list_notebook_chats",
+            "gemini_list_notebooks",
             "gemini_move_chat_to_notebook",
-            "gemini_update_chat",
             "gemini_notebooks",
+            "gemini_read_chat",
             "gemini_reset",
+            "gemini_scan_chat_history_sources",
+            "gemini_search_chats",
         }
     ),
     "account-read": frozenset(
@@ -87,13 +107,20 @@ PRIMARY_PROFILE_TOOLS = {
             "gemini_get_cookie_from_browser",
             "gemini_get_cookie_status",
             "gemini_get_tool_manifest",
+            "gemini_get_tool_mode_status",
+            "gemini_get_usage_limits",
+            "gemini_get_web_capabilities",
+            "gemini_inspect_account",
             "gemini_list_browser_cookie_profiles",
+            "gemini_list_library_capabilities",
+            "gemini_list_models",
+            "gemini_list_public_links",
+            "gemini_probe_web_features",
             "gemini_reset",
         }
     ),
     "scheduled-admin": frozenset(
         {
-            "gemini_scheduled",
             "gemini_create_scheduled_action",
             "gemini_delete_scheduled_action",
             "gemini_doctor",
@@ -108,13 +135,10 @@ PRIMARY_PROFILE_TOOLS = {
     ),
     "all": frozenset(
         {
-            "gemini_account",
-            "gemini_scheduled",
             "gemini_account_inventory",
             "gemini_analyze_url",
             "gemini_chat",
             "gemini_chat_stream",
-            "gemini_cleanup_test_artifacts",
             "gemini_create_from_research_report",
             "gemini_create_scheduled_action",
             "gemini_deep_research",
@@ -141,11 +165,13 @@ PRIMARY_PROFILE_TOOLS = {
             "gemini_list_notebooks",
             "gemini_list_public_links",
             "gemini_list_research_report_actions",
+            "gemini_get_operation_status",
+            "gemini_get_operation_result",
             "gemini_list_scheduled_actions",
             "gemini_list_sessions",
+            "gemini_manage_prompts",
             "gemini_manage_gems",
             "gemini_move_chat_to_notebook",
-            "gemini_update_chat",
             "gemini_notebooks",
             "gemini_probe_web_features",
             "gemini_read_chat",
@@ -163,16 +189,9 @@ PRIMARY_PROFILE_TOOLS = {
 
 COMPACT_TOOLS = frozenset(
     {
-        "account",
         "chat",
-        "cleanup",
-        "cookie",
         "create",
-        "doctor",
         "edit",
-        "history",
-        "prompts",
-        "scheduled",
         "session",
     }
 )
@@ -181,13 +200,20 @@ ASSIST_TOOLS = frozenset(
     {"gemini_ask", "gemini_research", "gemini_search", "gemini_understand", "gemini_understand_image"}
 )
 
-CREATE_TOOLS = frozenset({
+FUNCTION_TOOLS = frozenset({
+    "gemini_ask", "gemini_understand_image", "gemini_understand", "gemini_research",
+    "gemini_start_chat", "gemini_send_message", "gemini_list_sessions", "gemini_reset_session",
     "gemini_generate_image", "gemini_edit_image", "gemini_generate_video", "gemini_generate_music",
-    "gemini_get_operation_status", "gemini_get_operation_result", "gemini_cancel_operation",
+    "gemini_get_operation_status", "gemini_get_operation_result",
+    "gemini_list_research_report_actions", "gemini_create_from_research_report", "gemini_run_task",
 })
+
 ACCOUNT_TOOLS = frozenset({
-    "gemini_history", "gemini_notebooks", "gemini_scheduled", "gemini_gems",
-    "gemini_prompts", "gemini_account", "gemini_cleanup",
+    "gemini_history", "gemini_delete_chat", "gemini_notebooks", "gemini_move_chat_to_notebook",
+    "gemini_account_inventory", "gemini_list_scheduled_actions", "gemini_get_scheduled_action",
+    "gemini_create_scheduled_action", "gemini_delete_scheduled_action", "gemini_manage_gems", "gemini_cleanup",
+    "gemini_manage_chat", "gemini_tasks", "gemini_task_browser", "gemini_preferences",
+    "gemini_skills", "gemini_manage_notebook",
 })
 
 
@@ -203,21 +229,20 @@ def _probe(module_name: str) -> None:
 def _safe_environment(profile: str) -> dict[str, str]:
     environment = os.environ.copy()
     environment.pop("PYTHONPATH", None)
-    for name in ("GEMINI_PSID", "GEMINI_PSIDTS", "GEMINI_PSIDCC"):
+    for name in ("GEMINI_PSID", "GEMINI_PSIDTS", "GEMINI_PSIDCC", "GEMINI_API_KEY", "GEMINI_SKILL_MODE"):
         environment.pop(name, None)
     environment["GEMINI_AUTO_REFRESH"] = "false"
+    environment["GEMINI_BROWSER_AUTO_LOAD"] = "false"
     environment["GEMINI_TOOLS"] = profile
     return environment
 
 
 def _installed_surface(module_name: str, profile: str) -> frozenset[str]:
     with tempfile.TemporaryDirectory(prefix="gemini-profile-smoke-") as directory:
-        environment = _safe_environment(profile)
-        environment["GEMINI_STATE_DB_PATH"] = str(Path(directory) / "state.sqlite3")
         completed = subprocess.run(
             [sys.executable, str(Path(__file__).resolve()), "--probe", module_name],
             cwd=directory,
-            env=environment,
+            env=_safe_environment(profile),
             capture_output=True,
             text=True,
             timeout=30,
@@ -260,8 +285,8 @@ def main() -> None:
         [
             ("compact", "src.skill_server", "model", COMPACT_TOOLS),
             ("assist", "src.surfaces.assist", "model", ASSIST_TOOLS),
-            ("create", "src.surfaces.create", "model", CREATE_TOOLS),
-            ("account", "src.surfaces.account", "model", ACCOUNT_TOOLS),
+            ("function", "src.surfaces.function", "function", FUNCTION_TOOLS),
+            ("account", "src.surfaces.account", "function", ACCOUNT_TOOLS),
         ]
     )
     # Profile probes use separate interpreters to preserve import-time tool

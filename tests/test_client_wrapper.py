@@ -32,6 +32,7 @@ import os
 from types import SimpleNamespace
 
 import src.client_wrapper as cw
+from src.cookie_manager import BrowserCookieDiscovery
 from src.remote_chat_cleanup_manager import CleanupTask
 from src.session_manager import SessionData, SessionOperationResult
 
@@ -225,6 +226,7 @@ def test_reset_session_deletes_unretained_remote_chat(monkeypatch):
         session=SimpleNamespace(cid="c_remote"),
         session_id="sess_x",
         retain_chat=False,
+        account_key=cw._cleanup_manager._account(),
     )
     expected = SessionOperationResult.success(data)
     fake = _RecordingFake(reset_one_async=expected, _async_methods={"reset_one_async"})
@@ -590,6 +592,30 @@ def test_init_cookie_manager_integration_auto_refresh_false_when_env_disabled(mo
 # ---------------------------------------------------------------------------
 
 
+def test_startup_skips_browser_when_autoload_disabled(monkeypatch):
+    monkeypatch.setenv("GEMINI_BROWSER_AUTO_LOAD", "false")
+    calls = []
+    monkeypatch.setattr(cw, "init_cookie_manager_integration", lambda: calls.append("init"))
+    monkeypatch.setattr(cw, "get_cookie_status", lambda: {"has_cookie": False})
+    monkeypatch.setattr(cw, "get_cookie_from_browser", lambda **kwargs: calls.append("browser"))
+
+    cw.init_startup_infrastructure()
+
+    assert calls == ["init"]
+
+
+def test_startup_falls_back_to_browser_when_enabled_and_no_cookie(monkeypatch):
+    monkeypatch.setenv("GEMINI_BROWSER_AUTO_LOAD", "true")
+    monkeypatch.delenv("GEMINI_PSID", raising=False)
+    calls = []
+    monkeypatch.setattr(cw, "init_cookie_manager_integration", lambda: calls.append("init"))
+    monkeypatch.setattr(cw._client_manager, "ensure_browser_cookie", lambda: calls.append("browser"))
+
+    cw.init_startup_infrastructure()
+
+    assert calls == ["init", "browser"]
+
+
 def test_get_cookie_from_browser_returns_false_when_unavailable(monkeypatch):
     monkeypatch.setattr(cw, "COOKIE_MANAGER_AVAILABLE", False)
     assert cw.get_cookie_from_browser("chrome") is False
@@ -597,16 +623,15 @@ def test_get_cookie_from_browser_returns_false_when_unavailable(monkeypatch):
 
 def test_get_cookie_from_browser_returns_false_when_no_psid(monkeypatch):
     monkeypatch.setattr(cw, "COOKIE_MANAGER_AVAILABLE", True)
-    cache_calls = []
-    monkeypatch.setattr(cw, "_prepare_browser_cookie_cache", lambda **kw: cache_calls.append(kw))
+    monkeypatch.setattr(cw._client_manager, "browser_auth_reason", None)
     cm = SimpleNamespace(
-        get_cookies_from_browser=lambda browser, profile="": {"__Secure-1PSIDTS": "ts"},
+        discover_browser_cookies=lambda browser, profile="": BrowserCookieDiscovery(reason="BROWSER_COOKIE_ACCESS_DENIED"),
         update_cookie=lambda *a, **kw: True,
     )
     monkeypatch.setattr(cw, "get_cookie_manager", lambda: cm)
     result = cw.get_cookie_from_browser("chrome")
     assert result is False
-    assert cache_calls == [{"force": True}]
+    assert cw._client_manager.browser_auth_reason == "BROWSER_COOKIE_ACCESS_DENIED"
 
 
 def test_get_cookie_from_browser_updates_and_sets_env_on_success(monkeypatch):
@@ -621,11 +646,11 @@ def test_get_cookie_from_browser_updates_and_sets_env_on_success(monkeypatch):
         return True
 
     cm = SimpleNamespace(
-        get_cookies_from_browser=lambda browser, profile="": {
+        discover_browser_cookies=lambda browser, profile="": BrowserCookieDiscovery(cookies={
             "__Secure-1PSID": "psid-val",
             "__Secure-1PSIDTS": "psidts-val",
             "extra": "cookie",
-        },
+        }, source="browser_chrome"),
         update_cookie=fake_update,
     )
     monkeypatch.setattr(cw, "get_cookie_manager", lambda: cm)
@@ -650,10 +675,10 @@ def test_get_cookie_from_browser_returns_false_when_update_fails(monkeypatch):
     monkeypatch.setattr(cw, "COOKIE_MANAGER_AVAILABLE", True)
     monkeypatch.setattr(cw, "_prepare_browser_cookie_cache", lambda **kw: None)
     cm = SimpleNamespace(
-        get_cookies_from_browser=lambda browser, profile="": {
+        discover_browser_cookies=lambda browser, profile="": BrowserCookieDiscovery(cookies={
             "__Secure-1PSID": "psid-val",
             "__Secure-1PSIDTS": "psidts-val",
-        },
+        }),
         update_cookie=lambda *a, **kw: False,
     )
     monkeypatch.setattr(cw, "get_cookie_manager", lambda: cm)
@@ -667,10 +692,10 @@ def test_get_cookie_from_browser_skips_psidts_env_when_empty(monkeypatch):
     monkeypatch.setattr(cw, "COOKIE_MANAGER_AVAILABLE", True)
     monkeypatch.setattr(cw, "_prepare_browser_cookie_cache", lambda **kw: None)
     cm = SimpleNamespace(
-        get_cookies_from_browser=lambda browser, profile="": {
+        discover_browser_cookies=lambda browser, profile="": BrowserCookieDiscovery(cookies={
             "__Secure-1PSID": "psid-val",
             "__Secure-1PSIDTS": "",
-        },
+        }),
         update_cookie=lambda *a, **kw: True,
     )
     monkeypatch.setattr(cw, "get_cookie_manager", lambda: cm)
@@ -687,9 +712,8 @@ def test_get_cookie_from_browser_appends_profile_to_source(monkeypatch):
     monkeypatch.setattr(cw, "_prepare_browser_cookie_cache", lambda **kw: None)
     update_calls = []
     cm = SimpleNamespace(
-        get_cookies_from_browser=lambda browser, profile="": {
-            "__Secure-1PSID": "psid-val",
-        },
+        discover_browser_cookies=lambda browser, profile="": BrowserCookieDiscovery(
+            cookies={"__Secure-1PSID": "psid-val"}, source=f"browser_{browser}:{profile}"),
         update_cookie=lambda *a, **kw: update_calls.append(kw) or True,
     )
     monkeypatch.setattr(cw, "get_cookie_manager", lambda: cm)
@@ -752,10 +776,13 @@ def test_get_cookie_status_available_expands_status_and_info(monkeypatch):
         get_cookie_status=lambda: (status_obj, {"source": "browser", "acquired_at": 99})
     )
     monkeypatch.setattr(cw, "get_cookie_manager", lambda: cm)
+    monkeypatch.setattr(cw._client_manager, "browser_auth_reason", None)
     result = cw.get_cookie_status()
     assert result == {
         "available": True,
         "status": "VALID",
         "source": "browser",
         "acquired_at": 99,
+        "browser_auto_load": False,
+        "browser_auth_reason": None,
     }

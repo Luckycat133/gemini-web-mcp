@@ -37,6 +37,13 @@ MUTATES_REMOTE = ToolAnnotations(
     open_world_hint=True,
 )
 
+UPDATES_REMOTE_METADATA = ToolAnnotations(
+    read_only_hint=False,
+    destructive_hint=False,
+    idempotent_hint=True,
+    open_world_hint=True,
+)
+
 DESTRUCTIVE_LOCAL = ToolAnnotations(
     read_only_hint=False,
     destructive_hint=True,

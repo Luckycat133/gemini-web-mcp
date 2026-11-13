@@ -26,9 +26,14 @@ def _pyproject() -> dict:
 def test_runtime_imports_have_direct_or_extra_dependency_intent():
     assert dependency_contract_errors(PROJECT_ROOT) == []
     assert discover_runtime_imports(PROJECT_ROOT / "src") == {
+        "anyio",
+        "aiortc",
         "PIL",
         "browser_cookie3",
+        "curl_cffi",
         "gemini_webapi",
+        "httpx2",
+        "loguru",
         "mcp",
         "mcp_types",
         "orjson",
