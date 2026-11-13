@@ -210,7 +210,7 @@ def test_ci_pins_reference_skill_validator_and_checks_single_public_sources() ->
     workflow = CI_WORKFLOW.read_text(encoding="utf-8")
 
     assert SKILLS_REF_SHA in workflow
-    assert workflow.count("skills-ref validate") == 5
+    assert workflow.count("skills-ref validate") == 3
     assert ".codex/skills" not in workflow
     assert f"skills@{SKILLS_CLI_VERSION} add \"$GITHUB_WORKSPACE\" --skill gemini-web-mcp-development" in workflow
     assert (

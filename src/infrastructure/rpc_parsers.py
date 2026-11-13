@@ -70,21 +70,6 @@ def parse_remy_schedule_registry(body: Any, *, max_chars: int = 500, **_: Any) -
 
 
 # --- ported from main (v0.2.2) for the rebased branch ---
-def parse_remy_schedule_get(
-    body: Any, *, expected_id: str | None = None, max_chars: int = 500, **_: Any,
-) -> RPCParseResult:
-    if body == [] or body == [None]:
-        return RPCParseResult("empty", value=None)
-    if not isinstance(body, list) or not body:
-        return RPCParseResult("changed_shape", raw_type=type(body).__name__)
-    try:
-        item = _remy_schedule_entry(body[0], max_chars)
-    except (TypeError, ValueError, IndexError):
-        return RPCParseResult("changed_shape", warnings=("invalid_schedule",))
-    if expected_id is not None and item["id"] != expected_id:
-        return RPCParseResult("changed_shape", warnings=("returned_id_mismatch",))
-    return RPCParseResult("success", value=item)
-
 def _remy_schedule_entry(row: Any, max_chars: int) -> dict[str, Any]:
     if not isinstance(row, list) or len(row) < 10 or not isinstance(row[0], str) or not row[0].strip():
         raise ValueError("Invalid Remy schedule")
@@ -109,6 +94,21 @@ def _remy_schedule_entry(row: Any, max_chars: int) -> dict[str, Any]:
         "project_id": row[26] or "" if len(row) > 26 else "",
         "field_count": len(row),
     }
+
+def parse_remy_schedule_get(
+    body: Any, *, expected_id: str | None = None, max_chars: int = 500, **_: Any,
+) -> RPCParseResult:
+    if body == [] or body == [None]:
+        return RPCParseResult("empty", value=None)
+    if not isinstance(body, list) or not body:
+        return RPCParseResult("changed_shape", raw_type=type(body).__name__)
+    try:
+        item = _remy_schedule_entry(body[0], max_chars)
+    except (TypeError, ValueError, IndexError):
+        return RPCParseResult("changed_shape", warnings=("invalid_schedule",))
+    if expected_id is not None and item["id"] != expected_id:
+        return RPCParseResult("changed_shape", warnings=("returned_id_mismatch",))
+    return RPCParseResult("success", value=item)
 
 def _remy_schedule_trigger(row: list[Any], max_chars: int) -> dict[str, Any]:
     fields = ((3, "daily"), (4, "weekly"), (5, "event"), (15, "gmail"),
