@@ -20,10 +20,10 @@ EXPECTED_ENTRY_POINTS = {
     "gemini-mcp-skill-server": "src.skill_server:main",
     "gemini-mcp-onboarding": "src.onboarding:main",
     "gemini-mcp-assist": "src.surfaces.assist:main",
-    "gemini-mcp-create": "src.surfaces.create:main",
+    "gemini-mcp-function": "src.surfaces.function:main",
     "gemini-mcp-account": "src.surfaces.account:main",
 }
-SERVER_ENTRY_POINTS = ("gemini-mcp-server", "gemini-mcp-skill-server", "gemini-mcp-assist", "gemini-mcp-create", "gemini-mcp-account")
+SERVER_ENTRY_POINTS = ("gemini-mcp-server", "gemini-mcp-function", "gemini-mcp-account", "gemini-mcp-skill-server", "gemini-mcp-assist")
 
 
 def _assert_installed_import() -> Path:
@@ -62,44 +62,57 @@ def _check_entry_point_metadata() -> None:
             raise TypeError(f"Console entrypoint {name!r} does not resolve to a callable")
 
 
-async def _check_tool_surfaces() -> tuple[int, int, int, int, int]:
+async def _check_tool_surfaces() -> tuple[int, int, int]:
     os.environ["GEMINI_TOOLS"] = "model"
     from src.server import mcp as primary_mcp
     from src.skill_server import mcp as compact_mcp
     from src.surfaces.assist import mcp as assist_mcp
-    from src.surfaces.create import mcp as create_mcp
+    from src.surfaces.function import mcp as function_mcp
     from src.surfaces.account import mcp as account_mcp
+    from src.surfaces.catalogs import FUNCTION_TOOLS, ACCOUNT_TOOLS
 
     primary_tools = {tool.name for tool in await primary_mcp.list_tools()}
     compact_tools = {tool.name for tool in await compact_mcp.list_tools()}
     assist_tools = {tool.name for tool in await assist_mcp.list_tools()}
+    if {tool.name for tool in await function_mcp.list_tools()} != FUNCTION_TOOLS:
+        raise RuntimeError("Installed function catalog drifted")
+    if {tool.name for tool in await account_mcp.list_tools()} != ACCOUNT_TOOLS:
+        raise RuntimeError("Installed account catalog drifted")
     if not {"gemini_chat", "gemini_doctor", "gemini_get_tool_manifest"} <= primary_tools:
         raise RuntimeError(f"Primary installed surface is incomplete: {sorted(primary_tools)}")
-    if not {"chat", "doctor", "account"} <= compact_tools:
+    if compact_tools != {"chat", "create", "edit", "session"}:
         raise RuntimeError(f"Compact installed surface is incomplete: {sorted(compact_tools)}")
     if not {"gemini_ask", "gemini_search", "gemini_understand", "gemini_understand_image"} <= assist_tools:
         raise RuntimeError(f"Assist installed surface is incomplete: {sorted(assist_tools)}")
-    create_tools = {tool.name for tool in await create_mcp.list_tools()}
-    account_tools = {tool.name for tool in await account_mcp.list_tools()}
-    if create_tools != {"gemini_generate_image", "gemini_edit_image", "gemini_generate_video", "gemini_generate_music",
-                        "gemini_get_operation_status", "gemini_get_operation_result", "gemini_cancel_operation"}:
-        raise RuntimeError(f"Create installed surface drifted: {sorted(create_tools)}")
-    if account_tools != {"gemini_history", "gemini_notebooks", "gemini_scheduled", "gemini_gems", "gemini_prompts", "gemini_account", "gemini_cleanup"}:
-        raise RuntimeError(f"Account installed surface drifted: {sorted(account_tools)}")
-    return len(primary_tools), len(compact_tools), len(assist_tools), len(create_tools), len(account_tools)
+    from src.adapters.mcp_sdk import MCPServer
+    from src.tools import register_tools
+
+    recovery_mcp = MCPServer("installed-recovery-smoke")
+    register_tools(recovery_mcp, ["research"])
+    recovery_tools = {tool.name for tool in await recovery_mcp.list_tools()}
+    if not {"gemini_get_operation_status", "gemini_get_operation_result"} <= recovery_tools:
+        raise RuntimeError("Installed wheel is missing research operation recovery")
+    media_mcp = MCPServer("installed-media-recovery-smoke")
+    register_tools(media_mcp, ["media"])
+    media_tools = {tool.name for tool in await media_mcp.list_tools()}
+    if media_tools != {"gemini_generate_media", "gemini_generate_music", "gemini_get_operation_status", "gemini_get_operation_result"}:
+        raise RuntimeError("Installed media profile is missing operation recovery")
+    return len(primary_tools), len(compact_tools), len(assist_tools)
 
 
 def _start_console_entrypoints() -> None:
     environment = os.environ.copy()
     environment.pop("PYTHONPATH", None)
-    for name in ("GEMINI_PSID", "GEMINI_PSIDTS", "GEMINI_PSIDCC"):
+    for name in ("GEMINI_PSID", "GEMINI_PSIDTS", "GEMINI_PSIDCC", "GEMINI_API_KEY"):
         environment.pop(name, None)
     environment["GEMINI_AUTO_REFRESH"] = "false"
+    environment["GEMINI_BROWSER_AUTO_LOAD"] = "false"
     environment["GEMINI_TOOLS"] = "model"
 
     with tempfile.TemporaryDirectory(prefix="gemini-wheel-smoke-") as directory:
         smoke_cwd = Path(directory)
-        environment["GEMINI_STATE_DB_PATH"] = str(smoke_cwd / "state.sqlite3")
+        environment["GEMINI_OPERATION_DB_PATH"] = str(smoke_cwd / "operations.sqlite3")
+        environment["GEMINI_CLEANUP_DB_PATH"] = str(smoke_cwd / "cleanup.sqlite3")
         for name in SERVER_ENTRY_POINTS:
             executable = shutil.which(name, path=str(Path(sys.executable).parent))
             if executable is None:
@@ -131,7 +144,7 @@ def _start_console_entrypoints() -> None:
 def _call_offline_text_tool() -> dict[str, Any]:
     environment = os.environ.copy()
     environment.pop("PYTHONPATH", None)
-    for name in ("GEMINI_PSID", "GEMINI_PSIDTS", "GEMINI_PSIDCC"):
+    for name in ("GEMINI_PSID", "GEMINI_PSIDTS", "GEMINI_PSIDCC", "GEMINI_API_KEY"):
         environment.pop(name, None)
     environment["GEMINI_AUTO_REFRESH"] = "false"
 
@@ -139,7 +152,6 @@ def _call_offline_text_tool() -> dict[str, Any]:
     if executable is None:
         raise RuntimeError("Cannot locate installed gemini-mcp-onboarding entrypoint")
     with tempfile.TemporaryDirectory(prefix="gemini-onboarding-smoke-") as directory:
-        environment["GEMINI_STATE_DB_PATH"] = str(Path(directory) / "state.sqlite3")
         completed = subprocess.run(
             [executable],
             cwd=directory,
@@ -158,7 +170,8 @@ def _call_offline_text_tool() -> dict[str, Any]:
         payload = json.loads(completed.stdout)
     except json.JSONDecodeError as exc:
         raise RuntimeError(f"Onboarding preflight returned invalid JSON: {completed.stdout!r}") from exc
-    if payload.get("status") != "ok" or payload.get("text_tool") != "gemini_get_tool_manifest":
+    if (payload.get("status") != "ok" or payload.get("text_tool") != "gemini_ask"
+            or payload.get("profile") != "function" or payload.get("enabled_tools") != 17):
         raise RuntimeError(f"Onboarding preflight did not call the expected text tool: {payload!r}")
     if payload.get("credentials_accessed") is not False or payload.get("mode") != "offline":
         raise RuntimeError(f"Onboarding preflight did not preserve its offline boundary: {payload!r}")
@@ -168,9 +181,10 @@ def _call_offline_text_tool() -> dict[str, Any]:
 def main() -> None:
     os.environ["GEMINI_TOOLS"] = "model"
     package_path = _assert_installed_import()
+    from src.surfaces.catalogs import FUNCTION_TOOLS, ACCOUNT_TOOLS
     prompt_payload = _check_package_data()
     _check_entry_point_metadata()
-    primary_count, compact_count, assist_count, create_count, account_count = asyncio.run(_check_tool_surfaces())
+    primary_count, compact_count, assist_count = asyncio.run(_check_tool_surfaces())
     _start_console_entrypoints()
     onboarding = _call_offline_text_tool()
     print(
@@ -183,8 +197,8 @@ def main() -> None:
                 "primary_tools": primary_count,
                 "compact_tools": compact_count,
                 "assist_tools": assist_count,
-                "create_tools": create_count,
-                "account_tools": account_count,
+                "function_tools": len(FUNCTION_TOOLS),
+                "account_tools": len(ACCOUNT_TOOLS),
                 "entrypoints_started": sorted(EXPECTED_ENTRY_POINTS),
                 "onboarding_text_tool": onboarding["text_tool"],
                 "onboarding_mode": onboarding["mode"],

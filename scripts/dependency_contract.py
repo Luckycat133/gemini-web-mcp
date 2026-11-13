@@ -13,7 +13,11 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 _REQUIREMENT_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
 
 REQUIRED_IMPORTS = {
+    "anyio": "anyio",
+    "curl_cffi": "curl-cffi",
     "gemini_webapi": "gemini-webapi",
+    "httpx2": "httpx2",
+    "loguru": "loguru",
     "mcp": "mcp",
     "mcp_types": "mcp-types",
     "orjson": "orjson",
@@ -29,11 +33,16 @@ class OptionalImport:
 
 OPTIONAL_IMPORTS = {
     "browser_cookie3": OptionalImport("browser-cookie3", frozenset({"browser", "all"})),
-    "PIL": OptionalImport("pillow", frozenset({"image", "all"})),
+    "PIL": OptionalImport("pillow", frozenset({"image", "browser-control", "all"})),
+    "aiortc": OptionalImport("aiortc", frozenset({"browser-control", "all"})),
 }
 
 EXPECTED_REQUIREMENTS = {
+    "anyio": "anyio>=4.9,<5",
+    "curl-cffi": "curl-cffi>=0.16.2,<0.17",
     "gemini-webapi": "gemini-webapi>=2.1.1,<3",
+    "httpx2": "httpx2>=2.10.0,<3",
+    "loguru": "loguru>=0.7.3,<1",
     "mcp": "mcp>=2.0.0,<3",
     "mcp-types": "mcp-types>=2.0.0,<3",
     "orjson": "orjson>=3.11.7,<4",
@@ -42,9 +51,12 @@ EXPECTED_REQUIREMENTS = {
 
 EXPECTED_OPTIONAL_REQUIREMENTS = {
     ("browser", "browser-cookie3"): "browser-cookie3>=0.19.0,<1",
-    ("image", "pillow"): "pillow>=10.0.0,<14",
+    ("image", "pillow"): "pillow>=10.0.0,<13",
     ("all", "browser-cookie3"): "browser-cookie3>=0.19.0,<1",
-    ("all", "pillow"): "pillow>=10.0.0,<14",
+    ("all", "pillow"): "pillow>=10.0.0,<13",
+    ("all", "aiortc"): "aiortc>=1.15.0,<2",
+    ("browser-control", "aiortc"): "aiortc>=1.15.0,<2",
+    ("browser-control", "pillow"): "pillow>=10.0.0,<13",
 }
 
 

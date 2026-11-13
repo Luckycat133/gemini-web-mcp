@@ -8,20 +8,28 @@ import time
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
-from src.domain import CleanupState, DomainResult, OperationState
-from src.infrastructure.rpc_contracts import get_contract
+import pytest
+
+from src.domain import CleanupState, DomainErrorCode, DomainResult, OperationState
 from src.remote_chat_cleanup_manager import RemoteChatCleanupManager
 from src.services import ConversationLifecycleService
 from src.session_manager import SessionService
 
 
-def _empty_history_readback():
-    return AsyncMock(
-        return_value=SimpleNamespace(
-            status_code=200,
-            text=json.dumps([["wrb.fr", get_contract("history.page").rpc_id, json.dumps([None, None, []])]]),
-        ),
-    )
+@pytest.fixture(autouse=True)
+def verified_deletion_fixture(monkeypatch):
+    """Model read-back-confirmed deletion for lifecycle test clients."""
+    from src.infrastructure.account_identity import current_account_key
+    monkeypatch.setenv("GEMINI_PSID", "synthetic-lifecycle-account")
+    monkeypatch.setattr("src.remote_chat_cleanup_manager.default_account_key", current_account_key)
+    async def verify(client, cid, *, expected_account=None, account_key_provider=current_account_key):
+        assert expected_account == account_key_provider()
+        if not hasattr(client, "delete_chat"):
+            return DomainResult.failure(DomainErrorCode.CAPABILITY_UNAVAILABLE, "missing delete")
+        await client.delete_chat(cid)
+        return DomainResult.success({}, verification_status="verified_absent")
+    monkeypatch.setattr("src.services.history.delete_chat_result", verify)
+    monkeypatch.setattr("src.services.history.observe_chat_absence", AsyncMock(return_value=(False, {})))
 
 
 def _service(
@@ -36,6 +44,39 @@ def _service(
         cleanup_provider=lambda: cleanup_manager,
     )
     return lifecycle, session_service, cleanup_manager
+
+
+def test_reset_session_without_observed_chat_id_does_not_report_invalid_cleanup():
+    lifecycle, sessions, _ = _service()
+    sessions.store_session("sess_empty", SimpleNamespace(cid=""), model="flash")
+    delete = AsyncMock()
+    result = asyncio.run(lifecycle.reset_one("sess_empty", delete_callback=delete))
+    assert result.ok and result.meta.operation_state is OperationState.COMPLETED
+    assert result.meta.verification_status == "local_state_removed_cleanup_observed"
+    assert result.meta.details["lifecycle"].cleanup.state is CleanupState.NOT_APPLICABLE
+    assert not result.warnings
+    delete.assert_not_awaited()
+
+
+def test_reset_timeout_preserves_session_until_send_releases_lock(monkeypatch):
+    monkeypatch.setattr("src.session_manager.SESSION_RESET_WAIT_SECONDS", 0.01)
+    lifecycle, sessions, _ = _service()
+    state = sessions.store_session("sess_busy", SimpleNamespace(cid="c_busy"), model="flash")
+    delete = AsyncMock(return_value=True)
+
+    async def exercise():
+        async with state._send_lock:
+            result = await lifecycle.reset_one("sess_busy", delete_callback=delete)
+            assert result.error_code == DomainErrorCode.TIMED_OUT
+            assert result.meta.verification_status == "session_reset_waiting_for_send"
+            assert sessions.lookup_session("sess_busy").session is state
+            delete.assert_not_awaited()
+        return await lifecycle.reset_one("sess_busy", delete_callback=delete)
+
+    result = asyncio.run(exercise())
+    assert result.ok
+    assert sessions.lookup_session("sess_busy").error_code == DomainErrorCode.SESSION_NOT_FOUND
+    delete.assert_awaited_once_with("c_busy")
 
 
 def test_cleanup_schedule_is_idempotent_and_retention_cancels_pending():
@@ -70,11 +111,10 @@ def test_concurrent_and_repeated_delete_calls_upstream_exactly_once():
 
         manager = RemoteChatCleanupManager()
         client = Client()
-        client._batch_execute = _empty_history_readback()
         first_task = asyncio.create_task(
             manager.delete_chat_result("c_once", client=client),
         )
-        await started.wait()
+        await asyncio.wait_for(started.wait(), timeout=1)
         second_task = asyncio.create_task(
             manager.delete_chat_result("c_once", client=client),
         )
@@ -107,7 +147,6 @@ def test_failed_cleanup_keeps_safe_diagnostic_and_can_retry():
     async def run():
         manager = RemoteChatCleanupManager()
         client = Client()
-        client._batch_execute = _empty_history_readback()
         failed = await manager.delete_chat_result("c_retry", client=client)
         pending_after_failure = manager.list_pending_cleanup()
         completed = await manager.delete_chat_result("c_retry", client=client)
@@ -244,11 +283,9 @@ def test_reset_all_reports_each_retention_decision():
     lifecycle.create_session(SimpleNamespace())
     deleted: list[str] = []
 
-    client = SimpleNamespace(delete_chat=AsyncMock(), _batch_execute=_empty_history_readback())
-
-    async def delete(cid: str):
+    async def delete(cid: str) -> bool:
         deleted.append(cid)
-        return await cleanup.delete_chat_result(cid, client=client)
+        return True
 
     result = asyncio.run(lifecycle.reset_all(delete_callback=delete))
 
@@ -264,3 +301,70 @@ def test_reset_all_reports_each_retention_decision():
     ]
     assert deleted == ["c_delete"]
     assert sessions.list_sessions() == {}
+
+
+def test_reset_after_account_switch_schedules_only_original_owner_without_delete(tmp_path):
+    account = ["account-A"]
+    sessions = SessionService(id_factory=lambda: "sess_owned")
+    manager = RemoteChatCleanupManager(store_path=tmp_path / "cleanup.sqlite", account_key_provider=lambda: account[0])
+    lifecycle, _, _ = _service(sessions=sessions, cleanup=manager)
+    created = lifecycle.create_session(SimpleNamespace(cid="c_owned"))
+    created.session.account_key = "account-A"
+    account[0] = "account-B"
+    delete = AsyncMock(return_value=True)
+    result = asyncio.run(lifecycle.reset_one("sess_owned", delete_callback=delete))
+    delete.assert_not_awaited()
+    assert result.ok and result.meta.operation_state is OperationState.PARTIAL
+    assert result.meta.verification_status == "local_state_removed_cleanup_pending"
+    assert manager._store.get("account-A", "c_owned")["state"] == "pending"
+    assert manager._store.get("account-B", "c_owned") is None
+
+
+@pytest.mark.parametrize("raises", [False, True])
+def test_reset_account_switch_during_callback_preserves_owner_and_pending(tmp_path, raises):
+    account = ["account-A"]
+    sessions = SessionService(id_factory=lambda: "sess_owned")
+    manager = RemoteChatCleanupManager(store_path=tmp_path / "cleanup.sqlite", account_key_provider=lambda: account[0])
+    lifecycle, _, _ = _service(sessions=sessions, cleanup=manager)
+    created = lifecycle.create_session(SimpleNamespace(cid="c_owned"))
+    created.session.account_key = "account-A"
+
+    async def delete(_cid):
+        await asyncio.sleep(0)
+        account[0] = "account-B"
+        if raises:
+            raise RuntimeError("synthetic failure")
+        return True
+
+    result = asyncio.run(lifecycle.reset_one("sess_owned", delete_callback=delete))
+    assert result.meta.operation_state is OperationState.PARTIAL
+    assert result.meta.verification_status == "local_state_removed_cleanup_pending"
+    assert manager._store.get("account-A", "c_owned")["state"] == "pending"
+    assert manager._store.get("account-B", "c_owned") is None
+
+
+def test_expired_session_after_account_switch_stays_in_original_owner_ledger(tmp_path):
+    account = ["account-A"]
+    sessions = SessionService(max_age=10, id_factory=lambda: "sess_expired")
+    manager = RemoteChatCleanupManager(store_path=tmp_path / "cleanup.sqlite", account_key_provider=lambda: account[0])
+    lifecycle, _, _ = _service(sessions=sessions, cleanup=manager)
+    created = lifecycle.create_session(SimpleNamespace(cid="c_expired"), retain_chat=True)
+    created.session.account_key = "account-A"
+    created.session.created_at -= 20
+    account[0] = "account-B"
+    lifecycle.cleanup_expired_sessions()
+    assert manager._store.get("account-A", "c_expired")["state"] == "retained"
+    assert manager._store.get("account-B", "c_expired") is None
+
+
+def test_unbound_legacy_session_never_deletes_or_assigns_an_account(tmp_path):
+    sessions = SessionService(id_factory=lambda: "sess_unbound")
+    manager = RemoteChatCleanupManager(store_path=tmp_path / "cleanup.sqlite", account_key_provider=lambda: "account-B")
+    lifecycle, _, _ = _service(sessions=sessions, cleanup=manager)
+    created = lifecycle.create_session(SimpleNamespace(cid="c_unbound"))
+    created.session.account_key = None
+    delete = AsyncMock(return_value=True)
+    result = asyncio.run(lifecycle.reset_one("sess_unbound", delete_callback=delete))
+    delete.assert_not_awaited()
+    assert result.ok and result.meta.operation_state is OperationState.PARTIAL
+    assert manager._store.get("account-B", "c_unbound") is None

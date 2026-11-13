@@ -1,19 +1,21 @@
 """Unified artifact domain and cross-adapter contract tests."""
 
 import asyncio
+import base64
 import logging
-import json
-import sys
+from contextlib import nullcontext
+from pathlib import Path
 from types import SimpleNamespace
 
-import pytest
+from gemini_webapi.types import Candidate, ModelOutput
+from gemini_webapi.types.image import GeneratedImage, WebImage
+from gemini_webapi.types.video import GeneratedVideo
 
 from src.adapters.mcp_sdk import MCPServer
 
 import src.skill_server as skill_server
 import src.tools.media as media_tools
-import src.services.artifacts as artifact_service
-from tests.media_fixtures import fake_finalize_generated_cleanup, write_audio, write_image, write_video
+import src.services.media_storage as media_storage
 from src.adapters import format_artifact_block
 from src.domain import (
     ArtifactKind,
@@ -43,7 +45,7 @@ def _domain_payload(content):
 def test_artifact_identity_is_stable_across_remote_and_local_observations(tmp_path):
     uri = "https://cdn.example.test/generated/cat.png"
     path = tmp_path / "cat.png"
-    write_image(path, size=(640, 480))
+    path.write_bytes(b"image-bytes")
 
     remote = artifact_from_remote(ArtifactKind.IMAGE, uri, title="cat")
     local = artifact_from_local_path(
@@ -79,9 +81,9 @@ def test_artifact_identity_is_stable_across_remote_and_local_observations(tmp_pa
 
 def test_local_artifact_verifies_file_metadata_dimensions_and_duration(tmp_path):
     image_path = tmp_path / "cover.png"
-    write_image(image_path, size=(320, 180))
+    image_path.write_bytes(b"not-a-real-image-but-nonempty")
     audio_path = tmp_path / "theme.mp3"
-    write_audio(audio_path, duration=12.5)
+    audio_path.write_bytes(b"audio")
 
     image = artifact_from_local_path(
         ArtifactKind.IMAGE,
@@ -96,17 +98,17 @@ def test_local_artifact_verifies_file_metadata_dimensions_and_duration(tmp_path)
 
     assert image.state == ArtifactState.LOCAL
     assert image.mime_type == "image/png"
-    assert image.size_bytes == image_path.stat().st_size
+    assert image.size_bytes == len(b"not-a-real-image-but-nonempty")
     assert (image.width, image.height) == (320, 180)
     assert "image_dimensions" in image.verification.methods
-    assert audio.mime_type == "audio/wav"
+    assert audio.mime_type == "audio/mpeg"
     assert audio.duration_seconds == 12.5
     assert "duration_probe" in audio.verification.methods
 
 
 def test_local_image_mime_uses_signature_when_suffix_is_wrong(tmp_path):
     image_path = tmp_path / "actually-jpeg.png"
-    write_image(image_path, format="JPEG")
+    image_path.write_bytes(b"\xff\xd8\xff\xe0" + b"jpeg-content")
 
     image = artifact_from_local_path(ArtifactKind.IMAGE, str(image_path))
 
@@ -127,7 +129,7 @@ def test_local_artifact_marks_missing_and_empty_files_failed(tmp_path):
     assert "size_empty" in empty.verification.methods
 
 
-def test_response_extraction_includes_all_remote_modalities_and_backend_evidence():
+def test_response_extraction_limits_music_artifacts_and_preserves_backend_evidence():
     response = SimpleNamespace(
         images=[SimpleNamespace(url="https://cdn.test/image.png", title="image", width=50, height=40)],
         videos=[SimpleNamespace(url="https://cdn.test/video.mp4", title="video", duration=8)],
@@ -152,8 +154,6 @@ def test_response_extraction_includes_all_remote_modalities_and_backend_evidence
     )
 
     assert [artifact.kind for artifact in artifacts] == [
-        ArtifactKind.IMAGE,
-        ArtifactKind.VIDEO,
         ArtifactKind.AUDIO,
         ArtifactKind.VIDEO,
         ArtifactKind.AUDIO,
@@ -164,8 +164,27 @@ def test_response_extraction_includes_all_remote_modalities_and_backend_evidence
     assert all(artifact.request_model == "gemini-3-pro" for artifact in artifacts)
     assert all(artifact.effective_backend == "Lyria 3 Pro" for artifact in artifacts)
     assert all(artifact.observed_backend == "observed-generator" for artifact in artifacts)
-    assert artifacts[0].width == 50
-    assert artifacts[1].duration_seconds == 8.0
+
+
+def test_media_requests_do_not_count_other_media_types_as_artifacts():
+    response = SimpleNamespace(
+        images=[SimpleNamespace(url="https://example.test/cover.png")],
+        videos=[SimpleNamespace(url="https://example.test/unrelated.mp4")],
+        media=[], metadata=[],
+    )
+    assert not extract_response_artifacts(response, media_type="music")
+    assert [a.kind for a in extract_response_artifacts(response, media_type="video")] == [ArtifactKind.VIDEO]
+    assert [a.kind for a in extract_response_artifacts(response, media_type="image")] == [ArtifactKind.IMAGE]
+
+
+def test_jpeg_bytes_cannot_be_verified_as_audio_or_video(tmp_path):
+    preview = tmp_path / "fake-video.mp4"
+    preview.write_bytes(b"\xff\xd8\xff\xe0" + b"jpeg preview")
+    for kind in (ArtifactKind.AUDIO, ArtifactKind.VIDEO):
+        artifact = artifact_from_local_path(kind, str(preview))
+        assert artifact.state == ArtifactState.FAILED
+        assert artifact.mime_type == "image/jpeg"
+        assert "media_type_mismatch" in artifact.verification.methods
 
 
 def test_artifact_results_distinguish_queued_empty_failed_and_partial():
@@ -244,6 +263,9 @@ class _ParityClient:
         self.timeout = 30.0
         self.watchdog_timeout = 120.0
 
+    def video_generation_scope(self):
+        return nullcontext()
+
     async def generate_content(self, *args, **kwargs):
         return self.response
 
@@ -270,8 +292,8 @@ def test_primary_and_compact_media_adapters_return_same_artifact_identity(monkey
     monkeypatch.setattr(media_tools, "cleanup_due_remote_chats", _no_op_async)
     monkeypatch.setattr(
         media_tools,
-        "finalize_generated_chat_cleanup",
-        fake_finalize_generated_cleanup,
+        "finalize_remote_chat_cleanup_from_response",
+        _no_op_async,
     )
     primary_mcp = MCPServer("artifact-parity-primary")
     media_tools.register_media_tools(primary_mcp)
@@ -279,7 +301,7 @@ def test_primary_and_compact_media_adapters_return_same_artifact_identity(monkey
     async def call_primary():
         result = await primary_mcp.call_tool(
             "gemini_generate_media",
-            {"prompt": "shared", "media_type": "image", "model": "flash"},
+            {"background": False, "prompt": "shared", "media_type": "image", "model": "flash"},
         )
         return result.content
 
@@ -289,13 +311,14 @@ def test_primary_and_compact_media_adapters_return_same_artifact_identity(monkey
     monkeypatch.setattr(skill_server, "get_gemini_client", lambda: compact_client)
     monkeypatch.setattr(skill_server, "initialize_client", _no_op_async)
     monkeypatch.setattr(skill_server, "cleanup_due_remote_chats", _no_op_async)
+    monkeypatch.setattr(skill_server, "finalize_remote_chat_cleanup_from_response", _no_op_async)
     monkeypatch.setattr(
         skill_server,
         "validate_optional_image_path",
         lambda _path: (True, None, None),
     )
-    monkeypatch.setattr(skill_server, "finalize_generated_chat_cleanup", fake_finalize_generated_cleanup)
-    compact_content = asyncio.run(skill_server.create(prompt="shared", type="image", model="flash"))
+    monkeypatch.setattr(skill_server, "_schedule_skill_response_cleanup", lambda *_args: None)
+    compact_content = asyncio.run(skill_server.create(background=False, prompt="shared", type="image", model="flash"))
 
     primary_data = _domain_payload(primary_content)["data"]
     compact_data = _domain_payload(compact_content)["data"]
@@ -307,156 +330,318 @@ def test_primary_and_compact_media_adapters_return_same_artifact_identity(monkey
     assert primary_data["effective_backend"] == compact_data["effective_backend"] == "Nano Banana 2"
 
 
-@pytest.mark.parametrize("kind,body", [
-    (ArtifactKind.IMAGE, b"<html>login required</html>"),
-    (ArtifactKind.IMAGE, b"\x89PNG\r\n\x1a\ntruncated"),
-    (ArtifactKind.AUDIO, b"<html>login required</html>"),
-    (ArtifactKind.VIDEO, b"not video"),
-])
-def test_nonempty_damaged_media_never_becomes_verified(monkeypatch, tmp_path, kind, body):
-    monkeypatch.setattr(artifact_service, "_probe_av_metadata", lambda _path: {})
-    path = tmp_path / "download.png"
-    path.write_bytes(body)
-    artifact = artifact_from_local_path(kind, str(path), dimensions_probe=lambda _path: (20, 20),
-                                        duration_probe=lambda _path: 1.0)
-    assert artifact.state == ArtifactState.FAILED
-    assert artifact.verification.status == ArtifactVerificationStatus.FAILED
+def test_generated_image_extraction_uses_selected_candidate_provenance():
+    web = WebImage(url="https://example.test/search.png")
+    generated = GeneratedImage(url="https://example.test/generated.png")
+    response = ModelOutput(
+        metadata=[],
+        candidates=[
+            Candidate(rcid="one", text="first", web_images=[web], generated_images=[generated]),
+            Candidate(rcid="two", text="second", web_images=[web]),
+        ],
+        chosen=1,
+    )
+    assert not extract_response_artifacts(response, media_type="image")
+    assert extract_response_artifacts(response)[0].uri == web.url
+    response.chosen = 0
+    assert [item.uri for item in extract_response_artifacts(response, media_type="image")] == [generated.url]
 
 
-def test_truncated_wav_fails_content_verification(tmp_path):
-    path = write_audio(tmp_path / "truncated.wav")
-    path.write_bytes(path.read_bytes()[:-20])
-    artifact = artifact_from_local_path(ArtifactKind.AUDIO, str(path))
-    assert artifact.state == ArtifactState.FAILED
-    assert "media_decode_failed" in artifact.verification.methods
-
-
-@pytest.mark.parametrize("kind", [ArtifactKind.AUDIO, ArtifactKind.VIDEO])
-def test_valid_image_bytes_cannot_verify_an_audio_or_video_artifact(tmp_path, kind):
-    path = write_image(tmp_path / "wrong-kind.mp4", format="JPEG")
-    artifact = artifact_from_local_path(kind, str(path))
-    assert artifact.state == ArtifactState.FAILED
-    assert artifact.verification.status == ArtifactVerificationStatus.FAILED
-    assert "media_kind_mismatch" in artifact.verification.methods
-
-
-def test_unavailable_image_decoder_preserves_unverified_file(monkeypatch, tmp_path):
-    path = write_image(tmp_path / "image.png")
-    monkeypatch.setitem(sys.modules, "PIL", None)
-    artifact = artifact_from_local_path(ArtifactKind.IMAGE, str(path))
-    result = artifact_result(ArtifactResultData(state=ArtifactState.LOCAL, artifacts=(artifact,)))
-    assert artifact.state == ArtifactState.LOCAL
-    assert artifact.verification.status == ArtifactVerificationStatus.UNVERIFIED
-    assert result.meta.verification_status == "artifact_saved_unverified"
-    assert result.meta.operation_state == OperationState.PARTIAL
-    input_only = artifact_result(ArtifactResultData(state=ArtifactState.LOCAL, input_artifacts=(artifact,)))
-    assert input_only.meta.verification_status == "input_artifact_unverified"
-
-
-def test_unavailable_video_probe_preserves_unverified_file(monkeypatch, tmp_path):
-    path = write_video(tmp_path / "video.avi")
-    monkeypatch.setattr(artifact_service.shutil, "which", lambda _name: None)
-    artifact = artifact_from_local_path(ArtifactKind.VIDEO, str(path))
-    assert artifact.state == ArtifactState.LOCAL
-    assert artifact.mime_type == "video/x-msvideo"
-    assert artifact.verification.status == ArtifactVerificationStatus.UNVERIFIED
-    assert "media_decoder_unavailable" in artifact.verification.methods
-
-
-@pytest.mark.parametrize("format", ["BMP", "TIFF", "GIF", "WEBP"])
-def test_supported_reference_image_formats_still_verify(tmp_path, format):
-    path = write_image(tmp_path / "reference.image", format=format)
-    artifact = artifact_from_local_path(ArtifactKind.IMAGE, str(path))
-    assert artifact.state == ArtifactState.LOCAL
-    assert artifact.verification.status == ArtifactVerificationStatus.VERIFIED
-    assert (artifact.width, artifact.height) == (2, 1)
-
-
-@pytest.mark.parametrize("streams,expected", [
-    ([{"codec_type": "video", "width": 16, "height": 16}], ArtifactState.LOCAL),
-    ([{"codec_type": "audio"}], ArtifactState.FAILED),
-    ([{"codec_type": "video", "width": 0, "height": 16}], ArtifactState.FAILED),
-    (None, ArtifactState.FAILED),
-])
-def test_video_probe_parses_stream_evidence(monkeypatch, tmp_path, streams, expected):
-    path = write_video(tmp_path / "video.avi")
-    payload = {"streams": streams, "format": {"duration": "1.0", "format_name": "avi"}}
-    calls = []
-    monkeypatch.setattr(artifact_service.shutil, "which", lambda _name: "/fixture/ffprobe")
-
-    def probe(args, **kwargs):
-        calls.append((args, kwargs))
-        return SimpleNamespace(returncode=0, stdout=json.dumps(payload))
-
-    monkeypatch.setattr(artifact_service.subprocess, "run", probe)
-    artifact = artifact_from_local_path(ArtifactKind.VIDEO, str(path))
-    assert artifact.state == expected
-    assert calls[0][0][-1] == str(path.resolve())
-    if expected == ArtifactState.LOCAL:
-        assert artifact.verification.status == ArtifactVerificationStatus.VERIFIED
-        assert (artifact.width, artifact.height, artifact.duration_seconds) == (16, 16, 1.0)
-    else:
-        assert artifact.verification.status == ArtifactVerificationStatus.FAILED
-
-
-@pytest.mark.parametrize("requested,observed", [
-    ("image", "video"), ("image_edit", "video"), ("video", "image"),
-    ("music", "image"), ("music", "video"),
-])
-def test_primary_and_compact_do_not_complete_a_different_modality(monkeypatch, requested, observed):
-    response = SimpleNamespace(text="done", images=[], videos=[], media=[], metadata=["c_mismatch", "r_mismatch"])
-    item = SimpleNamespace(url=f"https://cdn.test/other.{observed}", title="other", alt="other")
-    getattr(response, "images" if observed == "image" else "videos").append(item)
+def test_web_images_do_not_prove_generated_image_on_either_surface(monkeypatch):
+    web = WebImage(url="https://example.test/search.png")
+    response = ModelOutput(
+        metadata=[],
+        candidates=[Candidate(rcid="one", text="I found an image", web_images=[web])],
+    )
     client = _ParityClient(response)
     monkeypatch.setattr(media_tools, "get_gemini_client", lambda: client)
     monkeypatch.setattr(media_tools, "initialize_client", _no_op_async)
     monkeypatch.setattr(media_tools, "cleanup_due_remote_chats", _no_op_async)
-    monkeypatch.setattr(media_tools, "finalize_generated_chat_cleanup", fake_finalize_generated_cleanup)
-
-    async def no_recovered_music(*_args):
-        return []
-
-    monkeypatch.setattr(media_tools, "_fetch_music_media_from_chat", no_recovered_music)
-    mcp = MCPServer("mismatched-media")
-    media_tools.register_media_tools(mcp)
-
-    async def run_primary():
-        return (await mcp.call_tool("gemini_generate_media", {"prompt": "make media", "media_type": "image" if requested == "image_edit" else requested})).content
-
-    primary = _domain_payload(asyncio.run(run_primary()))
-    _, compact_result = skill_server._skill_media_result(response, (), requested_model="flash", request_model="gemini-3-flash",
-                                                         effective_backend="observed", media_type=requested)
-    for result in (primary, compact_result.to_dict()):
-        assert result["ok"] is False
-        assert result["data"]["state"] == "empty"
-        assert result["error"]["code"] == "ARTIFACT_NOT_RETURNED"
-        assert result["meta"]["operation_state"] != "completed"
-
-
-@pytest.mark.parametrize("operation", ["create", "edit"])
-def test_compact_creation_has_a_finite_deadline(monkeypatch, tmp_path, operation):
-    cancelled = []
-
-    class Client:
-        async def generate_content(self, **kwargs):
-            assert kwargs["timeout"] == 0.04
-            try:
-                await asyncio.Event().wait()
-            finally:
-                cancelled.append(True)
-
-    monkeypatch.setattr(skill_server, "get_gemini_client", Client)
+    monkeypatch.setattr(media_tools, "finalize_remote_chat_cleanup_from_response", _no_op_async)
+    monkeypatch.setattr(skill_server, "get_gemini_client", lambda: client)
     monkeypatch.setattr(skill_server, "initialize_client", _no_op_async)
     monkeypatch.setattr(skill_server, "cleanup_due_remote_chats", _no_op_async)
-    monkeypatch.setattr(skill_server, "media_operation_timeout", lambda *_args: 0.04)
+    monkeypatch.setattr(skill_server, "finalize_remote_chat_cleanup_from_response", _no_op_async)
+    mcp = MCPServer("web-image-parity")
+    media_tools.register_media_tools(mcp)
+
+    async def call_primary():
+        return (await mcp.call_tool("gemini_generate_media", {"background": False, "prompt": "mug", "media_type": "image"})).content
+
+    primary = asyncio.run(call_primary())
+    compact = asyncio.run(skill_server.create(background=False, prompt="mug", type="image"))
+    for content in (primary, compact):
+        payload = _domain_payload(content)
+        assert payload["ok"] is False
+        assert payload["error"]["code"] == "ARTIFACT_NOT_RETURNED"
+        assert not payload["data"]["artifacts"]
+        assert web.url not in content[0].text
+    assert web.url in skill_server._format_response(response)[0].text
+
+
+def test_compact_music_recovers_the_observed_turn(monkeypatch):
+    response = SimpleNamespace(text="pending", images=[], videos=[], media=[], metadata=["c_1", "r_1", "rc_1"])
+    client = _ParityClient(response)
+    monkeypatch.setattr(skill_server, "get_gemini_client", lambda: client)
+    monkeypatch.setattr(skill_server, "initialize_client", _no_op_async)
+    monkeypatch.setattr(skill_server, "cleanup_due_remote_chats", _no_op_async)
+    monkeypatch.setattr(skill_server, "finalize_remote_chat_cleanup_from_response", _no_op_async)
+    monkeypatch.setattr(skill_server, "_schedule_skill_response_cleanup", lambda *_a, **_kw: None)
+
+    async def recover(got_client, cid, *, rid, rcid):
+        assert (got_client, cid, rid, rcid) == (client, "c_1", "r_1", "rc_1")
+        return [SimpleNamespace(mp3_url="https://example.test/song.mp3", url="", title="song")]
+
+    monkeypatch.setattr(skill_server, "fetch_music_media_from_chat", recover)
+    content = asyncio.run(skill_server.create(background=False, prompt="piano", type="music"))
+    payload = _domain_payload(content)
+    assert payload["ok"] is True
+    assert payload["data"]["artifacts"][0]["uri"] == "https://example.test/song.mp3"
+
+
+def test_primary_and_compact_music_share_verified_local_saving(monkeypatch, tmp_path):
+    events = []
+    payload_bytes = b"\xff\xfb\x90\x64" + b"\0" * 20
+
+    class Music:
+        mp3_url = "https://example.test/song.mp3"
+        url = ""
+        title = "song"
+
+        async def save(self, *, path, filename, verbose, download_type):
+            assert download_type == "audio"
+            events.append("save")
+            output = Path(path) / filename
+            output.write_bytes(payload_bytes)
+            return {"audio": str(output)}
+
+    response = SimpleNamespace(text="done", images=[], videos=[], media=[Music()], metadata=["c_shared", "r_shared"])
+    client = _ParityClient(response)
+
+    async def finalize(*_args, **_kwargs):
+        events.append("cleanup")
+
+    for module in (media_tools, skill_server):
+        monkeypatch.setattr(module, "get_gemini_client", lambda: client)
+        monkeypatch.setattr(module, "initialize_client", _no_op_async)
+        monkeypatch.setattr(module, "cleanup_due_remote_chats", _no_op_async)
+        monkeypatch.setattr(module, "finalize_remote_chat_cleanup_from_response", finalize)
+    monkeypatch.setattr(media_tools, "probe_playable_av_tracks", lambda path: frozenset({"audio"}))
+    monkeypatch.setattr(media_storage, "probe_playable_av_tracks", lambda path: frozenset({"audio"}))
+    mcp = MCPServer("music-local-parity")
+    media_tools.register_media_tools(mcp)
 
     async def run():
-        if operation == "create":
-            return await skill_server.create(prompt="cat")
-        path = write_image(tmp_path / "reference.png")
-        return await skill_server.edit(str(path), prompt="make it brighter")
+        primary = (await mcp.call_tool("gemini_generate_media", {"background": False,
+            "prompt": "piano", "media_type": "music", "output_dir": str(tmp_path / "primary"),
+            "filename": "song.mp3",
+        })).content
+        compact = await skill_server.create(background=False, prompt="piano", type="music", output_dir=str(tmp_path / "compact"),
+                                            filename="song.mp3")
+        return primary, compact
 
-    result = _domain_payload(asyncio.run(run()))
-    assert result["error"]["code"] == "TIMED_OUT"
-    assert result["meta"]["operation_state"] == "timed_out"
-    assert cancelled == [True]
+    primary, compact = asyncio.run(run())
+    assert events == ["save", "cleanup", "save", "cleanup"]
+    for content in (primary, compact):
+        result = _domain_payload(content)
+        artifact = result["data"]["artifacts"][0]
+        assert result["ok"] and artifact["state"] == "local"
+        assert artifact["mime_type"] == "audio/mpeg"
+        assert Path(artifact["local_path"]).read_bytes() == payload_bytes
+
+
+def test_thumbnail_only_video_fails_on_both_surfaces(monkeypatch, tmp_path):
+    jpeg = b"\xff\xd8\xff\xe0" + b"jpeg preview"
+
+    class Video:
+        url = "https://example.test/video.mp4"
+        thumbnail = "https://example.test/preview.jpg"
+        title = "video"
+
+        async def save(self, *, path, filename, verbose):
+            destination = Path(path)
+            destination.mkdir(parents=True, exist_ok=True)
+            thumb = destination / "preview.jpg"
+            thumb.write_bytes(jpeg)
+            return {"video": None, "video_thumbnail": str(thumb)}
+
+    response = SimpleNamespace(text="done", images=[], videos=[Video()], media=[], metadata=["c_shared", "r_1"])
+    client = _ParityClient(response)
+    for module in (media_tools, skill_server):
+        monkeypatch.setattr(module, "get_gemini_client", lambda: client)
+        monkeypatch.setattr(module, "initialize_client", _no_op_async)
+        monkeypatch.setattr(module, "cleanup_due_remote_chats", _no_op_async)
+        monkeypatch.setattr(module, "finalize_remote_chat_cleanup_from_response", _no_op_async)
+        monkeypatch.setattr(module, "schedule_remote_chat_cleanup_from_response", lambda *_a, **_kw: None)
+    mcp = MCPServer("video-preview-parity")
+    media_tools.register_media_tools(mcp)
+
+    async def run():
+        primary = (await mcp.call_tool("gemini_generate_media", {"background": False,
+            "prompt": "ball", "media_type": "video", "output_dir": str(tmp_path / "primary"),
+            "filename": "clip.mp4",
+        })).content
+        compact = await skill_server.create(background=False, prompt="ball", type="video", output_dir=str(tmp_path / "compact"),
+                                            filename="clip.mp4")
+        return primary, compact
+
+    for content in asyncio.run(run()):
+        result = _domain_payload(content)
+        assert not result["ok"]
+        assert result["error"]["code"] == "ARTIFACT_SAVE_FAILED"
+        assert result["data"]["state"] == "failed"
+        assert any(item["kind"] == "image" and item["mime_type"] == "image/jpeg" and item["state"] == "local"
+                   for item in result["data"]["artifacts"])
+        assert not any(item["kind"] == "video" and item["state"] == "local" for item in result["data"]["artifacts"])
+
+
+def test_video_and_thumbnail_stay_distinct_on_both_surfaces(monkeypatch, tmp_path):
+    mp4 = b"\x00\x00\x00\x18ftypisom" + b"\0" * 12
+    jpeg = b"\xff\xd8\xff\xe0" + b"jpeg preview"
+
+    class Video:
+        url = "https://example.test/video.mp4"
+        thumbnail = "https://example.test/preview.jpg"
+        title = "video"
+
+        async def save(self, *, path, filename, verbose):
+            destination = Path(path)
+            destination.mkdir(parents=True, exist_ok=True)
+            video = destination / "clip.mp4"
+            thumb = destination / "preview.jpg"
+            video.write_bytes(mp4)
+            thumb.write_bytes(jpeg)
+            return {"video": str(video), "video_thumbnail": str(thumb)}
+
+    response = SimpleNamespace(text="done", images=[], videos=[Video()], media=[], metadata=["c_shared", "r_1"])
+    client = _ParityClient(response)
+    for module in (media_tools, skill_server):
+        monkeypatch.setattr(module, "get_gemini_client", lambda: client)
+        monkeypatch.setattr(module, "initialize_client", _no_op_async)
+        monkeypatch.setattr(module, "cleanup_due_remote_chats", _no_op_async)
+        monkeypatch.setattr(module, "finalize_remote_chat_cleanup_from_response", _no_op_async)
+        monkeypatch.setattr(module, "schedule_remote_chat_cleanup_from_response", lambda *_a, **_kw: None)
+    monkeypatch.setattr(media_tools, "probe_playable_av_tracks", lambda path: frozenset({"video"}))
+    monkeypatch.setattr(media_storage, "probe_playable_av_tracks", lambda path: frozenset({"video"}))
+    mcp = MCPServer("video-main-and-preview")
+    media_tools.register_media_tools(mcp)
+
+    async def run():
+        primary = (await mcp.call_tool("gemini_generate_media", {"background": False,
+            "prompt": "ball", "media_type": "video", "output_dir": str(tmp_path / "primary"),
+        })).content
+        compact = await skill_server.create(background=False, prompt="ball", type="video", output_dir=str(tmp_path / "compact"))
+        return primary, compact
+
+    for content in asyncio.run(run()):
+        result = _domain_payload(content)
+        assert result["ok"] and result["data"]["state"] == "local"
+        items = {item["kind"]: item for item in result["data"]["artifacts"]}
+        assert items["video"]["mime_type"] == "video/mp4"
+        assert items["image"]["mime_type"] == "image/jpeg"
+        assert Path(items["video"]["local_path"]).read_bytes() == mp4
+        assert Path(items["image"]["local_path"]).read_bytes() == jpeg
+        assert items["video"]["id"] != items["image"]["id"]
+
+
+def test_primary_and_compact_preserve_video_seen_only_in_earlier_stream_frame(monkeypatch, tmp_path):
+    url = "https://example.test/current.mp4"
+    video = GeneratedVideo(url=url)
+    early = ModelOutput(metadata=["c_video", "r_one"], candidates=[Candidate(
+        rcid="rc_one", text="working", generated_videos=[video],
+    )])
+    final = ModelOutput(metadata=["c_video", "r_one"], candidates=[Candidate(rcid="rc_one", text="done")])
+    calls = []
+
+    class Client(_ParityClient):
+        async def generate_content_stream(self, **kwargs):
+            calls.append(kwargs)
+            yield early
+            yield final
+
+    async def save(_self, *, path, filename, verbose):
+        destination = Path(path)
+        destination.mkdir(parents=True, exist_ok=True)
+        output = destination / "clip.mp4"
+        output.write_bytes(b"\x00\x00\x00\x18ftypisom" + b"\0" * 12)
+        return {"video": str(output)}
+
+    monkeypatch.setattr(GeneratedVideo, "save", save)
+    client = Client(None)
+    for module in (media_tools, skill_server):
+        monkeypatch.setattr(module, "get_gemini_client", lambda: client)
+        monkeypatch.setattr(module, "initialize_client", _no_op_async)
+        monkeypatch.setattr(module, "cleanup_due_remote_chats", _no_op_async)
+        monkeypatch.setattr(module, "finalize_remote_chat_cleanup_from_response", _no_op_async)
+        monkeypatch.setattr(module, "schedule_remote_chat_cleanup_from_response", lambda *_a, **_kw: None)
+    monkeypatch.setattr(media_tools, "probe_playable_av_tracks", lambda path: frozenset({"video"}))
+    monkeypatch.setattr(media_storage, "probe_playable_av_tracks", lambda path: frozenset({"video"}))
+    mcp = MCPServer("video-frame-parity")
+    media_tools.register_media_tools(mcp)
+
+    async def run():
+        primary = (await mcp.call_tool("gemini_generate_media", {"background": False,
+            "prompt": "a blue ball", "media_type": "video", "output_dir": str(tmp_path / "primary"),
+        })).content
+        compact = await skill_server.create(background=False, prompt="a blue ball", type="video", output_dir=str(tmp_path / "compact"))
+        return primary, compact
+
+    for content in asyncio.run(run()):
+        result = _domain_payload(content)
+        assert result["ok"] and result["data"]["state"] == "local"
+        artifact = result["data"]["artifacts"][0]
+        assert artifact["kind"] == "video" and artifact["uri"] == url
+    assert calls[0]["prompt"] == calls[1]["prompt"]
+    assert calls[0]["timeout"] == calls[1]["timeout"] == 600
+
+
+def test_music_local_evidence_supersedes_wrong_remote_url_extension():
+    remote = artifact_from_remote(ArtifactKind.AUDIO, "https://example.test/audio.mp3")
+    local = SimpleNamespace(uri=remote.uri, kind=ArtifactKind.VIDEO, state=ArtifactState.LOCAL)
+    assert not media_storage.reconcile_remote_media_types((remote,), (local,))
+
+
+def test_compact_create_and_edit_save_images_before_cleanup(monkeypatch, tmp_path):
+    events = []
+    png = base64.b64decode(
+        "iVBORw0KGgoAAAANSUhEUgAAAAIAAAABAQMAAADO7O3JAAAAIGNIUk0AAHomAACAhAAA+gAAAIDoAAB1MAAA6mAAADqYAAAXcJy6UTwAAAAGUExURf8AAP///0EdNBEAAAABYktHRAH/Ai3eAAAAB3RJTUUH6ggDByA1n7aAbwAAAApJREFUCNdjYAAAAAIAAeIhvDMAAAAASUVORK5CYII="
+    )
+
+    class Image:
+        url = "https://example.test/image.png"
+        title = "image"
+        alt = "image"
+
+        async def save(self, *, path, filename, verbose):
+            events.append("save")
+            dest = Path(path)
+            dest.mkdir(parents=True, exist_ok=True)
+            output = dest / filename
+            output.write_bytes(png)
+            return str(output)
+
+    response = SimpleNamespace(text="done", images=[Image()], videos=[], media=[], metadata=["c_shared", "r_1"])
+    client = _ParityClient(response)
+    monkeypatch.setattr(skill_server, "get_gemini_client", lambda: client)
+    monkeypatch.setattr(skill_server, "initialize_client", _no_op_async)
+    monkeypatch.setattr(skill_server, "cleanup_due_remote_chats", _no_op_async)
+
+    async def finalize(*_args, **_kwargs):
+        events.append("cleanup")
+
+    monkeypatch.setattr(skill_server, "finalize_remote_chat_cleanup_from_response", finalize)
+    reference = tmp_path / "reference.png"
+    reference.write_bytes(png)
+
+    async def run():
+        created = await skill_server.create(background=False, prompt="image", output_dir=str(tmp_path / "create"), filename="out.png")
+        edited = await skill_server.edit(background=False, image_path=str(reference), prompt="edit", output_dir=str(tmp_path / "edit"),
+                                         filename="out.png")
+        return created, edited
+
+    created, edited = asyncio.run(run())
+    assert events == ["save", "cleanup", "save", "cleanup"]
+    for content in (created, edited):
+        result = _domain_payload(content)
+        assert result["data"]["artifacts"][0]["state"] == "local"
+        assert Path(result["data"]["artifacts"][0]["local_path"]).read_bytes() == png

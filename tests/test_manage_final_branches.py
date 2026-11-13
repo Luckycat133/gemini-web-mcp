@@ -31,9 +31,8 @@
 
 import asyncio
 import json
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
-
-from tests._account_rpc_fakes import scheduled_ack_response, scheduled_read
 
 import src.tools.manage as manage_tools
 from src.tools.manage import (
@@ -59,19 +58,20 @@ def test_payload_scheduled_rpc_accepted_but_not_deleted_state(monkeypatch):
     删除 RPC 已被接受（bodies 非空），但 registry 复检仍包含该 action，
     因此删除未被验证 -> deleted=False，verification_status='still_visible_in_registry'。
     """
+    monkeypatch.setenv("GEMINI_PSID", "synthetic-test-account")
     client = MagicMock()
     # _batch_execute 返回非空 response（_extract_rpc_bodies 会返回非空 bodies）
-    client._batch_execute = AsyncMock(return_value=scheduled_ack_response())
+    client._batch_execute = AsyncMock(return_value=SimpleNamespace(text='["wrb.fr","Q4Gw3c","body"]'))
 
     entries = [{"id": "task-codex-1", "title": "Codex", "instructions": "", "schedule_label": ""}]
     monkeypatch.setattr(
         manage_tools, "_fetch_scheduled_registry",
-        AsyncMock(return_value=scheduled_read(entries)),
+        AsyncMock(return_value=(entries, {"ok": True})),
     )
     # task_after_delete.task_state_id=3 (running) != 6 (deleted) → 未达删除态
     monkeypatch.setattr(
         manage_tools, "_fetch_scheduled_task_by_id",
-        AsyncMock(return_value=scheduled_read({"id": "task-codex-1", "task_state_id": 3})),
+        AsyncMock(return_value=({"task_state_id": 3}, {})),
     )
     # _extract_rpc_bodies 返回非空 → bodies 真值 → RPC 接受
     monkeypatch.setattr(manage_tools, "_extract_rpc_bodies", lambda *a, **kw: ["body"])
@@ -92,18 +92,19 @@ def test_payload_scheduled_rpc_accepted_with_task_after_none(monkeypatch):
     RPC 已接受，但 registry 复检仍包含该 action -> 删除未被验证，
     deleted=False，verification_status='still_visible_in_registry'。
     """
+    monkeypatch.setenv("GEMINI_PSID", "synthetic-test-account")
     client = MagicMock()
-    client._batch_execute = AsyncMock(return_value=scheduled_ack_response())
+    client._batch_execute = AsyncMock(return_value=SimpleNamespace(text='["wrb.fr","Q4Gw3c","body"]'))
 
     entries = [{"id": "task-codex-1", "title": "Codex", "instructions": "", "schedule_label": ""}]
     monkeypatch.setattr(
         manage_tools, "_fetch_scheduled_registry",
-        AsyncMock(return_value=scheduled_read(entries)),
+        AsyncMock(return_value=(entries, {"ok": True})),
     )
     # task_after_delete=None → 按 id 复检不可读
     monkeypatch.setattr(
         manage_tools, "_fetch_scheduled_task_by_id",
-        AsyncMock(return_value=scheduled_read(None)),
+        AsyncMock(return_value=(None, {})),
     )
     monkeypatch.setattr(manage_tools, "_extract_rpc_bodies", lambda *a, **kw: ["body"])
 
@@ -131,7 +132,7 @@ def test_payload_scheduled_registry_exception_records_error(monkeypatch):
 
     monkeypatch.setattr(
         manage_tools, "_fetch_scheduled_registry",
-        AsyncMock(side_effect=RuntimeError("registry boom")),
+        AsyncMock(side_effect=RuntimeError("synthetic-private-body")),
     )
 
     payload = asyncio.run(_cleanup_test_artifacts_payload(
@@ -142,9 +143,10 @@ def test_payload_scheduled_registry_exception_records_error(monkeypatch):
     assert payload["matched_scheduled_count"] == 0
     # errors 记录外层异常
     assert any(
-        err.get("target") == "scheduled" and "RuntimeError: registry boom" in err.get("error", "")
+        err.get("target") == "scheduled" and err.get("error") == "RuntimeError"
         for err in payload["errors"]
     )
+    assert "synthetic-private-body" not in str(payload)
 
 
 # ===========================================================================

@@ -5,8 +5,6 @@ Gemini 常量配置
 from enum import Enum
 from typing import TypedDict
 
-from .infrastructure.web_request_contracts import THINKING_LEVEL_VALUES
-
 
 class RPC(str, Enum):
     """Gemini Web RPC identifiers used by compatible tooling."""
@@ -23,7 +21,24 @@ ENDPOINTS = {
 }
 
 # 默认的会话/远端聊天保留时间（秒），可通过 GEMINI_CHAT_RETENTION_SECONDS 环境变量覆盖
-DEFAULT_CHAT_RETENTION_SECONDS = 1800
+DEFAULT_CHAT_RETENTION_SECONDS = 0
+DEFAULT_SESSION_MAX_AGE_SECONDS = 1800
+
+OMNI_VIDEO_MODEL = "gemini-omni-1.2-flash"
+OMNI_VIDEO_API_BACKEND = "Gemini API (Omni 1.2 Flash)"
+GEMINI_GENERIC_FAILURE_REPLY = (
+    "I'm having a hard time fulfilling your request. Can I help you with something else instead?"
+)
+_GEMINI_GENERATION_FAILURE_REPLIES = frozenset({
+    GEMINI_GENERIC_FAILURE_REPLY,
+    "I encountered an error doing what you asked. Could you try again?",
+    "Sorry, something went wrong. Please try your request again.",
+})
+
+
+def is_generation_failure_reply(text: object) -> bool:
+    """Recognize the full observed Gemini failure notice, including browser whitespace."""
+    return isinstance(text, str) and " ".join(text.split()) in _GEMINI_GENERATION_FAILURE_REPLIES
 
 
 class ModelConfig(TypedDict):
@@ -64,7 +79,7 @@ MODEL_CONFIG: dict[str, ModelConfig] = {
         "thinking_mode_id": 1,
     },
     "thinking": {
-        "name": "gemini-3-flash",
+        "name": "gemini-3-flash-thinking",
         "hex_id": "5bf011840784117a",
         "capacity_tail": 1,
         "advanced_only": False,
@@ -80,12 +95,14 @@ MODEL_CONFIG: dict[str, ModelConfig] = {
 }
 
 THINKING_LEVEL_IDS = {
-    **THINKING_LEVEL_VALUES,
     "low": 1,
+    "medium": 4,
     "high": 2,
-    "低点": 1,
-    "中等": 4,
-    "高点": 2,
+    "低": 1,
+    "中": 4,
+    "高": 2,
+    "standard": 1,
+    "extended": 2,
     "标准": 1,
     "扩展": 2,
 }
@@ -94,6 +111,7 @@ THINKING_MODE_IDS = {
     "3.5 flash-lite": 6,
     "3.1 flash-lite": 6,
     "flash-lite": 6,
+    "gemini-flash-lite": 6,
     "lite": 6,
     "8c46e95b1a07cecc": 6,
     "3.5 flash": 1,
@@ -102,6 +120,7 @@ THINKING_MODE_IDS = {
     "fast": 1,
     "thinking": 1,
     "gemini-3-flash": 1,
+    "gemini-flash": 1,
     "gemini-3-flash-thinking": 1,
     "fbb127bbb056c959": 1,
     "56fdd199312815e2": 1,
@@ -110,6 +129,7 @@ THINKING_MODE_IDS = {
     "3.1 pro": 3,
     "pro": 3,
     "gemini-3-pro": 3,
+    "gemini-pro": 3,
     "9d8ca3786ebdfbea": 3,
     "e6fa609c3fa255c0": 3,
 }
@@ -120,12 +140,9 @@ class LearningModeConfig(TypedDict, total=False):
     x9b_field: str
     x9b_value: int
     prompt_prefix: str
-    feature_mode_id: int
 
 
 LEARNING_MODE_CONFIG: dict[str, LearningModeConfig] = {
-    "guided_learning": {"feature_mode_id": 24},
-    "guided": {"alias_for": "guided_learning"},
     "interactive_quiz": {
         "id": 18,
         "x9b_field": "h5d",
@@ -167,9 +184,12 @@ def resolve_model_name(model: str | None) -> str:
         "3.5 flash-lite": "flash-lite",
         "3.8 flash": "flash",
         "3.1 pro": "pro",
-        "gemini-3-flash-thinking": "thinking",
+        "4 argon": "argon",
+        "gemini-4-argon": "argon",
     }
     alias = current_web_names.get(model.strip().lower(), model)
+    if alias == "argon":
+        return "gemini-argon"
     config = MODEL_CONFIG.get(alias)
     return config["name"] if config else model
 
@@ -186,6 +206,8 @@ def normalize_model_alias(model: str | None) -> str:
         return "flash"
     if alias in {"3.1 pro", "pro"}:
         return "pro"
+    if alias in {"4 argon", "argon", "gemini-argon", "gemini-4-argon"}:
+        return "argon"
     if alias in {"thinking", "gemini-3-flash-thinking"}:
         return "thinking"
     return alias
@@ -196,8 +218,17 @@ def resolve_media_request(
     media_type: str,
     thinking_level: str | None = None,
 ) -> dict[str, str]:
-    """Resolve the effective Gemini Web backend behavior for media generation."""
+    """Resolve media routing while keeping Web chat aliases and API IDs separate."""
     alias = normalize_model_alias(model)
+
+    if media_type == "video" and alias == OMNI_VIDEO_MODEL:
+        return {
+            "requested_alias": alias,
+            "effective_alias": alias,
+            "request_model": OMNI_VIDEO_MODEL,
+            "backend_label": OMNI_VIDEO_API_BACKEND,
+            "note": "Explicit Gemini API video generation with GEMINI_API_KEY.",
+        }
 
     if media_type == "image":
         if alias == "flash-lite":
@@ -236,8 +267,8 @@ def resolve_media_request(
             "requested_alias": alias,
             "effective_alias": alias,
             "request_model": resolve_model_name(alias),
-            "backend_label": "Gemini Web video feature",
-            "note": "请求已选择网页视频模式；实际后端版本和完成状态仍须响应与视频产物验证。",
+            "backend_label": "Gemini Web video mode",
+            "note": "使用已观测的视频专用请求模式；仅在实际视频文件及视频轨道验证通过后报告完成。",
         }
 
     return {
@@ -257,9 +288,6 @@ def describe_model_name(model: str) -> str:
 
 def resolve_thinking_mode_id(model: object) -> int | None:
     """Resolve the current Web UI thinking-level mode bucket for a model."""
-    model_number = getattr(model, "model_number", None)
-    if type(model_number) is int and model_number > 0:
-        return model_number
     if isinstance(model, str):
         keys = [model, resolve_model_name(model)]
     else:
@@ -278,7 +306,7 @@ def resolve_thinking_mode_id(model: object) -> int | None:
 
 
 def resolve_thinking_level_id(thinking_level: str | None) -> int | None:
-    """Resolve observed protocol levels, retaining the standard/extended API."""
+    """Resolve low/medium/high and compatible standard/extended Web selectors."""
     if thinking_level is None:
         return None
     return THINKING_LEVEL_IDS.get(thinking_level.strip().lower())
@@ -301,4 +329,4 @@ def resolve_learning_mode_config(learning_mode: str | None) -> dict[str, object]
 
 def supported_learning_modes() -> str:
     """Return user-facing learning mode names."""
-    return "guided_learning/guided, interactive_quiz/quiz, flashcards, practice_test, study_guide/exam_prep"
+    return "interactive_quiz/quiz, flashcards, practice_test, study_guide/exam_prep"

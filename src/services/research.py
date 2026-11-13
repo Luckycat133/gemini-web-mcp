@@ -16,35 +16,186 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import os
 import re
-import tempfile
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, replace
-from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
 from ..constants import resolve_model_name
 from ..domain import (
-    ArtifactKind,
-    ArtifactVerificationStatus,
+    CleanupObservation,
+    CleanupState,
     DomainErrorCode,
     DomainResult,
+    DomainWarning,
     LongOperationData,
     OperationState,
+    new_operation_id,
     result_from_exception,
 )
-from ..infrastructure.state_store import OperationRecord
-from ..thinking_client import ThinkingLevelGeminiClient, client_generation_once
-from .artifacts import artifact_from_local_path
-from .operations import OperationContext, OperationService, get_operation_service
+from ..infrastructure.account_identity import operation_account_matches
+from ..infrastructure.operation_store import RETENTION_SECONDS, OperationStore
+from ..infrastructure.rpc_contracts import execute_contract, get_contract
+from ..infrastructure.rpc_parsers import parse_contract_body, parse_rpc_envelope
+from .client_timeouts import client_timeout_scope
+from .cleanup_scope import observe_cleanup_frames
+from .deadlines import await_before_deadline, consume_finished_task as consume_finished_task
+from .model_policy import model_policy_scope
 
 logger = logging.getLogger(__name__)
+
+
+class _SafeResearchLogger(logging.Logger):
+    """Keep the shared error classifier from logging upstream response previews."""
+
+    def error(self, msg: object, *args: Any, **kwargs: Any) -> None:
+        if len(args) >= 4:
+            logger.error("Research failed request_id=%s diagnostic_id=%s error_type=%s",
+                         args[1], args[2], args[3])
+        else:
+            logger.error("Research failed")
+
+
+_safe_failure_logger = _SafeResearchLogger(__name__ + ".safe")
 
 RESEARCH_CLEANUP_SOURCE = "gemini_research"
 DEFAULT_RESEARCH_TIMEOUT_SECONDS = 600
 RESEARCH_START_TIMEOUT_SECONDS = 120
+RESEARCH_DEFERRED_CLEANUP_SECONDS = 1800
+
+
+class ResearchCleanupPreconditionError(RuntimeError):
+    """A research confirmation cannot proceed without durable cleanup evidence."""
+
+
+@dataclass(frozen=True)
+class _ResearchPlanRejection:
+    metadata: tuple[str, str, str]
+
+
+def research_cleanup_checkpoint(
+    store: OperationStore, operation_id: str, plan: Any, chat: Any, *,
+    response: Any = None, retain_chat: bool, delete_after_seconds: int | None,
+    source: str, schedule_chat_cleanup: Callable[..., Any],
+) -> str:
+    """Persist guard and cleanup queue before sending a research confirmation."""
+    chat_id = research_chat_id(plan=plan, chat=chat, response=response)
+    if chat_id is None:
+        raise ResearchCleanupPreconditionError("No chat ID was observed before confirmation.")
+    existing = store.get(operation_id)
+    if not store.attach_late_chat(operation_id, chat_id):
+        raise ResearchCleanupPreconditionError("Research cleanup protection is unavailable")
+    if existing is not None and (existing.phase not in {"created", "plan_created", "chat_observed", "plan_outcome_unverified"}
+                                 or (existing.phase == "plan_outcome_unverified" and not plan)):
+        checkpoint_state, checkpoint_phase, checkpoint_verification = (
+            existing.state, existing.phase, existing.verification_status,
+        )
+    else:
+        checkpoint_state = OperationState.ACCEPTED.value
+        checkpoint_phase = "plan_created" if plan else "chat_observed"
+        checkpoint_verification = "plan_observed_start_not_confirmed"
+    store.update(
+        operation_id, state=checkpoint_state, phase=checkpoint_phase,
+        upstream_chat_id=chat_id,
+        upstream_operation_id=nonempty_identifier(getattr(plan, "research_id", None)),
+        verification_status=checkpoint_verification,
+    )
+    metadata = getattr(response, "metadata", None) or getattr(chat, "metadata", None)
+    if (existing is not None and existing.account_key and isinstance(metadata, (list, tuple))
+            and len(metadata) >= 3 and metadata[0] == chat_id
+            and all(isinstance(value, str) and value.strip() for value in metadata[:3])):
+        store.bind_research_turn(operation_id, account_key=existing.account_key, chat_id=chat_id,
+                                 response_id=metadata[1], candidate_id=metadata[2])
+    cleanup = schedule_chat_cleanup(
+        chat_id, retain_chat=retain_chat,
+        delete_after_seconds=(delete_after_seconds if retain_chat else
+            max(RESEARCH_DEFERRED_CLEANUP_SECONDS, delete_after_seconds or 0)),
+        source=source,
+    )
+    expected = CleanupState.RETAINED if retain_chat else CleanupState.PENDING
+    if not isinstance(cleanup, CleanupObservation) or cleanup.state is not expected:
+        raise ResearchCleanupPreconditionError("Research cleanup policy could not be persisted.")
+    return chat_id
+
+
+def research_late_cleanup_checkpoint(
+    store: OperationStore, operation_id: str, plan: Any, chat: Any, *, response: Any = None,
+    retain_chat: bool, delete_after_seconds: int | None, source: str,
+    schedule_chat_cleanup: Callable[..., Any],
+) -> None:
+    chat_id = research_chat_id(plan=plan, chat=chat, response=response)
+    if not chat_id or not store.attach_late_chat(operation_id, chat_id):
+        return
+    existing = store.get(operation_id)
+    metadata = getattr(response, "metadata", None) or getattr(chat, "metadata", None)
+    if (existing is not None and existing.account_key and isinstance(metadata, (list, tuple))
+            and len(metadata) >= 3 and metadata[0] == chat_id
+            and all(isinstance(value, str) and value.strip() for value in metadata[:3])):
+        store.bind_research_turn(operation_id, account_key=existing.account_key, chat_id=chat_id,
+                                 response_id=metadata[1], candidate_id=metadata[2])
+    cleanup = schedule_chat_cleanup(
+        chat_id, retain_chat=retain_chat,
+        delete_after_seconds=(delete_after_seconds if retain_chat else
+                              max(RESEARCH_DEFERRED_CLEANUP_SECONDS, delete_after_seconds or 0)),
+        source=source,
+    )
+    expected = CleanupState.RETAINED if retain_chat else CleanupState.PENDING
+    if not isinstance(cleanup, CleanupObservation) or cleanup.state is not expected:
+        raise ResearchCleanupPreconditionError("Late research cleanup policy could not be persisted.")
+
+
+@dataclass(frozen=True)
+class ResearchCleanupCheckpoints:
+    checkpoint: Callable[..., str]
+    late_checkpoint: Callable[..., None]
+    early_checkpoint: Callable[[Any], None]
+
+
+def make_research_cleanup_checkpoints(
+    store: OperationStore, record: Any, *, retain_chat: bool, delete_after_seconds: int | None,
+    source: str, schedule_chat_cleanup: Callable[..., Any], worker_token: str | None = None,
+) -> ResearchCleanupCheckpoints:
+    """Bind early and late identities to the operation's account and cleanup guard."""
+    operation_id = record.operation_id
+
+    def attach_observed(plan: Any, chat: Any, response: Any = None) -> None:
+        cid = research_chat_id(plan=plan, chat=chat, response=response)
+        if not cid:
+            raise ResearchCleanupPreconditionError("No research chat ID was observed")
+        metadata = getattr(response, "metadata", None) or getattr(chat, "metadata", None)
+        values = metadata if isinstance(metadata, (list, tuple)) and metadata and metadata[0] == cid else ()
+        rid = nonempty_identifier(values[1]) if len(values) > 1 else None
+        rcid = nonempty_identifier(values[2]) if len(values) > 2 else None
+        if not record.account_key or not store.attach_research_observation(
+            operation_id, cid, account_key=record.account_key, response_id=rid, candidate_id=rcid,
+        ):
+            raise ResearchCleanupPreconditionError("Research identity could not be durably bound")
+
+    def checkpoint(plan: Any, chat: Any, response: Any = None) -> str:
+        attach_observed(plan, chat, response)
+        if (not operation_account_matches(record)
+                or (worker_token is not None and not store.is_worker_owner(operation_id, worker_token))):
+            raise ResearchCleanupPreconditionError("Operation account changed")
+        return research_cleanup_checkpoint(
+            store, operation_id, plan, chat, response=response, retain_chat=retain_chat,
+            delete_after_seconds=delete_after_seconds, source=source, schedule_chat_cleanup=schedule_chat_cleanup,
+        )
+
+    def late_checkpoint(plan: Any, chat: Any, response: Any = None) -> None:
+        attach_observed(plan, chat, response)
+        if (not operation_account_matches(record)
+                or (worker_token is not None and not store.is_worker_owner(operation_id, worker_token))):
+            return
+        research_late_cleanup_checkpoint(
+            store, operation_id, plan, chat, response=response, retain_chat=retain_chat,
+            delete_after_seconds=delete_after_seconds, source=source, schedule_chat_cleanup=schedule_chat_cleanup,
+        )
+
+    def early_checkpoint(observed: Any) -> None:
+        checkpoint(None, observed, None)
+
+    return ResearchCleanupCheckpoints(checkpoint, late_checkpoint, early_checkpoint)
 
 
 @dataclass(frozen=True)
@@ -56,33 +207,25 @@ class ResearchServiceDependencies:
     cleanup_due_remote_chats: Callable[[Any], Awaitable[int]]
     schedule_chat_cleanup: Callable[..., Any]
     resolve_model: Callable[[str], str]
+    finalize_chat_cleanup: Callable[..., Awaitable[Any]] | None = None
 
 
 @dataclass(frozen=True)
 class ResearchRequest:
     """One asynchronous Deep Research start request.
 
-    ``retain_chat`` defaults to ``True`` so the started research chat — and with
-    it the final report — stays recoverable through the preserved upstream chat
-    identifier.
+    A default cleanup deadline protects an active research chat temporarily.
     """
 
     query: str
     model: str = "flash"
-    thinking_level: str = "extended"
+    thinking_level: str = "standard"
     timeout_seconds: int = DEFAULT_RESEARCH_TIMEOUT_SECONDS
-    retain_chat: bool = True
+    retain_chat: bool = False
     delete_after_seconds: int | None = None
     cleanup_source: str = RESEARCH_CLEANUP_SOURCE
     operation: str = "gemini_research"
-    output_dir: str | None = None
-    idempotency_key: str | None = None
-
-
-@dataclass(frozen=True)
-class ResearchExecution:
-    result: DomainResult[LongOperationData]
-    upstream_result: Any = None
+    operation_id: str | None = None
 
 
 class ResearchService:
@@ -90,119 +233,107 @@ class ResearchService:
 
     The service reuses the same native plan/start workflow as the compatibility
     ``gemini_deep_research`` tool (fresh research chat, transport model
-    resolution, capability-probe recovery, start-with-recovery), then saves
-    reports before cleanup. Start returns an opaque high-entropy operation ID
-    before provider work. The shared metadata repository owns continuation;
-    later clients only read the previously observed source.
+    resolution, capability-probe recovery, start-with-recovery) but returns as
+    soon as the upstream research has started, issuing one opaque high-entropy
+    ``operation_id`` and preserving the upstream operation/chat identifiers in
+    structured metadata. It keeps no connection-local operation registry.
     """
 
-    def __init__(self, dependencies: ResearchServiceDependencies, operations: OperationService | None = None):
+    def __init__(self, dependencies: ResearchServiceDependencies):
         self._dependencies = dependencies
-        self._operations = operations or get_operation_service()
-        self._operations.register_recovery("research", self.recover)
 
-    async def start(self, request: ResearchRequest) -> DomainResult[LongOperationData]:
+    async def start(self, request: ResearchRequest, *, worker_token: str | None = None) -> DomainResult[LongOperationData]:
+        if request.operation_id is not None and not re.fullmatch(r"op_[0-9a-f]{32}", request.operation_id):
+            return _input_rejected("operation_id must be op_ followed by 32 lowercase hexadecimal characters.")
         query = request.query.strip()
         if not query:
             return _input_rejected("query must not be blank.")
+        operation_id = request.operation_id or new_operation_id()
+        store = OperationStore()
+        try:
+            if worker_token is not None:
+                record = store.get(operation_id)
+                if (record is None or record.operation != request.operation
+                        or not store.is_worker_owner(operation_id, worker_token)):
+                    return DomainResult.failure(DomainErrorCode.INVALID_ARGUMENT, "Worker ownership was not verified.")
+                created = record.phase == "created"
+            else:
+                record, created = store.create_or_get(
+                    operation_id, request.operation, retain_chat=request.retain_chat,
+                    delete_after_seconds=request.delete_after_seconds,
+                    requested_model=request.model, thinking_level=request.thinking_level,
+                )
+        except Exception:
+            logger.exception("Unable to persist research operation metadata")
+            return DomainResult.failure(
+                DomainErrorCode.INTERNAL_ERROR,
+                "Unable to persist research operation metadata; research was not started.",
+                verification_status="operation_not_persisted",
+            )
+        if not operation_account_matches(record):
+            return DomainResult.failure(DomainErrorCode.CAPABILITY_UNAVAILABLE, "Operation account could not be verified.",
+                                        verification_status="account_mismatch_or_unbound")
+        if not created:
+            recoverable_plan = bool(
+                record.phase == "plan_outcome_unverified" and record.upstream_chat_id and record.cleanup_protected
+                and record.requested_model and record.thinking_level
+            )
+            if store.clock() - record.created_at >= RETENTION_SECONDS and not recoverable_plan:
+                return DomainResult.failure(
+                    DomainErrorCode.INVALID_ARGUMENT, "The operation handle has expired.",
+                    verification_status="operation_expired",
+                )
+            if record.operation != request.operation:
+                return _input_rejected("operation_id is already used by a different operation.")
+            if recoverable_plan:
+                return await self._resume_existing_plan(store, record, request.timeout_seconds)
+            data = LongOperationData(
+                operation=record.operation, state=OperationState(record.state),
+                operation_id=record.operation_id, upstream_chat_id=record.upstream_chat_id,
+                upstream_operation_id=record.upstream_operation_id,
+                continuation_possible=bool(record.upstream_chat_id),
+                report_available=False,
+            )
+            existing = research_domain_result(data)
+            return replace(
+                existing,
+                meta=replace(existing.meta, verification_status=record.verification_status),
+                warnings=(*existing.warnings, DomainWarning(
+                    code="operation_already_exists",
+                    message="The handle was already claimed; no new research was started.",
+                )),
+            )
 
-        async def runner(context: OperationContext) -> DomainResult[LongOperationData]:
-            try:
-                client = await self._prepare_client()
-            except Exception as error:
-                return _failure_from_exception(error, request, operation_id=context.operation_id)
-            if not has_native_research_api(client):
-                return _capability_unavailable(request, operation_id=context.operation_id)
-            execution = await self.execute_native(client, request, context, wait_for_completion=False)
-            return execution.result
+        try:
+            client = await self._prepare_client(record)
+        except Exception as error:
+            result = _failure_from_exception(error, request, operation_id=operation_id, failure_phase="initialization")
+            store.update(operation_id, state=result.meta.operation_state.value, phase="initialization_failed",
+                         verification_status=result.meta.verification_status)
+            if operation_account_matches(record):
+                store.release_cleanup(operation_id)
+            return result
 
-        return await self._operations.start("research", runner, recovery=self.recover,
-                                            idempotency_key=request.idempotency_key,
-                                            output_dir=self._destination(request), retain_chat=request.retain_chat,
-                                            delete_after_seconds=request.delete_after_seconds)
+        if not operation_account_matches(record):
+            return DomainResult.failure(DomainErrorCode.CAPABILITY_UNAVAILABLE, "Operation account could not be verified.",
+                                        verification_status="account_mismatch_or_unbound")
+        if not has_native_research_api(client):
+            store.update(operation_id, state=OperationState.UNAVAILABLE.value, phase="capability_unavailable",
+                         verification_status="capability_not_available")
+            store.release_cleanup(operation_id)
+            return _capability_unavailable(request)
 
-    def reserve(self, request: ResearchRequest) -> tuple[DomainResult[LongOperationData], OperationContext | None]:
-        result, context, created = self._operations.reserve("research", output_dir=self._destination(request),
-                                                            idempotency_key=request.idempotency_key,
-                                                            retain_chat=request.retain_chat,
-                                                            delete_after_seconds=request.delete_after_seconds)
-        return result, context if created else None
+        research_model, model_note = resolve_deep_research_transport_model(request.model, client)
 
-    @staticmethod
-    def _destination(request: ResearchRequest) -> str:
-        return str(Path(request.output_dir or "generated_reports").expanduser().absolute())
+        checkpoints = make_research_cleanup_checkpoints(
+            store, record, retain_chat=request.retain_chat, delete_after_seconds=request.delete_after_seconds,
+            source=request.cleanup_source, schedule_chat_cleanup=self._dependencies.schedule_chat_cleanup,
+            worker_token=worker_token,
+        )
 
-    async def status(self, operation_id: str) -> DomainResult[LongOperationData]:
-        return await self._operations.status(operation_id)
-
-    async def result(self, operation_id: str) -> DomainResult[LongOperationData]:
-        return await self._operations.result(operation_id)
-
-    async def cancel(self, operation_id: str) -> DomainResult[LongOperationData]:
-        # The installed SDK exposes no provider cancellation proof. The
-        # shared owner therefore reports cancel_requested and retains source.
-        return await self._operations.cancel(operation_id)
-
-    async def execute_fallback(self, client: Any, request: ResearchRequest) -> ResearchExecution:
-        """Compatibility-only plan fallback, with the same durable ownership."""
-        reserved, context = self.reserve(request)
-        if context is None:
-            return ResearchExecution(reserved)
-        async with self._operations.execution(context) as owns:
-            if not owns:
-                return ResearchExecution(reserved)
-            response = None
-            chat = None
-            try:
-                _model, note = resolve_deep_research_transport_model(request.model)
-                model = self._dependencies.resolve_model(request.model)
-                if isinstance(client, ThinkingLevelGeminiClient):
-                    chat = start_fresh_research_chat(client, model, on_chat_observed=context.observe_chat_sync)
-                with client_generation_once(client):
-                    response = await await_before_deadline(client.generate_content(
-                        format_research_query(request.query, request.model, note),
-                        model=model, deep_research=True,
-                        thinking_level=request.thinking_level, timeout=request.timeout_seconds,
-                        **({"chat": chat} if chat is not None else {}),
-                    ), timeout=request.timeout_seconds)
-                result = research_domain_result(research_operation_data(OperationState.RUNNING,
-                    operation=request.operation, operation_id=context.operation_id, chat=chat, response=response,
-                    latest_upstream_state="running"))
-            except Exception as error:
-                result = _failure_from_exception(error, request, operation_id=context.operation_id, chat=chat)
-            finally:
-                cid = research_chat_id(chat=chat, response=response)
-                if cid:
-                    context.observe_chat_sync(cid)
-                    self._dependencies.schedule_chat_cleanup(cid, retain_chat=True,
-                                                              delete_after_seconds=request.delete_after_seconds,
-                                                              source=request.cleanup_source)
-            self._operations.finish(context, result)
-            return ResearchExecution(result, response)
-
-    async def execute_native(
-        self, client: Any, request: ResearchRequest, context: OperationContext, *,
-        wait_for_completion: bool, poll_interval: float = 10,
-        fetch_report: Callable[[Any, str], Awaitable[Any]] | None = None,
-        request_report: Callable[[Any], Awaitable[Any]] | None = None,
-    ) -> ResearchExecution:
-        """One shared plan/start/wait owner; adapters only render this outcome."""
-        async with self._operations.execution(context) as owns:
-            if not owns:
-                record = self._operations.store.operations.get(context.scope_id, context.operation_id)
-                return ResearchExecution(self._operations._render(record) if record is not None else self._operations._not_found())
-            return await self._execute_native(client, request, context, wait_for_completion=wait_for_completion,
-                                              poll_interval=poll_interval, fetch_report=fetch_report, request_report=request_report)
-
-    async def _execute_native(
-        self, client: Any, request: ResearchRequest, context: OperationContext, *, wait_for_completion: bool,
-        poll_interval: float, fetch_report: Callable[[Any, str], Awaitable[Any]] | None,
-        request_report: Callable[[Any], Awaitable[Any]] | None,
-    ) -> ResearchExecution:
-        research_model, model_note = resolve_deep_research_transport_model(request.model)
         start = await run_deep_research_start_phase(
             client,
-            query=request.query.strip(),
+            query=query,
             requested_model=request.model,
             resolved_model=self._dependencies.resolve_model(request.model),
             research_model=research_model,
@@ -210,177 +341,212 @@ class ResearchService:
             thinking_level=request.thinking_level,
             timeout_seconds=request.timeout_seconds,
             operation=request.operation,
-            operation_id=context.operation_id,
+            operation_id=operation_id,
             schedule_chat_cleanup=self._dependencies.schedule_chat_cleanup,
             retain_chat=request.retain_chat,
             delete_after_seconds=request.delete_after_seconds,
             cleanup_source=request.cleanup_source,
-            observe_locator=lambda cid, provider: context.observe_chat_sync(cid, provider_operation_id=provider),
-            observe_provider_locator=context.observe_provider_operation_sync,
+            checkpoint=checkpoints.checkpoint,
+            late_checkpoint=checkpoints.late_checkpoint,
+            early_checkpoint=checkpoints.early_checkpoint,
+            claim_confirmation=lambda: operation_account_matches(record)
+                and (worker_token is None or store.is_worker_owner(operation_id, worker_token))
+                and store.claim_research_confirmation(operation_id, expected_phase="plan_created"),
         )
+        if (not operation_account_matches(record)
+                or (worker_token is not None and not store.is_worker_owner(operation_id, worker_token))):
+            return DomainResult.failure(DomainErrorCode.CAPABILITY_UNAVAILABLE, "Operation account could not be verified.",
+                                        verification_status="account_mismatch_or_unbound")
         if start.timed_out is not None:
-            self._operations.finish(context, start.timed_out)
-            return ResearchExecution(start.timed_out)
-        if start.error is not None:
-            result = _failure_from_exception(
-                start.error,
-                request,
-                operation_id=context.operation_id,
-                plan=start.plan,
-                chat=start.chat,
-            )
-            self._operations.finish(context, result)
-            return ResearchExecution(result)
-        state = operation_state_from_upstream(getattr(start.start_output, "state", None))
-        provider_id = nonempty_identifier(getattr(start.plan, "research_id", None))
-        if provider_id:
-            context.observe_provider_operation_sync(provider_id)
-        upstream_result = SimpleNamespace(plan=start.plan, start_output=start.start_output, final_output=None,
-                                          statuses=[SimpleNamespace(state=state.value, done=False,
-                                                                    notes=["caller requested start-only execution"])],
-                                          done=False, poll_count=0)
-        if wait_for_completion:
-            try:
-                if getattr(start.plan, "research_id", None):
-                    upstream_result = await await_before_deadline(client.wait_for_deep_research(
-                        start.plan, poll_interval=poll_interval, timeout=request.timeout_seconds,
-                    ), timeout=request.timeout_seconds)
-                elif fetch_report is not None and request_report is not None:
-                    upstream_result = await wait_for_deep_research_by_chat(
-                        client, start.plan, start.chat, start.start_output, poll_interval=poll_interval,
-                        timeout=request.timeout_seconds, fetch_report=fetch_report, request_report=request_report,
-                    )
-                else:
-                    raise asyncio.TimeoutError
-                upstream_result.start_output = start.start_output
-                statuses = list(getattr(upstream_result, "statuses", ()) or ())
-                last_state = operation_state_from_upstream(statuses[-1] if statuses else None)
-                state = OperationState.COMPLETED if getattr(upstream_result, "done", False) else (
-                    last_state if last_state in {OperationState.FAILED, OperationState.CANCELLED, OperationState.UNAVAILABLE}
-                    else OperationState.TIMED_OUT
+            result = start.timed_out
+        elif start.error is not None:
+            if research_start_outcome_unknown(start):
+                result = research_unknown_result(request.operation, operation_id, start.plan, start.chat)
+            else:
+                result = _failure_from_exception(
+                    start.error, request, operation_id=operation_id, plan=start.plan, chat=start.chat,
+                    failure_phase=start.failure_phase,
                 )
-            except asyncio.TimeoutError:
-                result = research_timed_out_result(operation=request.operation, operation_id=context.operation_id,
-                                                   plan=start.plan, chat=start.chat, start_output=start.start_output)
-                self._operations.finish(context, result)
-                return ResearchExecution(result)
-            except Exception as error:
-                result = _failure_from_exception(error, request, operation_id=context.operation_id,
-                                                 plan=start.plan, chat=start.chat)
-                self._operations.finish(context, result)
-                return ResearchExecution(result)
-        data = research_operation_data(
-            state,
-            operation=request.operation,
-            operation_id=context.operation_id,
-            plan=start.plan,
-            chat=start.chat,
-            upstream_result=upstream_result,
-            latest_upstream_state=state.value if not wait_for_completion else None,
+        else:
+            state = (OperationState.COMPLETED if _has_ready_research_document(start.start_output)
+                     else operation_state_from_upstream(getattr(start.start_output, "state", None)))
+            if state is OperationState.COMPLETED:
+                document = getattr(start.start_output, "deep_research_document", None)
+                content = getattr(document, "content", "")
+                if not (getattr(document, "ready", False) and isinstance(content, str) and content.strip()):
+                    state = OperationState.PARTIAL
+            data = research_operation_data(
+                state, operation=request.operation, operation_id=operation_id, plan=start.plan,
+                chat=start.chat, response=start.start_output,
+                latest_upstream_state=upstream_state(getattr(start.start_output, "state", None)), poll_count=0,
+            )
+            result = research_domain_result(data)
+        assert result.data is not None
+        try:
+            store.update(
+                operation_id, state=result.data.state.value,
+                phase=("plan_outcome_unverified" if research_start_outcome_unknown(start)
+                       or (start.timed_out is not None and start.failure_phase == "plan") else "start_returned"),
+                upstream_chat_id=result.data.upstream_chat_id,
+                upstream_operation_id=result.data.upstream_operation_id,
+                verification_status=result.meta.verification_status,
+            )
+        except Exception:
+            logger.exception("Unable to update research operation metadata")
+            return DomainResult.failure(
+                DomainErrorCode.INTERNAL_ERROR,
+                "Research outcome could not be saved; use any observed upstream chat ID to recover it.",
+                data=result.data,
+                verification_status="operation_not_persisted",
+            )
+        if start.error is None and start.timed_out is None and _has_ready_research_document(start.start_output):
+            from .operations import OperationService
+            current = store.get(operation_id)
+            if current is None:
+                return DomainResult.failure(DomainErrorCode.INTERNAL_ERROR,
+                    "The original research operation could not be read back.")
+            saved = await OperationService(
+                store, self._dependencies.client_provider, self._dependencies.client_initializer,
+                self._dependencies.finalize_chat_cleanup, worker_token=worker_token,
+            ).save_report(current, getattr(start.start_output, "deep_research_document", None))
+            saved_data = saved.data
+            return DomainResult(
+                ok=saved.ok,
+                data=(replace(result.data, state=saved_data.state, report_available=saved_data.report_available,
+                              cleanup=saved_data.cleanup, continuation_possible=not saved_data.report_available)
+                      if saved_data is not None else None),
+                error=saved.error, warnings=saved.warnings, meta=saved.meta,
+            )
+        definitely_failed = (
+            (start.error is not None and not start.start_attempted and not research_start_outcome_unknown(start))
+            or (start.error is None and start.timed_out is None
+                and result.data.state in {OperationState.FAILED, OperationState.CANCELLED})
         )
-        result = research_domain_result(data)
-        final_output = getattr(upstream_result, "final_output", None) or start.start_output
-        body = research_report_body(final_output, provider_completed=bool(getattr(upstream_result, "done", False)))
-        if body:
-            result = await self._save_report(context, data, body, client)
-        elif state == OperationState.COMPLETED:
-            result = research_domain_result(replace(data, state=OperationState.RUNNING, report_available=False))
-        self._operations.finish(context, result)
-        return ResearchExecution(result, upstream_result)
-
-    async def _save_report(self, context: OperationContext, data: LongOperationData, body: str, client: Any) -> DomainResult[LongOperationData]:
-        failure_data = replace(data, state=OperationState.FAILED, report_available=False)
-        record = self._operations.store.operations.get(context.scope_id, context.operation_id)
-        if record is None or not record.output_dir:
-            return DomainResult.failure(DomainErrorCode.ARTIFACT_SAVE_FAILED, "Research destination is unavailable.",
-                                        data=failure_data, verification_status="report_not_saved")
-        path = Path(record.output_dir) / f"{context.operation_id}.md"
-        try:
-            path.parent.mkdir(parents=True, exist_ok=True)
-            # A deterministic opaque filename makes cross-client result reads
-            # converge. Existing content must match; never overwrite a caller's
-            # unrelated file in the approved destination.
-            fd, temporary_name = tempfile.mkstemp(prefix=f".{context.operation_id}.", dir=path.parent)
-            temporary = Path(temporary_name)
+        if definitely_failed and not request.retain_chat and operation_account_matches(record):
             try:
-                with os.fdopen(fd, "w", encoding="utf-8") as output:
-                    output.write(body)
-                    output.flush()
-                    os.fsync(output.fileno())
-                try:
-                    os.link(temporary, path)
-                except FileExistsError:
-                    if path.read_text(encoding="utf-8") != body:
-                        raise ValueError("Report destination already contains different content.") from None
-            finally:
-                temporary.unlink(missing_ok=True)
-            if path.read_text(encoding="utf-8") != body:
-                raise ValueError("Saved report did not match its source.")
-            artifact = artifact_from_local_path(ArtifactKind.REPORT, str(path), source_chat_id=data.upstream_chat_id)
-            if artifact.verification.status != ArtifactVerificationStatus.VERIFIED:
-                raise ValueError("Saved report could not be verified.")
-        except (OSError, ValueError):
-            return DomainResult.failure(DomainErrorCode.ARTIFACT_SAVE_FAILED, "Research report could not be saved and verified; its source is retained.",
-                                        data=failure_data, verification_status="report_not_saved")
-        result = research_domain_result(replace(data, state=OperationState.COMPLETED, report_available=True, artifacts=(artifact,)))
-        try:
-            context.observe_artifacts_sync((artifact,), operation_state=OperationState.COMPLETED,
-                                           verification_status="report_observed")
-        except (ValueError, RuntimeError):
-            return DomainResult.failure(DomainErrorCode.ARTIFACT_SAVE_FAILED, "The saved report locator could not be retained; its source remains available.",
-                                        data=replace(failure_data, artifacts=(artifact,)), verification_status="locator_not_retained")
-        if self._operations._scope() == context.scope_id:
-            from ..client_wrapper import finalize_generated_chat_cleanup
-            cleanup = await finalize_generated_chat_cleanup(SimpleNamespace(cid=data.upstream_chat_id), owns_chat=True,
-                                                             retain_chat=record.retain_chat,
-                                                             delete_after_seconds=record.delete_after_seconds,
-                                                             source="research", client=client)
-            result = replace(result, meta=replace(result.meta, details={**result.meta.details, "cleanup": cleanup}))
+                store.release_cleanup(operation_id)
+                if result.data.upstream_chat_id and self._dependencies.finalize_chat_cleanup is not None:
+                    cleanup = await self._dependencies.finalize_chat_cleanup(
+                        result.data.upstream_chat_id, retain_chat=False,
+                        delete_after_seconds=request.delete_after_seconds, source=request.cleanup_source,
+                    )
+                    store.update_cleanup(operation_id, cleanup.state.value)
+                    result = replace(result, data=replace(
+                        result.data, cleanup=cleanup,
+                        continuation_possible=cleanup.state.value not in {"completed", "already_completed"},
+                    ))
+            except Exception:
+                logger.exception("Failed to finalize research cleanup")
+                result = replace(result, warnings=(*result.warnings, DomainWarning(
+                    code="cleanup_unverified", message="Research chat cleanup was not verified.",
+                )))
         return result
 
-    async def recover(self, record: OperationRecord) -> DomainResult[LongOperationData]:
-        """Read an existing report; never create a plan or send a message."""
-        data = self._operations._data(record)
-        if record.artifacts:
-            verified = tuple(replace(artifact_from_local_path(ArtifactKind.REPORT, item.local_path,
-                                                             source_chat_id=record.upstream_chat_id), id=item.id)
-                             for item in record.artifacts if item.local_path)
-            if verified and all(item.verification.status == ArtifactVerificationStatus.VERIFIED for item in verified):
-                return research_domain_result(replace(data, state=OperationState.COMPLETED, report_available=True, artifacts=verified))
-        if not record.upstream_chat_id:
-            return DomainResult.success(replace(data, state=OperationState.RUNNING), operation_state=OperationState.RUNNING,
-                                        verification_status="source_not_observed")
-        client = await self._prepare_client()
-        fetch = getattr(client, "fetch_latest_chat_response", None)
-        if not callable(fetch):
-            return DomainResult.failure(DomainErrorCode.CAPABILITY_UNAVAILABLE, "The client cannot read the existing research source.",
-                                        data=data, operation_state=OperationState.UNAVAILABLE, verification_status="readback_unavailable")
-        # Current SDK supports a match callback so a later acknowledgement
-        # cannot hide an earlier completed document in the same owned chat.
-        import inspect
-        supports_match = "match" in inspect.signature(fetch).parameters
-        output = await fetch(record.upstream_chat_id, **({"limit": 10, "match": lambda value: bool(research_report_body(value))} if supports_match else {}))
-        observed_cid = research_chat_id(response=output)
-        if observed_cid and observed_cid != record.upstream_chat_id:
-            return DomainResult.failure(DomainErrorCode.UPSTREAM_CHANGED, "Research read-back returned a different source identity.",
-                                        data=data, verification_status="source_identity_changed")
-        body = research_report_body(output)
-        if not body:
-            state = operation_state_from_upstream(getattr(output, "state", None))
-            if state == OperationState.COMPLETED or output is None or (
-                upstream_state(output) is None and not is_research_start_message(getattr(output, "text", ""))
-            ):
-                state = record.state if record.state in {OperationState.QUEUED, OperationState.RUNNING, OperationState.CANCEL_REQUESTED,
-                                                         OperationState.FAILED, OperationState.TIMED_OUT} else OperationState.RUNNING
-            unresolved = replace(data, state=state, report_available=False)
-            unresolved_result = research_domain_result(unresolved)
-            return replace(unresolved_result, meta=replace(unresolved_result.meta, verification_status="completion_not_observed"))
-        return await self._save_report(OperationContext(self._operations, record), data, body, client)
+    async def _resume_existing_plan(self, store: OperationStore, record: Any, timeout: int) -> DomainResult[LongOperationData]:
+        """Confirm an observed original plan once, without submitting its query again."""
+        if not operation_account_matches(record):
+            return DomainResult.failure(DomainErrorCode.CAPABILITY_UNAVAILABLE, "Operation account could not be verified.",
+                                        verification_status="account_mismatch_or_unbound")
+        original = research_unknown_result(record.operation, record.operation_id, None,
+                                           SimpleNamespace(cid=record.upstream_chat_id))
+        try:
+            async def prepare_and_read() -> tuple[Any, Any]:
+                client = await self._prepare_client(record)
+                if not operation_account_matches(record):
+                    return client, None
+                return client, await read_existing_research_plan(client, record.upstream_chat_id)
 
-    async def _prepare_client(self) -> Any:
+            client, plan = await await_before_deadline(prepare_and_read(), timeout=phase_timeout(timeout))
+            if plan is None:
+                return original
+            if isinstance(plan, _ResearchPlanRejection):
+                cid, rid, rcid = plan.metadata
+                if (not operation_account_matches(record) or not record.account_key
+                        or not store.reject_research_turn(record.operation_id, account_key=record.account_key,
+                                                          chat_id=cid, response_id=rid, candidate_id=rcid)):
+                    return original
+                cleanup = None
+                if self._dependencies.finalize_chat_cleanup is not None and operation_account_matches(record):
+                    try:
+                        cleanup = await self._dependencies.finalize_chat_cleanup(
+                            cid, retain_chat=record.retain_chat, delete_after_seconds=record.delete_after_seconds,
+                            source=record.operation,
+                        )
+                        if operation_account_matches(record):
+                            store.update_cleanup(record.operation_id, cleanup.state.value)
+                    except Exception:
+                        pass
+                data = LongOperationData(operation=record.operation, state=OperationState.FAILED,
+                                         operation_id=record.operation_id, upstream_chat_id=cid,
+                                         cleanup=cleanup, error_code="UPSTREAM_REJECTED")
+                return DomainResult.failure(DomainErrorCode.UPSTREAM_REJECTED, "The research plan request was rejected.",
+                                            data=data, operation_state=OperationState.FAILED,
+                                            verification_status="research_rejection_observed")
+            metadata = getattr(plan, "metadata", None)
+            if (not isinstance(metadata, (list, tuple)) or len(metadata) < 3
+                    or metadata[0] != record.upstream_chat_id
+                    or getattr(plan, "cid", None) != record.upstream_chat_id
+                    or (record.upstream_response_id and metadata[1] != record.upstream_response_id)
+                    or (record.upstream_candidate_id and metadata[2] != record.upstream_candidate_id)):
+                return original
+            model, _note = resolve_deep_research_transport_model(record.requested_model, client)
+            # A fallback unspecified model cannot prove preservation of the
+            # original selection, so do not confirm on that basis.
+            if is_default_deep_research_transport(model):
+                return original
+            registry = getattr(client, "_model_registry", None)
+            if not isinstance(registry, dict):
+                return original
+            if isinstance(model, str):
+                exact = [item for item in registry.values()
+                         if str(getattr(item, "model_name", "")).lower() == model.lower()]
+                if len(exact) != 1:
+                    return original
+                model = exact[0]
+            if not any(model is item for item in registry.values()):
+                return original
+            chat = client.start_chat(metadata=list(plan.metadata), cid=plan.cid, model=model)
+        except Exception:
+            return original
+
+        # A crash after this commit is intentionally not retried: it may have
+        # sent the confirmation even when its response was lost.
+        if not operation_account_matches(record):
+            return original
+        if not store.claim_research_confirmation(record.operation_id, expected_phase="plan_outcome_unverified"):
+            return original
+        try:
+            with research_thinking_scope(client, model, self._dependencies.resolve_model(record.requested_model),
+                                         record.thinking_level), model_policy_scope("research"):
+                output = await start_deep_research_with_recovery(
+                    client, plan, chat, timeout=min(phase_timeout(timeout), RESEARCH_START_TIMEOUT_SECONDS),
+                )
+            if not operation_account_matches(record):
+                return original
+            state = (OperationState.COMPLETED if _has_ready_research_document(output)
+                     else operation_state_from_upstream(getattr(output, "state", None)))
+            if getattr(output, "timeout_during_start", False):
+                state = OperationState.PARTIAL
+            data = research_operation_data(state, operation=record.operation, operation_id=record.operation_id,
+                                           plan=plan, chat=chat, response=output)
+            store.update(record.operation_id, state=data.state.value, phase="confirmation_returned",
+                         upstream_chat_id=data.upstream_chat_id, upstream_operation_id=data.upstream_operation_id,
+                         verification_status="report_observed" if data.report_available else "start_outcome_unverified")
+            result = research_domain_result(data)
+            return replace(result, warnings=(*result.warnings, DomainWarning(
+                code="operation_already_exists", message="The saved plan was confirmed; the new query was ignored.",
+            )))
+        except Exception:
+            return original
+
+    async def _prepare_client(self, record: Any) -> Any:
         client = self._dependencies.client_provider()
         await self._dependencies.client_initializer()
+        if not operation_account_matches(record):
+            raise ResearchCleanupPreconditionError("Operation account changed during initialization")
         await self._dependencies.cleanup_due_remote_chats(client)
+        if not operation_account_matches(record):
+            raise ResearchCleanupPreconditionError("Operation account changed during initialization")
         return client
 
 
@@ -400,6 +566,8 @@ class DeepResearchStart:
     start_output: Any | None = None
     timed_out: DomainResult[LongOperationData] | None = None
     error: BaseException | None = None
+    start_attempted: bool = False
+    failure_phase: str | None = None
 
 
 async def run_deep_research_start_phase(
@@ -418,8 +586,10 @@ async def run_deep_research_start_phase(
     retain_chat: bool,
     delete_after_seconds: int | None,
     cleanup_source: str,
-    observe_locator: Callable[[str, str | None], None] | None = None,
-    observe_provider_locator: Callable[[str], None] | None = None,
+    checkpoint: Callable[[Any, Any, Any], str] | None = None,
+    late_checkpoint: Callable[[Any, Any, Any], None] | None = None,
+    early_checkpoint: Callable[[Any], None] | None = None,
+    claim_confirmation: Callable[[], bool] | None = None,
 ) -> DeepResearchStart:
     """Run the shared Deep Research plan/start phases for both surfaces.
 
@@ -436,13 +606,63 @@ async def run_deep_research_start_phase(
     chat = None
     plan = None
     start_output = None
+    start_attempted = False
+    checkpointed_chat_id: str | None = None
+    observed_chat: Any = None
+    active = True
+    phase = "chat_setup"
+
+    def observe_identity(value: Any) -> None:
+        nonlocal observed_chat, checkpointed_chat_id
+        if phase != "plan" or early_checkpoint is None:
+            return
+        cid = research_chat_id(chat=value, response=value)
+        if not cid:
+            return
+        if observed_chat is not None and observed_chat.cid != cid:
+            raise ResearchCleanupPreconditionError("Research chat identity changed")
+        metadata = getattr(value, "metadata", None)
+        metadata = list(metadata) if isinstance(metadata, (list, tuple)) else [cid]
+        if not metadata:
+            metadata = [cid]
+        metadata[0] = cid
+        observed_chat = SimpleNamespace(cid=cid, metadata=metadata)
+        if not active and late_checkpoint is not None:
+            late_checkpoint(None, observed_chat, None)
+        elif active and early_checkpoint is not None:
+            early_checkpoint(observed_chat)
+            checkpointed_chat_id = cid
+
+    def safe_chat() -> Any:
+        return observed_chat if observed_chat is not None and research_chat_id(chat=chat) != observed_chat.cid else chat
+
+    def checkpoint_late(done: asyncio.Future[Any]) -> None:
+        try:
+            output = done.result()
+        except BaseException:
+            output = None
+        late_id = research_chat_id(plan=plan, chat=chat, response=output)
+        if not late_id:
+            return
+        if late_id == checkpointed_chat_id:
+            # The pre-confirmation checkpoint already durably registered this
+            # exact chat. A late cancellation must not enqueue it again.
+            return
+        if late_checkpoint is not None:
+            late_checkpoint(plan, chat, output)
+        else:
+            schedule_chat_cleanup(
+                late_id, retain_chat=retain_chat,
+                delete_after_seconds=(delete_after_seconds if retain_chat else
+                                      max(RESEARCH_DEFERRED_CLEANUP_SECONDS, delete_after_seconds or 0)),
+                source=cleanup_source,
+            )
+
     try:
-        chat = start_fresh_research_chat(
-            client, research_model,
-            on_chat_observed=(lambda cid: observe_locator(cid, None)) if observe_locator is not None else None,
-        )
+        chat = start_fresh_research_chat(client, research_model)
         scope = research_thinking_scope(client, research_model, resolved_model, thinking_level)
-        with scope, client_generation_once(client):
+        with client_timeout_scope(client, phase_timeout(timeout_seconds)), scope, observe_cleanup_frames(observe_identity), model_policy_scope("research"):
+            phase = "plan"
             plan = await await_before_deadline(
                 create_deep_research_plan(
                     client,
@@ -451,18 +671,23 @@ async def run_deep_research_start_phase(
                     model=research_model,
                 ),
                 timeout=phase_timeout(timeout_seconds),
+                on_late=checkpoint_late,
             )
-            chat_id = research_chat_id(plan=plan, chat=chat)
-            provider_id = nonempty_identifier(getattr(plan, "research_id", None))
-            if provider_id and observe_provider_locator is not None:
-                observe_provider_locator(provider_id)
-            if chat_id and observe_locator is not None:
-                observe_locator(chat_id, provider_id)
+            if observed_chat is not None and research_chat_id(plan=plan, chat=chat) != observed_chat.cid:
+                raise ResearchCleanupPreconditionError("Research chat identity changed")
+            phase = "checkpoint"
+            if checkpoint is not None:
+                checkpointed_chat_id = checkpoint(plan, chat, None)
+            start_attempted = True
+            if claim_confirmation is not None and not claim_confirmation():
+                raise RuntimeError("Research confirmation was already claimed or is unavailable")
+            phase = "start"
             start_output = await start_deep_research_with_recovery(
                 client,
                 plan,
                 chat,
                 timeout=min(phase_timeout(timeout_seconds), RESEARCH_START_TIMEOUT_SECONDS),
+                on_late=checkpoint_late,
             )
             if getattr(start_output, "timeout_during_start", False):
                 return DeepResearchStart(
@@ -476,38 +701,71 @@ async def run_deep_research_start_phase(
                         chat=chat,
                         start_output=start_output,
                     ),
+                    start_attempted=start_attempted,
+                    failure_phase=phase,
                 )
     except asyncio.TimeoutError:
         return DeepResearchStart(
-            chat,
+            safe_chat(),
             plan,
             start_output,
             timed_out=research_timed_out_result(
                 operation=operation,
                 operation_id=operation_id,
                 plan=plan,
-                chat=chat,
+                chat=safe_chat(),
                 start_output=start_output,
             ),
+            start_attempted=start_attempted,
+            failure_phase=phase,
         )
     except Exception as error:
-        return DeepResearchStart(chat, plan, start_output, error=error)
+        # The SDK may receive a completed research document on the plan turn,
+        # then raise because no plan was present. Preserve that exact output;
+        # do not synthesize a plan or submit a confirmation.
+        output = getattr(chat, "last_output", None) if chat is not None else None
+        if (phase == "plan" and _safe_research_failure_reason(error) in {"plan_missing", "research_no_output", "no_output"}
+                and _has_ready_research_document(output)):
+            try:
+                if checkpoint is not None:
+                    checkpointed_chat_id = checkpoint(None, chat, output)
+                elif not research_chat_id(plan=None, chat=chat, response=output):
+                    raise RuntimeError("Ready research document has no recoverable chat ID")
+                return DeepResearchStart(chat, None, output, start_attempted=False)
+            except Exception as checkpoint_error:
+                return DeepResearchStart(chat, None, output, error=checkpoint_error, start_attempted=True,
+                                         failure_phase="checkpoint")
+        return DeepResearchStart(safe_chat(), plan, start_output, error=error, start_attempted=start_attempted,
+                                 failure_phase=phase)
     finally:
-        # Preserve every observed fresh source, including a partial plan
-        # failure. A report must be saved before applying disposal policy.
-        chat_id = research_chat_id(plan=plan, chat=chat, response=start_output)
-        if chat_id is not None:
-            if observe_locator is not None:
-                observe_locator(chat_id, nonempty_identifier(getattr(plan, "research_id", None)))
-            schedule_chat_cleanup(
-                chat_id,
-                # A plan/start result still contains the only recoverable
-                # report source. Apply the caller policy after local save.
-                retain_chat=True,
-                delete_after_seconds=delete_after_seconds,
-                source=cleanup_source,
-            )
-    return DeepResearchStart(chat, plan, start_output)
+        active = False
+        # Backstop any ID first seen after the pre-confirmation checkpoint.
+        chat_id = research_chat_id(plan=plan, chat=safe_chat(), response=start_output)
+        if chat_id is not None and chat_id != checkpointed_chat_id:
+            try:
+                if checkpoint is not None:
+                    # Guard the newly observed CID before making its cleanup
+                    # visible to any process. Never enqueue an unguarded chat.
+                    checkpoint(plan, safe_chat(), start_output)
+                else:
+                    schedule_chat_cleanup(
+                        chat_id,
+                        retain_chat=retain_chat,
+                        delete_after_seconds=(
+                            delete_after_seconds if retain_chat else
+                            max(RESEARCH_DEFERRED_CLEANUP_SECONDS, delete_after_seconds or 0)
+                        ),
+                        source=cleanup_source,
+                    )
+            except Exception:
+                logger.exception("Research cleanup backstop could not be registered")
+    return DeepResearchStart(chat, plan, start_output, start_attempted=start_attempted)
+
+
+def _has_ready_research_document(response: Any) -> bool:
+    document = getattr(response, "deep_research_document", None)
+    content = getattr(document, "content", None)
+    return bool(getattr(document, "ready", False)) and isinstance(content, str) and bool(content.strip())
 
 
 def research_thinking_scope(
@@ -544,44 +802,6 @@ def has_native_research_api(client: Any) -> bool:
     )
 
 
-def consume_finished_task(task: asyncio.Future[Any]) -> None:
-    """Observe a detached task result so late completion cannot leak warnings."""
-    try:
-        task.result()
-    except BaseException:
-        pass
-
-
-async def await_before_deadline(
-    awaitable: Awaitable[Any],
-    *,
-    timeout: float,
-) -> Any:
-    """Await strictly until a deadline and never adopt a late completion.
-
-    ``asyncio.wait_for`` can continue waiting when a child suppresses its
-    cancellation.  Long-operation state must be final at the declared
-    deadline, so this helper detaches and consumes any such late result.
-    """
-    task = asyncio.ensure_future(awaitable)
-    try:
-        done, _pending = await asyncio.wait(
-            {task},
-            timeout=max(0.0, float(timeout)),
-        )
-    except BaseException:
-        if not task.done():
-            task.cancel()
-        task.add_done_callback(consume_finished_task)
-        raise
-
-    if not done:
-        task.cancel()
-        task.add_done_callback(consume_finished_task)
-        raise asyncio.TimeoutError
-    return await task
-
-
 def nonempty_identifier(value: Any) -> str | None:
     return value.strip() if isinstance(value, str) and value.strip() else None
 
@@ -593,7 +813,7 @@ def research_chat_id(
     response: Any = None,
 ) -> str | None:
     for owner in (chat, plan, response):
-        identifier = nonempty_identifier(getattr(owner, "observed_chat_id", None)) or nonempty_identifier(getattr(owner, "cid", None))
+        identifier = nonempty_identifier(getattr(owner, "cid", None))
         if identifier:
             return identifier
     metadata = getattr(response, "metadata", None)
@@ -625,9 +845,9 @@ def operation_state_from_upstream(value: Any) -> OperationState:
         return OperationState.CANCELLED
     if state in {"failed", "error"}:
         return OperationState.FAILED
-    if state in {"unavailable", "not_available"}:
-        return OperationState.UNAVAILABLE
-    return OperationState.RUNNING
+    if state in {"running", "processing", "in_progress"}:
+        return OperationState.RUNNING
+    return OperationState.ACCEPTED
 
 
 def research_operation_data(
@@ -657,11 +877,15 @@ def research_operation_data(
     upstream_operation_id = nonempty_identifier(getattr(plan, "research_id", None))
     chat_id = research_chat_id(plan=plan, chat=chat, response=response)
     final_output = getattr(upstream_result, "final_output", None)
-    final_text = getattr(final_output, "text", "") if final_output else ""
+    if final_output is None and state is OperationState.COMPLETED:
+        final_output = response
+    document = getattr(final_output, "deep_research_document", None) if final_output else None
+    report_text = getattr(document, "content", "") if document else ""
     report_available = (
         state is OperationState.COMPLETED
-        and isinstance(final_text, str)
-        and bool(final_text.strip())
+        and bool(getattr(document, "ready", False))
+        and isinstance(report_text, str)
+        and bool(report_text.strip())
     )
     return LongOperationData(
         operation=operation,
@@ -671,9 +895,29 @@ def research_operation_data(
         upstream_chat_id=chat_id,
         title=nonempty_identifier(getattr(plan, "title", None)),
         latest_upstream_state=latest_upstream_state,
-        continuation_possible=bool(upstream_operation_id or chat_id),
+        continuation_possible=bool(chat_id),
         report_available=report_available,
         poll_count=max(0, poll_count),
+    )
+
+
+def research_start_outcome_unknown(start: DeepResearchStart) -> bool:
+    return bool(
+        start.error is not None and start.failure_phase == "plan"
+        and research_chat_id(plan=start.plan, chat=start.chat, response=start.start_output)
+    )
+
+
+def research_unknown_result(operation: str, operation_id: str, plan: Any, chat: Any) -> DomainResult[LongOperationData]:
+    data = research_operation_data(OperationState.PARTIAL, operation=operation, operation_id=operation_id,
+                                   plan=plan, chat=chat)
+    return DomainResult.success(
+        data, operation_state=OperationState.PARTIAL, verification_status="start_outcome_unverified",
+        warnings=(DomainWarning(
+            code="research_outcome_unknown",
+            message="The research request was sent, but its outcome could not be verified; do not start it again.",
+            suggested_action="Inspect the same operation handle later; do not start duplicate research.",
+        ),),
     )
 
 
@@ -731,6 +975,8 @@ def research_domain_result(
         ),
         OperationState.QUEUED: "upstream_queued",
         OperationState.RUNNING: "upstream_running",
+        OperationState.ACCEPTED: "start_outcome_unverified",
+        OperationState.PARTIAL: "report_not_observed",
     }.get(data.state, "upstream_state_observed")
     return DomainResult.success(
         data,
@@ -761,17 +1007,51 @@ def research_timed_out_result(
     return research_domain_result(data)
 
 
+async def read_existing_research_plan(client: Any, cid: str):
+    """Read a complete original plan with the evidence-backed RPC contract."""
+    contract = get_contract("research.chat_plan")
+    response = await execute_contract(client, contract.key, chat_id=cid)
+    if getattr(response, "status_code", None) != 200:
+        return None
+    envelope = parse_rpc_envelope(getattr(response, "text", "") or "", contract.rpc_id)
+    if envelope.reject_code is not None or not envelope.parsed or not envelope.bodies:
+        return None
+    parsed = parse_contract_body(contract, envelope.bodies[0], chat_id=cid)
+    if parsed.status == "rejected" and isinstance(parsed.value, dict):
+        metadata = parsed.value.get("metadata")
+        if isinstance(metadata, list) and len(metadata) == 3 and all(isinstance(item, str) and item for item in metadata):
+            return _ResearchPlanRejection(tuple(metadata))
+    if parsed.status != "success" or not isinstance(parsed.value, dict):
+        return None
+    from gemini_webapi.types import DeepResearchPlan
+    payload = dict(parsed.value["plan"])
+    payload["metadata"] = parsed.value["metadata"]
+    payload["cid"] = cid
+    return DeepResearchPlan(**payload)
+
+
 async def create_deep_research_plan(client: Any, query: str, chat: Any, model: Any):
     try:
         return await client.create_deep_research_plan(query, chat=chat, model=model)
     except Exception as e:
+        cid = research_chat_id(chat=chat)
+        if (cid and _safe_research_failure_reason(e) in {"plan_missing", "no_output", "research_no_output"}
+                and not _has_ready_research_document(getattr(chat, "last_output", None))):
+            try:
+                recovered = await read_existing_research_plan(client, cid)
+                if recovered is not None and not isinstance(recovered, _ResearchPlanRejection):
+                    chat.metadata = list(recovered.metadata)
+                    chat.cid, chat.rid, chat.rcid = recovered.metadata[:3]
+                    return recovered
+            except Exception:
+                logger.warning("Research plan readback could not be verified")
         if not is_capability_probe_false_negative(e) or not all(
             hasattr(client, attr)
             for attr in ("_deep_research_preflight", "_collect_research_output")
         ):
             raise
 
-        logger.warning("Deep Research capability probe failed, trying direct research request: %s", e)
+        logger.warning("Deep Research capability probe failed; trying direct research request")
         await client._deep_research_preflight()
         output = await client._collect_research_output(chat, query)
         plan = getattr(output, "deep_research_plan", None)
@@ -786,10 +1066,8 @@ async def create_deep_research_plan(client: Any, query: str, chat: Any, model: A
         return plan
 
 
-def start_fresh_research_chat(client: Any, model: Any, *, on_chat_observed: Callable[[str], None] | None = None):
+def start_fresh_research_chat(client: Any, model: Any):
     """Create a chat that is not polluted by gemini_webapi's shared default metadata."""
-    if isinstance(client, ThinkingLevelGeminiClient):
-        return client.start_owned_chat(model=model, on_chat_observed=on_chat_observed)
     chat = client.start_chat(model=model)
     for attr in ("cid", "rid", "rcid"):
         try:
@@ -799,152 +1077,23 @@ def start_fresh_research_chat(client: Any, model: Any, *, on_chat_observed: Call
     return chat
 
 
-async def start_deep_research_with_recovery(client: Any, plan: Any, chat: Any, timeout: float):
-    deadline = asyncio.get_running_loop().time() + max(0.0, timeout)
+async def start_deep_research_with_recovery(
+    client: Any, plan: Any, chat: Any, timeout: int,
+    on_late: Callable[[asyncio.Future[Any]], None] | None = None,
+):
     try:
         return await await_before_deadline(
             client.start_deep_research(plan, chat=chat),
             timeout=timeout,
+            on_late=on_late,
         )
     except asyncio.TimeoutError:
-        logger.warning("Deep Research start timed out; inspecting recoverable state within the deadline")
+        logger.warning("Deep Research start timed out; continuing with chat-history polling")
         latest = None
         cid = getattr(chat, "cid", None) or getattr(plan, "cid", None)
-        remaining = deadline - asyncio.get_running_loop().time()
-        if remaining > 0 and cid and hasattr(client, "fetch_latest_chat_response"):
-            try:
-                latest = await await_before_deadline(
-                    client.fetch_latest_chat_response(cid), timeout=remaining,
-                )
-            except asyncio.TimeoutError:
-                pass
+        if cid and hasattr(client, "fetch_latest_chat_response"):
+            latest = await client.fetch_latest_chat_response(cid)
         return latest or SimpleNamespace(text="", timeout_during_start=True)
-
-
-def is_research_start_message(text: str) -> bool:
-    lower = text.lower()
-    return any(marker in lower for marker in (
-        "i'm on it", "i’ll let you know", "i'll let you know", "research is finished",
-        "while i'm researching", "leave this chat", "i've finished the research",
-        "i have finished the research", "我已经完成了研究", "研究完成后", "我这就开始",
-    ))
-
-
-def is_research_completion_message(text: str) -> bool:
-    lower = text.lower()
-    return any(marker in lower for marker in (
-        "i've finished the research", "i have finished the research", "我已经完成了研究",
-    ))
-
-
-def _followup_report_observed(output: Any) -> bool:
-    """Accept a report response, rather than a changed acknowledgement or refusal."""
-    text = getattr(output, "text", "")
-    if not isinstance(text, str) or not text.strip() or is_research_start_message(text):
-        return False
-    if operation_state_from_upstream(getattr(output, "state", None)) in {
-        OperationState.FAILED, OperationState.CANCELLED, OperationState.UNAVAILABLE,
-    }:
-        return False
-    if nonempty_identifier(getattr(output, "report_id", None)):
-        return True
-    if getattr(output, "sources", None) or getattr(output, "deep_research_sources", None):
-        return True
-    # A pasted report may lose provider metadata. Require report structure and
-    # an observed source trail after the explicit completion observation.
-    return bool(
-        len(text.strip()) >= 1000
-        and re.search(r"^#{1,6}\s+\S", text, re.MULTILINE)
-        and re.search(r"https?://[^\s<>]+", text)
-    )
-
-
-def research_report_body(output: Any, *, provider_completed: bool = False) -> str | None:
-    """Require a typed document or a report-bearing completion observation."""
-    document = getattr(output, "deep_research_document", None)
-    content = getattr(document, "content", None)
-    if isinstance(content, str) and content.strip():
-        return content.strip()
-    text = getattr(output, "text", None)
-    if not isinstance(text, str) or not text.strip() or is_research_start_message(text):
-        return None
-    if re.match(r"(?is)^\s*(?:you(?:'ve| have) reached|daily (?:usage )?limit|quota exceeded|已达到|您已达到|无法完成|我无法完成)", text):
-        return None
-    if provider_completed or _followup_report_observed(output):
-        return text.strip()
-    return None
-
-
-async def wait_for_deep_research_by_chat(
-    client: Any,
-    plan: Any,
-    chat: Any,
-    start_output: Any,
-    *,
-    poll_interval: float,
-    timeout: float,
-    fetch_report: Callable[[Any, str], Awaitable[Any]],
-    request_report: Callable[[Any], Awaitable[Any]],
-) -> Any:
-    """Poll a no-ID operation under one deadline, requiring report evidence."""
-    loop = asyncio.get_running_loop()
-    deadline = loop.time() + max(0.0, timeout)
-    cid = research_chat_id(plan=plan, chat=chat, response=start_output)
-    checks = 0
-    followup_requested = False
-
-    def result(state: OperationState, note: str, output: Any = None) -> Any:
-        return SimpleNamespace(
-            plan=plan, start_output=start_output, final_output=output,
-            statuses=[SimpleNamespace(state=state.value, done=state is OperationState.COMPLETED, notes=[note])],
-            done=state is OperationState.COMPLETED, poll_count=checks,
-        )
-
-    async def before_deadline(awaitable: Awaitable[Any]) -> Any:
-        return await await_before_deadline(awaitable, timeout=max(0.0, deadline - loop.time()))
-
-    try:
-        while loop.time() < deadline:
-            if cid and hasattr(client, "fetch_latest_chat_response"):
-                latest = await before_deadline(client.fetch_latest_chat_response(cid))
-                checks += 1
-                text = getattr(latest, "text", "") or ""
-                state = operation_state_from_upstream(getattr(latest, "state", None))
-                if state in {OperationState.FAILED, OperationState.CANCELLED, OperationState.UNAVAILABLE}:
-                    return result(state, "upstream research reached a non-success terminal state")
-                if state is OperationState.COMPLETED or is_research_completion_message(text):
-                    if _followup_report_observed(latest):
-                        return result(OperationState.COMPLETED, "report observed in completed chat response", latest)
-                    report = await before_deadline(fetch_report(client, cid))
-                    report_text = getattr(report, "text", "") if report is not None else ""
-                    if isinstance(report_text, str) and report_text.strip():
-                        return result(
-                            OperationState.COMPLETED,
-                            f"retrieved immersive report from raw chat payload after {checks} checks", report,
-                        )
-                    if not followup_requested:
-                        # A report follow-up is still a generation mutation.
-                        # Mark it before awaiting so timeout/uncertain failure
-                        # cannot repost it on the next history poll.
-                        followup_requested = True
-                        with client_generation_once(client):
-                            report = await before_deadline(request_report(chat))
-                        if _followup_report_observed(report):
-                            return result(
-                                OperationState.COMPLETED,
-                                f"retrieved completed report by follow-up after {checks} checks", report,
-                            )
-            else:
-                checks += 1
-            remaining = deadline - loop.time()
-            if remaining > 0:
-                await asyncio.sleep(min(max(0.0, poll_interval), remaining))
-    except asyncio.TimeoutError:
-        pass
-    return result(
-        OperationState.RUNNING,
-        f"research_id was not present in Gemini's plan; checked chat history {checks} times; report not observed",
-    )
 
 
 def is_capability_probe_false_negative(error: Exception) -> bool:
@@ -956,25 +1105,51 @@ def is_default_deep_research_transport(model: Any) -> bool:
     return getattr(model, "model_name", None) == "unspecified" or model == "unspecified"
 
 
-def resolve_deep_research_transport_model(requested_model: str) -> tuple[Any, str]:
-    """Return the Gemini Web transport model that is stable for Deep Research."""
-    try:
-        from gemini_webapi.constants import Model
-    except ImportError:
-        return resolve_model_name(requested_model), resolve_model_name(requested_model)
-
-    resolved = resolve_model_name(requested_model)
+def resolve_deep_research_transport_model(requested_model: str, client: Any = None) -> tuple[Any, str]:
+    """Preserve the requested family; the client rejects unavailable models."""
     if requested_model in {"", None}:
         requested_model = "flash"
+    normalized = str(requested_model).strip().lower()
+    resolved = resolve_model_name(normalized)
 
-    if str(requested_model).strip().lower() in {"flash-lite", "lite", "flash", "fast", "pro", "thinking"}:
-        return (
-            Model.UNSPECIFIED,
-            (
-                "Gemini Web default Deep Research mode "
-                f"(requested {requested_model}; explicit model header {resolved} is unstable for this workflow)"
-            ),
-        )
+    # The SDK's fuzzy fallback may pick Flash-Lite for Flash. Accept only a
+    # descriptor actually present in the runtime registry and in the exact
+    # requested family; never infer the selected model from default transport.
+    families = {
+        "flash": ("gemini-3-flash", {"gemini-3-flash", "gemini-flash"}),
+        "fast": ("gemini-3-flash", {"gemini-3-flash", "gemini-flash"}),
+        "thinking": ("gemini-3-flash", {"gemini-3-flash", "gemini-flash"}),
+        "gemini-3-flash-thinking": ("gemini-3-flash", {"gemini-3-flash", "gemini-flash"}),
+        "gemini-flash": ("gemini-3-flash", {"gemini-3-flash", "gemini-flash"}),
+        "gemini-3-flash": ("gemini-3-flash", {"gemini-3-flash", "gemini-flash"}),
+        "pro": ("gemini-3-pro", {"gemini-3-pro", "gemini-pro"}),
+        "gemini-pro": ("gemini-3-pro", {"gemini-3-pro", "gemini-pro"}),
+        "gemini-3-pro": ("gemini-3-pro", {"gemini-3-pro", "gemini-pro"}),
+        "argon": ("gemini-argon", {"gemini-argon", "gemini-4-argon"}),
+        "4 argon": ("gemini-argon", {"gemini-argon", "gemini-4-argon"}),
+        "gemini-argon": ("gemini-argon", {"gemini-argon", "gemini-4-argon"}),
+        "gemini-4-argon": ("gemini-argon", {"gemini-argon", "gemini-4-argon"}),
+        "flash-lite": ("flash-lite", {"gemini-flash-lite", "gemini-3-flash-lite"}),
+        "lite": ("flash-lite", {"gemini-flash-lite", "gemini-3-flash-lite"}),
+        "gemini-flash-lite": ("flash-lite", {"gemini-flash-lite", "gemini-3-flash-lite"}),
+        "gemini-3-flash-lite": ("flash-lite", {"gemini-flash-lite", "gemini-3-flash-lite"}),
+    }
+    family = families.get(normalized)
+    registry = getattr(client, "_model_registry", None)
+    resolver = getattr(client, "_resolve_model_by_name", None)
+    if family and isinstance(registry, dict) and callable(resolver):
+        try:
+            selected = resolver(family[0])
+        except ValueError:
+            selected = None
+        if selected is not None and any(selected is item for item in registry.values()):
+            name = getattr(selected, "model_name", "")
+            if isinstance(name, str) and name.lower() in family[1]:
+                return selected, f"discovered model {name}"
+
+    # Never let the account's implicit default replace an explicit Pro/Argon
+    # choice. The shared client boundary must still discover this exact family
+    # before it can dispatch the named request.
     return resolved, resolved
 
 
@@ -984,8 +1159,8 @@ def format_research_query(query: str, requested_model: str, model_note: str) -> 
         "Deep Research request metadata:\n"
         f"- Requested MCP model alias: {requested_model}\n"
         f"- Transport model selection: {model_note}\n"
-        "If Gemini Web allows model-specific Deep Research, use the requested alias; "
-        "otherwise proceed with the account's default Deep Research mode and state that limitation."
+        "The client enforces this model selection; report capability limits "
+        "rather than claiming that this text selected a different model."
     )
 
 
@@ -1013,11 +1188,11 @@ def _input_rejected(message: str) -> DomainResult[LongOperationData]:
     )
 
 
-def _capability_unavailable(request: ResearchRequest, *, operation_id: str | None = None) -> DomainResult[LongOperationData]:
+def _capability_unavailable(request: ResearchRequest) -> DomainResult[LongOperationData]:
     return DomainResult.failure(
         DomainErrorCode.CAPABILITY_UNAVAILABLE,
         "The Gemini Web client does not expose the native Deep Research start API.",
-        data=LongOperationData(operation=request.operation, state=OperationState.UNAVAILABLE, operation_id=operation_id),
+        data=LongOperationData(operation=request.operation, state=OperationState.UNAVAILABLE),
         suggested_action="Update gemini-webapi, or use the compatibility gemini_deep_research tool.",
         operation_state=OperationState.UNAVAILABLE,
         verification_status="capability_not_available",
@@ -1032,8 +1207,21 @@ def _failure_from_exception(
     operation_id: str | None = None,
     plan: Any = None,
     chat: Any = None,
+    failure_phase: str | None = None,
 ) -> DomainResult[LongOperationData]:
-    classified = result_from_exception(error, logger=logger, operation=request.operation)
+    details = {"service": "research", "exception_type": type(error).__name__,
+               "failure_phase": failure_phase or "unknown", "failure_reason": _safe_research_failure_reason(error)}
+    if isinstance(error, ResearchCleanupPreconditionError):
+        data = research_operation_data(
+            OperationState.FAILED, operation=request.operation, operation_id=operation_id, plan=plan, chat=chat,
+        )
+        return DomainResult.failure(
+            DomainErrorCode.CAPABILITY_UNAVAILABLE,
+            "Research confirmation was not sent because a chat ID or durable cleanup policy was unavailable.",
+            data=data, operation_state=OperationState.FAILED, verification_status="start_not_attempted",
+            details=details,
+        )
+    classified = result_from_exception(error, logger=_safe_failure_logger, operation=request.operation)
     failure = classified.error
     assert failure is not None
     data = research_operation_data(
@@ -1053,5 +1241,25 @@ def _failure_from_exception(
         request_id=classified.meta.request_id,
         diagnostic_id=classified.meta.diagnostic_id,
         verification_status=classified.meta.verification_status,
-        details={"service": "research"},
+        details=details,
     )
+
+
+def _safe_research_failure_reason(error: BaseException) -> str:
+    """Classify known SDK errors without returning previews, identifiers, or exception text."""
+    text = str(error)
+    prefixes = (
+        ("Gemini did not return a deep research plan.", "plan_missing"),
+        ("Failed to generate contents. No output data found in response.", "no_output"),
+        ("Gemini returned no usable output for deep research.", "research_no_output"),
+        ("Permission denied. Account status:", "account_restricted"),
+        ("The connection to Gemini was lost while generating the response, and recovery timed out.",
+         "generation_recovery_timeout"),
+        ("Cannot poll deep research: the plan carries no chat id.", "research_chat_id_missing"),
+    )
+    for prefix, code in prefixes:
+        if text.startswith(prefix):
+            return code
+    if " is not available for use. Account status:" in text:
+        return "model_unavailable"
+    return "unknown"

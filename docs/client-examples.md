@@ -1,35 +1,31 @@
 # Client installation and verified onboarding
 
-The default templates use the canonical `main` source through `uvx`, which
-creates an isolated tool environment. Select a checkout or reviewed revision
-that provides the intended tools and arguments; a template does not establish
-that another revision has the same capabilities. Pin `@main` to a reviewed
-commit SHA when you need an immutable installation. Do not substitute
-`releases/latest` blindly: a release tag and wheel filename must both match
-the source version you intend to run.
-
-For local checkout installation, replace the `--from` source with its absolute
-path. Include the `image` extra for local image verification, for example
-`uvx --from '/absolute/path/to/gemini-web-mcp[image]' gemini-mcp-create`.
+These examples use the [development branch from PR #39](source-update-integration.md) through `uvx`, which creates an isolated tool environment. For an immutable install, replace the branch after `@` with a reviewed commit SHA. The published 0.2.2 release uses different server entrypoints and account schemas.
 
 ## One-command offline proof
 
-With [uv](https://docs.astral.sh/uv/) installed, this command installs the current source, starts its real stdio server, negotiates MCP, and calls `gemini_get_tool_manifest`:
+With [uv](https://docs.astral.sh/uv/) installed, this command installs the current source, starts `gemini-mcp-function`, checks its 17-tool catalog and verifies the typed `INVALID_ARGUMENT` response to an empty `gemini_ask` prompt:
 
 ```bash
-uvx --from git+https://github.com/Luckycat133/gemini-web-mcp@main gemini-mcp-onboarding
+uvx --from git+https://github.com/Luckycat133/gemini-web-mcp@codex/gemini-tools-polish-20261101 gemini-mcp-onboarding
 ```
 
-The command removes Gemini Cookie variables from the child process and reports `mode=offline`, `credentials_accessed=false`, the negotiated protocol version, server version, profile, and enabled-tool count. It makes no Gemini request.
+The command removes Gemini Cookie variables from the child process and makes no Gemini request. Check for `mode=offline`, `credentials_accessed=false`, `profile=function`, `enabled_tools=17`, and `text_tool=gemini_ask`.
 
 ## Authentication
 
-The authenticated local runtime currently requires macOS/Linux POSIX file
-protections. Windows local authentication is unsupported until a secure
-private-file/ACL implementation is accepted. Desktop configuration examples
-describe client formats; they do not establish server support on that OS.
+Live model calls can discover Cookies from a signed-in browser automatically. When supplying Cookies explicitly, export secrets in the client host or use the client's secret-input facility; never pass Cookies as command-line arguments or commit them.
 
-Live model calls use Gemini Web Cookies and therefore carry account and Terms-of-Service risk. Export secrets in the client host or use that client's secret-input facility; never pass Cookies as command-line arguments or commit them.
+For browser discovery, install the browser dependencies too. A full desktop entry can use the following arguments, with no Cookie placeholders in `env`:
+
+```json
+{
+  "command": "uvx",
+  "args": ["--from", "gemini-mcp-server[all] @ git+https://github.com/Luckycat133/gemini-web-mcp@codex/gemini-tools-polish-20261101", "gemini-mcp-function"]
+}
+```
+
+The base package leaves browser, image, and browser-control dependencies optional. A supplied PSID takes priority and constrains refresh to that credential lineage. Leave the Cookie variables unset for automatic discovery.
 
 ```bash
 export GEMINI_PSID='your __Secure-1PSID value'
@@ -43,6 +39,8 @@ not evidence that no matching browser profile exists.
 
 ## Copyable client configurations
 
+These files are for manually supplied credentials. For Chrome autoload, use the `[all]` arguments above and omit the Cookie variables. For image generation or editing with manual credentials, also use those arguments so the server can decode the returned images.
+
 - [Codex `config.toml`](../examples/clients/codex.config.toml) uses the documented `mcp_servers` table and forwards locally exported Cookie variables.
 - [Claude Desktop JSON](../examples/clients/claude-desktop.json) uses `mcpServers`; replace its Cookie placeholders locally and restrict file permissions.
 - [Claude Code `.mcp.json`](../examples/clients/claude-code.mcp.json) uses Claude Code's `${VAR}` environment expansion.
@@ -50,44 +48,43 @@ not evidence that no matching browser profile exists.
 
 Authoritative configuration references: [Codex MCP](https://developers.openai.com/codex/mcp/), [Claude Code MCP](https://code.claude.com/docs/en/mcp), and [VS Code MCP configuration](https://code.visualstudio.com/docs/agents/reference/mcp-configuration).
 
-Focused configurations for all three capability lanes are also available:
-[Codex](../examples/clients/codex.focused.config.toml),
-[Claude Desktop](../examples/clients/claude-desktop.focused.json),
-[Claude Code](../examples/clients/claude-code.focused.mcp.json), and
-[VS Code](../examples/clients/vscode.focused.mcp.json).
-Connect only the lanes needed for the task. Share `GEMINI_STATE_DB_PATH` when
-multiple local processes should recover the same operations and cleanup jobs.
+## Choose a surface
 
-## Pick one surface
+The supplied client configurations connect only `gemini-mcp-function` by default. This 17-tool surface covers assistance, chat, Task, image/video/music, Research and operation recovery. Ask ordinary and current-web questions through `gemini_ask`, naming an available app in natural language when needed; Flash is the default and no web/tool enable switch is required. Function Ask with Notebook IDs starts background ordinary Chat; `gemini_run_task` explicitly starts Task. Both return a persistent operation handle. See [Notebook, Chat and Task workflows](notebook-task-workflows.md). The compatibility assist entrypoint retains its five-tool catalog including `gemini_search`, without Notebook attachment arguments.
 
-| Surface | Select it when | Trade-off |
-| --- | --- | --- |
-| `gemini-mcp-assist` | Second opinion, sourced search, image/mixed-input understanding, Research | Five focused tools; explicit Research actions recover a saved handle |
-| `gemini-mcp-create` | Image generation/editing, video/music operations | Seven focused tools; verified files and restart recovery |
-| `gemini-mcp-account` | Explicit Gemini history/admin/cleanup | Seven typed action facades; account reads/mutations require user intent |
-| Primary + `GEMINI_TOOLS=model` | Text/model calls are the goal | Recommended starting point; smallest primary model surface |
-| Primary + `GEMINI_TOOLS=core` | Images, music, files, URLs, or Deep Research are needed | Broader content surface and longer tool timeouts; use Gemini Web's dedicated Videos page for video until its MCP route returns a verified artifact |
-| `gemini-mcp-skill-server` | The client benefits from a fixed, low-token facade | Eleven workflow tools; compact presentation, shared service semantics |
-| Primary + `GEMINI_TOOLS=all` | A maintainer is verifying account/history/admin coverage | Largest and most sensitive surface; not a general default |
+For explicitly requested account management, add a second server configuration. This optional entry is not enabled by the supplied default files:
 
-Change `GEMINI_TOOLS` from `model` to `core` in a copied client configuration for multimodal work. To use the compact facade, change only the final argument from `gemini-mcp-server` to `gemini-mcp-skill-server`; `GEMINI_TOOLS` does not resize the compact surface.
+```json
+{
+  "mcpServers": {
+    "gemini-account": {
+      "command": "uvx",
+      "args": ["--from", "gemini-mcp-server[all] @ git+https://github.com/Luckycat133/gemini-web-mcp@codex/gemini-tools-polish-20261101", "gemini-mcp-account"]
+    }
+  }
+}
+```
+
+Configure the account entry's authentication as you do for the function entry, or use browser discovery. The account surface exposes 17 tools, including Notebook metadata, Task activity and schedules, and verified Task browser frames with explicit one-shot inputs; `gemini_cleanup` only acts on MCP-owned ledger records, never title matches.
+
+The older `gemini-mcp-assist` and `gemini-mcp-skill-server` entrypoints remain compatibility options. Explicit `GEMINI_TOOLS=model` or `GEMINI_TOOLS=core` still selects the corresponding legacy profile when running `gemini-mcp-server`. Do not set that variable for the default function entry.
 
 ## Explicit live examples
 
-Live examples require the flag as well as Cookie configuration. Text uses a temporary chat:
+Live examples require the flag as well as Cookie configuration. Text uses the function assistance tool:
 
 ```bash
-uvx --from git+https://github.com/Luckycat133/gemini-web-mcp@main \
+uvx --from git+https://github.com/Luckycat133/gemini-web-mcp@codex/gemini-tools-polish-20261101 \
   gemini-mcp-onboarding chat \
   --allow-live-account \
   --prompt 'Reply with exactly: Gemini MCP is connected'
 ```
 
-The image example installs the image-verification extra, asks the primary `core` surface to save the result, and independently rejects response prose, a remote-only URI, a missing/empty file, MIME mismatch, missing dimensions, or an unverified artifact:
+The image example installs the image-verification extra, starts the function surface background task, retrieves the same operation handle, and independently rejects response prose, a remote-only URI, a missing/empty file, MIME mismatch, missing dimensions, or an unverified artifact:
 
 ```bash
 uvx \
-  --from 'gemini-mcp-server[image] @ git+https://github.com/Luckycat133/gemini-web-mcp@main' \
+  --from 'gemini-mcp-server[image] @ git+https://github.com/Luckycat133/gemini-web-mcp@codex/gemini-tools-polish-20261101' \
   gemini-mcp-onboarding image \
   --allow-live-account \
   --prompt 'A two-color geometric cat icon on a plain background' \
@@ -114,7 +111,7 @@ Install the runtime workflow skill when an agent should operate the MCP tools:
 
 ```bash
 npx --yes skills@1.5.21 add \
-  https://github.com/Luckycat133/gemini-web-mcp \
+  "https://github.com/Luckycat133/gemini-web-mcp#codex/gemini-tools-polish-20261101" \
   --skill gemini-web-mcp \
   --agent codex --copy --yes
 ```
@@ -123,27 +120,9 @@ Contributors changing this repository should install the separate development wo
 
 ```bash
 npx --yes skills@1.5.21 add \
-  https://github.com/Luckycat133/gemini-web-mcp \
+  "https://github.com/Luckycat133/gemini-web-mcp#codex/gemini-tools-polish-20261101" \
   --skill gemini-web-mcp-development \
   --agent codex --copy --yes
 ```
 
 The runtime skill teaches safe tool use. The development skill owns architecture, tests, packaging, compatibility, and release gates; neither installs the MCP server itself.
-
-## Client and OS evidence
-
-The initial supported runtime is Python 3.11+ with MCP SDK v2 over local stdio,
-installed from a built wheel or pinned source with uvx. Media images require
-`[image]` (or `[all]`) for independent decoding; audio/video verification needs
-working ffprobe/ffmpeg binaries in the server's PATH.
-
-| Combination | Evidence | Boundary |
-| --- | --- | --- |
-| macOS arm64, Python SDK v2 stdio client | Modern/legacy protocol, wheel/uvx, bounded Chrome media tests | Primary, compact and focused surfaces; signed-in coverage is modality-specific |
-| Linux, supported CI Python matrix | Offline tests, package and real stdio gates | CI does not access a Gemini account |
-| Codex, Claude Desktop/Code, VS Code configs | Parsed copyable configurations | Desktop-host end-to-end behavior requires a separate run |
-| Windows | Authenticated local runtime unsupported; no runtime/ACL acceptance | Missing POSIX protections fail with a safe storage error before writing state; configuration templates are format examples only |
-
-An agent-use handoff can exercise a Skill with an existing verified file without
-making another generation request. This proves task routing/use of that file;
-it does not replace fresh upstream acceptance for another modality.

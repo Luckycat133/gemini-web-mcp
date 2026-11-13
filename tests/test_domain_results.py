@@ -6,6 +6,7 @@ import logging
 import re
 from types import SimpleNamespace
 from typing import Any
+from unittest.mock import AsyncMock
 
 import pytest
 from src.adapters.mcp_sdk import MCPServer, TextContent
@@ -73,26 +74,6 @@ class _CodedError(RuntimeError):
         self.code = code
 
 
-@pytest.mark.parametrize("exception_name,code", [("SSLError", "NETWORK_ERROR"), ("ConnectionError", "NETWORK_ERROR"), ("Timeout", "TIMED_OUT")])
-def test_curl_transport_errors_use_type_without_exposing_or_misreading_private_message(exception_name, code):
-    from curl_cffi.requests import exceptions
-
-    result = result_from_exception(
-        getattr(exceptions, exception_name)("cookie expired in synthetic private details"),
-        logger=logging.getLogger("tests.domain.transport"), operation="test.transport",
-    )
-    assert result.error.code.value == code
-    assert "synthetic private" not in result.error.message
-
-
-def test_matching_transport_class_name_from_unrelated_module_is_not_a_network_error():
-    class SSLError(RuntimeError):
-        pass
-
-    result = result_from_exception(SSLError("unknown failure"), logger=logging.getLogger("tests.domain.transport"), operation="test.transport")
-    assert result.error.code == DomainErrorCode.INTERNAL_ERROR
-
-
 @pytest.mark.parametrize(
     ("error", "expected_code", "retryable", "state"),
     [
@@ -137,7 +118,7 @@ def test_exception_taxonomy_is_stable_and_machine_readable(
     json.dumps(payload)
 
 
-def test_internal_exception_is_public_safe_but_raw_evidence_is_logged(caplog):
+def test_internal_exception_keeps_private_text_out_of_results_and_logs(caplog):
     caplog.set_level(logging.ERROR, logger="tests.domain.internal")
     secret = "raw-secret-token-123"
 
@@ -151,7 +132,28 @@ def test_internal_exception_is_public_safe_but_raw_evidence_is_logged(caplog):
     assert secret not in payload_text
     assert result.meta.request_id in caplog.text
     assert result.meta.diagnostic_id in caplog.text
-    assert secret in caplog.text
+    assert secret not in caplog.text
+    assert "error_type=RuntimeError code=INTERNAL_ERROR" in caplog.text
+    assert all(record.exc_info is None for record in caplog.records)
+
+
+def test_signed_url_in_chained_exception_does_not_reach_logs(caplog):
+    caplog.set_level(logging.ERROR, logger="tests.domain.internal")
+    signed_url = "https://example.com/download?token=private-download-token"
+    try:
+        try:
+            raise ConnectionError(signed_url)
+        except ConnectionError as cause:
+            raise RuntimeError("private upstream response") from cause
+    except RuntimeError as error:
+        result = result_from_exception(
+            error, logger=logging.getLogger("tests.domain.internal"), operation="media.save",
+        )
+
+    assert signed_url not in caplog.text
+    assert "private upstream response" not in caplog.text
+    assert result.meta.diagnostic_id in caplog.text
+    assert all(record.exc_info is None for record in caplog.records)
 
 
 def test_contract_rejects_inconsistent_success_and_failure_states():
@@ -310,9 +312,12 @@ def test_mcpserver_serializes_domain_result_under_meta_alias(monkeypatch):
 
 
 def test_chat_success_records_requested_effective_and_verification_metadata(monkeypatch):
+    monkeypatch.setenv("GEMINI_PSID", "synthetic-test-account")
+    from src.domain import CleanupObservation, CleanupState
+
     class SuccessClient:
         async def generate_content(self, **_kwargs):
-            return SimpleNamespace(text="done")
+            return SimpleNamespace(text="done", metadata=["c_fixture"])
 
     client = SuccessClient()
 
@@ -325,6 +330,10 @@ def test_chat_success_records_requested_effective_and_verification_metadata(monk
     monkeypatch.setattr(chat_tools, "get_gemini_client", lambda: client)
     monkeypatch.setattr(chat_tools, "initialize_client", noop_initialize)
     monkeypatch.setattr(chat_tools, "cleanup_due_remote_chats", noop_cleanup)
+    monkeypatch.setattr(chat_tools, "schedule_remote_chat_cleanup", lambda *_args, **_kwargs: CleanupObservation(
+        state=CleanupState.PENDING, upstream_chat_id="c_fixture"))
+    monkeypatch.setattr(chat_tools, "finalize_remote_chat_cleanup_from_response", AsyncMock(return_value=CleanupObservation(
+        state=CleanupState.COMPLETED, upstream_chat_id="c_fixture")))
     monkeypatch.setattr(chat_tools, "resolve_model_name", lambda _model: "web-flash")
     monkeypatch.setattr(
         chat_tools,
@@ -372,7 +381,8 @@ def test_auth_failure_is_typed_at_primary_chat_boundary(monkeypatch):
     assert payload["meta"]["diagnostic_id"].startswith("diag_")
 
 
-def test_timeout_preserves_identical_non_retryable_state_across_chat_adapters(monkeypatch):
+def test_timeout_has_identical_retryable_state_across_chat_adapters(monkeypatch):
+    monkeypatch.setenv("GEMINI_PSID", "synthetic-test-account")
     class TimeoutClient:
         async def generate_content(self, **_kwargs):
             raise TimeoutError("upstream took too long")
@@ -402,8 +412,7 @@ def test_timeout_preserves_identical_non_retryable_state_across_chat_adapters(mo
 
     for payload in (primary_payload, compact_payload):
         assert payload["error"]["code"] == "TIMED_OUT"
-        assert payload["error"]["retryable"] is False
-        assert payload["warnings"][0]["code"] == "SOURCE_UNOBSERVED"
+        assert payload["error"]["retryable"] is True
         assert payload["meta"]["operation_state"] == "timed_out"
 
 

@@ -16,10 +16,13 @@ initialize_client / cleanup_due_remote_chats，需 patch 这 3 个接缝 + 工�
 走真实实现（不 mock），用 SimpleNamespace 构造 response。
 """
 
+import pytest
+
 import asyncio
 from types import SimpleNamespace
 
 from src.adapters.mcp_sdk import MCPServer
+from src.constants import DEFAULT_SESSION_MAX_AGE_SECONDS
 
 import src.tools.chat as chat_tools
 from src.session_manager import SessionData, SessionOperationResult
@@ -84,6 +87,15 @@ def _patch_chat_client_env(monkeypatch, client, *, captured_schedule=None,
             })
     monkeypatch.setattr(chat_tools, "schedule_remote_chat_cleanup_from_response",
                         fake_schedule_from_response)
+
+    async def fake_finalize(response, *, expected_account, **kwargs):
+        from src.domain import CleanupObservation, CleanupState
+        from src.infrastructure.account_identity import current_account_key
+
+        assert expected_account == current_account_key()
+        fake_schedule_from_response(response, **kwargs)
+        return CleanupObservation(state=CleanupState.RETAINED if kwargs["retain_chat"] else CleanupState.COMPLETED)
+    monkeypatch.setattr(chat_tools, "finalize_remote_chat_cleanup_from_response", fake_finalize)
 
     def fake_create(session, model, **kwargs):
         session_id = "sess_0123456789abcdef0123456789abcdef"
@@ -410,8 +422,8 @@ def test_chat_stream_invalid_images_returns_error_before_client(monkeypatch):
     assert result[0].text.startswith("❌")
 
 
-def test_chat_stream_empty_stream_returns_empty_text_and_skips_cleanup(monkeypatch):
-    """空流（无 chunk）→ final_response=None → 不调 cleanup，返回空文本。"""
+def test_chat_stream_empty_stream_returns_unverified_failure_without_inventing_a_chat(monkeypatch):
+    """An empty stream cannot prove completion or an effective model."""
     client = _FakeStreamClient(chunks=[])
     schedule_calls = []
     _patch_chat_client_env(monkeypatch, client, captured_schedule=schedule_calls)
@@ -423,8 +435,12 @@ def test_chat_stream_empty_stream_returns_empty_text_and_skips_cleanup(monkeypat
 
     result = asyncio.run(run())
     assert len(result) == 1
-    assert result[0].text == ""  # full_text 为空
-    assert schedule_calls == []  # final_response is None → 跳过 cleanup
+    assert result[0].text.startswith("UPSTREAM_CHANGED:")
+    domain = result[0].meta["domain_result"]
+    assert domain["ok"] is False
+    assert domain["meta"]["effective_backend"] is None
+    assert domain["meta"]["verification_status"] == "upstream_response_missing"
+    assert schedule_calls == []
 
 
 def test_chat_stream_accumulates_text_delta_across_chunks(monkeypatch):
@@ -618,19 +634,17 @@ def test_send_message_stream_accumulates_text_delta(monkeypatch):
     assert result[0].text == "partial reply"
 
 
-def test_send_message_stream_empty_stream_still_schedules_cleanup_with_none(monkeypatch):
-    """空流（无 chunk）→ final_response=None → 仍调 cleanup（传 None，文档化当前行为）。
-
-    注意：这与 gemini_chat_stream 不同——chat_stream 用 `if final_response:` 守卫，
-    send_message_stream 无守卫，总是调用。这是一个潜在的不一致，本测试锁定当前行为。
-    """
+def test_send_message_stream_empty_stream_preserves_known_chat_for_recovery(monkeypatch):
     fake_session = _FakeStreamSession(chunks=[])
-    schedule_calls = []
+    response_cleanup = []
+    deferred_cleanup = []
     _patch_stream_session_env(
         monkeypatch,
         {"session": fake_session, "thinking_level": "standard"},
-        captured_schedule=schedule_calls,
+        captured_schedule=response_cleanup,
     )
+    monkeypatch.setattr(chat_tools, "schedule_remote_chat_cleanup",
+                        lambda chat_id, **kwargs: deferred_cleanup.append((chat_id, kwargs)))
 
     mcp = _make_mcp()
 
@@ -639,14 +653,20 @@ def test_send_message_stream_empty_stream_still_schedules_cleanup_with_none(monk
                                 session_id="s1", message="hi")
 
     result = asyncio.run(run())
-    assert result[0].text == ""  # full_text 为空
-    assert len(schedule_calls) == 1
-    assert schedule_calls[0]["response"] is None  # 文档化：空流传 None
-    assert schedule_calls[0]["source"] == "gemini_send_message_stream"
+    domain = result[0].meta["domain_result"]
+    assert domain["ok"] is False
+    assert domain["meta"]["verification_status"] == "session_reply_unverified"
+    assert not response_cleanup
+    assert deferred_cleanup == [(fake_session.cid, {
+        "retain_chat": False,
+        "delete_after_seconds": DEFAULT_SESSION_MAX_AGE_SECONDS,
+        "source": "gemini_send_message_stream",
+        "reschedule_pending": True,
+    })]
 
 
-def test_send_message_stream_schedules_cleanup_with_final_response(monkeypatch):
-    """有 chunk → schedule cleanup 用最后一个 response。"""
+def test_send_message_stream_persists_explicit_retention_before_sending(monkeypatch):
+    """显式保留必须在发送前落地，不等到最后一个 chunk。"""
     final_chunk = _stream_chunk(text_delta="end")
     fake_session = _FakeStreamSession(chunks=[_stream_chunk(text_delta="start"), final_chunk])
     schedule_calls = []
@@ -655,6 +675,13 @@ def test_send_message_stream_schedules_cleanup_with_final_response(monkeypatch):
         {"session": fake_session, "thinking_level": "standard"},
         captured_schedule=schedule_calls,
     )
+    policy_calls = []
+
+    def save_policy(cid, **policy):
+        assert fake_session.captured_kwargs is None
+        policy_calls.append((cid, policy))
+
+    monkeypatch.setattr(chat_tools, "schedule_remote_chat_cleanup", save_policy)
 
     mcp = _make_mcp()
 
@@ -664,9 +691,11 @@ def test_send_message_stream_schedules_cleanup_with_final_response(monkeypatch):
                                 retain_chat=True, delete_after_seconds=60)
 
     asyncio.run(run())
-    assert schedule_calls[0]["response"] is final_chunk
-    assert schedule_calls[0]["retain_chat"] is True
-    assert schedule_calls[0]["delete_after_seconds"] == 60
+    assert len(policy_calls) == 1
+    assert policy_calls[0][1]["retain_chat"] is True
+    assert policy_calls[0][1]["delete_after_seconds"] == 60
+    assert fake_session.captured_kwargs is not None
+    assert schedule_calls == []
 
 
 def test_send_message_stream_temporary_falls_back_to_session(monkeypatch):
@@ -703,3 +732,23 @@ def test_send_message_stream_learning_mode_double_none_omits(monkeypatch):
 
     asyncio.run(run())
     assert "learning_mode" not in fake_session.captured_kwargs
+
+
+@pytest.fixture(autouse=True)
+def _synthetic_chat_account(monkeypatch):
+    monkeypatch.setenv("GEMINI_PSID", "synthetic-chat-test-account")
+
+
+@pytest.mark.parametrize("tool,arguments", [
+    ("gemini_chat", {"message": "hello"}),
+    ("gemini_chat_stream", {"message": "hello"}),
+    ("gemini_start_chat", {}),
+])
+def test_chat_adapters_preserve_account_failure_in_text_and_metadata(monkeypatch, tool, arguments):
+    client = _FakeChatClient()
+    _patch_chat_client_env(monkeypatch, client)
+    monkeypatch.delenv("GEMINI_PSID", raising=False)
+    content = asyncio.run(_call_tool(_make_mcp(), tool, **arguments))
+    assert "AUTH_REQUIRED" in content[0].text
+    assert content[0].meta["domain_result"]["error"]["code"] == "AUTH_REQUIRED"
+    assert client.captured_generate_kwargs is None and client.captured_start_chat_kwargs is None

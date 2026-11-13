@@ -16,8 +16,25 @@ test_server_cookie_tools.py 同模式），monkeypatch 底层 payload/format 函
 
 import asyncio
 import json
+import os
+import sys
 
+os.environ["GEMINI_TOOLS"] = "core"
+
+if "src.server" in sys.modules:
+    del sys.modules["src.server"]
 import src.server as server
+
+
+def _reload_server():
+    if "src.server" in sys.modules:
+        del sys.modules["src.server"]
+    import src.server as srv
+    globals()["server"] = srv
+
+
+async def _call_tool(name, **kwargs):
+    return (await server.mcp.call_tool(name, kwargs)).content
 
 
 async def _call_tool(name, **kwargs):
@@ -32,6 +49,7 @@ async def _call_tool(name, **kwargs):
 
 def test_get_tool_manifest_markdown_default(monkeypatch):
     """默认 response_format=markdown → 调 _format_tool_manifest_markdown（lines 97-100）。"""
+    _reload_server()
     captured = {}
 
     def fake_payload(scope):
@@ -52,6 +70,7 @@ def test_get_tool_manifest_markdown_default(monkeypatch):
 
 def test_get_tool_manifest_json_format(monkeypatch):
     """response_format=json → json.dumps(payload)（line 98-99 json 分支）。"""
+    _reload_server()
     payload = {"tools": [{"name": "gemini_chat"}]}
     monkeypatch.setattr(server, "_tool_manifest_payload", lambda scope: payload)
 
@@ -62,6 +81,7 @@ def test_get_tool_manifest_json_format(monkeypatch):
 
 def test_get_tool_manifest_passes_scope(monkeypatch):
     """scope 参数透传到 _tool_manifest_payload。"""
+    _reload_server()
     captured = {}
     monkeypatch.setattr(server, "_tool_manifest_payload", lambda scope: captured.setdefault("scope", scope))
     monkeypatch.setattr(server, "_format_tool_manifest_markdown", lambda payload: "")
@@ -77,6 +97,7 @@ def test_get_tool_manifest_passes_scope(monkeypatch):
 
 def test_gemini_reset_awaits_reset_client_async(monkeypatch):
     """gemini_reset 等待旧客户端退休后返回固定文本。"""
+    _reload_server()
     called = {"n": 0}
 
     async def fake_reset_client_async():
@@ -97,6 +118,7 @@ def test_gemini_reset_awaits_reset_client_async(monkeypatch):
 
 def test_gemini_doctor_markdown_default(monkeypatch):
     """默认 response_format=markdown → 调 _format_doctor_markdown（lines 117-120）。"""
+    _reload_server()
     captured = {}
 
     def fake_payload(browser, validate_browser):
@@ -116,6 +138,7 @@ def test_gemini_doctor_markdown_default(monkeypatch):
 
 def test_gemini_doctor_json_format(monkeypatch):
     """response_format=json → json.dumps(payload)（line 118-119 json 分支）。"""
+    _reload_server()
     payload = {"overall_status": "warn", "checks": []}
     monkeypatch.setattr(server, "_doctor_payload", lambda browser, validate_browser: payload)
 
@@ -126,6 +149,7 @@ def test_gemini_doctor_json_format(monkeypatch):
 
 def test_gemini_doctor_passes_browser_and_validate(monkeypatch):
     """browser 与 validate_browser 参数透传到 _doctor_payload。"""
+    _reload_server()
     captured = {}
     monkeypatch.setattr(
         server, "_doctor_payload",
