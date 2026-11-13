@@ -20,8 +20,9 @@ ENDPOINTS = {
     "batchexecute": "https://gemini.google.com/_/BardChatUi/data/batchexecute",
 }
 
-# 默认的会话/远端聊天保留时间（秒），可通过 GEMINI_CHAT_RETENTION_SECONDS 环境变量覆盖
+# 远端 Gemini 对话在请求完成后的保留时间（秒）。0 表示返回前尝试删除并验证，失败或无法验证时留在持久队列中重试；可用 GEMINI_CHAT_RETENTION_SECONDS 覆盖。
 DEFAULT_CHAT_RETENTION_SECONDS = 0
+# 本地会话状态的最大存活时间（秒）。
 DEFAULT_SESSION_MAX_AGE_SECONDS = 1800
 
 OMNI_VIDEO_MODEL = "gemini-omni-1.2-flash"
