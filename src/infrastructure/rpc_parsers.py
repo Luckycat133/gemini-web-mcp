@@ -206,6 +206,16 @@ def parse_notebook_source_created(body: Any, *, expected_id: str = "", **_: Any)
 
 
 # --- ported from main (v0.2.2) for the rebased branch ---
+def parse_notebook_get(body: Any, *, expected_id: str = "", **_: Any) -> RPCParseResult:
+    if body == []:
+        return RPCParseResult("empty", value=None)
+    if not isinstance(body, list) or not body:
+        return RPCParseResult("changed_shape")
+    detail = _native_notebook_detail(body[0])
+    if detail is None or (expected_id and detail["item"]["id"] != expected_id):
+        return RPCParseResult("changed_shape", warnings=("invalid_notebook_or_identity",))
+    return RPCParseResult("success", value=detail)
+
 def _native_notebook_detail(record: Any) -> dict[str, Any] | None:
     if (not isinstance(record, list) or len(record) < 2 or not isinstance(record[0], str)
             or not record[0].strip() or not isinstance(record[1], list)):
@@ -277,16 +287,6 @@ def _native_notebook_detail(record: Any) -> dict[str, Any] | None:
     item = parse_native_notebook(record)
     item.update(instructions=(summary[0] or "") if summary else "", sources=sources)
     return {"item": item, "metadata": notebook_metadata_for_update(record)}
-
-def parse_notebook_get(body: Any, *, expected_id: str = "", **_: Any) -> RPCParseResult:
-    if body == []:
-        return RPCParseResult("empty", value=None)
-    if not isinstance(body, list) or not body:
-        return RPCParseResult("changed_shape")
-    detail = _native_notebook_detail(body[0])
-    if detail is None or (expected_id and detail["item"]["id"] != expected_id):
-        return RPCParseResult("changed_shape", warnings=("invalid_notebook_or_identity",))
-    return RPCParseResult("success", value=detail)
 
 def notebook_metadata_for_update(record: list[Any]) -> list[Any]:
     """Mirror Ajd -> Vjd, whose response and request metadata have different fields."""
