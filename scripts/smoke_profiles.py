@@ -200,6 +200,11 @@ ASSIST_TOOLS = frozenset(
     {"gemini_ask", "gemini_research", "gemini_search", "gemini_understand", "gemini_understand_image"}
 )
 
+CREATE_TOOLS = frozenset({
+    "gemini_generate_image", "gemini_edit_image", "gemini_generate_video", "gemini_generate_music",
+    "gemini_get_operation_status", "gemini_get_operation_result", "gemini_cancel_operation",
+})
+
 FUNCTION_TOOLS = frozenset({
     "gemini_ask", "gemini_understand_image", "gemini_understand", "gemini_research",
     "gemini_start_chat", "gemini_send_message", "gemini_list_sessions", "gemini_reset_session",
@@ -285,6 +290,7 @@ def main() -> None:
         [
             ("compact", "src.skill_server", "model", COMPACT_TOOLS),
             ("assist", "src.surfaces.assist", "model", ASSIST_TOOLS),
+            ("create", "src.surfaces.create", "model", CREATE_TOOLS),
             ("function", "src.surfaces.function", "function", FUNCTION_TOOLS),
             ("account", "src.surfaces.account", "function", ACCOUNT_TOOLS),
         ]

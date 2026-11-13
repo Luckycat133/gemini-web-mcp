@@ -419,6 +419,37 @@ def classify_artifact_state(
     return ArtifactState.EMPTY
 
 
+def media_artifacts(artifacts: Iterable[Artifact], media_type: str) -> tuple[Artifact, ...]:
+    """Select the requested creation outputs without narrowing understanding."""
+    kinds = {
+        "image": {ArtifactKind.IMAGE},
+        "image_edit": {ArtifactKind.IMAGE},
+        "video": {ArtifactKind.VIDEO},
+        "music": {ArtifactKind.AUDIO, ArtifactKind.VIDEO},
+    }.get(media_type, set())
+    return tuple(artifact for artifact in artifacts if artifact.kind in kinds)
+
+
+def media_operation_timeout(media_type: str, timeout_seconds: int | None = None) -> int:
+    if timeout_seconds is not None and timeout_seconds > 0:
+        return timeout_seconds
+    return 180 if media_type in {"image", "image_edit"} else 600
+
+
+def classify_media_artifact_state(
+    response: Any, artifacts: Sequence[Artifact], media_type: str,
+) -> ArtifactState:
+    # A music visualization is auxiliary; music completion requires audio.
+    required_kind = {
+        "image": ArtifactKind.IMAGE,
+        "image_edit": ArtifactKind.IMAGE,
+        "video": ArtifactKind.VIDEO,
+        "music": ArtifactKind.AUDIO,
+    }.get(media_type)
+    matching = tuple(artifact for artifact in artifacts if artifact.kind == required_kind)
+    return classify_artifact_state(response, matching)
+
+
 def is_response_queued(response: Any) -> bool:
     if getattr(response, "queued", False) is True:
         return True

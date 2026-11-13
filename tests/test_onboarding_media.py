@@ -10,7 +10,8 @@ import pytest
 from mcp import MCPError
 
 import src.onboarding as onboarding
-from src.adapters.mcp_sdk import CallToolResult, TextContent
+from mcp_types import CallToolResult
+from src.adapters.mcp_sdk import TextContent
 from tests.media_fixtures import write_audio
 
 
