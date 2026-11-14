@@ -1,19 +1,172 @@
-# Two Business Surfaces and Shared Services
+# Implemented Dual-Surface Contracts
 
-One repository and distribution expose `gemini-mcp-function` (17 tools) and `gemini-mcp-account` (17 tools). The function surface owns assistance, session chat, Task, image/video/music creation, Research, report derivatives and operation recovery. The account surface owns explicit history, deletion, native Skills, Notebook/text sources, Task metadata/progress/schedules/browser, saved preferences, Chat scheduled actions, inventory, Gems and MCP-owned cleanup. Function `gemini_ask` handles chat, current-web questions and natural-language app requests; assist retains the compatibility `gemini_search`. External app mutations require independent verification.
+Reviewed source: `5c9f53087398f614958acf06d3c9d14f54958c52` (2026-11-14 review).
+Re-read source after rebasing; this document separates implemented behavior from
+future targets in the generation/management backlog.
 
-Function Ask with `notebook_ids` is background ordinary Chat (`execution_mode="chat"`); `gemini_run_task` explicitly starts Task (`execution_mode="task"`). Both use the centralized legacy Notebook attachment contract: deterministic file-reference bytes for ordinary Chat and direct Notebook references for Task. Public ProcessSession probes remain experiments, not a production adapter. Rich Task handoff, permissions, steps, schedules and export are not all adapted; Task schedules are distinct from Chat scheduled actions.
+## Entrypoints and compatibility
 
-Account `gemini_notebooks` defaults to source-picker metadata; `source="gemini"` is the same integrated product's project view for chat listing and moves. Do not guess a conversion between their IDs. Account `gemini_tasks` exposes metadata-only list/get and exact-ID delete with independent absence verification; its union annotation is destructive, as is `gemini_run_task`.
+| Entrypoint | Source | Current boundary |
+| --- | --- | --- |
+| `gemini-mcp-function` | `src/surfaces/function.py` | Function catalog |
+| `gemini-mcp-account` | `src/surfaces/account.py` | Explicit Account catalog |
+| `gemini-mcp-server` | `src/server.py` | Function when `GEMINI_TOOLS` is unset; explicit profiles retain branch behavior |
+| `gemini-mcp-assist` | `src/surfaces/assist.py` | Five-tool assist compatibility surface |
+| `gemini-mcp-skill-server` | `src/skill_server.py` | Branch compact compatibility surface |
+| `gemini-mcp-onboarding` | `src/onboarding.py` | Installation/protocol checks, not another business server |
 
-The main `gemini-mcp-server` uses the function surface when `GEMINI_TOOLS` is absent. Explicit profile values keep their legacy meaning. `gemini-mcp-assist` and `gemini-mcp-skill-server` remain compatibility entrypoints. Cookie, Doctor and local Prompts are outside both business surfaces.
+There is no current `gemini-mcp-create` console entrypoint. The released 0.2.2
+Account command has the same name but different request facades and results.
+Branch compatibility is NOT full released-client compatibility.
 
-Adapters own schemas, annotations and rendering. Shared `src/services/` owns workflows; `src/domain/` owns results and artifacts; `src/infrastructure/` owns evidenced RPC contracts and operation metadata. Neither server imports business behavior from another adapter. Preserve exact model selection, operation identity and cleanup guard across restarts and clients.
+### Function catalog
 
-Function media, Task and Notebook-backed Chat starts always return a background handle; Deep Research defaults to background. Poll the same handle. No cancellation is promised. Artifact success requires local verification; report completion requires a ready nonempty document. Task and Notebook Chat workers verify the exact completed reply, save the full local answer Artifact and verify its identity before owned-chat cleanup. Task also atomically records its full recognized native file inventory; every attachment must verify before cleanup. Changed shapes, download failures and missing files preserve protection or partial results. Result retrieval can use verified local files after restart without regenerating. `audio_overview` is a script and `custom_app` an application specification, not audio generation or deployment.
+`gemini_ask`, `gemini_understand_image`, `gemini_understand`, `gemini_research`,
+`gemini_start_chat`, `gemini_send_message`, `gemini_list_sessions`,
+`gemini_reset_session`, `gemini_generate_image`, `gemini_edit_image`,
+`gemini_generate_video`, `gemini_generate_music`, `gemini_run_task`,
+`gemini_get_operation_status`, `gemini_get_operation_result`,
+`gemini_list_research_report_actions`, `gemini_create_from_research_report`.
 
-Ordinary sessions remain process-local. An uncertain turn blocks new prompts; exact-turn `recover_only` reads do not replay generation or accept the SDK's latest-reply fallback. Active and in-flight sessions remain protected against stale cleanup timers. Native App setup cards require attention rather than a fabricated input choice. Before dispatch, client authentication requires fresh user-status evidence; extracting a Cookie or returning from SDK init is insufficient.
+### Account catalog
 
-`gemini_cleanup` is limited to MCP-owned ledger entries. Do not select or delete by title. Notebook objects and sources are not temporary owned chats. Account reads and mutations require explicit user intent and mutation verification. Unresolved background operations retain cleanup protection. A legacy report response without a saved local Artifact may no longer be recoverable after remote cleanup.
+`gemini_history`, `gemini_manage_chat`, `gemini_delete_chat`, `gemini_notebooks`,
+`gemini_manage_notebook`, `gemini_move_chat_to_notebook`, `gemini_tasks`,
+`gemini_task_browser`, `gemini_skills`, `gemini_account_inventory`,
+`gemini_list_scheduled_actions`, `gemini_get_scheduled_action`,
+`gemini_create_scheduled_action`, `gemini_delete_scheduled_action`,
+`gemini_manage_gems`, `gemini_cleanup`, `gemini_preferences`.
 
-The operation store keeps IDs, states and verified local artifact locators, not Cookies, prompts, reports or raw responses. Preserve seven-day retention and restart and cross-client resume without duplicate generation. Do not expose a global unbounded operation list.
+Membership comes from `src/surfaces/catalogs.py`; schemas and side effects come
+from actual registration and services. Do not add a tool just to match this prose.
+
+## Shared ownership
+
+| Concern | Current owner |
+| --- | --- |
+| SDK/protocol import and content-wrapper compaction | `src/adapters/mcp_sdk.py` |
+| Domain state and artifacts | `src/domain/` |
+| Business registration and presentation | `src/surfaces/`, reusable registrars in `src/tools/` |
+| Detached starts | `src/services/background.py`, `src/operation_worker.py` |
+| Status/result and recoverable media/report/Task work | `src/services/operations.py`, `media_jobs.py`, `task_jobs.py`, `research.py` |
+| Verified saved results | `src/services/media_storage.py`, `research_result_storage.py`, `artifacts.py` |
+| Persistence and account identity | `src/infrastructure/operation_store.py`, `cleanup_store.py`, `account_identity.py` |
+| Session/authentication/cleanup lifetime | shared client, session and remote-cleanup managers |
+| Provider contracts and parsers | `src/infrastructure/` |
+
+Account currently reuses registrars from `src/tools/manage.py`. That is adapter
+composition, not a reason to duplicate services. Services must not import MCP
+servers or depend on a registration module. A future registrar extraction must
+preserve behavior and is not a prerequisite for delivering user capabilities.
+
+## MCP v2 wire boundary
+
+The adapter subclasses the official SDK; it is not a new protocol stack. It
+defaults `structured_output=True` and conservatively compacts only a recognized
+SDK TextContent/ImageContent wrapper, removing descriptive labels. Business
+schemas and validation constraints remain intact; unknown shapes are untouched.
+
+For domain-backed content-block tools, the current structured wire shape is:
+
+```text
+structuredContent.result[i]._meta.domain_result
+    ok / data / error / warnings / meta
+```
+
+Do not assume every non-domain helper contains that field. The smoke tests
+intentionally accept some domain rejections inside `isError=false`,
+`resultType=complete` responses. This is the existing application contract, not
+an assertion that MCP recommends treating all tool failures as success. Any
+migration to `isError=true` or a direct domain output schema is separately
+reviewed, versioned and tested for both protocol eras.
+
+## Execution and recovery matrix
+
+| Workflow | Start | Recovery / limitation |
+| --- | --- | --- |
+| Ask without Notebook IDs | Direct Chat | No durable ordinary Ask job implied |
+| Ask with Notebook IDs | Background ordinary Chat, `execution_mode=chat` | Persistent handle; not a native Task |
+| `gemini_run_task` | Background native Task, `execution_mode=task` | Exact goal AND completed original answer; attachment completeness |
+| Function image/edit/video/music | Background handle | Resume observation/materialization, never resubmit generation |
+| Research | Background by default | Exact original report; verified saved artifact before cleanup |
+| Ordinary session send | Process-local session | `recover_only=true` reads the uncertain original turn in the original process |
+
+Defaults, bounds and model support must be read from the request schema and
+current account policy. Complex prompts, app requests and Notebook context do
+not automatically select Task. Assist retains `gemini_search` and does not gain
+Function-only Notebook arguments.
+
+`get_operation_status` reads recorded/observed metadata; it may validate local
+files, read upstream progress or update local metadata. It must not generate,
+fetch arbitrary account history or turn into result materialization. `result`
+can resume a recovery observer, fetch/save/verify files and apply stored cleanup;
+it is declared destructive. Local-only status is not promised.
+
+## Persistence, ownership and idempotency
+
+- `GEMINI_OPERATION_DB_PATH` selects `OperationStore`; reviewed schema version 6
+  includes operation identity, artifact hashes/locators and Task guards/input
+  metadata. `GEMINI_CLEANUP_DB_PATH` selects the separate cleanup ledger.
+  Task browser action deduplication has its own owner; do not conflate these stores.
+- `GEMINI_STATE_DB_PATH` belongs to the different released architecture. Renaming
+  an environment variable does not migrate data or preserve old handles.
+- Detached workers receive ephemeral request data through anonymous stdin, not
+  a durable prompt spool. Claims/heartbeats fence workers. A server disconnect is
+  not a worker crash; a recorded handle is not proof the provider accepted work.
+- Persist observed CID/RID/candidate/provider IDs before relying on them. A crash
+  before any provider locator may be unrecoverable without a new explicitly
+  authorized request. Unknown submission is never automatically retried.
+- The current retry handle is `operation_id`, not the released `idempotency_key`
+  API. Existing-handle calls return existing work after account/kind checks;
+  payload equivalence is not established. New intent needs a new handle.
+- Keep seven-day retention, with protected operations retaining recoverability
+  under implemented locator/protection rules. Do not promise unconditional expiry
+  or global unbounded operation listing. Account mismatch/unbound fails closed.
+- Credentials, prompts, raw responses and report/answer bytes are excluded from
+  ledgers. Verified result files are deliberately persistent outside them.
+  New content indexes/backups require separate opt-in storage and retention.
+
+## Exact completion and cleanup
+
+Task/Notebook workers save a full verified answer, not just a preview. Task also
+records the complete recognized native attachment inventory; an unknown shape
+is not an empty inventory. Missing downloads keep protection. Restarted reads
+recheck files; a deleted/corrupted artifact does not justify provider replay.
+
+Uncertain session turns block new sends and use the exact turn's recovery path,
+not the SDK latest-reply fallback. Protect active/in-flight sessions from stale
+timers. Cleanup is account-scoped and limited to the MCP-owned ledger; it does
+not sweep titles or delete Notebook objects/sources. Scheduled Task relationships
+also protect their threads. Retention and artifact success are distinct states.
+
+## Models, transport and account mutations
+
+Fresh user-status evidence is required before Web dispatch; Cookie extraction
+or SDK initialization alone is insufficient. Preserve same-account fencing
+across permitted pre-dispatch refresh; no hidden generation replay.
+
+Low/medium/high and compatibility aliases must keep body/header selection
+consistent. The current Lite policy requires recent same-account basic Flash
+quota evidence and locked thinking; it is not a fallback for every failure.
+Do not exhaust real quota to test this policy. Keep explicit Pro/Argon intent.
+
+Default video is Web. Explicit `gemini-omni-1.2-flash` selects the paid API using
+`GEMINI_API_KEY`; only that current route accepts `duration_seconds` 3..15.
+Do not reinterpret those API options as Web controls or silently switch providers.
+
+Account reads minimize body access. Exact chat mutations use pre-read and
+independent read-back; sent-but-unverified updates keep `changed=null`.
+Notebook source-picker and `source=gemini` project views are resolved by observed
+ID/type, never prefix conversion. Notebook deletion can delete its conversations.
+Task schedules differ from Chat scheduled actions. Preference read-back proves
+stored values, not runtime effects. Task browser inputs require original reply
+IDs, frame hash and unique action ID; no input replay or automatic permission
+approval. Connection setup/OAuth, confirmations and browser input are different.
+
+## Explicit non-claims
+
+No public cancel, Task pause/resume, exclusive browser handoff or Task export is
+promised. ProcessSession probes are experimental. Report `audio_overview` and
+`custom_app` outputs are scripts/specifications, not native audio or deployment.
+Canvas/Library/sharing/ZIP and other released workflows need action-level migration
+accounting. Neither retained RPC fixtures nor green new-surface tests prove parity.
