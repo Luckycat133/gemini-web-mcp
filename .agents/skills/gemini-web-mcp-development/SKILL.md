@@ -12,7 +12,8 @@ metadata:
 
 # Gemini Web MCP Development
 
-Develop the repository, not an installed account workflow. The two equal product
+Develop, refactor, evaluate, package, and release the repository; use the runtime
+Skill for installed account workflows. The two equal product
 goals are **all account-available generation capabilities** and **complete Gemini
 Web content management**. A focused catalog is an interface design, not permission
 to drop Canvas, Library, sharing, exports or other requirements.
@@ -30,6 +31,18 @@ The 2026-11-14 review targets `5c9f53087398f614958acf06d3c9d14f54958c52` on
 `0.2.1`; published `v0.2.2` has different interfaces/storage. Keep metadata aligned
 with the checkout for documentation work; do not republish `v0.2.1` or alter tags.
 Resolve the next release against actual published versions and migration scope.
+
+Install this development Skill from the exact checkout you intend to work on.
+Run from that checkout's repository root:
+
+```bash
+npx --yes skills@1.5.21 add "$PWD" \
+  --skill gemini-web-mcp-development \
+  --agent codex --copy --yes
+```
+
+This copies the Skill locally; it does not install the runtime Skill, contact a
+Gemini account, or publish anything.
 
 ## Load only the relevant reference
 
