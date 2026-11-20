@@ -46,3 +46,7 @@ CI 覆盖 Python 3.11/3.12 全量离线测试、契约、profile 与真实 stdio
 不自动 merge/tag/release。本轮只更新开发指导与计划，不改运行时或指纹。
 
 后续实施顺序与验收见 [开发计划](development-plan.md)。
+
+For exact source declarations see the [entrypoint inventory](release-entrypoint-inventory.md) and the
+[released account action ledger](release-account-compatibility-ledger.md). Treat these as migration inputs,
+not approval to retag, merge the runtime redesign, or access a live account.
