@@ -46,17 +46,25 @@ CI 覆盖 Python 3.11/3.12 全量离线测试、契约、profile 与真实 stdio
 
 v0.2.2 Create 的 video/music 句柄保存在 `GEMINI_STATE_DB_PATH` 指定的旧数据库
 （默认 `state.sqlite3`，账户范围依赖同目录的 `state.sqlite3.key`；自定义路径使用对应的 `.key`）。
-Function 的 status/result 读取 `GEMINI_OPERATION_DB_PATH` 的另一套账本。合成测试确认：
-在独立路径启动且当前账户匹配时，可从静止的旧账本只读恢复原句柄及记录状态。
-结果明确标记为 `released_media_receipt_only`，不是媒体恢复成功。旧记录没有新后台
-观察器所需的精确响应与候选标识，也没有可核对的文件散列，不会联系上游、重新提交、
-清理或改写旧账本；错误账户、活跃日志及无效文件不返回旧句柄。
-把新变量指向旧库仍会遭遇 schema 不兼容，并非迁移。
+Function 的 status/result 平时读取另外的 `GEMINI_OPERATION_DB_PATH`。查不到新记录时，
+如果只想确认旧句柄，可用 Function 读取原句柄：`released_media_receipt_only` 只表明在旧账本
+找到匹配记录，返回媒体类型、记录状态和句柄，不代表已恢复媒体。旧账本及对应 key 必须是当前
+用户私有文件，账本须静止且无活动 WAL/回滚日志；需已加载原账户凭据，且系统支持 POSIX 文件
+所有权检查及 `O_NOFOLLOW`。不支持该文件保护的平台不返回回执（未验证原生 Windows）；
+未返回回执不等于旧记录不存在。此路径不会访问上游、重新提交、清理或改写旧账本。
+旧记录没有新观察器所需的精确响应与候选标识，也没有可核对的文件散列。
+不要将 `GEMINI_OPERATION_DB_PATH` 指向旧库：两者 schema 不兼容，并非迁移。
 
-未完成的任务不要重提，也不要把旧 `idempotency_key` 当成新 `operation_id`。
-先以 v0.2.2 Create、原账户、原数据库和身份 key 查询原句柄，等待取回结果后再切换；
-如已切换，回退客户端入口与版本并指回原路径，不覆盖新账本。保留两个版本的独立状态。
-这只是回滚路径，不是迁移成功或真实账号的验收。
+只有明确打算继续原操作时，才回退到 v0.2.2 的 `gemini-mcp-create`，使用原账户、原
+`GEMINI_STATE_DB_PATH` 和对应 key。该版本的 `gemini_get_operation_status` 和
+`gemini_get_operation_result` **都不是只读查询**：对匹配、未完成、带恢复定位信息且
+未在运行的操作，两者都可能恢复原任务、写入账本租约并保存产物；在产物验证通过且记录的
+保留策略允许时，也可能清理（删除）源对话。只确认状态时，不要调用旧 Create 的这两个工具。
+不要重提未完成任务，或把旧 `idempotency_key` 当成新 `operation_id`；保留两代独立账本。
+
+需要获取原版时，使用 [v0.2.2 GitHub Release wheel](https://github.com/Luckycat133/gemini-web-mcp/releases/download/v0.2.2/gemini_mcp_server-0.2.2-py3-none-any.whl)；
+其 SHA-256 为 `43657efb69d04c5498a07168acfb96a84cc34bcb754fb21e51ea6108f5d3dcd5`。
+这是回执与受控回滚的边界说明，不代表已完成迁移或验收真实账号恢复。
 
 
 发布时先查询实际已发布版本，选择新的正确版本并同步 metadata；不按旧 Skill 指令发布 v0.2.1，
