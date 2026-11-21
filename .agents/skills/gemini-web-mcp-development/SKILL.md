@@ -1,6 +1,6 @@
 ---
 name: gemini-web-mcp-development
-description: "Develop and review gemini-web-mcp as two focused business tool surfaces for all account-available Gemini generation workflows and explicit Gemini content management. Use for repository changes, dual-surface contracts, MCP SDK v2 fingerprints, recovery, compatibility migrations, Agent Skills, tests, packaging, and releases."
+description: "Develop, refactor, evaluate, package, and release gemini-web-mcp as two focused business tool surfaces for all account-available Gemini generation workflows and explicit Gemini content management. Use for repository changes, dual-surface contracts, MCP SDK v2 fingerprints, recovery, compatibility migrations, Agent Skills, tests, packaging, and releases."
 license: AGPL-3.0-only
 compatibility: Requires a gemini-web-mcp checkout, Python 3.11+ and its development dependencies. Gemini account access and paid API usage require task-specific authorization.
 metadata:
@@ -16,6 +16,14 @@ Develop the repository, not an installed account workflow. The two equal product
 goals are **all account-available generation capabilities** and **complete Gemini
 Web content management**. A focused catalog is an interface design, not permission
 to drop Canvas, Library, sharing, exports or other requirements.
+
+Install this Skill:
+
+```bash
+npx --yes skills@1.5.21 add \
+  --skill gemini-web-mcp-development \
+  --agent codex --copy --yes
+```
 
 ## Establish the revision
 
