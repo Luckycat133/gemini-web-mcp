@@ -781,6 +781,7 @@ class OperationStore:
                 """UPDATE operations SET state=?,phase=?,verification_status='task_artifact_verified',
                    artifact_state='local',error_code=?,updated_at=? WHERE operation_id=? AND account_key=?
                    AND operation IN ('gemini_run_task','gemini_notebook_chat')
+                   AND (phase NOT IN ('task_result_saved','task_answer_saved','task_failure_saved') OR state=?)
                    AND EXISTS (SELECT 1 FROM operation_artifacts WHERE operation_id=? AND kind='report')
                    AND (operation='gemini_notebook_chat' OR EXISTS (
                         SELECT 1 FROM task_file_manifests m WHERE m.operation_id=operations.operation_id
@@ -790,11 +791,11 @@ class OperationStore:
                                             WHERE a.operation_id=operations.operation_id AND a.kind='file')))""",
                 (terminal_state, 'task_failure_saved' if terminal_state == 'failed' else 'task_result_saved',
                  'UPSTREAM_REJECTED' if terminal_state == 'failed' else None, self.clock(), operation_id,
-                 current_account_key(), operation_id),
+                 current_account_key(), terminal_state, operation_id),
             ).rowcount == 1
 
     def release_task_result_cleanup(self, operation_id: str, *, terminal_state: str = "completed") -> bool:
-        """Publish verified terminal Task output without turning failure into success."""
+        """Release only an already checkpointed, matching terminal Task result."""
         if terminal_state not in {"completed", "failed"}:
             raise ValueError("Task result must have an observed terminal state")
         with self._connect() as db:
@@ -802,6 +803,9 @@ class OperationStore:
                 """UPDATE operations SET state=?,phase=?,
                    verification_status='task_artifact_verified',cleanup_protected=0,updated_at=?,error_code=?
                    WHERE operation_id=? AND operation IN ('gemini_run_task','gemini_notebook_chat') AND account_key=?
+                   AND state=? AND verification_status='task_artifact_verified'
+                   AND ((state='failed' AND phase='task_failure_saved')
+                     OR (state='completed' AND phase IN ('task_result_saved','task_answer_saved')))
                    AND EXISTS (SELECT 1 FROM operation_artifacts WHERE operation_id=? AND kind='report')
                    AND (operation='gemini_notebook_chat' OR EXISTS (
                         SELECT 1 FROM task_file_manifests m WHERE m.operation_id=operations.operation_id
@@ -811,7 +815,7 @@ class OperationStore:
                                             WHERE a.operation_id=operations.operation_id AND a.kind='file')))""",
                 (terminal_state, "task_failure_saved" if terminal_state == "failed" else "task_answer_saved",
                  self.clock(), "UPSTREAM_REJECTED" if terminal_state == "failed" else None,
-                 operation_id, current_account_key(), operation_id),
+                 operation_id, current_account_key(), terminal_state, operation_id),
             ).rowcount == 1
 
     def release_media_cleanup(self, operation_id: str, *, worker_token: str) -> bool:
@@ -877,9 +881,13 @@ class OperationStore:
 
     def recoverable_web_workflows(self, *, limit: int = 20) -> tuple[OperationRecord, ...]:
         """Resume exact reply observation or result cleanup; prompts are never replayed."""
-        with self._connect() as db:
+        account = current_account_key()
+        if not account:
+            return ()
+        with self._connect(read_only=True) as db:
             return tuple(_record_from_row(row) for row in db.execute(
                 """SELECT * FROM operations WHERE operation IN ('gemini_run_task','gemini_notebook_chat')
+                   AND account_key=?
                    AND (worker_token IS NULL OR heartbeat_at IS NULL OR heartbeat_at < ?)
                    AND updated_at <= ? AND upstream_chat_id IS NOT NULL
                    AND upstream_response_id IS NOT NULL
@@ -888,7 +896,7 @@ class OperationStore:
                    AND NOT EXISTS (SELECT 1 FROM task_schedule_guards AS g
                                    WHERE g.account_key=operations.account_key AND g.chat_id=operations.upstream_chat_id)
                    AND (cleanup_protected=1 OR (retain_chat=0 AND cleanup_state NOT IN ('completed','already_completed')))
-                   ORDER BY updated_at LIMIT ?""", (self.clock() - 60, self.clock() - 60, limit),
+                   ORDER BY updated_at LIMIT ?""", (account, self.clock() - 60, self.clock() - 60, limit),
             ))
 
     def recoverable_research(self, *, limit: int = 20) -> tuple[OperationRecord, ...]:

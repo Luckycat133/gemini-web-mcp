@@ -163,6 +163,7 @@ def test_late_worker_finish_cannot_regress_a_saved_task_terminal(tmp_path, monke
     )
     artifact = save_task_result(store, store.get(handle), "The exact terminal Task response.")
     store.commit_task_files(handle, response_id='r_task', candidate_id='rc_task', artifacts=())
+    assert store.checkpoint_task_result_state(handle, terminal_state=terminal_state)
     assert store.release_task_result_cleanup(handle, terminal_state=terminal_state)
     store.update_cleanup(handle, "completed")
     before = store.get(handle)
@@ -219,3 +220,30 @@ def test_only_retryable_failed_task_phases_can_be_discovered_and_claimed(tmp_pat
     after = reopened.get(handle)
     assert after.state == "failed" and after.phase == phase and after.cleanup_protected
     assert after.worker_token == ("retry" if recoverable else None)
+
+
+def test_workflow_recovery_filters_account_before_limit(tmp_path, monkeypatch):
+    now = [1000.0]
+    store = OperationStore(tmp_path / "operations.sqlite3", clock=lambda: now[0])
+
+    def checkpoint(handle, kind):
+        store.create(handle, kind, retain_chat=False)
+        assert store.claim_worker(handle, "original")
+        assert store.checkpoint_media(
+            handle, worker_token="original", chat_id="c_fixture", response_id="r_fixture", candidate_id="rc_fixture",
+        )
+        store.retire_worker(handle, "original")
+
+    monkeypatch.setenv("GEMINI_PSID", "synthetic-previous-owner")
+    for index in range(21):
+        checkpoint(f"old-{index}", "gemini_run_task")
+    now[0] += 1
+    monkeypatch.setenv("GEMINI_PSID", "synthetic-current-owner")
+    checkpoint("current-task", "gemini_run_task")
+    checkpoint("current-notebook", "gemini_notebook_chat")
+    now[0] += 61
+
+    assert {row.operation_id for row in store.recoverable_web_workflows()} == {"current-task", "current-notebook"}
+    assert len(store.recoverable_web_workflows(limit=1)) == 1
+    monkeypatch.delenv("GEMINI_PSID")
+    assert store.recoverable_web_workflows() == ()

@@ -661,13 +661,20 @@ async def read_task_operation(
         return DomainResult.failure(DomainErrorCode.VERIFICATION_FAILED,
                                     f"The saved {workflow} result was removed or changed.",
                                     verification_status="task_artifact_verification_failed")
-    if saved_artifact is not None and (notebook_chat or store.task_files_committed(operation_id)):
+    saved_phase = getattr(record, "phase", None)
+    recorded_terminal = (
+        saved_state == OperationState.COMPLETED and saved_phase in {"task_result_saved", "task_answer_saved"}
+        or saved_state == OperationState.FAILED and saved_phase == "task_failure_saved"
+    ) and getattr(record, "verification_status", None) == "task_artifact_verified"
+    # A report or manifest may survive a crash before the terminal checkpoint.
+    # Without that outcome, fall through to fresh exact-turn observation.
+    if saved_artifact is not None and recorded_terminal and (notebook_chat or store.task_files_committed(operation_id)):
         artifact, preview = saved_artifact
         try:
             file_artifacts = () if notebook_chat else load_task_files(store, record)
         except (TaskResultUnavailable, OSError, UnicodeError):
             return _partial_saved_answer(record, saved_artifact, reason='task_artifact_verification_failed')
-        cached_state = OperationState.FAILED if saved_state == OperationState.FAILED else OperationState.COMPLETED
+        cached_state = saved_state
         cached_warnings: tuple[DomainWarning, ...] = ()
         cleanup = (CleanupObservation(state=CleanupState(saved_cleanup_state), upstream_chat_id=upstream_chat_id)
                    if saved_cleanup_state in {state.value for state in CleanupState} else None)
@@ -700,6 +707,8 @@ async def read_task_operation(
             and saved_cleanup_state in {CleanupState.COMPLETED.value, CleanupState.ALREADY_COMPLETED.value}):
         return _partial_saved_answer(record, saved_artifact, reason='task_file_manifest_unavailable')
     if saved_cleanup_state in {CleanupState.COMPLETED.value, CleanupState.ALREADY_COMPLETED.value}:
+        if saved_artifact is not None and not recorded_terminal:
+            return _partial_saved_answer(record, saved_artifact, reason='task_terminal_outcome_unverified')
         if include_answer:
             return DomainResult.failure(DomainErrorCode.CAPABILITY_UNAVAILABLE,
                                         f"The remote {workflow} was deleted before its answer was saved.",
@@ -757,6 +766,8 @@ async def read_task_operation(
 
     if notebook_chat:
         state = saved_state if saved_state in _TASK_TERMINAL_STATES or saved_state == OperationState.COMPLETED else OperationState.PARTIAL
+        if saved_artifact is not None and not recorded_terminal and state == OperationState.COMPLETED:
+            state = OperationState.PARTIAL
         if state == OperationState.COMPLETED:
             verification_status = "exact_reply_completed"
         elif state == OperationState.FAILED and getattr(record, "verification_status", None) == "notebook_reply_rejected":

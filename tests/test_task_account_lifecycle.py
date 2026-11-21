@@ -40,6 +40,7 @@ def task(store, handle, cid, *, operation='gemini_run_task', retained=False, art
         save_task_result(store, store.get(handle), 'Synthetic cached result')
         if operation == 'gemini_run_task':
             store.commit_task_files(handle, response_id='r_task', candidate_id='rc_task', artifacts=())
+        assert store.checkpoint_task_result_state(handle, terminal_state='completed')
         assert store.release_task_result_cleanup(handle)
 
 
