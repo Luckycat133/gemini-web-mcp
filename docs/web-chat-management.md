@@ -1,6 +1,6 @@
 # 紧凑的 Gemini 对话管理
 
-账号入口 `gemini-mcp-account` 提供对话元数据控制。先用 `gemini_history` 找到准确的 `c_` ID，再使用 `gemini_manage_chat` 重命名、置顶或取消置顶。删除仍由独立的 `gemini_delete_chat` 执行；`gemini_cleanup` 仍只清理已登记的 MCP 自有对话。
+账号入口 `gemini-mcp-account-next` 提供对话元数据控制。先用 `gemini_history` 找到准确的 `c_` ID，再使用 `gemini_manage_chat` 重命名、置顶或取消置顶。删除仍由独立的 `gemini_delete_chat` 执行；`gemini_cleanup` 仍只清理已登记的 MCP 自有对话。
 
 ## 面向任务的调用
 

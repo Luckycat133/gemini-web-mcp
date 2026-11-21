@@ -45,7 +45,7 @@ def test_project_skill_frontmatter_and_progressive_disclosure_are_complete() -> 
     assert "get a second opinion" in frontmatter
     assert "understand images/files/URLs" in frontmatter
     assert "generate image/video/music artifacts, edit images" in frontmatter
-    assert 'version: "0.2.1"' in frontmatter
+    assert 'version: "0.2.2"' in frontmatter
     assert "license: MIT-0" in frontmatter
     assert "openclaw:" in frontmatter
     assert "- uvx" in frontmatter

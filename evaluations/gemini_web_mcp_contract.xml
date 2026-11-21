@@ -73,7 +73,7 @@
   </qa_pair>
   <qa_pair>
     <question>Which business entrypoints serve ordinary Gemini functionality and explicit account management?</question>
-    <answer>Use gemini-mcp-function for the 17-tool function surface and gemini-mcp-account for the 17-tool account surface; explicit legacy profiles retain their meaning.</answer>
+    <answer>Use gemini-mcp-function for the 17-tool function surface and gemini-mcp-account-next for the 17-tool account surface; explicit legacy profiles retain their meaning.</answer>
   </qa_pair>
   <qa_pair>
     <question>Which default tool handles ordinary questions, current-web questions and natural-language requests to connected apps?</question>

@@ -4,7 +4,7 @@
 
 ---
 
-默认使用 `gemini-mcp-function`；显式账号操作连接 `gemini-mcp-account`。`gemini-mcp-server` 在未设置 `GEMINI_TOOLS` 时使用功能面，只有显式设置该变量才选择兼容 profile。
+默认使用 `gemini-mcp-function`；显式账号操作连接 `gemini-mcp-account-next`。`gemini-mcp-server` 在未设置 `GEMINI_TOOLS` 时使用功能面，只有显式设置该变量才选择兼容 profile。
 
 浏览器自动读取需要安装 `browser` extra；完整桌面功能使用 `[all]`，包含 Cookie、图片校验和 Task 浏览器依赖。采用自动读取时省略 Cookie 占位值；显式 PSID 会绑定账号并限制刷新范围。完整配置见[客户端示例](client-examples.md)。
 

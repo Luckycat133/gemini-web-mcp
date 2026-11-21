@@ -9,7 +9,7 @@ dated Gemini Web observations are documented separately in the
 
 ## Business Surfaces
 
-`gemini-mcp-function` exposes 17 tools; `gemini-mcp-account` exposes 17 explicit account tools. The main server without `GEMINI_TOOLS` uses the function surface. Authentication helpers belong to explicit compatibility profiles, not these business catalogs.
+`gemini-mcp-function` exposes 17 tools; `gemini-mcp-account-next` exposes 17 explicit account tools. The main server without `GEMINI_TOOLS` uses the function surface. Authentication helpers belong to explicit compatibility profiles, not these business catalogs.
 
 | Tool | Current business contract |
 | --- | --- |

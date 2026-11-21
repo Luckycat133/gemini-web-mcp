@@ -9,7 +9,9 @@ future targets in the generation/management backlog.
 | Entrypoint | Source | Current boundary |
 | --- | --- | --- |
 | `gemini-mcp-function` | `src/surfaces/function.py` | Function catalog |
-| `gemini-mcp-account` | `src/surfaces/account.py` | Explicit Account catalog |
+| `gemini-mcp-account-next` | `src/surfaces/account.py` | Explicit Account catalog |
+| `gemini-mcp-account` | `src_legacy/surfaces/account.py` | Released seven typed account facades |
+| `gemini-mcp-create` | `src_legacy/surfaces/create.py` | Released seven creation and operation tools |
 | `gemini-mcp-server` | `src/server.py` | Function when `GEMINI_TOOLS` is unset; explicit profiles retain branch behavior |
 | `gemini-mcp-assist` | `src/surfaces/assist.py` | Five-tool assist compatibility surface |
 | `gemini-mcp-skill-server` | `src/skill_server.py` | Branch compact compatibility surface |

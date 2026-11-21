@@ -21,9 +21,11 @@ EXPECTED_ENTRY_POINTS = {
     "gemini-mcp-onboarding": "src.onboarding:main",
     "gemini-mcp-assist": "src.surfaces.assist:main",
     "gemini-mcp-function": "src.surfaces.function:main",
-    "gemini-mcp-account": "src.surfaces.account:main",
+    "gemini-mcp-account": "src_legacy.surfaces.account:main",
+    "gemini-mcp-create": "src_legacy.surfaces.create:main",
+    "gemini-mcp-account-next": "src.surfaces.account:main",
 }
-SERVER_ENTRY_POINTS = ("gemini-mcp-server", "gemini-mcp-function", "gemini-mcp-account", "gemini-mcp-skill-server", "gemini-mcp-assist")
+SERVER_ENTRY_POINTS = tuple(name for name in EXPECTED_ENTRY_POINTS if name != "gemini-mcp-onboarding")
 
 
 def _assert_installed_import() -> Path:
@@ -111,6 +113,7 @@ def _start_console_entrypoints() -> None:
 
     with tempfile.TemporaryDirectory(prefix="gemini-wheel-smoke-") as directory:
         smoke_cwd = Path(directory)
+        environment["GEMINI_STATE_DB_PATH"] = str(smoke_cwd / "state.sqlite3")
         environment["GEMINI_OPERATION_DB_PATH"] = str(smoke_cwd / "operations.sqlite3")
         environment["GEMINI_CLEANUP_DB_PATH"] = str(smoke_cwd / "cleanup.sqlite3")
         for name in SERVER_ENTRY_POINTS:

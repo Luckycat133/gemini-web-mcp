@@ -17,7 +17,7 @@ One repository and Python distribution exposes two business surfaces:
 | Surface | Entrypoint | Scope |
 | --- | --- | --- |
 | Function | `gemini-mcp-function` | Assistance, chat, Task, media, research and operation recovery (17 tools) |
-| Account | `gemini-mcp-account` | Explicit history, Notebook/Task metadata, Chat scheduled actions, Gems, inventory and MCP-owned cleanup (17 tools) |
+| Account | `gemini-mcp-account-next` | Explicit history, Notebook/Task metadata, Chat scheduled actions, Gems, inventory and MCP-owned cleanup (17 tools) |
 
 `gemini-mcp-server` without `GEMINI_TOOLS` serves the function surface; explicit profiles keep their existing behavior. Assist and compact remain compatible. Cookie, Doctor and local Prompts tools stay outside the two business surfaces. `gemini_cleanup` targets only chats recorded as MCP-owned, never title matches.
 

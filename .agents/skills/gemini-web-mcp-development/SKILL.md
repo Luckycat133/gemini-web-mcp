@@ -7,7 +7,7 @@ metadata:
   author: Luckycat133
   project: gemini-web-mcp
   scope: development
-  version: "0.2.1"
+  version: "0.2.2"
 ---
 
 # Gemini Web MCP Development
@@ -58,7 +58,7 @@ for generation/management describe goals unless expressly labeled implemented.
 ## Settled Product Decisions
 
 - One distribution, shared services, two business surfaces: `gemini-mcp-function`
-  and `gemini-mcp-account`. Do not invent a third `gemini-mcp-generate` product.
+  and `gemini-mcp-account-next`. Do not invent a third `gemini-mcp-generate` product.
 - `src/surfaces/catalogs.py` is the current membership contract. The reviewed
   Function/Account catalogs each contain 17 tools; the number is not a permanent
   ceiling. Keep deliberate schema/catalog changes reviewable.

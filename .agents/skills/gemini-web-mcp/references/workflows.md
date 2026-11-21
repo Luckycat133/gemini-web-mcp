@@ -2,7 +2,7 @@
 
 Load this reference only after the `gemini-web-mcp` Skill has selected the user's capability lane.
 
-Use `gemini-mcp-function` for assistance, chat, Task, media and research; use `gemini-mcp-account` for explicitly requested account work. Existing assist, compact and explicit profiles are compatibility routes over the same shared services.
+Use `gemini-mcp-function` for assistance, chat, Task, media and research; use `gemini-mcp-account-next` for explicitly requested account work. Existing assist, compact and explicit profiles are compatibility routes over the same shared services.
 
 ## Chat or Task: Intent First
 
@@ -256,7 +256,7 @@ Process:
 
 ## 8. Explicit Account Work
 
-Prefer the dedicated `gemini-mcp-account` surface. `gemini_history` defaults to compact JSON with IDs, titles, pin state and pagination; ordinary list/search does not read chat text. Explicit reads use a bounded text window. Use `response_format="markdown"` or `"json"` only when the detailed compatibility view is needed.
+Prefer the dedicated `gemini-mcp-account-next` surface. `gemini_history` defaults to compact JSON with IDs, titles, pin state and pagination; ordinary list/search does not read chat text. Explicit reads use a bounded text window. Use `response_format="markdown"` or `"json"` only when the detailed compatibility view is needed.
 
 For an explicitly requested rename, pin or unpin, call `gemini_manage_chat(action="rename"|"pin"|"unpin", chat_id=<exact c_ ID>, title=<rename only>)`. Optional `expected_title` guards a stale selection. Fresh metadata is checked before and after the single mutation; `verified=true` is required to claim completion. A sent but unverified request returns `changed=null`, not success, and must not be blindly repeated. Deletion remains a separate explicit operation. These metadata actions do not call a generation model or expose a full browser DOM.
 

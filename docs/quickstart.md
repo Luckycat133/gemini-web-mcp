@@ -65,7 +65,7 @@ export GEMINI_PSIDTS='your __Secure-1PSIDTS value'
 | 工具面 | 使用场景 |
 | --- | --- |
 | `gemini-mcp-function` | 默认 17 个功能工具：问答、理解、会话、Task、图像／视频／音乐及 Research |
-| `gemini-mcp-account` | 显式账号管理：历史、Notebook、Skills、偏好、Task 计划及浏览器 |
+| `gemini-mcp-account-next` | 显式账号管理：历史、Notebook、Skills、偏好、Task 计划及浏览器 |
 | `gemini-mcp-skill-server` | 固定四工具兼容入口：chat/create/edit/session |
 | `gemini-mcp-assist` | 只需要第二意见、有据搜索、图像/混合输入理解或异步 Deep Research 的专注五工具面 |
 | `GEMINI_TOOLS=model` / `core` | 在 `gemini-mcp-server` 中显式选择旧版模型／完整内容工具组 |

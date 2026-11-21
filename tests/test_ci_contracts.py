@@ -125,6 +125,7 @@ def test_targeted_contract_checklist_covers_stable_architecture_boundaries() -> 
         "tests/test_skill_packaging.py",
         "tests/test_assist_skill.py",
         "tests/test_ci_contracts.py",
+        "tests/test_legacy_public_commands.py",
     } == set(CONTRACT_TESTS)
 
 

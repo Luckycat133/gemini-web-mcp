@@ -274,7 +274,7 @@ TOOL_MANIFEST: list[dict[str, Any]] = [
     {
         "name": "gemini_manage_chat",
         "group": "account",
-        "purpose": "Rename, pin or unpin one explicit chat ID on gemini-mcp-account, with fresh metadata read-back.",
+        "purpose": "Rename, pin or unpin one explicit chat ID on gemini-mcp-account-next, with fresh metadata read-back.",
         "read_only": False,
         "destructive": False,
         "privacy": "reads_and_updates_private_chat_metadata",

@@ -19,9 +19,9 @@ CI 覆盖 Python 3.11/3.12 全量离线测试、契约、profile 与真实 stdio
 
 | 方面 | 当前 Function/Account 分支 | 已发布 v0.2.2 |
 | --- | --- | --- |
-| 源包版本 | 0.2.1，仍是开发源 metadata | 0.2.2 已发布；历史 tag 不可覆盖 |
+| 源包版本 | 0.2.2，沿用 main 版本，未重新发布 | 0.2.2 已发布；历史 tag 不可覆盖 |
 | 推荐功能入口 | `gemini-mcp-function`；主入口未设置 GEMINI_TOOLS 时同此 | assist/create 分离；存在 `gemini-mcp-create` |
-| 账号入口 | 同名 `gemini-mcp-account`，17 个扁平参数工具 | 七个 request 判别联合 facade |
+| 账号入口 | 新 `gemini-mcp-account-next` 提供 17 个扁平参数工具 | `gemini-mcp-account` 提供七个 request 判别联合 facade |
 | 图片/编辑 | 与视频音乐一样返回后台句柄 | create 面同步产物 |
 | wire 结果 | SDK content wrapper；domain-backed block 的 `_meta.domain_result` | 部分 focused tools 直接 typed domain envelope |
 | 长任务 | 显式 operation_id、独立 worker、status/result；无公开取消 | idempotency_key、status/result/cancel 等合同 |
@@ -31,6 +31,18 @@ CI 覆盖 Python 3.11/3.12 全量离线测试、契约、profile 与真实 stdio
 
 同名不保证 input/output/annotation 兼容。当前“兼容 profile”只描述本分支保留的路径。
 保留的 RPC/parser fixture 不等于存在服务或公开工具；删掉旧实现测试也不能充当迁移验收。
+
+## 旧公开命令的兼容入口
+
+`gemini-mcp-create` 与 `gemini-mcp-account` 使用从 main
+(`ec12c1a5b4953728aac666eeeb95435a9fcc18a7`) 保留的独立 `src_legacy` 实现。
+旧客户端无需改工具参数、结果或状态路径：Create 与旧 Account 继续使用
+`GEMINI_STATE_DB_PATH`；新 Function 保留独立操作和清理账本。17 工具账号面要
+显式使用 `gemini-mcp-account-next`。两个运行时不共享进程内会话或操作服务。
+
+旧 Create 的 status/result 是可能产生副作用的恢复入口，不能作为只读轮询替代品。
+新 Function 的 `released_media_receipt_only` 仍仅是只读回执；没有精确上游定位信息
+的旧记录不自动恢复、不重提、不改写。旧发布标签不变，未执行发布。
 
 ## 合入前的最小决定与验证
 

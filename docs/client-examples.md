@@ -59,7 +59,7 @@ For explicitly requested account management, add a second server configuration. 
   "mcpServers": {
     "gemini-account": {
       "command": "uvx",
-      "args": ["--from", "gemini-mcp-server[all] @ git+https://github.com/Luckycat133/gemini-web-mcp@codex/gemini-tools-polish-20261101", "gemini-mcp-account"]
+      "args": ["--from", "gemini-mcp-server[all] @ git+https://github.com/Luckycat133/gemini-web-mcp@codex/gemini-tools-polish-20261101", "gemini-mcp-account-next"]
     }
   }
 }

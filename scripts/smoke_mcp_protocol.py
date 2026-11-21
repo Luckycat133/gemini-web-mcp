@@ -219,7 +219,7 @@ async def _run(
     assist_command: str,
     profile: str,
     function_command: str = "gemini-mcp-function",
-    account_command: str = "gemini-mcp-account",
+    account_command: str = "gemini-mcp-account-next",
 ) -> list[dict[str, object]]:
     with tempfile.TemporaryDirectory(prefix="gemini-protocol-smoke-") as directory:
         cwd = Path(directory)
@@ -267,7 +267,7 @@ def main() -> None:
     parser.add_argument("--compact-command", default="gemini-mcp-skill-server")
     parser.add_argument("--assist-command", default="gemini-mcp-assist")
     parser.add_argument("--function-command", default="gemini-mcp-function")
-    parser.add_argument("--account-command", default="gemini-mcp-account")
+    parser.add_argument("--account-command", default="gemini-mcp-account-next")
     parser.add_argument("--profile", choices=sorted(PRIMARY_PROFILE_TOOLS), default="model")
     args = parser.parse_args()
 

@@ -67,7 +67,7 @@
 |------|------|
 | 模型 | 旧别名 + 运行时模型发现 |
 | 媒体生成 | 图片、编辑、视频和音乐后台返回句柄；完成须有已保存并验证的实际文件 |
-| 推荐工具面 | 功能面 `gemini-mcp-function` 与显式账号面 `gemini-mcp-account`；旧 profile、assist、compact 保留兼容 |
+| 推荐工具面 | 功能面 `gemini-mcp-function` 与显式账号面 `gemini-mcp-account-next`；旧 profile、assist、compact 保留兼容 |
 | Deep Research | 需要当前账号具备相应权限；完成报告须另行验证 |
 | Assistance 专用面 | ✅ `gemini-mcp-assist`：五工具确定性目录（ask/搜索/图像理解/混合理解/异步 Research） |
 | Gem 管理 | ✅ 自定义助手管理 |

@@ -3,7 +3,7 @@ name: gemini-assist
 description: "Use this skill when the user wants a second opinion, critique, code or design review, current-web search that names its sources, image or screenshot understanding, file, URL, or mixed-input understanding, or Deep Research. Prefer this focused skill over the gemini-web-mcp compatibility skill for pure assistance and understanding workloads. Do not use it for pure image, video, or music generation, Gemini account administration, or repository development; route those requests to the creation, account, or development capability instead."
 license: MIT-0
 metadata:
-  version: "0.2.1"
+  version: "0.2.2"
   openclaw:
     emoji: "♊️"
     homepage: https://github.com/Luckycat133/gemini-web-mcp

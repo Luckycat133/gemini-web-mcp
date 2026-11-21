@@ -310,7 +310,7 @@ def _enabled_manifest_tool_names(configured: list[str], enabled_groups: set[str]
 def _tool_availability(tool: dict[str, Any]) -> list[str]:
     if tool["name"] in {"gemini_manage_chat", "gemini_tasks", "gemini_task_browser", "gemini_preferences",
                         "gemini_skills", "gemini_manage_notebook"}:
-        return ["gemini-mcp-account"]
+        return ["gemini-mcp-account-next"]
     if tool["name"] == "gemini_run_task":
         return ["gemini-mcp-function"]
     if tool["name"] == "gemini_get_tool_manifest":

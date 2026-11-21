@@ -57,14 +57,14 @@ def test_gemini_web_mcp_contract_answers_match_static_manifest():
 
     assert account_tools["gemini_manage_chat"]["read_only"] is False
     assert account_tools["gemini_manage_chat"]["destructive"] is False
-    assert account_tools["gemini_manage_chat"]["availability"] == ["gemini-mcp-account"]
+    assert account_tools["gemini_manage_chat"]["availability"] == ["gemini-mcp-account-next"]
     assert account_tools["gemini_preferences"]["read_only"] is False
-    assert account_tools["gemini_preferences"]["availability"] == ["gemini-mcp-account"]
+    assert account_tools["gemini_preferences"]["availability"] == ["gemini-mcp-account-next"]
     assert pairs["gemini_preferences"]
     for name in ("gemini_skills", "gemini_manage_notebook"):
         assert account_tools[name]["read_only"] is False
         assert account_tools[name]["destructive"] is True
-        assert account_tools[name]["availability"] == ["gemini-mcp-account"]
+        assert account_tools[name]["availability"] == ["gemini-mcp-account-next"]
         assert pairs[name]
 
     assert "gemini_get_tool_manifest" in tools
@@ -145,7 +145,7 @@ def test_business_surface_evaluations_distinguish_function_account_and_owned_cle
     answers = {pair.findtext("question"): pair.findtext("answer") for pair in _qa_pairs()}
     surfaces = answers["Which business entrypoints serve ordinary Gemini functionality and explicit account management?"]
     cleanup = answers["What is the permitted scope of gemini_cleanup on the account surface?"]
-    assert "gemini-mcp-function" in surfaces and "gemini-mcp-account" in surfaces
+    assert "gemini-mcp-function" in surfaces and "gemini-mcp-account-next" in surfaces
     assert "MCP-owned" in cleanup and "titles" in cleanup
 
 

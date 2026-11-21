@@ -81,7 +81,8 @@ def test_reference_catalogs_cover_the_actual_business_tools() -> None:
     for tools in _catalogs().values():
         assert tools <= names
     # Check the documented entrypoints against package metadata, not a hardcoded count.
-    for command in ("gemini-mcp-function", "gemini-mcp-account", "gemini-mcp-assist",
+    for command in ("gemini-mcp-function", "gemini-mcp-account", "gemini-mcp-account-next",
+                    "gemini-mcp-create", "gemini-mcp-assist",
                     "gemini-mcp-skill-server", "gemini-mcp-server", "gemini-mcp-onboarding"):
         assert command in _project()["scripts"] and f"`{command}`" in architecture
 

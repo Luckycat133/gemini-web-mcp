@@ -246,7 +246,7 @@ def test_assist_skill_frontmatter_is_complete() -> None:
     lines = text.splitlines()
 
     assert re.search(r"^name: gemini-assist$", frontmatter, re.MULTILINE)
-    assert 'version: "0.2.1"' in frontmatter
+    assert 'version: "0.2.2"' in frontmatter
     assert "license: MIT-0" in frontmatter
     assert "license: AGPL-3.0-only" not in frontmatter
     assert "openclaw:" in frontmatter

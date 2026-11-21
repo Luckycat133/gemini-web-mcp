@@ -41,7 +41,7 @@
 
 功能面的 `gemini_generate_video` 默认用 `model="flash"` 进入 Gemini 网页的「创建视频」模式。需要明确指定 Omni 1.2 Flash 或精确时长时，使用单独计费的 Developer API 路径。见[视频生成参数与示例](#gemini_generate_video)。
 
-### 显式账号面（`gemini-mcp-account`）
+### 显式账号面（`gemini-mcp-account-next`）
 
 `gemini_history`、`gemini_manage_chat`、`gemini_delete_chat`、`gemini_notebooks`、`gemini_manage_notebook`、`gemini_skills`、`gemini_move_chat_to_notebook`、`gemini_tasks`、`gemini_task_browser`、`gemini_account_inventory`、`gemini_list_scheduled_actions`、`gemini_get_scheduled_action`、`gemini_create_scheduled_action`、`gemini_delete_scheduled_action`、`gemini_manage_gems`、`gemini_cleanup`、`gemini_preferences`。
 

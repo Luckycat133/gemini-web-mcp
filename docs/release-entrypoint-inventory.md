@@ -1,5 +1,7 @@
 # Released and candidate entrypoints
 
+Current #47 restores the original `gemini-mcp-create` and `gemini-mcp-account` entrypoints, backed by the isolated main implementation. The redesigned 17-tool account surface uses `gemini-mcp-account-next`. The tables below record the earlier static #48 comparison, not the current catalog.
+
 Static comparison of published source tag [v0.2.2](https://github.com/Luckycat133/gemini-web-mcp/blob/362a368f6c68b01c6eb143586db45743c5222e2c/pyproject.toml) and candidate [PR #48 source](https://github.com/Luckycat133/gemini-web-mcp/blob/2c4bb80fdba9a27cab13c1b4564fbb40aa8b2fa9/pyproject.toml). These are declared contracts, not proof of compatibility, installed schemas, successful migrations, or live behavior.
 
 | Command | v0.2.2 target | Candidate target |

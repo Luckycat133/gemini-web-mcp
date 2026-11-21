@@ -17,13 +17,13 @@ codex mcp add gemini-compact -- uvx --from git+https://github.com/Luckycat133/ge
 codex mcp list
 ```
 
-Connect `gemini-mcp-function` for assistance, chat, media and Research, or `gemini-mcp-account` for explicitly requested account operations. The compact and assist servers and explicit `GEMINI_TOOLS` profiles remain compatibility options. Client configuration examples are in the project documentation. Restart or reload the client if newly connected tools are not visible in the current task.
+Connect `gemini-mcp-function` for assistance, chat, media and Research, or `gemini-mcp-account-next` for explicitly requested account operations. The compact and assist servers and explicit `GEMINI_TOOLS` profiles remain compatibility options. Client configuration examples are in the project documentation. Restart or reload the client if newly connected tools are not visible in the current task.
 
 For focused assistance or the primary content surface in Codex:
 
 ```bash
 codex mcp add gemini-function -- uvx --from git+https://github.com/Luckycat133/gemini-web-mcp@codex/gemini-tools-polish-20261101 gemini-mcp-function
-codex mcp add gemini-account -- uvx --from git+https://github.com/Luckycat133/gemini-web-mcp@codex/gemini-tools-polish-20261101 gemini-mcp-account
+codex mcp add gemini-account -- uvx --from git+https://github.com/Luckycat133/gemini-web-mcp@codex/gemini-tools-polish-20261101 gemini-mcp-account-next
 ```
 
 This setup does not authenticate a Gemini account. Keep Cookie values in the client host's secret environment; never put them in command arguments, committed files, or chat. An authentication error after the offline preflight means the connection works but live Gemini access still needs account setup.

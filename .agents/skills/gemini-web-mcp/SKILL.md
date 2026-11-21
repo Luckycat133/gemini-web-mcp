@@ -4,7 +4,7 @@ description: "Use this skill when an agent should extend itself with Gemini Web:
 license: MIT-0
 compatibility: "Requires Python 3.11+ and a connected Gemini Web MCP server. The function server covers assistance, understanding, media, and Deep Research; the separate account server handles explicit account work. Assist and compact compatibility servers remain supported. Media completion requires verified artifacts, and availability depends on the account and upstream service. Live calls require Gemini Web account Cookies."
 metadata:
-  version: "0.2.1"
+  version: "0.2.2"
   openclaw:
     emoji: "♊️"
     homepage: https://github.com/Luckycat133/gemini-web-mcp
@@ -88,7 +88,7 @@ Load [workflows.md](references/workflows.md) only for detailed mode settings, ap
 
 ## Default Server Choice
 
-Use `gemini-mcp-function` for the 17-tool function surface and `gemini-mcp-account` for the 17-tool explicit account surface. State the goal and app naturally; web and tool availability need no enable switch. Inspect observed source evidence, and verify app changes independently of answer prose. The five-tool assist compatibility server retains `gemini_search` and has no Notebook attachment arguments.
+Use `gemini-mcp-function` for the 17-tool function surface and `gemini-mcp-account-next` for the 17-tool explicit account surface. State the goal and app naturally; web and tool availability need no enable switch. Inspect observed source evidence, and verify app changes independently of answer prose. The five-tool assist compatibility server retains `gemini_search` and has no Notebook attachment arguments.
 
 The main server without `GEMINI_TOOLS` also selects the function surface. Explicit `GEMINI_TOOLS` profiles and the older assist and compact servers remain compatibility routes. Cookie, Doctor and local Prompts do not belong to either business catalog. `gemini_cleanup` addresses only MCP-owned ledger entries, never title matches.
 

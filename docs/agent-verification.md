@@ -7,7 +7,7 @@ Read for protocol, tool, artifact, account, packaging or release changes. Docume
 - `python -m venv .venv && . .venv/bin/activate`: create and enter a local virtual environment.
 - `pip install -e ".[all,dev]"`: install the package with optional browser/image support and maintained development gates.
 - `gemini-mcp-function`: run the default 17-tool function surface locally; `gemini-mcp-server` with no `GEMINI_TOOLS` selects the same surface.
-- `gemini-mcp-account`: run the separate 17-tool account surface for explicitly requested account work.
+- `gemini-mcp-account-next`: run the separate 17-tool account surface for explicitly requested account work.
 - `GEMINI_TOOLS=core python -m src.server` or `GEMINI_TOOLS=all python -m src.server`: exercise explicitly selected legacy compatibility profiles.
 - `gemini-mcp-onboarding`: start the installed stdio server and call an auth-free text tool; live chat/image subcommands require `--allow-live-account`.
 - `python -m ruff check src tests scripts && python -m mypy src scripts`: run the maintained static correctness gates.

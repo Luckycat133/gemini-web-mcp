@@ -59,7 +59,7 @@ gemini-mcp-function
 
 ## Product summary
 
-Gemini Web MCP is an agent-first MCP Python SDK v2 gateway and paired skill set. The development branch exposes two entrypoints: `gemini-mcp-function` for Chat, Task, media and research, and `gemini-mcp-account` for explicit management of chats, Notebooks, native Skills, preferences and schedules. Each offers 17 tools.
+Gemini Web MCP is an agent-first MCP Python SDK v2 gateway and paired skill set. The development branch exposes two entrypoints: `gemini-mcp-function` for Chat, Task, media and research, and `gemini-mcp-account-next` for explicit management of chats, Notebooks, native Skills, preferences and schedules. Each offers 17 tools.
 
 The runtime skill and development skill are deliberately separate. Shared history services keep primary and compact typed results aligned, destructive results distinguish accepted requests from positive read-back evidence, and media results preserve requested, effective, and observed backend fields while treating a deliverable as local only after file/MIME/size metadata verification.
 
@@ -69,13 +69,13 @@ The ClawHub runtime bundle is MIT-0. The MCP server source and repository-develo
 
 ### Short English
 
-Gemini Web MCP gives Codex, Claude, VS Code, and other MCP clients access to Gemini Web. Start with the auth-free preflight for `gemini-mcp-function` and add `gemini-mcp-account` when you want to manage account data.
+Gemini Web MCP gives Codex, Claude, VS Code, and other MCP clients access to Gemini Web. Start with the auth-free preflight for `gemini-mcp-function` and add `gemini-mcp-account-next` when you want to manage account data.
 
 Repo: https://github.com/Luckycat133/gemini-web-mcp
 
 ### 简体中文
 
-Gemini Web MCP 让 Codex、Claude、VS Code 等 MCP 客户端使用 Gemini Web。先运行无需账号的功能面预检；有明确的账号管理需求时，再添加 `gemini-mcp-account`。
+Gemini Web MCP 让 Codex、Claude、VS Code 等 MCP 客户端使用 Gemini Web。先运行无需账号的功能面预检；有明确的账号管理需求时，再添加 `gemini-mcp-account-next`。
 
 Repo: https://github.com/Luckycat133/gemini-web-mcp
 

@@ -2,7 +2,9 @@
   <img src="docs/assets/gemini-web-mcp-banner.svg" alt="Gemini Web MCP" width="100%">
 </p>
 
-<h1 align="center">Gemini Web MCP (v0.2.1)</h1>
+<h1 align="center">Gemini Web MCP (v0.2.2)</h1>
+
+Existing clients can continue using `gemini-mcp-create` and `gemini-mcp-account` with their released contracts. Use `gemini-mcp-account-next` for the new 17-tool Account surface. See the [migration guide](docs/source-update-integration.md#旧公开命令的兼容入口).
 
 <p align="center">
   An agent-first MCP Python SDK v2 gateway and skills for Gemini Web workflows.
@@ -29,7 +31,7 @@ Gemini Web MCP exposes Gemini Web capabilities to MCP-compatible clients such as
 
 These instructions install the development source from [PR #39](https://github.com/Luckycat133/gemini-web-mcp/pull/39). The published 0.2.2 release has different entrypoints and state storage. See the [source integration notes](docs/source-update-integration.md) before switching from an existing release.
 
-Configure `gemini-mcp-function` and `gemini-mcp-account` as separate MCP entries. Enable the six function tools for Chat, Task, media, Research and operation recovery. Enable the six account tools when a task calls for existing conversation history, chat management, Notebooks or native Task metadata. Either entry can run on its own. The earlier 17-tool catalogs are available through the explicit `function-full` and `account-full` profiles.
+Configure `gemini-mcp-function` and `gemini-mcp-account-next` as separate MCP entries. Enable the six function tools for Chat, Task, media, Research and operation recovery. Enable the six account tools when a task calls for existing conversation history, chat management, Notebooks or native Task metadata. Either entry can run on its own. The earlier 17-tool catalogs are available through the explicit `function-full` and `account-full` profiles.
 
 `gemini_ask` handles ordinary questions, current-web questions, mixed inputs and natural-language requests to available connected apps. It defaults to Flash. Explicit `notebook_ids` add NotebookLM/Gemini Notebook sources to a background Chat. `gemini_run_task` starts a separate Task workflow. Keep the original operation handle to read status and recover verified results.
 
@@ -47,7 +49,7 @@ The supported runtime is `mcp>=2,<3` plus `mcp-types>=2,<3`. CI exercises both c
 
 ## Install The Runtime Skill
 
-The repository runtime Skill is `0.2.1`. Install the public listing from ClawHub (and verify its displayed version when publication state matters):
+The repository runtime Skill is `0.2.2`. Install the public listing from ClawHub (and verify its displayed version when publication state matters):
 
 ```bash
 clawhub install gemini-web-mcp
@@ -119,7 +121,7 @@ Use the command for the surface you want to connect.
 
 ```bash
 gemini-mcp-function
-gemini-mcp-account
+gemini-mcp-account-next
 ```
 
 `gemini-mcp-server` without `GEMINI_TOOLS` also serves the function surface. To use either previous 17-tool catalog, run `GEMINI_TOOLS=function-full gemini-mcp-server` or `GEMINI_TOOLS=account-full gemini-mcp-server`. Configure these as separate client entries only when their tools are needed.
@@ -196,7 +198,7 @@ restore the other v0.2.2 Account tools.
 
 On 2026-11-06, the signed-in Chrome session verified Flash image generation and editing through MCP, including result retrieval after reconnecting and automatic conversation cleanup. Task browser controls with the saved Always allow setting completed without prompting when the run used a remote browser. Plain Flash Chat, grounded search, session follow-up, ordinary Notebook Chat, and image understanding did not produce verified answers in those checks.
 
-See the [live verification record](docs/development-status.md#flash-and-browser-permission-follow-up-2026-11-06) and [tool quality matrix](docs/tool-quality.md) for the evidence and remaining gaps. The package and Skill metadata remain `0.2.1`; changes on this branch are listed under [Unreleased](docs/changelog.md#unreleased).
+See the [live verification record](docs/development-status.md#flash-and-browser-permission-follow-up-2026-11-06) and [tool quality matrix](docs/tool-quality.md) for the evidence and remaining gaps. The package and Skill metadata remain `0.2.2`; changes on this branch are listed under [Unreleased](docs/changelog.md#unreleased).
 
 ## Distribution Assets
 
