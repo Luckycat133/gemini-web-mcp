@@ -62,7 +62,8 @@ Function 的 status/result 平时读取另外的 `GEMINI_OPERATION_DB_PATH`。�
 保留策略允许时，也可能清理（删除）源对话。只确认状态时，不要调用旧 Create 的这两个工具。
 不要重提未完成任务，或把旧 `idempotency_key` 当成新 `operation_id`；保留两代独立账本。
 
-需要获取原版时，使用 [v0.2.2 GitHub Release wheel](https://github.com/Luckycat133/gemini-web-mcp/releases/download/v0.2.2/gemini_mcp_server-0.2.2-py3-none-any.whl)；
+需要获取原版时，从 [v0.2.2 GitHub Release](https://github.com/Luckycat133/gemini-web-mcp/releases/tag/v0.2.2) 的 Assets 选择
+`gemini_mcp_server-0.2.2-py3-none-any.whl`；
 其 SHA-256 为 `43657efb69d04c5498a07168acfb96a84cc34bcb754fb21e51ea6108f5d3dcd5`。
 这是回执与受控回滚的边界说明，不代表已完成迁移或验收真实账号恢复。
 
