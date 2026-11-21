@@ -69,6 +69,8 @@ def _present(result: DomainResult[OperationReadData], *, include_text: bool = Tr
             text += "\nFull report in verified local artifact."
         else:
             text += "\n\n" + (report or "The research report is ready; call gemini_get_operation_result to retrieve it.")
+    elif data.verification_status == "released_media_receipt_only":
+        text += "\nRecovered a v0.2.2 receipt, not the media. Continue with v0.2.2 Create and its original ledger."
     elif data.media_type:
         if data.artifact_state is not None:
             text += f"\nArtifact state: {data.artifact_state.value}."

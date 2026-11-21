@@ -47,8 +47,11 @@ CI 覆盖 Python 3.11/3.12 全量离线测试、契约、profile 与真实 stdio
 v0.2.2 Create 的 video/music 句柄保存在 `GEMINI_STATE_DB_PATH` 指定的旧数据库
 （默认 `state.sqlite3`，账户范围依赖同目录的 `state.sqlite3.key`；自定义路径使用对应的 `.key`）。
 Function 的 status/result 读取 `GEMINI_OPERATION_DB_PATH` 的另一套账本。合成测试确认：
-在独立路径启动时，旧句柄返回 `operation_not_found`，不会提交、清理或改写旧账本；
-把新变量指向旧库只会遭遇 schema 不兼容，不是迁移。
+在独立路径启动且当前账户匹配时，可从静止的旧账本只读恢复原句柄及记录状态。
+结果明确标记为 `released_media_receipt_only`，不是媒体恢复成功。旧记录没有新后台
+观察器所需的精确响应与候选标识，也没有可核对的文件散列，不会联系上游、重新提交、
+清理或改写旧账本；错误账户、活跃日志及无效文件不返回旧句柄。
+把新变量指向旧库仍会遭遇 schema 不兼容，并非迁移。
 
 未完成的任务不要重提，也不要把旧 `idempotency_key` 当成新 `operation_id`。
 先以 v0.2.2 Create、原账户、原数据库和身份 key 查询原句柄，等待取回结果后再切换；

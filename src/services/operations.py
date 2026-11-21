@@ -13,6 +13,7 @@ from ..domain.artifacts import ArtifactState
 from ..domain.conversations import CleanupObservation, CleanupState
 from ..domain.operations import InlineReportArtifact, OperationReadData, operation_failure_code
 from ..domain.results import DomainErrorCode, DomainResult, DomainWarning, OperationState, result_from_exception
+from ..infrastructure.released_media_ledger import lookup_released_media
 from ..infrastructure.account_identity import operation_account_matches, uses_omni_video_api
 from ..infrastructure.cleanup_store import CleanupStore
 from ..infrastructure.operation_store import RETENTION_SECONDS, OperationRecord, OperationStore
@@ -104,6 +105,29 @@ class OperationService:
         except Exception as error:
             return result_from_exception(error, logger=logger, operation="operation_read")
         if record is None:
+            released = lookup_released_media(operation_id)
+            if released is not None:
+                if released.expires_at <= self.store.clock():
+                    return DomainResult.failure(
+                        DomainErrorCode.INVALID_ARGUMENT, "The v0.2.2 media handle has expired.",
+                        verification_status="released_media_handle_expired",
+                    )
+                reason = "released_media_receipt_only"
+                # The released store has no exact response/candidate identity
+                # or artifact hash. This receipt cannot authorize read-back or cleanup.
+                data = OperationReadData(
+                    operation_id, f"gemini_generate_{released.kind}", OperationState.PARTIAL,
+                    False, False, reason, media_type=released.kind,
+                )
+                return DomainResult.success(
+                    data, operation_state=OperationState.PARTIAL, verification_status=reason,
+                    details={"recorded_state": released.recorded_state.value},
+                    warnings=(DomainWarning(
+                        code=reason,
+                        message="Recovered the v0.2.2 receipt, not the original media bytes. "
+                        "Use v0.2.2 Create with the original account and ledger to continue.",
+                    ),),
+                )
             return DomainResult.failure(
                 DomainErrorCode.INVALID_ARGUMENT, "The operation handle was not found.",
                 verification_status="operation_not_found",
