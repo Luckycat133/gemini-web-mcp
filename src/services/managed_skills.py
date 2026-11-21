@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 import io
+import json
 import re
 import zipfile
 from typing import Any, Awaitable, Callable
@@ -16,12 +17,12 @@ from ..services.deadlines import await_before_deadline
 
 
 def _skill_description_yaml(description: str) -> str:
-    """Match the native editor's YAML scalar formatting."""
-    if "\n" in description:
-        return "|\n" + "\n".join("  " + line for line in description.split("\n"))
-    if re.search(r"[:#{}\[\],&*?|>!'\"%@`]", description) or description.startswith(("-", " ")):
-        return '"' + description.replace("\\", "\\\\").replace('"', '\\"') + '"'
-    return description
+    """Emit an exact double-quoted YAML string, without implicit types or chomping."""
+    # JSON's escapes also work in YAML. Escape its additional line separators
+    # and nonprinting characters, but keep valid non-BMP Unicode intact.
+    quoted = json.dumps(description, ensure_ascii=False)
+    return re.sub(r"[\x7f-\x9f\u2028\u2029\ud800-\udfff\ufffe\uffff]",
+                  lambda match: f"\\u{ord(match[0]):04x}", quoted)
 
 
 @dataclass(frozen=True)

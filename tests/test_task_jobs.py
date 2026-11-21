@@ -903,6 +903,8 @@ def test_notebook_chat_classifies_only_exact_completed_refusal(store, monkeypatc
 def test_notebook_chat_answer_changed_during_cleanup_stays_chat_and_protected(store):
     record = _notebook_record(store, state="completed")
     artifact = task_jobs.save_task_result(store, record, "Saved Notebook answer.")
+    assert store.checkpoint_task_result_state(record.operation_id, terminal_state="completed")
+    record = store.get(record.operation_id)
 
     async def initialize():
         Path(artifact.local_path).write_text("Modified Notebook answer.")
@@ -1487,6 +1489,48 @@ def test_task_generated_files_are_committed_before_cleanup_and_reused(store, mon
     assert changed.meta.verification_status == 'task_artifact_verification_failed'
 
 
+def test_crash_after_task_files_commit_does_not_report_cached_success(store, monkeypatch):
+    from src.services.task_result_storage import save_task_result
+
+    record = _read_record(store, state="partial")
+    answer = "Synthetic exact failed Task answer."
+    save_task_result(store, record, answer)
+    store.commit_task_files(record.operation_id, response_id="r_one", candidate_id="rc_id", artifacts=())
+    assert not store.release_task_result_cleanup(record.operation_id)
+    assert not store.release_task_result_cleanup(record.operation_id, terminal_state="failed")
+    reopened = OperationStore(store.path)
+    client = TaskClient(history=_history(
+        _model_turn("c_one", "r_one", "rc_id", answer),
+    ), raise_on_generate=True)
+    metadata = AsyncMock(return_value=None)
+    monkeypatch.setattr(task_jobs, "fetch_task_metadata", metadata)
+    finalize = AsyncMock(return_value=CleanupObservation(state=CleanupState.COMPLETED))
+
+    def read(include_answer):
+        return asyncio.run(task_jobs.read_task_operation(
+            reopened.get(record.operation_id), store=reopened, client_provider=lambda: client,
+            client_initializer=AsyncMock(), finalize_chat_cleanup=finalize, include_answer=include_answer,
+        ))
+
+    assert read(False).data.state == OperationState.PARTIAL
+    assert read(True).data.state == OperationState.PARTIAL
+    assert reopened.get(record.operation_id).cleanup_protected
+    finalize.assert_not_awaited()
+    assert not client.read_calls
+
+    metadata.return_value = _metadata(4)
+    failed = read(True)
+    assert not failed.ok and failed.data.state == OperationState.FAILED
+    assert failed.data.task_response == answer
+    assert reopened.get(record.operation_id).state == "failed"
+    finalize.assert_awaited_once()
+    assert not reopened.checkpoint_task_result_state(record.operation_id, terminal_state="completed")
+    assert not reopened.release_task_result_cleanup(record.operation_id, terminal_state="completed")
+    assert read(True).data.state == OperationState.FAILED
+    assert metadata.await_count == 3
+    assert not client.calls
+
+
 def test_task_missing_file_evidence_never_releases_cleanup(store, monkeypatch):
     record = _read_record(store)
     client = TaskClient(history=_history(_model_turn('c_one', 'r_one', 'rc_id', 'answer')))
@@ -1527,6 +1571,7 @@ def test_cached_file_disappearing_during_initializer_cannot_release_cleanup(stor
         verification=ArtifactVerification(ArtifactVerificationStatus.VERIFIED,
             details={'sha256': hashlib.sha256(path.read_bytes()).hexdigest()}))
     store.commit_task_files(record.operation_id, response_id='r_one', candidate_id='rc_id', artifacts=(artifact,))
+    assert store.checkpoint_task_result_state(record.operation_id, terminal_state='completed')
     async def initialize():
         path.unlink()
     finalize = AsyncMock()

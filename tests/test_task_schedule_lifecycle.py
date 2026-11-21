@@ -34,6 +34,7 @@ def owned_task(store, *, handle, chat_id, retained=False, artifact=True):
                                       response_id='r_task', candidate_id='rc_task')
         save_task_result(store, store.get(handle), 'Synthetic result')
         store.commit_task_files(handle, response_id='r_task', candidate_id='rc_task', artifacts=())
+        assert store.checkpoint_task_result_state(handle, terminal_state='completed')
         assert store.release_task_result_cleanup(handle)
 
 

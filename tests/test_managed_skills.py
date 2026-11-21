@@ -111,7 +111,8 @@ def test_tool_registration_and_destructive_annotation():
     assert tool.annotations.destructive_hint is True
 
 
-def test_create_uploads_single_skill_md_once_and_verifies_readback():
+@pytest.mark.parametrize("description", ["synthetic description", "null", "line one\nline two\n"])
+def test_create_uploads_single_skill_md_once_and_verifies_readback(description):
     import io
     import zipfile
 
@@ -121,6 +122,7 @@ def test_create_uploads_single_skill_md_once_and_verifies_readback():
             assert archive.namelist() == ["SKILL.md"]
             text = archive.read("SKILL.md").decode()
             assert 'name: synthetic-skill' in text and "fixture instruction" in text
+            assert json.loads(text.splitlines()[2].removeprefix("description: ")) == description
         calls.append(("upload", filename))
         return "private-upload-handle"
     async def mutate(_client, action, **kwargs):
@@ -128,10 +130,10 @@ def test_create_uploads_single_skill_md_once_and_verifies_readback():
         return "skill-fixture"
     async def read(_client, key, **kwargs):
         calls.append(("read", key))
-        return ManagedSkill("skill-fixture", "synthetic-skill", "synthetic description", True, None,
+        return ManagedSkill("skill-fixture", "synthetic-skill", description, True, None,
                             "fixture instruction", True)
     service = ManagedSkillService(ManagedSkillDependencies(lambda: object(), AsyncMock(), read, lambda: "account", upload, mutate))
-    result = asyncio.run(service.mutate("create", title="synthetic-skill", description="synthetic description",
+    result = asyncio.run(service.mutate("create", title="synthetic-skill", description=description,
                                         instructions="fixture instruction"))
     assert result.ok and result.data.verified and result.data.skill_id == "skill-fixture"
     assert [entry[0] for entry in calls] == ["upload", "create", "read"]
@@ -207,13 +209,19 @@ def test_plain_skill_update_preserves_unspecified_fields():
     assert upload.await_count == mutation.await_count == 1
 
 
-def test_native_skill_description_yaml_matches_editor():
+@pytest.mark.parametrize("description", [
+    "simple", "true", "null", "123", "001", "yes", "2026-01-01", "one: two",
+    "line one\nline two", "line one\nline two\n", 'quote " and ' + chr(92),
+    "lead\tand trailing ", "café 🪁", "a\x85b\u2028c\u2029d",
+])
+def test_native_skill_description_yaml_preserves_the_exact_scalar(description):
     from src.services.managed_skills import _skill_description_yaml
 
-    assert _skill_description_yaml("simple") == "simple"
-    assert _skill_description_yaml("one: two") == '"one: two"'
-    assert _skill_description_yaml("line one\nline two") == "|\n  line one\n  line two"
-    assert _skill_description_yaml('quote " and \\') == '"quote \\" and \\\\"'
+    scalar = _skill_description_yaml(description)
+    # JSON-quoted strings are valid YAML double-quoted scalars.
+    assert scalar[0] == scalar[-1] == '"'
+    assert scalar.splitlines() == [scalar]
+    assert json.loads(scalar) == description
 
 
 def test_unauthenticated_initialization_stops_skill_reads_and_mutations():
