@@ -21,13 +21,10 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from src.adapters.mcp_sdk import (  # noqa: E402
-    Client,
-    StdioServerParameters,
-    create_mcp_http_client,
-    sse_client,
-    streamable_http_client,
-)
+from mcp import Client, StdioServerParameters  # noqa: E402
+from mcp.client.sse import sse_client  # noqa: E402
+from mcp.client.streamable_http import streamable_http_client  # noqa: E402
+from mcp.shared._httpx_utils import create_mcp_http_client  # noqa: E402
 
 _IMPORT_LOCK = threading.Lock()
 

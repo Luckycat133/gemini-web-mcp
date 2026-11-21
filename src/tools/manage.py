@@ -3,19 +3,20 @@
 """
 
 import json
-from ..adapters import attach_domain_result, domain_failure_text, domain_text, exception_text
+import inspect
+from functools import wraps
+from ..adapters import attach_domain_result, domain_text, exception_text
 from ..adapters.mcp_sdk import MCPServer, TextContent
-from ..domain import DomainErrorCode, DomainResult
-from ..domain.account_requests import AccountRequest, ScheduledRequest, NotebooksRequest
-from ..services.account_facade import get_account_facade_service
 from collections.abc import Coroutine
-from typing import Any, Callable, Literal, Optional, TypeVar
+from typing import Any, Callable, Literal, Optional, TypeVar, cast
 import logging
 
 from ..client_wrapper import (
     get_gemini_client,
     initialize_client,
 )
+from ..domain import DomainErrorCode, DomainResult
+from ..infrastructure.account_identity import current_account_key
 from ..infrastructure.rpc_contracts import (
     RawRPCData as _RawRPCData,
     get_contract,
@@ -35,9 +36,7 @@ from ..infrastructure.rpc_parsers import (
     parse_usage_entry as parse_registered_usage,
     summarize_rpc_response as summarize_registered_rpc_response,
 )
-from ..services.account import account_contract_result, account_probe_status, account_read_result, sanitize_account_status
-from ..services.history_mutations import update_chat_metadata_result
-from ..services.tasks import get_task_status_result
+from ..services.account import inspect_account_status_compat
 from ..services.cleanup import (
     cleanup_test_artifacts_payload as cleanup_test_artifacts_payload_service,
     format_cleanup_markdown,
@@ -46,27 +45,27 @@ from ..services.cleanup import (
 )
 from ..services.compatibility import sanitized_error_code, sanitized_error_type
 from ..services.gems import (
+    GemMutationNotVerified,
     _find_gem_by_id as registered_find_gem_by_id,
     _gem_field as registered_gem_field,
     create_gem as create_gem_service,
+    read_custom_gems,
     delete_gem as delete_gem_service,
     iter_gem_values as registered_iter_gems,
-    list_gems as list_gems_service,
     update_gem as update_gem_service,
 )
 from ..services.history import (
-    HistoryMetadataReadError,
+    account_read_scope, bind_account_read_client, check_account_read,
+    chat_to_dict,
     clamp_int,
     conversation_history_payload as registered_conversation_history_payload,
     delete_chat_result,
     export_chat_result,
     format_chat_export_markdown,
-    history_metadata_failure,
-    list_chat_history_result,
+    list_chats_result,
     paginate_items,
     read_chat_result,
-    read_history_metadata_page,
-    search_chat_history_result,
+    search_chats_result,
 )
 from ..services.manifest import (
     format_tool_manifest_markdown as format_registered_tool_manifest,
@@ -76,6 +75,7 @@ from ..services.manifest import (
     web_capabilities_payload as registered_web_capabilities_payload,
 )
 from ..services.notebooks import (
+    NotebookChatReadError,
     fetch_native_notebooks as fetch_native_notebooks_service,
     fetch_notebook_chats as fetch_notebook_chats_service,
     move_chat_to_notebook as move_chat_to_notebook_service,
@@ -86,10 +86,6 @@ from ..services.notebooks import (
 from ..services.scheduled import (
     create_daily_action as create_daily_action_service,
     delete_action as delete_action_service,
-    fetch_scheduled_registry as fetch_scheduled_registry_service,
-    fetch_scheduled_task_by_id as fetch_scheduled_task_by_id_service,
-    fetch_remy_schedule_registry,
-    fetch_remy_schedule_by_id,
     scheduled_daily_payload as registered_scheduled_daily_payload,
 )
 from .annotations import (
@@ -109,6 +105,7 @@ logger = logging.getLogger(__name__)
 
 
 ResponseFormat = Literal["markdown", "json"]
+HistoryResponseFormat = Literal["compact", "markdown", "json"]
 FeatureSurface = Literal[
     "all",
     "history",
@@ -124,8 +121,9 @@ FeatureSurface = Literal[
 ]
 UsageScope = Literal["quota", "model_state", "all"]
 ScheduledScope = Literal["active", "inactive", "all"]
-HistoryAction = Literal["list", "scan", "search", "read", "export", "task_status"]
+HistoryAction = Literal["list", "scan", "search", "read", "export"]
 NotebookAction = Literal["list", "chats"]
+NotebookSource = Literal["gemini", "notebooklm"]
 AccountInventorySurface = Literal[
     "capabilities",
     "status",
@@ -224,7 +222,31 @@ async def _execute_observed_rpc(client, probe: dict[str, str]):
 
 
 async def _fetch_scheduled_registry(client, max_chars: int) -> tuple[list[dict[str, Any]], dict[str, Any]]:
-    return await fetch_scheduled_registry_service(client, max_chars)
+    probe = _get_probe("scheduled", "scheduled_actions_registry")
+    response = await _execute_observed_rpc(client, probe)
+    bodies = _extract_rpc_bodies(response.text, probe["rpcid"])
+    body = bodies[0] if bodies else []
+    raw_entries = body[0] if isinstance(body, list) and body and isinstance(body[0], list) else []
+    entries = [_parse_scheduled_action_task_entry(item, max_chars) for item in raw_entries]
+    diagnostic = {
+        "source_rpc": probe["rpcid"],
+        "observed": probe["observed"],
+        "status_code": getattr(response, "status_code", None),
+        "response_length": len(getattr(response, "text", "") or ""),
+        "body_present": bool(bodies),
+        "raw_entry_count": len(raw_entries),
+        "client_language": getattr(client, "language", None),
+        "client_build_label": getattr(client, "build_label", None),
+        "has_session_id": bool(getattr(client, "session_id", None)),
+        "account_status": str(getattr(client, "account_status", "")),
+    }
+    if not entries:
+        diagnostic["empty_hint"] = (
+            "The current Gemini cookie/session returned an empty scheduled-actions registry. "
+            "If the Gemini Web UI shows scheduled actions, refresh cookies from the same signed-in "
+            "Chrome profile or check Google multi-account context."
+        )
+    return entries, diagnostic
 
 
 def _get_scheduled_task_entry_from_body(body: Any) -> Any:
@@ -243,7 +265,40 @@ async def _fetch_scheduled_task_by_id(
     action_id: str,
     max_chars: int,
 ) -> tuple[dict[str, Any] | None, dict[str, Any]]:
-    return await fetch_scheduled_task_by_id_service(client, action_id, max_chars)
+    contract = get_contract("scheduled.get")
+    response = await client._batch_execute(
+        [_RawRPCData(contract.rpc_id, contract.build_payload(action_id=action_id))],
+        source_path=contract.source_path,
+        close_on_error=False,
+    )
+    bodies = _extract_rpc_bodies(response.text, contract.rpc_id)
+    body = bodies[0] if bodies else []
+    raw_entry = _get_scheduled_task_entry_from_body(body)
+    entry = _parse_scheduled_action_task_entry(raw_entry, max_chars) if raw_entry is not None else None
+    matched_task = bool(entry and entry.get("id") == action_id)
+    diagnostic = {
+        "source_rpc": contract.rpc_id,
+        "contract_key": contract.key,
+        "observed": contract.observed,
+        "status_code": getattr(response, "status_code", None),
+        "response_length": len(getattr(response, "text", "") or ""),
+        "body_present": bool(bodies),
+        "raw_body_type": type(body).__name__,
+        "raw_top_level_count": len(body) if isinstance(body, list) else None,
+        "matched_task": matched_task,
+        "client_language": getattr(client, "language", None),
+        "client_build_label": getattr(client, "build_label", None),
+        "has_session_id": bool(getattr(client, "session_id", None)),
+        "account_status": str(getattr(client, "account_status", "")),
+    }
+    if entry and not matched_task:
+        diagnostic["returned_id"] = entry.get("id", "")
+    if not matched_task:
+        diagnostic["empty_hint"] = (
+            "The current Gemini cookie/session did not return this scheduled action by id. "
+            "Check that the id belongs to the same Gemini account/profile context."
+        )
+    return (entry if matched_task else None), diagnostic
 
 
 
@@ -251,6 +306,9 @@ async def _fetch_scheduled_task_by_id(
 
 async def _fetch_native_notebooks(client, locale: str = "zh-CN") -> tuple[list[dict[str, Any]], dict[str, Any]]:
     return await fetch_native_notebooks_service(client, locale)
+
+
+
 
 
 async def _fetch_conversation_metadata_source(
@@ -273,15 +331,17 @@ async def _fetch_conversation_metadata_source(
     stopped_reason = "max_pages"
 
     for page_index in range(safe_max_pages):
-        result = await read_history_metadata_page(
-            client, filter_payload=filter_payload, page_size=safe_page_size, next_page_token=next_page_token,
+        response = await client._batch_execute(
+            [_RawRPCData(contract.rpc_id, _conversation_history_payload(filter_payload, safe_page_size, next_page_token))],
+            source_path=contract.source_path,
+            close_on_error=False,
         )
-        if not result.ok:
-            raise HistoryMetadataReadError(result)
-        assert result.data is not None
-        response_size = int(result.meta.details["response_length"])
-        response_length += response_size
-        parsed_entries = [dict(item) for item in result.data["items"]]
+        response_text = getattr(response, "text", "") or ""
+        response_length += len(response_text)
+        bodies = _extract_rpc_bodies(response_text, contract.rpc_id)
+        body = bodies[0] if bodies else []
+        raw_entries = body[2] if isinstance(body, list) and len(body) > 2 and isinstance(body[2], list) else []
+        parsed_entries = [_parse_conversation_metadata(item) for item in raw_entries]
         new_unique_count = 0
         for item in parsed_entries:
             item_id = item.get("id")
@@ -294,15 +354,15 @@ async def _fetch_conversation_metadata_source(
             if len(items) >= safe_max_items:
                 break
 
-        next_page_token = result.data["continuation"]
+        next_page_token = body[1] if isinstance(body, list) and len(body) > 1 and isinstance(body[1], str) else None
         pages.append(
             {
                 "page": page_index + 1,
-                "raw_count": len(parsed_entries),
+                "raw_count": len(raw_entries),
                 "new_unique_count": new_unique_count,
                 "unique_so_far": len(items),
                 "next_page_token_present": bool(next_page_token),
-                "response_length": response_size,
+                "response_length": len(response_text),
                 "first_id": parsed_entries[0].get("id") if parsed_entries else "",
                 "last_id": parsed_entries[-1].get("id") if parsed_entries else "",
                 "last_title": parsed_entries[-1].get("title") if parsed_entries else "",
@@ -312,7 +372,7 @@ async def _fetch_conversation_metadata_source(
         if len(items) >= safe_max_items:
             stopped_reason = "max_items"
             break
-        if not parsed_entries:
+        if not raw_entries:
             stopped_reason = "empty_page"
             break
         if not next_page_token:
@@ -355,8 +415,6 @@ async def _collect_notebook_chat_sources(
     diagnostic: dict[str, Any] | None = None
     source_blocks: list[dict[str, Any]] = []
     notebooks, diagnostic = await _fetch_native_notebooks(client)
-    if diagnostic.get("read_back_valid") is not True:
-        raise HistoryMetadataReadError(history_metadata_failure(diagnostic))
     for notebook in notebooks:
         notebook_id = notebook.get("id", "")
         if not notebook_id:
@@ -367,9 +425,6 @@ async def _collect_notebook_chat_sources(
         while len(notebook_items) < safe_max_items:
             batch_limit = min(100, safe_max_items - len(notebook_items))
             page_items, page_payload = await _fetch_notebook_chats(client, notebook_id, batch_limit, next_offset)
-            page_diagnostic = page_payload.get("diagnostic", {})
-            if page_diagnostic.get("read_back_valid") is not True:
-                raise HistoryMetadataReadError(history_metadata_failure(page_diagnostic))
             source_name = f"notebook:{notebook.get('title') or notebook_id}"
             for item in page_items:
                 item["history_source"] = source_name
@@ -548,15 +603,17 @@ async def _fetch_remy_goal_conversation_refs(
     stopped_reason = "max_pages"
 
     for page_index in range(safe_max_pages):
-        result = await read_history_metadata_page(
-            client, contract_key=contract.key, page_size=safe_page_size, next_page_token=next_page_token,
+        response = await client._batch_execute(
+            [_RawRPCData(contract.rpc_id, contract.build_payload(page_size=safe_page_size, next_page_token=next_page_token))],
+            source_path=contract.source_path,
+            close_on_error=False,
         )
-        if not result.ok:
-            raise HistoryMetadataReadError(result)
-        assert result.data is not None
-        response_size = int(result.meta.details["response_length"])
-        response_length += response_size
-        parsed_entries = [dict(item) for item in result.data["items"]]
+        response_text = getattr(response, "text", "") or ""
+        response_length += len(response_text)
+        bodies = _extract_rpc_bodies(response_text, contract.rpc_id)
+        body = bodies[0] if bodies else []
+        raw_entries = body[0] if isinstance(body, list) and body and isinstance(body[0], list) else []
+        parsed_entries = [_parse_remy_goal_entry(item) for item in raw_entries]
         new_unique_count = 0
         for item in parsed_entries:
             item_id = item.get("id")
@@ -569,21 +626,21 @@ async def _fetch_remy_goal_conversation_refs(
             if len(items) >= safe_max_items:
                 break
 
-        next_page_token = result.data["continuation"]
+        next_page_token = body[1] if isinstance(body, list) and len(body) > 1 and isinstance(body[1], str) else None
         pages.append(
             {
                 "page": page_index + 1,
-                "raw_count": len(parsed_entries),
+                "raw_count": len(raw_entries),
                 "new_unique_count": new_unique_count,
                 "unique_so_far": len(items),
                 "next_page_token_present": bool(next_page_token),
-                "response_length": response_size,
+                "response_length": len(response_text),
             }
         )
         if len(items) >= safe_max_items:
             stopped_reason = "max_items"
             break
-        if not parsed_entries:
+        if not raw_entries:
             stopped_reason = "empty_page"
             break
         if not next_page_token:
@@ -623,6 +680,7 @@ async def _fetch_notebook_chats(
     limit: int,
     offset: int,
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """Compatibility seam over the shared evidence-checked reader."""
     return await fetch_notebook_chats_service(client, notebook_id, limit, offset)
 
 
@@ -706,7 +764,6 @@ async def _fetch_recent_conversation_metadata(
         "contract_key": contract.key,
         "observed": contract.observed,
         "target_count_per_bucket": safe_target,
-        "max_offset": 5000,
         "pinned": pinned_diag,
         "recent": recent_diag,
         "has_remote_more": bool(
@@ -781,20 +838,67 @@ _gem_field = registered_gem_field
 
 
 
-def _conditional_tool_decorator(mcp: MCPServer, enabled_tool_names: set[str]):
-    """Build the @_tool decorator that registers only profile-enabled tools."""
+_SCOPED_ACCOUNT_READ_TOOLS = {
+    "gemini_history", "gemini_list_chats", "gemini_scan_chat_history_sources",
+    "gemini_read_chat", "gemini_search_chats", "gemini_export_chat",
+    "gemini_notebooks", "gemini_list_notebooks", "gemini_list_notebook_chats",
+}
 
+
+def _conditional_tool_decorator(mcp: MCPServer, enabled_tool_names: set[str]):
+    """Register selected tools; fence history/Notebook reads to the starting account."""
     def _tool(tool_name: str, annotations) -> Callable[[_F], _F]:
         def decorator(func: _F) -> _F:
+            registered: Any = func
+            if tool_name in _SCOPED_ACCOUNT_READ_TOOLS:
+                @wraps(func)
+                async def scoped(*args: Any, **kwargs: Any) -> Any:
+                    bound = inspect.signature(func).bind_partial(*args, **kwargs)
+                    bound.apply_defaults()
+                    inputs = bound.arguments
+                    if tool_name == "gemini_notebooks" and inputs.get("source") == "notebooklm":
+                        # Its service validates inputs before initialization and owns its account fence.
+                        return await func(*args, **kwargs)
+                    action = inputs.get("action")
+                    if ((tool_name in {"gemini_read_chat", "gemini_export_chat"} or
+                         (tool_name == "gemini_history" and action in {"read", "export"}))
+                            and not str(inputs.get("chat_id") or "").strip()):
+                        result: DomainResult[Any] = DomainResult.failure(DomainErrorCode.INVALID_ARGUMENT, "chat_id is required.")
+                        text = "❌ 导出聊天需要提供 chat_id。" if tool_name == "gemini_export_chat" else "❌ 读取聊天需要提供 chat_id。"
+                        return domain_text(result, text)
+                    if ((tool_name == "gemini_search_chats" or
+                         (tool_name == "gemini_history" and action == "search"))
+                            and not str(inputs.get("query") or "").strip()):
+                        result = DomainResult.failure(DomainErrorCode.INVALID_ARGUMENT, "query is required.")
+                        return domain_text(result, "query is required.")
+                    original = current_account_key()
+                    try:
+                        await initialize_client()
+                    except PermissionError:
+                        result = DomainResult.failure(DomainErrorCode.AUTH_REQUIRED, "Gemini authentication is required.")
+                        return domain_text(result, "Gemini authentication is required.")
+                    owner = current_account_key()
+                    if not owner or (original and owner != original):
+                        result = DomainResult.failure(DomainErrorCode.AUTH_REQUIRED, "Gemini account changed or is unavailable.")
+                        return domain_text(result, "Gemini account changed or is unavailable.")
+                    try:
+                        with account_read_scope(owner):
+                            output = await func(*args, **kwargs)
+                            check_account_read()
+                            return output
+                    except PermissionError:
+                        result = DomainResult.failure(DomainErrorCode.AUTH_REQUIRED, "Gemini account changed or is unavailable.")
+                        return domain_text(result, "Gemini account changed or is unavailable.")
+                    except Exception:
+                        if current_account_key() != owner:
+                            result = DomainResult.failure(DomainErrorCode.AUTH_REQUIRED, "Gemini account changed or is unavailable.")
+                            return domain_text(result, "Gemini account changed or is unavailable.")
+                        raise
+                registered = scoped
             if tool_name in enabled_tool_names:
-                # Register with MCPServer for external MCP dispatch, but keep the
-                # original typed function for in-process calls so callers retain
-                # the declared return type (avoids cascading Any returns).
-                mcp.tool(annotations=annotations)(func)
-            return func
-
+                mcp.tool(annotations=annotations)(registered)
+            return cast(_F, registered)
         return decorator
-
     return _tool
 
 
@@ -841,25 +945,28 @@ def _register_history_scan_tools(mcp: MCPServer, enabled_tool_names: set[str], t
         response_format: ResponseFormat = "markdown",
     ) -> list[TextContent]:
         """列出 Gemini 历史对话记录元数据，支持分页。"""
-        client = get_gemini_client()
         await initialize_client()
+        client = bind_account_read_client(get_gemini_client())
 
         try:
-            result = await list_chat_history_result(client, limit, offset, max_limit=50)
-            if not result.ok:
-                return domain_text(result, "❌ 无法验证历史对话元数据。")
+            if hasattr(client, "_batch_execute"):
+                target_count = clamp_int(limit, default=10, minimum=1, maximum=50) + clamp_int(
+                    offset, default=0, minimum=0, maximum=5000
+                )
+                items, diagnostic = await _fetch_recent_conversation_metadata(client, target_count)
+            else:
+                chats = client.list_chats() or []
+                items = list(chats)
+                diagnostic = {"source": "client_cache", "fetched_count": len(items), "has_remote_more": False}
+            result = list_chats_result(items, limit, offset, diagnostic=diagnostic, max_limit=50)
             assert result.data is not None
             payload = result.data
             page = payload["items"]
+            if not page:
+                return domain_text(result, "暂无历史对话。", use_result_data=True)
+
             if response_format == "json":
                 return attach_domain_result(_json_response(payload), result, use_result_data=True)
-
-            if not page:
-                message = (
-                    "历史扫描达到当前来源上限，覆盖不完整；请使用深度扫描提高上限。"
-                    if result.warnings else "暂无历史对话。"
-                )
-                return domain_text(result, message, use_result_data=True)
 
             chat_list = [
                 "## 📜 历史对话",
@@ -899,8 +1006,8 @@ def _register_history_scan_tools(mcp: MCPServer, enabled_tool_names: set[str], t
         只读：合并前端已观测的 ListConversations 过滤器、原生 notebook 对话列表，
         以及 Remy goals 中携带的 conversationId 引用。不读取 turn 正文，不删除或移动聊天。
         """
-        client = get_gemini_client()
         await initialize_client()
+        client = bind_account_read_client(get_gemini_client())
         if not hasattr(client, "_batch_execute"):
             return [TextContent(type="text", text="❌ 当前客户端不支持 Gemini Web RPC 深度扫描。")]
 
@@ -966,8 +1073,6 @@ def _register_history_scan_tools(mcp: MCPServer, enabled_tool_names: set[str], t
                 return _json_response(payload)
 
             return [TextContent(type="text", text=_format_scan_history_markdown(payload, page))]
-        except HistoryMetadataReadError as error:
-            return domain_text(error.result, "❌ 历史深度扫描的来源未获验证。")
         except Exception as e:
             logger.error(f"深度扫描聊天历史失败: {e}")
             return [TextContent(type="text", text=f"❌ 深度扫描失败: {str(e)}")]
@@ -986,8 +1091,8 @@ def _register_history_read_tools(mcp: MCPServer, enabled_tool_names: set[str], t
         max_chars_per_turn: int = 4000,
     ) -> list[TextContent]:
         """读取指定 Gemini 历史对话内容。会返回私人聊天文本，请只在用户需要时调用。"""
-        client = get_gemini_client()
         await initialize_client()
+        client = bind_account_read_client(get_gemini_client())
 
         try:
             safe_chars = min(max(max_chars_per_turn, 200), 20000)
@@ -1032,23 +1137,50 @@ def _register_history_read_tools(mcp: MCPServer, enabled_tool_names: set[str], t
 
         默认只搜索标题/ID；只有 scan_turns=true 时才读取聊天正文进行内容匹配。
         """
-        client = get_gemini_client()
         await initialize_client()
+        client = bind_account_read_client(get_gemini_client())
 
         needle = (query or "").strip()
-        try:
-            result = await search_chat_history_result(
-                client, needle, limit, offset, scan_turns=scan_turns,
-                turns_per_chat=turns_per_chat, max_chars_per_turn=max_chars_per_turn, max_limit=50,
+        if not needle or (scan_turns and not hasattr(client, "read_chat")):
+            result = await search_chats_result(
+                client,
+                [],
+                needle,
+                limit,
+                offset,
+                scan_turns=scan_turns,
+                turns_per_chat=turns_per_chat,
+                max_chars_per_turn=max_chars_per_turn,
             )
-            if result.data is None:
-                if not needle:
-                    fallback = "❌ 搜索聊天需要提供 query。"
-                elif scan_turns and not hasattr(client, "read_chat"):
-                    fallback = "❌ 当前 gemini-webapi 不支持正文搜索需要的 read_chat。"
-                else:
-                    fallback = "❌ 无法验证历史对话元数据。"
-                return domain_text(result, fallback)
+            fallback = (
+                "❌ 搜索聊天需要提供 query。"
+                if not needle
+                else "❌ 当前 gemini-webapi 不支持正文搜索需要的 read_chat。"
+            )
+            return domain_text(result, fallback)
+
+        try:
+            safe_limit = clamp_int(limit, default=10, minimum=1, maximum=50)
+            safe_offset = clamp_int(offset, default=0, minimum=0, maximum=5000)
+            if hasattr(client, "_batch_execute"):
+                chats, diagnostic = await _fetch_recent_conversation_metadata(client, safe_limit + safe_offset)
+            else:
+                chats = [chat_to_dict(chat) for chat in client.list_chats() or []]
+                diagnostic = {"source": "client_cache", "fetched_count": len(chats), "has_remote_more": False}
+            safe_turn_limit = clamp_int(turns_per_chat, default=20, minimum=1, maximum=50)
+            safe_chars = clamp_int(max_chars_per_turn, default=1000, minimum=100, maximum=4000)
+            result = await search_chats_result(
+                client,
+                chats,
+                needle,
+                safe_limit,
+                safe_offset,
+                scan_turns=scan_turns,
+                turns_per_chat=safe_turn_limit,
+                max_chars_per_turn=safe_chars,
+                diagnostic=diagnostic,
+                max_limit=50,
+            )
             assert result.data is not None
             payload = result.data
             matches = payload["matches"]
@@ -1062,9 +1194,7 @@ def _register_history_read_tools(mcp: MCPServer, enabled_tool_names: set[str], t
                 f"Scanned: {payload['scanned_count']}/{payload['total_count']} · Matches: {payload['match_count']}",
             ]
             if not matches:
-                lines.append("正文读取失败，无法确认是否存在匹配项。" if not result.ok else "未在当前页找到匹配项。")
-            for warning in result.warnings:
-                lines.append(f"⚠️ {warning.message}")
+                lines.append("未在当前页找到匹配项。")
             for idx, match in enumerate(matches, 1):
                 fields_str = ", ".join(match["matched_fields"])
                 time_text = f" · {match['time']}" if match.get("time") else ""
@@ -1093,8 +1223,8 @@ def _register_history_read_tools(mcp: MCPServer, enabled_tool_names: set[str], t
         include_metadata: bool = True,
     ) -> list[TextContent]:
         """导出指定 Gemini Web 历史对话为 Markdown 或 JSON。会返回私人聊天文本。"""
-        client = get_gemini_client()
         await initialize_client()
+        client = bind_account_read_client(get_gemini_client())
 
         try:
             async def _load_export_metadata() -> list[object]:
@@ -1136,7 +1266,11 @@ def _register_history_read_tools(mcp: MCPServer, enabled_tool_names: set[str], t
         gemini_read_chat=gemini_read_chat,
         gemini_export_chat=gemini_export_chat,
     )
-def _register_history_facade_tools(mcp: MCPServer, enabled_tool_names: set[str], tool_functions: dict[str, Callable[..., Coroutine[Any, Any, list["TextContent"]]]]) -> None:
+def _register_history_facade_tools(
+    mcp: MCPServer, enabled_tool_names: set[str],
+    tool_functions: dict[str, Callable[..., Coroutine[Any, Any, list["TextContent"]]]], *,
+    default_response_format: HistoryResponseFormat = "markdown", default_max_chars_per_turn: int = 4000,
+) -> None:
     _tool = _conditional_tool_decorator(mcp, enabled_tool_names)
 
     @_tool("gemini_history", READS_PRIVATE_REMOTE)
@@ -1148,32 +1282,31 @@ def _register_history_facade_tools(mcp: MCPServer, enabled_tool_names: set[str],
         offset: int = 0,
         scan_turns: bool = False,
         turns_per_chat: int = 20,
-        max_chars_per_turn: int = 4000,
+        max_chars_per_turn: int = default_max_chars_per_turn,
         max_items_per_source: int = 5000,
         page_size: int = 100,
         max_pages_per_source: int = 50,
         include_notebook_chats: bool = True,
         include_remy_goals: bool = True,
         include_metadata: bool = True,
-        response_format: ResponseFormat = "markdown",
+        response_format: HistoryResponseFormat = default_response_format,
     ) -> list[TextContent]:
         """
-        Read/scan/search/export chat history, or read one native Task's task_status.
+        Read, scan, search, or export Gemini Web chat history through action=list/scan/search/read/export.
 
         This read-only entrypoint never deletes or moves chats. Use it for narrow history agents.
+        compact preserves identities and pagination with concise JSON; read full text only when requested.
         """
-        if action == "task_status":
-            try:
-                client = get_gemini_client()
-                await initialize_client()
-                result = await get_task_status_result(client, chat_id)
-                return domain_text(result, "Native Task status read-back.", use_result_data=True)
-            except Exception as error:
-                return exception_text(error, logger=logger, operation="gemini_history.task_status")
+        from ..adapters.history import compact_history_content
+
+        transport_format = "json" if response_format == "compact" else response_format
+        def present(content: list[TextContent]) -> list[TextContent]:
+            return compact_history_content(action, content) if response_format == "compact" else content
+
         if action == "list":
-            return await tool_functions["gemini_list_chats"](limit=limit, offset=offset, response_format=response_format)
+            return present(await tool_functions["gemini_list_chats"](limit=limit, offset=offset, response_format=transport_format))
         if action == "scan":
-            return await tool_functions["gemini_scan_chat_history_sources"](
+            return present(await tool_functions["gemini_scan_chat_history_sources"](
                 limit=limit,
                 offset=offset,
                 max_items_per_source=max_items_per_source,
@@ -1181,61 +1314,52 @@ def _register_history_facade_tools(mcp: MCPServer, enabled_tool_names: set[str],
                 max_pages_per_source=max_pages_per_source,
                 include_notebook_chats=include_notebook_chats,
                 include_remy_goals=include_remy_goals,
-                response_format=response_format,
-            )
+                response_format=transport_format,
+            ))
         if action == "search":
-            return await tool_functions["gemini_search_chats"](
+            return present(await tool_functions["gemini_search_chats"](
                 query=query,
                 limit=limit,
                 offset=offset,
                 scan_turns=scan_turns,
                 turns_per_chat=turns_per_chat,
                 max_chars_per_turn=max_chars_per_turn,
-                response_format=response_format,
-            )
+                response_format=transport_format,
+            ))
         if action == "read":
-            return await tool_functions["gemini_read_chat"](
+            return present(await tool_functions["gemini_read_chat"](
                 chat_id=chat_id,
                 limit=limit,
-                response_format=response_format,
+                response_format=transport_format,
                 max_chars_per_turn=max_chars_per_turn,
-            )
+            ))
         if action == "export":
-            return await tool_functions["gemini_export_chat"](
+            return present(await tool_functions["gemini_export_chat"](
                 chat_id=chat_id,
-                response_format=response_format,
+                response_format=transport_format,
                 limit=limit,
                 max_chars_per_turn=max_chars_per_turn,
                 include_metadata=include_metadata,
-            )
+            ))
         return [TextContent(type="text", text=f"❌ 不支持的 history action: {action}")]
-
-    @_tool("gemini_update_chat", MUTATES_REMOTE)
-    async def gemini_update_chat(
-        chat_id: str, title: Optional[str] = None, pinned: Optional[bool] = None,
-    ) -> list[TextContent]:
-        """Rename/pin one exact chat; pinned=false unpins. Omitted fields are preserved.
-
-        verified_updated requires independent fresh metadata read-back.
-        """
-        try:
-            client = get_gemini_client()
-            await initialize_client()
-            result = await update_chat_metadata_result(client, chat_id, title=title, pinned=pinned)
-            text = "聊天元数据已更新并回读确认。" if result.meta.verification_status == "verified_updated" else "聊天元数据更新尚未验证。"
-            return domain_text(result, text, use_result_data=True)
-        except Exception as error:
-            return exception_text(error, logger=logger, operation="gemini_update_chat", prefix="❌ 更新失败")
 
     @_tool("gemini_delete_chat", DESTRUCTIVE_REMOTE)
     async def gemini_delete_chat(chat_id: str) -> list[TextContent]:
         """删除指定 Gemini 历史对话。该操作会修改远端聊天记录。"""
+        owner = current_account_key()
         client = get_gemini_client()
         await initialize_client()
+        current_owner = current_account_key()
+        if not current_owner or (owner and current_owner != owner):
+            return domain_text(DomainResult.failure(DomainErrorCode.AUTH_REQUIRED, "Gemini account changed or is unavailable."),
+                               "Gemini account changed or is unavailable.")
+        owner = current_owner
 
         try:
-            result = await delete_chat_result(client, chat_id)
+            result = await delete_chat_result(client, chat_id, expected_account=owner, reconcile_owned_cleanup=True)
             if not result.ok:
+                if result.error_code == "AUTH_REQUIRED":
+                    return domain_text(result, "Gemini account changed or is unavailable.")
                 if result.error_code == "INVALID_ARGUMENT":
                     return domain_text(result, "❌ 删除聊天需要提供 chat_id。")
                 if result.error_code == "CAPABILITY_UNAVAILABLE":
@@ -1254,6 +1378,9 @@ def _register_history_facade_tools(mcp: MCPServer, enabled_tool_names: set[str],
                 text = f"已请求删除聊天 {result.data['chat_id']}；当前客户端无法独立回读验证。"
             return domain_text(result, text, use_result_data=True)
         except Exception as e:
+            if current_account_key() != owner:
+                return domain_text(DomainResult.failure(DomainErrorCode.AUTH_REQUIRED, "Gemini account changed or is unavailable."),
+                                   "Gemini account changed or is unavailable.")
             return exception_text(
                 e,
                 logger=logger,
@@ -1274,12 +1401,10 @@ def _register_account_probe_tools(mcp: MCPServer, enabled_tool_names: set[str], 
         client = get_gemini_client()
         await initialize_client()
 
-        if not hasattr(client, "inspect_account_status"):
-            return [TextContent(type="text", text="❌ 当前 gemini-webapi 不支持 inspect_account_status。")]
-
         try:
-            status = await client.inspect_account_status()
-            sanitized = sanitize_account_status(status)
+            sanitized = await inspect_account_status_compat(client)
+            if sanitized is None:
+                return [TextContent(type="text", text="❌ 当前 gemini-webapi 不支持 inspect_account_status。")]
             if response_format == "json":
                 return _json_response(sanitized)
 
@@ -1328,8 +1453,14 @@ def _register_account_probe_tools(mcp: MCPServer, enabled_tool_names: set[str], 
         results = []
         for probe in selected:
             try:
-                response = await _execute_observed_rpc(client, probe)
-                summary = account_probe_status(response, probe)
+                response = await client._batch_execute(
+                    [_RawRPCData(probe["rpcid"], probe["payload"])],
+                    source_path=probe["source_path"],
+                    close_on_error=False,
+                )
+                summary = _summarize_probe_response(response.text, probe["rpcid"])
+                reject_code = summary.get("reject_code")
+                ok = response.status_code == 200 and reject_code is None
                 results.append(
                     {
                         "surface": probe["surface"],
@@ -1337,6 +1468,8 @@ def _register_account_probe_tools(mcp: MCPServer, enabled_tool_names: set[str], 
                         "rpcid": probe["rpcid"],
                         "source_path": probe["source_path"],
                         "observed": probe["observed"],
+                        "ok": ok,
+                        "status_code": response.status_code,
                         **summary,
                     }
                 )
@@ -1505,10 +1638,9 @@ def _register_account_inventory_tools(mcp: MCPServer, enabled_tool_names: set[st
         try:
             probe = _get_probe("sharing", "public_links_index")
             response = await _execute_observed_rpc(client, probe)
-            result = account_contract_result(response, "sharing.public_links")
-            if not result.ok or result.data is None:
-                return domain_text(result, domain_failure_text(result), use_result_data=True)
-            parsed_links = result.data["value"]
+            bodies = _extract_rpc_bodies(response.text, probe["rpcid"])
+            entries = bodies[0] if bodies and isinstance(bodies[0], list) else []
+            parsed_links = [_parse_public_link_entry(item) for item in entries]
             links, page_info = paginate_items(parsed_links, limit, offset)
             payload = {
                 **page_info,
@@ -1527,7 +1659,7 @@ def _register_account_inventory_tools(mcp: MCPServer, enabled_tool_names: set[st
             ]
             for idx, link in enumerate(links, payload["offset"] + 1):
                 title = link.get("title") or "(untitled)"
-                disabled = "禁用" if link.get("disabled") is True else "启用" if link.get("disabled") is False else "状态未知"
+                disabled = "禁用" if link.get("disabled") else "启用"
                 url = link.get("url") or "(no url)"
                 lines.append(f"{idx}. {title} [{disabled}]\n   ID: {link.get('id', '')}\n   URL: {url}")
             if payload["has_more"]:
@@ -1559,10 +1691,12 @@ def _register_account_inventory_tools(mcp: MCPServer, enabled_tool_names: set[st
             for name in probe_names:
                 probe = _get_probe("usage", name)
                 response = await _execute_observed_rpc(client, probe)
-                observation = account_contract_result(response, "usage.quota" if name == "usage_quota" else "usage.model_state")
-                if not observation.ok or observation.data is None:
-                    return domain_text(observation, domain_failure_text(observation), use_result_data=True)
-                entries = observation.data["value"]
+                bodies = _extract_rpc_bodies(response.text, probe["rpcid"])
+                entries: list[dict[str, Any]] = []
+                if bodies and isinstance(bodies[0], list) and bodies[0]:
+                    first = bodies[0][0]
+                    if isinstance(first, list):
+                        entries = [_parse_usage_entry(item) for item in first]
                 results.append(
                     {
                         "name": name,
@@ -1614,10 +1748,12 @@ def _register_account_inventory_tools(mcp: MCPServer, enabled_tool_names: set[st
         try:
             probe = _get_probe("library", "library_locale_capabilities")
             response = await _execute_observed_rpc(client, probe)
-            result = account_contract_result(response, "library.locale_capabilities")
-            if not result.ok or result.data is None:
-                return domain_text(result, domain_failure_text(result), use_result_data=True)
-            entries = result.data["value"]
+            bodies = _extract_rpc_bodies(response.text, probe["rpcid"])
+            entries = []
+            if bodies and isinstance(bodies[0], list) and bodies[0]:
+                first = bodies[0][0]
+                if isinstance(first, list):
+                    entries = [_parse_library_capability(item) for item in first]
             page, page_info = paginate_items(entries, limit, offset)
             payload = {
                 **page_info,
@@ -1652,7 +1788,7 @@ def _register_account_inventory_tools(mcp: MCPServer, enabled_tool_names: set[st
 
 
 
-def _register_notebook_tools(mcp: MCPServer, enabled_tool_names: set[str], tool_functions: dict[str, Callable[..., Coroutine[Any, Any, list["TextContent"]]]]) -> None:
+def _register_notebook_tools(mcp: MCPServer, enabled_tool_names: set[str], tool_functions: dict[str, Callable[..., Coroutine[Any, Any, list["TextContent"]]]], *, default_source: NotebookSource = "gemini") -> None:
     _tool = _conditional_tool_decorator(mcp, enabled_tool_names)
 
     @_tool("gemini_list_notebooks", READS_PRIVATE_REMOTE)
@@ -1662,17 +1798,14 @@ def _register_notebook_tools(mcp: MCPServer, enabled_tool_names: set[str], tool_
         locale: str = "zh-CN",
         response_format: ResponseFormat = "markdown",
     ) -> list[TextContent]:
-        """列出 Gemini Web 原生笔记本。只读，不访问 NotebookLM。"""
-        client = get_gemini_client()
+        """列出 Gemini Notebook 项目视图中的笔记本元数据。只读。"""
         await initialize_client()
+        client = bind_account_read_client(get_gemini_client())
         if not hasattr(client, "_batch_execute"):
             return [TextContent(type="text", text="❌ 当前客户端不支持 Gemini Notebooks RPC。")]
 
         try:
             notebooks, diagnostic = await _fetch_native_notebooks(client, locale)
-            observation = account_read_result(notebooks, diagnostic)
-            if not observation.ok:
-                return domain_text(observation, domain_failure_text(observation), use_result_data=True)
             page, page_info = paginate_items(notebooks, limit, offset, max_limit=100)
             payload = {
                 "ok": True,
@@ -1681,7 +1814,7 @@ def _register_notebook_tools(mcp: MCPServer, enabled_tool_names: set[str], tool_
                 "source_rpc": diagnostic["source_rpc"],
                 "observed": diagnostic["observed"],
                 "diagnostic": diagnostic,
-                "note": "These are native Gemini Web Notebooks, not NotebookLM notebooks.",
+                "note": "This is the Gemini Notebook project metadata view; source-picker metadata is available with source=notebooklm.",
             }
             if response_format == "json":
                 return _json_response(payload)
@@ -1713,16 +1846,13 @@ def _register_notebook_tools(mcp: MCPServer, enabled_tool_names: set[str], tool_
         response_format: ResponseFormat = "markdown",
     ) -> list[TextContent]:
         """列出某个 Gemini 原生笔记本内的最近对话元数据。"""
-        client = get_gemini_client()
         await initialize_client()
+        client = bind_account_read_client(get_gemini_client())
         if not hasattr(client, "_batch_execute"):
             return [TextContent(type="text", text="❌ 当前客户端不支持 Gemini Notebooks RPC。")]
 
         try:
             notebooks, diagnostic = await _fetch_native_notebooks(client, locale)
-            observation = account_read_result(notebooks, diagnostic)
-            if not observation.ok:
-                return domain_text(observation, domain_failure_text(observation), use_result_data=True)
             notebook = _find_notebook(notebooks, notebook_id, notebook_title)
             if not notebook:
                 available = [item.get("title", "") for item in notebooks if item.get("title")]
@@ -1738,9 +1868,6 @@ def _register_notebook_tools(mcp: MCPServer, enabled_tool_names: set[str], tool_
                 return [TextContent(type="text", text=f"未找到匹配的 Gemini 原生笔记本。可用标题: {', '.join(available)}")]
 
             items, page_payload = await _fetch_notebook_chats(client, notebook["id"], limit, offset)
-            observation = account_read_result(items, page_payload["diagnostic"])
-            if not observation.ok:
-                return domain_text(observation, domain_failure_text(observation), use_result_data=True)
             payload = {
                 "ok": True,
                 "notebook": notebook,
@@ -1764,11 +1891,25 @@ def _register_notebook_tools(mcp: MCPServer, enabled_tool_names: set[str], tool_
             if payload["has_more"]:
                 lines.append(f"\n下一页: offset={payload['next_offset']}")
             return [TextContent(type="text", text="\n".join(lines))]
+        except NotebookChatReadError as e:
+            if response_format == "json":
+                return _json_response({
+                    "ok": False,
+                    "verification_status": "read_back_unverified",
+                    "diagnostic": {"parser_status": e.status},
+                })
+            return [TextContent(type="text", text=f"❌ Notebook 对话读取未验证: {e.status}")]
         except Exception as e:
             logger.error(f"Gemini Notebook 对话读取失败: {e}")
+            if response_format == "json":
+                return _json_response({
+                    "ok": False,
+                    "verification_status": "read_back_unverified",
+                    "diagnostic": {"parser_status": "read_error"},
+                })
             return [TextContent(type="text", text=f"❌ 读取 Gemini Notebook 对话失败: {str(e)}")]
 
-    @_tool("gemini_notebooks", DESTRUCTIVE_REMOTE)
+    @_tool("gemini_notebooks", READS_PRIVATE_REMOTE)
     async def gemini_notebooks(
         action: NotebookAction = "list",
         notebook_id: str = "",
@@ -1777,15 +1918,30 @@ def _register_notebook_tools(mcp: MCPServer, enabled_tool_names: set[str], tool_
         offset: int = 0,
         locale: str = "zh-CN",
         response_format: ResponseFormat = "markdown",
-        request: NotebooksRequest | None = None,
+        source: NotebookSource = default_source,
+        query: str = "",
     ) -> list[TextContent]:
         """
-        Read notebooks/chats with legacy arguments, or manage native notebooks
-        and their sources using the focused typed request contract.
+        List NotebookLM/Gemini Notebook source metadata, or the legacy Gemini project catalog.
+
+        source=notebooklm returns compact IDs, titles, source counts and pagination.
+        Pass returned IDs as notebook_ids when asking Gemini or running a Task.
+        source=gemini retains project listing and recent project-chat reads.
+        This read-only entrypoint never edits notebook contents or moves chats.
         """
-        if request is not None:
-            result = await get_account_facade_service().execute("notebooks", request)
-            return domain_text(result, "Notebook action and observed verification.", use_result_data=True)
+        if source == "notebooklm":
+            from ..services.notebooklm import NotebookLMService, NotebookLMServiceDependencies, fetch_typed_notebooks
+            result: DomainResult[Any]
+            if action != "list":
+                result = DomainResult.failure(DomainErrorCode.CAPABILITY_UNAVAILABLE,
+                                               "Notebook source chats are not the legacy project-chat catalog.")
+            else:
+                result = await NotebookLMService(NotebookLMServiceDependencies(
+                    client_initializer=initialize_client, client_provider=get_gemini_client,
+                    fetch_notebooks=fetch_typed_notebooks,
+                )).list_notebooks(query=query, limit=limit, offset=offset)
+            text = json.dumps(result.to_dict()["data"], ensure_ascii=False, separators=(",", ":")) if result.ok else "Notebook metadata could not be verified."
+            return domain_text(result, text, use_result_data=True)
         if action == "list":
             return await tool_functions["gemini_list_notebooks"](
                 limit=limit,
@@ -1815,12 +1971,18 @@ def _register_notebook_tools(mcp: MCPServer, enabled_tool_names: set[str], tool_
         """把已有 Gemini Web 对话移动到 Gemini 原生笔记本。该操作修改远端聊天元数据，但不删除聊天。"""
         clean_chat_id = chat_id.strip()
         if not clean_chat_id:
-            return [TextContent(type="text", text="❌ chat_id 不能为空。")]
+            return domain_text(DomainResult.failure(DomainErrorCode.INVALID_ARGUMENT, "chat_id 不能为空。"), "❌ chat_id 不能为空。")
         if not notebook_id.strip() and not notebook_title.strip():
-            return [TextContent(type="text", text="❌ 需要提供 notebook_id 或 notebook_title。")]
+            return domain_text(DomainResult.failure(DomainErrorCode.INVALID_ARGUMENT, "需要提供 notebook_id 或 notebook_title。"), "❌ 需要提供 notebook_id 或 notebook_title。")
 
+        owner = current_account_key()
         client = get_gemini_client()
         await initialize_client()
+        current_owner = current_account_key()
+        if not current_owner or (owner and current_owner != owner):
+            return domain_text(DomainResult.failure(DomainErrorCode.AUTH_REQUIRED, "Gemini account changed or is unavailable."),
+                               "Gemini account changed or is unavailable.")
+        owner = current_owner
         if not hasattr(client, "_batch_execute"):
             return [TextContent(type="text", text="❌ 当前客户端不支持 Gemini Notebooks RPC。")]
 
@@ -1834,6 +1996,7 @@ def _register_notebook_tools(mcp: MCPServer, enabled_tool_names: set[str], tool_
                 fetch_notebooks=_fetch_native_notebooks,
                 fetch_chats=_fetch_notebook_chats,
                 extract_bodies=_extract_rpc_bodies,
+                expected_account=owner,
             )
             notebook = payload.get("notebook")
             if not notebook:
@@ -1871,9 +2034,12 @@ def _register_notebook_tools(mcp: MCPServer, enabled_tool_names: set[str], tool_
                     ),
                 )]
             return [TextContent(type="text", text=f"❌ 移动聊天失败: {clean_chat_id}")]
-        except Exception as e:
-            logger.error(f"Gemini Notebook 移动失败: {e}")
-            return [TextContent(type="text", text=f"❌ 移动 Gemini Notebook 聊天失败: {str(e)}")]
+        except PermissionError:
+            return domain_text(DomainResult.failure(DomainErrorCode.AUTH_REQUIRED, "Gemini account changed or is unavailable."),
+                               "Gemini account changed or is unavailable.")
+        except Exception:
+            logger.warning("Gemini Notebook move outcome could not be verified")
+            return [TextContent(type="text", text="❌ 移动结果未验证；请先检查目标笔记本，不要直接重试。") ]
     tool_functions.update(
         gemini_notebooks=gemini_notebooks,
     )
@@ -1892,9 +2058,8 @@ def _register_scheduled_tools(mcp: MCPServer, enabled_tool_names: set[str], tool
         offset: int = 0,
         response_format: ResponseFormat = "markdown",
         max_chars_per_field: int = 500,
-        backend: Literal["legacy", "remy"] = "legacy",
     ) -> list[TextContent]:
-        """只读列出定时任务。backend=remy 对应当前任务页；默认 legacy 保留旧版兼容行为。"""
+        """列出 Gemini Web 定时操作页面返回的定时任务条目。只读，不创建/修改/删除任务。"""
         client = get_gemini_client()
         await initialize_client()
         if not hasattr(client, "_batch_execute"):
@@ -1902,11 +2067,7 @@ def _register_scheduled_tools(mcp: MCPServer, enabled_tool_names: set[str], tool
 
         safe_chars = min(max(max_chars_per_field, 40), 4000)
         try:
-            fetch_registry = fetch_remy_schedule_registry if backend == "remy" else _fetch_scheduled_registry
-            entries, diagnostic = await fetch_registry(client, safe_chars)
-            observation = account_read_result(entries, diagnostic)
-            if not observation.ok:
-                return domain_text(observation, domain_failure_text(observation), use_result_data=True)
+            entries, diagnostic = await _fetch_scheduled_registry(client, safe_chars)
             if scope == "active":
                 entries = [item for item in entries if item.get("enabled") is True]
             elif scope == "inactive":
@@ -1915,7 +2076,6 @@ def _register_scheduled_tools(mcp: MCPServer, enabled_tool_names: set[str], tool
             page, page_info = paginate_items(entries, limit, offset)
             result = {
                 "name": "scheduled_actions_registry",
-                "backend": backend,
                 "source_rpc": diagnostic["source_rpc"],
                 "observed": diagnostic["observed"],
                 **page_info,
@@ -1953,12 +2113,11 @@ def _register_scheduled_tools(mcp: MCPServer, enabled_tool_names: set[str], tool
         action_id: str,
         response_format: ResponseFormat = "markdown",
         max_chars_per_field: int = 500,
-        backend: Literal["legacy", "remy"] = "legacy",
     ) -> list[TextContent]:
-        """按 id 和原列表的 backend 只读获取任务；remy 读取新版原生任务，默认 legacy。"""
+        """按 id 读取单个 Gemini Web 定时操作。只读，不修改任务状态。"""
         clean_id = action_id.strip()
         if not clean_id:
-            return [TextContent(type="text", text="❌ action_id 不能为空。")]
+            return domain_text(DomainResult.failure(DomainErrorCode.INVALID_ARGUMENT, "action_id 不能为空。"), "❌ action_id 不能为空。")
 
         client = get_gemini_client()
         await initialize_client()
@@ -1967,14 +2126,9 @@ def _register_scheduled_tools(mcp: MCPServer, enabled_tool_names: set[str], tool
 
         safe_chars = min(max(max_chars_per_field, 40), 4000)
         try:
-            fetch_by_id = fetch_remy_schedule_by_id if backend == "remy" else _fetch_scheduled_task_by_id
-            item, diagnostic = await fetch_by_id(client, clean_id, safe_chars)
-            observation = account_read_result(item, diagnostic)
-            if not observation.ok:
-                return domain_text(observation, domain_failure_text(observation), use_result_data=True)
+            item, diagnostic = await _fetch_scheduled_task_by_id(client, clean_id, safe_chars)
             payload = {
                 "ok": item is not None,
-                "backend": backend,
                 "id": clean_id,
                 "source_rpc": diagnostic["source_rpc"],
                 "observed": diagnostic["observed"],
@@ -2035,8 +2189,14 @@ def _register_scheduled_tools(mcp: MCPServer, enabled_tool_names: set[str], tool
         if not clean_timezone:
             return [TextContent(type="text", text="❌ timezone_name 不能为空。")]
 
+        owner = current_account_key()
         client = get_gemini_client()
         await initialize_client()
+        current_owner = current_account_key()
+        if not current_owner or (owner and current_owner != owner):
+            return domain_text(DomainResult.failure(DomainErrorCode.AUTH_REQUIRED, "Gemini account changed or is unavailable."),
+                               "Gemini account changed or is unavailable.")
+        owner = current_owner
         if not hasattr(client, "_batch_execute"):
             return [TextContent(type="text", text="❌ 当前客户端不支持定时操作 RPC。")]
 
@@ -2054,6 +2214,7 @@ def _register_scheduled_tools(mcp: MCPServer, enabled_tool_names: set[str], tool
                 extract_bodies=_extract_rpc_bodies,
                 parse_create=_parse_scheduled_action_create_body,
                 payload_builder=_scheduled_daily_payload,
+                expected_account=owner,
             )
             if response_format == "json":
                 return _json_response(payload)
@@ -2088,26 +2249,31 @@ def _register_scheduled_tools(mcp: MCPServer, enabled_tool_names: set[str], tool
                     ),
                 )
             ]
-        except Exception as e:
-            logger.error(f"定时操作创建失败: {e}")
-            return [TextContent(type="text", text=f"❌ 创建定时操作失败: {str(e)}")]
+        except PermissionError:
+            return domain_text(DomainResult.failure(DomainErrorCode.AUTH_REQUIRED, "Gemini account changed or is unavailable."),
+                               "Gemini account changed or is unavailable.")
+        except Exception:
+            logger.warning("Scheduled action creation outcome could not be verified")
+            return [TextContent(type="text", text="❌ 创建结果未验证，请先检查计划列表，不要直接重试。")]
 
     @_tool("gemini_delete_scheduled_action", DESTRUCTIVE_REMOTE)
     async def gemini_delete_scheduled_action(
         action_id: str,
         response_format: ResponseFormat = "markdown",
-        backend: Literal["legacy", "remy"] = "legacy",
     ) -> list[TextContent]:
         """按 id 删除 Gemini Web 定时操作。不会删除由该定时操作产生的历史对话。"""
-        if backend != "legacy":
-            result: DomainResult[Any] = DomainResult.failure(DomainErrorCode.INVALID_ARGUMENT, "Native schedules support list/get only.")
-            return domain_text(result, domain_failure_text(result), use_result_data=True)
         clean_id = action_id.strip()
         if not clean_id:
-            return [TextContent(type="text", text="❌ action_id 不能为空。")]
+            return domain_text(DomainResult.failure(DomainErrorCode.INVALID_ARGUMENT, "action_id 不能为空。"), "❌ action_id 不能为空。")
 
+        owner = current_account_key()
         client = get_gemini_client()
         await initialize_client()
+        current_owner = current_account_key()
+        if not current_owner or (owner and current_owner != owner):
+            return domain_text(DomainResult.failure(DomainErrorCode.AUTH_REQUIRED, "Gemini account changed or is unavailable."),
+                               "Gemini account changed or is unavailable.")
+        owner = current_owner
         if not hasattr(client, "_batch_execute"):
             return [TextContent(type="text", text="❌ 当前客户端不支持定时操作 RPC。")]
 
@@ -2119,6 +2285,7 @@ def _register_scheduled_tools(mcp: MCPServer, enabled_tool_names: set[str], tool
                 fetch_registry=_fetch_scheduled_registry,
                 fetch_by_id=_fetch_scheduled_task_by_id,
                 extract_bodies=_extract_rpc_bodies,
+                expected_account=owner,
             )
             if response_format == "json":
                 return _json_response(payload)
@@ -2141,10 +2308,13 @@ def _register_scheduled_tools(mcp: MCPServer, enabled_tool_names: set[str], tool
                 if payload["verification_status"] in {"registry_empty_unverified", "registry_empty_not_readable_by_id"}:
                     return [TextContent(type="text", text=f"⚠️ 删除请求已被 Gemini 接受: {clean_id}；当前 registry 为空，按 ID 校验状态: {payload['verification_status']}。")]
                 return [TextContent(type="text", text=f"⚠️ 删除请求已被 Gemini 接受: {clean_id}；校验状态: {payload['verification_status']}")]
-            return [TextContent(type="text", text=f"⚠️ 删除请求已发送，但响应无法确认: {clean_id}")]
-        except Exception as e:
-            logger.error(f"定时操作删除失败: {e}")
-            return [TextContent(type="text", text=f"❌ 删除定时操作失败: {str(e)}")]
+            return [TextContent(type="text", text=f"⚠️ 删除请求已发送，但响应无法确认: {clean_id}；校验状态: {payload['verification_status']}")]
+        except PermissionError:
+            return domain_text(DomainResult.failure(DomainErrorCode.AUTH_REQUIRED, "Gemini account changed or is unavailable."),
+                               "Gemini account changed or is unavailable.")
+        except Exception:
+            logger.warning("Scheduled action deletion outcome could not be verified")
+            return [TextContent(type="text", text="❌ 删除结果未验证，请先检查计划状态，不要直接重试。")]
     tool_functions.update(
         gemini_list_scheduled_actions=gemini_list_scheduled_actions,
     )
@@ -2171,11 +2341,14 @@ def _register_tool_mode_tools(mcp: MCPServer, enabled_tool_names: set[str], tool
         try:
             probe = _get_probe("tool_modes", "tool_mode_status")
             response = await _execute_observed_rpc(client, probe)
-            result = account_contract_result(response, "tool_modes.status")
-            if not result.ok or result.data is None:
-                return domain_text(result, domain_failure_text(result), use_result_data=True)
-            entries = result.data["value"]
-            leading_enabled = result.data["leading_enabled"]
+            bodies = _extract_rpc_bodies(response.text, probe["rpcid"])
+            body = bodies[0] if bodies else []
+            entries = []
+            leading_enabled = None
+            if isinstance(body, list):
+                leading_enabled = body[0] if body and isinstance(body[0], bool) else None
+                if len(body) > 1 and isinstance(body[1], list):
+                    entries = [_parse_tool_mode_entry(item) for item in body[1]]
             page, page_info = paginate_items(entries, limit, offset, max_limit=100)
 
             payload = {
@@ -2221,11 +2394,28 @@ def _register_model_tools(mcp: MCPServer, enabled_tool_names: set[str], tool_fun
     @_tool("gemini_list_models", READS_PRIVATE_REMOTE)
     async def gemini_list_models() -> list[TextContent]:
         """列出所有可用模型及其说明"""
-        aliases = """🤖 MCP 模型别名与选择:
-- flash-lite / lite、flash / fast、pro 保持稳定别名；thinking 兼容映射为 flash。
-- 也接受下方运行时目录的 model_name、display_name 或 model_id（例如目录存在时的 4 Argon）。
-- thinking_level=low / medium / high；standard=low、extended=high 保持兼容。
-- 当前账号目录如下；静态网页观察不代表其他账号权限。
+        aliases = """🤖 MCP 模型别名:
+
+1. flash-lite / lite → Web UI 3.5 Flash-Lite (request name: Flash-Lite)
+   - 网页端极速模型
+
+2. flash / fast → gemini-3-flash
+   - 2026-09-26 网页端 3.8 Flash；fast 保留为兼容别名
+
+3. pro → gemini-3-pro
+   - 网页端 3.1 Pro，是否可用取决于当前账户
+
+4. thinking → gemini-3-flash-thinking
+   - 旧兼容别名；网页思考等级用 thinking_level=low/medium/high，standard/extended 兼容低/高
+
+媒体规则:
+- 图像: Flash-Lite → Nano Banana 2 Lite；Flash / Pro → Nano Banana 2
+- 音乐: Lyria；网页公告为 3.5，MCP 结果未必标明实际版本
+- 视频: 当前普通聊天请求不等于 Gemini Omni 视频模式；需要验证实际视频产物
+
+---
+
+运行时模型:
 """
         try:
             client = get_gemini_client()
@@ -2266,7 +2456,8 @@ def _register_gem_tools(mcp: MCPServer, enabled_tool_names: set[str]) -> None:
         instructions: Optional[str] = None,
     ) -> list[TextContent]:
         """
-        管理 Gemini Gems（自定义 AI 助手）。
+        管理用户自建 Gemini Gems。list 只返回自建 Gem 元数据，不含预置项或指令正文。
+        创建、修改和删除只有独立读回核验后才报告成功。
         
         参数:
         - action: list, create, update, delete
@@ -2275,27 +2466,31 @@ def _register_gem_tools(mcp: MCPServer, enabled_tool_names: set[str]) -> None:
         - description: 创建/更新时描述
         - instructions: 创建/更新时系统指令
         """
+        owner = current_account_key()
         client = get_gemini_client()
         await initialize_client()
+        current_owner = current_account_key()
+        if not current_owner or (owner and current_owner != owner):
+            return domain_text(DomainResult.failure(DomainErrorCode.AUTH_REQUIRED, "Gemini account changed or is unavailable."),
+                               "Gemini account changed or is unavailable.")
+        owner = current_owner
 
         try:
             if action == "list":
-                result = await list_gems_service(client)
-                items = (result.data or {}).get("items", [])
-                if not result.ok:
-                    return domain_text(result, "无法核实 Gems 列表。", use_result_data=True)
-                if not items and not result.warnings:
-                    return domain_text(result, "暂无保存的 Gems。", use_result_data=True)
+                gems = await read_custom_gems(client)
+                if current_account_key() != owner:
+                    raise PermissionError
+                if not gems:
+                    return [TextContent(type="text", text="暂无保存的 Gems。")]
+
                 gem_list = ["## 💎 Gems 列表"]
-                if not items:
-                    gem_list.append("已观察的集合中暂无 Gems。")
-                for i, gem in enumerate(items, 1):
-                    gem_name = gem.get("name") or "Untitled"
-                    gem_id_val = gem.get("id", "")
-                    gem_desc = gem.get("description", "")[:30]
+                for i, gem in enumerate(_iter_gem_values(gems), 1):
+                    gem_name = getattr(gem, "name", "Untitled")
+                    gem_id_val = getattr(gem, "id", "")
+                    gem_desc = getattr(gem, "description", "")[:30]
                     gem_list.append(f"{i}. {gem_name} (ID: {gem_id_val})\n   {gem_desc}")
-                gem_list.extend(f"⚠️ {warning.message}" for warning in result.warnings)
-                return domain_text(result, "\n".join(gem_list), use_result_data=True)
+                
+                return [TextContent(type="text", text="\n".join(gem_list))]
 
             elif action == "create":
                 if not name:
@@ -2305,6 +2500,7 @@ def _register_gem_tools(mcp: MCPServer, enabled_tool_names: set[str]) -> None:
                     name=name,
                     description=description,
                     instructions=instructions or "",
+                    expected_account=owner,
                 )
                 return [TextContent(
                     type="text",
@@ -2323,6 +2519,7 @@ def _register_gem_tools(mcp: MCPServer, enabled_tool_names: set[str]) -> None:
                     name=name,
                     description=description,
                     instructions=instructions,
+                    expected_account=owner,
                 )
                 if payload.get("verification_status") == "target_not_found":
                     return [
@@ -2339,38 +2536,67 @@ def _register_gem_tools(mcp: MCPServer, enabled_tool_names: set[str]) -> None:
             elif action == "delete":
                 if not gem_id:
                     return [TextContent(type="text", text="❌ 删除 Gem 需要提供 gem_id。")]
-                payload = await delete_gem_service(client, gem_id=gem_id)
+                payload = await delete_gem_service(client, gem_id=gem_id, expected_account=owner)
                 return [TextContent(type="text", text=f"✅ Gem {gem_id} 删除成功。读回校验: {payload['verification_status']}")]
 
             return [TextContent(type="text", text="❌ 无效的 action。")]
 
         except Exception as e:
-            logger.error(f"Gem 操作失败: {e}")
-            return [TextContent(type="text", text=f"❌ 失败: {str(e)}")]
+            if current_account_key() != owner or isinstance(e, PermissionError):
+                return domain_text(DomainResult.failure(DomainErrorCode.AUTH_REQUIRED, "Gemini account changed or is unavailable."),
+                                   "Gemini account changed or is unavailable.")
+            logger.warning("Gem operation could not be verified: %s", type(e).__name__)
+            if isinstance(e, GemMutationNotVerified) or (type(e) is ValueError and str(e) in {
+                "Gem name must not be empty.", "Gem name must not be blank when provided.", "Gem ID must not be empty.",
+            }):
+                return [TextContent(type="text", text=f"❌ 失败: {str(e)}")]
+            return [TextContent(type="text", text="❌ Gem 操作结果未验证；请先检查列表，不要直接重试。")]
 
 
-def _register_typed_account_tools(mcp: MCPServer, enabled_tool_names: set[str]) -> None:
-    _tool = _conditional_tool_decorator(mcp, enabled_tool_names)
+def register_history_tools(mcp: MCPServer, enabled_tool_names: set[str] | None = None, *, compact: bool = False) -> None:
+    """注册历史相关工具（按需加载）。"""
+    if enabled_tool_names is None:
+        enabled_tool_names = set()
+    tool_functions: dict[str, Callable[..., Coroutine[Any, Any, list[TextContent]]]] = {}
+    _register_history_scan_tools(mcp, enabled_tool_names, tool_functions)
+    _register_history_read_tools(mcp, enabled_tool_names, tool_functions)
+    _register_history_facade_tools(mcp, enabled_tool_names, tool_functions,
+                                   default_response_format="compact" if compact else "markdown",
+                                   default_max_chars_per_turn=800 if compact else 4000)
 
-    @_tool("gemini_account", DESTRUCTIVE_REMOTE)
-    async def gemini_account(request: AccountRequest) -> list[TextContent]:
-        """Typed native Skills, public sharing, Library and Canvas workflows.
 
-        Reuses the focused account request contract. Mutations need user intent
-        and fresh read-back; public sharing publishes the selected source.
-        """
-        result = await get_account_facade_service().execute("account", request)
-        return domain_text(result, "Account action and observed verification.", use_result_data=True)
+def register_account_tools(mcp: MCPServer, enabled_tool_names: set[str] | None = None) -> None:
+    """注册账号相关工具（按需加载）。"""
+    if enabled_tool_names is None:
+        enabled_tool_names = set()
+    tool_functions: dict[str, Callable[..., Coroutine[Any, Any, list[TextContent]]]] = {}
+    _register_account_probe_tools(mcp, enabled_tool_names, tool_functions)
+    _register_manifest_tools(mcp, enabled_tool_names, tool_functions)
+    _register_account_inventory_tools(mcp, enabled_tool_names, tool_functions)
+    _register_tool_mode_tools(mcp, enabled_tool_names, tool_functions)
+    _register_model_tools(mcp, enabled_tool_names, tool_functions)
+    # The account facade delegates to these read-only handlers even when their
+    # standalone tool groups are not exposed. Register implementation closures
+    # without publishing any additional tools or mutation capabilities.
+    _register_notebook_tools(mcp, set(), tool_functions)
+    _register_scheduled_tools(mcp, set(), tool_functions)
 
-    @_tool("gemini_scheduled", DESTRUCTIVE_REMOTE)
-    async def gemini_scheduled(request: ScheduledRequest) -> list[TextContent]:
-        """Read/manage legacy actions or native Remy schedules and recurrence.
 
-        Preserve backend with observed IDs. Native create/update/pause/resume/
-        delete use independent read-back; create_daily preserves legacy behavior.
-        """
-        result = await get_account_facade_service().execute("scheduled", request)
-        return domain_text(result, "Scheduled action and observed verification.", use_result_data=True)
+def register_scheduled_tools(mcp: MCPServer, enabled_tool_names: set[str] | None = None) -> None:
+    """注册定时任务工具（按需加载）。"""
+    if enabled_tool_names is None:
+        enabled_tool_names = set()
+    tool_functions: dict[str, Callable[..., Coroutine[Any, Any, list[TextContent]]]] = {}
+    _register_scheduled_tools(mcp, enabled_tool_names, tool_functions)
+
+
+def register_notebook_tools(mcp: MCPServer, enabled_tool_names: set[str] | None = None,
+                            *, default_source: NotebookSource = "gemini") -> None:
+    """注册笔记本工具（按需加载）。"""
+    if enabled_tool_names is None:
+        enabled_tool_names = set()
+    tool_functions: dict[str, Callable[..., Coroutine[Any, Any, list[TextContent]]]] = {}
+    _register_notebook_tools(mcp, enabled_tool_names, tool_functions, default_source=default_source)
 
 
 def register_manage_tools(mcp: MCPServer, layers: list[str] | set[str] | tuple[str, ...] | None = None):
@@ -2389,4 +2615,3 @@ def register_manage_tools(mcp: MCPServer, layers: list[str] | set[str] | tuple[s
     _register_tool_mode_tools(mcp, enabled_tool_names, tool_functions)
     _register_model_tools(mcp, enabled_tool_names, tool_functions)
     _register_gem_tools(mcp, enabled_tool_names)
-    _register_typed_account_tools(mcp, enabled_tool_names)

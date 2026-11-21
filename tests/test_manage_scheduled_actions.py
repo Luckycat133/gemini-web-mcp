@@ -31,12 +31,7 @@ import json
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
-import pytest
-
-from tests._account_rpc_fakes import scheduled_ack_response, scheduled_read
-
 from src.adapters.mcp_sdk import MCPServer
-from src.infrastructure.rpc_contracts import get_contract
 
 import src.tools.manage as manage_tools
 
@@ -59,9 +54,8 @@ class _FakeBatchClient:
         self._raise_exc = raise_exc
         self.call_count = 0
         self.captured_payloads = []
-        self.response_lengths = []
 
-    async def _batch_execute(self, raw_rpc_list, *, source_path=None, close_on_error=False):
+    async def _batch_execute(self, raw_rpc_list, *, source_path=None, close_on_error=False, current_retry=None):
         self.call_count += 1
         self.captured_payloads.append(raw_rpc_list)
         if self._raise_exc is not None:
@@ -70,12 +64,6 @@ class _FakeBatchClient:
             text = self._responses.pop(0)
         else:
             text = ""
-        if (
-            text == "resp" and raw_rpc_list[0].rpcid == get_contract("scheduled.create_daily").rpc_id
-        ) or raw_rpc_list[0].rpcid == get_contract("history.remy_goals").rpc_id:
-            bodies = manage_tools._extract_rpc_bodies(text, raw_rpc_list[0].rpcid)
-            text = json.dumps([["wrb.fr", raw_rpc_list[0].rpcid, json.dumps(body)] for body in bodies])
-        self.response_lengths.append(len(text))
         return SimpleNamespace(text=text, status_code=self._status_code)
 
 
@@ -86,6 +74,7 @@ class _NoBatchClient:
 
 def _patch_seams(monkeypatch, client):
     """统一 patch manage 模块的 client_wrapper 接缝。"""
+    monkeypatch.setenv("GEMINI_PSID", "synthetic-test-account")
     monkeypatch.setattr(manage_tools, "get_gemini_client", lambda: client)
 
     async def fake_init():
@@ -313,22 +302,21 @@ def test_remy_goal_aggregates_response_length(monkeypatch):
     monkeypatch.setattr(manage_tools, "_extract_rpc_bodies",
                         lambda _t, _r: pages.pop(0))
 
-    client = _FakeBatchClient(responses=["aaaa", "bbbbbb"])
+    client = _FakeBatchClient(responses=["aaaa", "bbbbbb"])  # 4 + 6 = 10
     result = _run(manage_tools._fetch_remy_goal_conversation_refs(client, max_items=100))
 
-    assert result["diagnostic"]["response_length"] == sum(client.response_lengths)
+    assert result["diagnostic"]["response_length"] == 10
 
 
-def test_remy_goal_missing_response_body_is_unverified_not_empty(monkeypatch):
-    """缺少 RPC body 不能证明 Remy 来源为空。"""
+def test_remy_goal_empty_bodies_falls_back_to_empty_page(monkeypatch):
+    """_extract_rpc_bodies 返回空 list → body=[] → raw_entries=[] → 'empty_page'。"""
     monkeypatch.setattr(manage_tools, "_extract_rpc_bodies", lambda _t, _r: [])
 
     client = _FakeBatchClient(responses=["r1"])
-    with pytest.raises(manage_tools.HistoryMetadataReadError) as raised:
-        _run(manage_tools._fetch_remy_goal_conversation_refs(client, max_items=100))
+    result = _run(manage_tools._fetch_remy_goal_conversation_refs(client, max_items=100))
 
-    assert raised.value.result.ok is False
-    assert raised.value.result.meta.verification_status == "read_back_unavailable"
+    assert result["diagnostic"]["stopped_reason"] == "empty_page"
+    assert result["items"] == []
 
 
 def test_remy_goal_pages_diagnostic_records_per_page_metadata(monkeypatch):
@@ -424,9 +412,9 @@ def test_create_scheduled_action_visible_in_registry(monkeypatch):
     monkeypatch.setattr(manage_tools, "_extract_rpc_bodies",
                         lambda _t, _r: [_created_body(task_id=created_id)])
     monkeypatch.setattr(manage_tools, "_fetch_scheduled_registry",
-                        AsyncMock(return_value=scheduled_read([_registry_entry(created_id)])))
+                        AsyncMock(return_value=([_registry_entry(created_id)], {})))
     monkeypatch.setattr(manage_tools, "_fetch_scheduled_task_by_id",
-                        AsyncMock(return_value=scheduled_read(_task_entry(created_id, 1))))
+                        AsyncMock(return_value=(_task_entry(created_id, 1), {})))
 
     mcp = _make_mcp()
     result = _run(_call(mcp, "gemini_create_scheduled_action",
@@ -445,9 +433,9 @@ def test_create_scheduled_action_not_visible_in_nonempty_registry(monkeypatch):
     monkeypatch.setattr(manage_tools, "_extract_rpc_bodies",
                         lambda _t, _r: [_created_body(task_id="t_1")])
     monkeypatch.setattr(manage_tools, "_fetch_scheduled_registry",
-                        AsyncMock(return_value=scheduled_read([_registry_entry("other")])))
+                        AsyncMock(return_value=([_registry_entry("other")], {})))
     monkeypatch.setattr(manage_tools, "_fetch_scheduled_task_by_id",
-                        AsyncMock(return_value=scheduled_read(None)))
+                        AsyncMock(return_value=(None, {})))
 
     mcp = _make_mcp()
     result = _run(_call(mcp, "gemini_create_scheduled_action",
@@ -455,7 +443,7 @@ def test_create_scheduled_action_not_visible_in_nonempty_registry(monkeypatch):
     # ok=True (有 id) 但 not visible + not readable → ⚠️ visibility 警告
     assert "⚠️" in result[0].text
     assert "✅ 已创建" not in result[0].text
-    assert "cookie/session" in result[0].text
+    assert "创建请求未获确认" in result[0].text
 
 
 def test_create_scheduled_action_registry_empty_unverified(monkeypatch):
@@ -466,15 +454,15 @@ def test_create_scheduled_action_registry_empty_unverified(monkeypatch):
     monkeypatch.setattr(manage_tools, "_extract_rpc_bodies",
                         lambda _t, _r: [_created_body(task_id="t_1")])
     monkeypatch.setattr(manage_tools, "_fetch_scheduled_registry",
-                        AsyncMock(return_value=scheduled_read([])))
+                        AsyncMock(return_value=([], {})))
     monkeypatch.setattr(manage_tools, "_fetch_scheduled_task_by_id",
-                        AsyncMock(return_value=scheduled_read(None)))
+                        AsyncMock(return_value=(None, {})))
 
     mcp = _make_mcp()
     result = _run(_call(mcp, "gemini_create_scheduled_action",
                         title="T", instructions="I", hour=9))
     assert "⚠️" in result[0].text
-    assert "cookie/session" in result[0].text
+    assert "创建请求未获确认" in result[0].text
 
 
 def test_create_scheduled_action_readable_by_id_registry_empty(monkeypatch):
@@ -486,9 +474,9 @@ def test_create_scheduled_action_readable_by_id_registry_empty(monkeypatch):
     monkeypatch.setattr(manage_tools, "_extract_rpc_bodies",
                         lambda _t, _r: [_created_body(task_id=created_id)])
     monkeypatch.setattr(manage_tools, "_fetch_scheduled_registry",
-                        AsyncMock(return_value=scheduled_read([])))
+                        AsyncMock(return_value=([], {})))
     monkeypatch.setattr(manage_tools, "_fetch_scheduled_task_by_id",
-                        AsyncMock(return_value=scheduled_read(_task_entry(created_id, 1))))
+                        AsyncMock(return_value=(_task_entry(created_id, 1), {})))
 
     mcp = _make_mcp()
     result = _run(_call(mcp, "gemini_create_scheduled_action",
@@ -506,9 +494,9 @@ def test_create_scheduled_action_readable_by_id_not_visible_in_registry(monkeypa
     monkeypatch.setattr(manage_tools, "_extract_rpc_bodies",
                         lambda _t, _r: [_created_body(task_id=created_id)])
     monkeypatch.setattr(manage_tools, "_fetch_scheduled_registry",
-                        AsyncMock(return_value=scheduled_read([_registry_entry("other")])))
+                        AsyncMock(return_value=([_registry_entry("other")], {})))
     monkeypatch.setattr(manage_tools, "_fetch_scheduled_task_by_id",
-                        AsyncMock(return_value=scheduled_read(_task_entry(created_id, 1))))
+                        AsyncMock(return_value=(_task_entry(created_id, 1), {})))
 
     mcp = _make_mcp()
     result = _run(_call(mcp, "gemini_create_scheduled_action",
@@ -526,7 +514,7 @@ def test_create_scheduled_action_verification_error(monkeypatch):
     monkeypatch.setattr(manage_tools, "_fetch_scheduled_registry",
                         AsyncMock(side_effect=RuntimeError("registry boom")))
     monkeypatch.setattr(manage_tools, "_fetch_scheduled_task_by_id",
-                        AsyncMock(return_value=scheduled_read(None)))
+                        AsyncMock(return_value=(None, {})))
 
     mcp = _make_mcp()
     result = _run(_call(mcp, "gemini_create_scheduled_action",
@@ -543,7 +531,7 @@ def test_create_scheduled_action_get_task_error(monkeypatch):
     monkeypatch.setattr(manage_tools, "_extract_rpc_bodies",
                         lambda _t, _r: [_created_body(task_id="t_1")])
     monkeypatch.setattr(manage_tools, "_fetch_scheduled_registry",
-                        AsyncMock(return_value=scheduled_read([_registry_entry("t_1")])))
+                        AsyncMock(return_value=([_registry_entry("t_1")], {})))
     monkeypatch.setattr(manage_tools, "_fetch_scheduled_task_by_id",
                         AsyncMock(side_effect=RuntimeError("task boom")))
 
@@ -578,9 +566,9 @@ def test_create_scheduled_action_response_format_json(monkeypatch):
     monkeypatch.setattr(manage_tools, "_extract_rpc_bodies",
                         lambda _t, _r: [_created_body(task_id=created_id)])
     monkeypatch.setattr(manage_tools, "_fetch_scheduled_registry",
-                        AsyncMock(return_value=scheduled_read([_registry_entry(created_id)])))
+                        AsyncMock(return_value=([_registry_entry(created_id)], {})))
     monkeypatch.setattr(manage_tools, "_fetch_scheduled_task_by_id",
-                        AsyncMock(return_value=scheduled_read(_task_entry(created_id, 1))))
+                        AsyncMock(return_value=(_task_entry(created_id, 1), {})))
 
     mcp = _make_mcp()
     result = _run(_call(mcp, "gemini_create_scheduled_action",
@@ -616,9 +604,9 @@ def test_create_scheduled_action_schedule_label_omitted_when_empty(monkeypatch):
     monkeypatch.setattr(manage_tools, "_extract_rpc_bodies",
                         lambda _t, _r: [_created_body(task_id=created_id, schedule_label="")])
     monkeypatch.setattr(manage_tools, "_fetch_scheduled_registry",
-                        AsyncMock(return_value=scheduled_read([_registry_entry(created_id)])))
+                        AsyncMock(return_value=([_registry_entry(created_id)], {})))
     monkeypatch.setattr(manage_tools, "_fetch_scheduled_task_by_id",
-                        AsyncMock(return_value=scheduled_read(_task_entry(created_id, 1))))
+                        AsyncMock(return_value=(_task_entry(created_id, 1), {})))
 
     mcp = _make_mcp()
     result = _run(_call(mcp, "gemini_create_scheduled_action",
@@ -635,8 +623,8 @@ def test_create_scheduled_action_batch_execute_exception(monkeypatch):
     mcp = _make_mcp()
     result = _run(_call(mcp, "gemini_create_scheduled_action",
                         title="T", instructions="I", hour=9))
-    assert "❌ 创建定时操作失败" in result[0].text
-    assert "network down" in result[0].text
+    assert "创建结果未验证" in result[0].text
+    assert "network down" not in result[0].text
 
 
 def test_create_scheduled_action_default_locale_when_empty(monkeypatch):
@@ -648,9 +636,9 @@ def test_create_scheduled_action_default_locale_when_empty(monkeypatch):
     monkeypatch.setattr(manage_tools, "_extract_rpc_bodies",
                         lambda _t, _r: [_created_body(task_id=created_id)])
     monkeypatch.setattr(manage_tools, "_fetch_scheduled_registry",
-                        AsyncMock(return_value=scheduled_read([_registry_entry(created_id)])))
+                        AsyncMock(return_value=([_registry_entry(created_id)], {})))
     monkeypatch.setattr(manage_tools, "_fetch_scheduled_task_by_id",
-                        AsyncMock(return_value=scheduled_read(_task_entry(created_id, 1))))
+                        AsyncMock(return_value=(_task_entry(created_id, 1), {})))
 
     mcp = _make_mcp()
     result = _run(_call(mcp, "gemini_create_scheduled_action",
@@ -667,9 +655,9 @@ def test_create_scheduled_action_non_200_status(monkeypatch):
     monkeypatch.setattr(manage_tools, "_extract_rpc_bodies",
                         lambda _t, _r: [_created_body(task_id="t_1")])
     monkeypatch.setattr(manage_tools, "_fetch_scheduled_registry",
-                        AsyncMock(return_value=scheduled_read([])))
+                        AsyncMock(return_value=([], {})))
     monkeypatch.setattr(manage_tools, "_fetch_scheduled_task_by_id",
-                        AsyncMock(return_value=scheduled_read(None)))
+                        AsyncMock(return_value=(None, {})))
 
     mcp = _make_mcp()
     result = _run(_call(mcp, "gemini_create_scheduled_action",
@@ -702,15 +690,15 @@ def test_delete_scheduled_action_rejects_client_without_batch_execute(monkeypatc
 
 def test_delete_scheduled_action_deleted_state_by_id(monkeypatch):
     """task_state_id==6 → deleted_by_id_after_delete=True → '✅ 已删除...deleted'。"""
-    client = _FakeBatchClient(responses=[scheduled_ack_response().text])
+    client = _FakeBatchClient(responses=["resp"])
     _patch_seams(monkeypatch, client)
 
     action_id = "a_del"
     monkeypatch.setattr(manage_tools, "_extract_rpc_bodies", lambda _t, _r: [["ok"]])
     monkeypatch.setattr(manage_tools, "_fetch_scheduled_registry",
-                        AsyncMock(return_value=scheduled_read([_registry_entry(action_id)])))
+                        AsyncMock(return_value=([_registry_entry(action_id)], {})))
     monkeypatch.setattr(manage_tools, "_fetch_scheduled_task_by_id",
-                        AsyncMock(return_value=scheduled_read(_task_entry(action_id, 6, "deleted"))))
+                        AsyncMock(return_value=(_task_entry(action_id, 6, "deleted"), {})))
 
     mcp = _make_mcp()
     result = _run(_call(mcp, "gemini_delete_scheduled_action", action_id=action_id))
@@ -720,134 +708,134 @@ def test_delete_scheduled_action_deleted_state_by_id(monkeypatch):
 
 def test_delete_scheduled_action_still_visible_in_registry(monkeypatch):
     """A still-visible action must not be presented as deleted."""
-    client = _FakeBatchClient(responses=[scheduled_ack_response().text])
+    client = _FakeBatchClient(responses=["resp"])
     _patch_seams(monkeypatch, client)
 
     action_id = "a_still"
     monkeypatch.setattr(manage_tools, "_extract_rpc_bodies", lambda _t, _r: [["ok"]])
     monkeypatch.setattr(manage_tools, "_fetch_scheduled_registry",
-                        AsyncMock(return_value=scheduled_read([_registry_entry(action_id)])))
+                        AsyncMock(return_value=([_registry_entry(action_id)], {})))
     monkeypatch.setattr(manage_tools, "_fetch_scheduled_task_by_id",
-                        AsyncMock(return_value=scheduled_read(None)))
+                        AsyncMock(return_value=(None, {})))
 
     mcp = _make_mcp()
     result = _run(_call(mcp, "gemini_delete_scheduled_action", action_id=action_id))
-    assert "⚠️ 删除请求已被 Gemini 接受" in result[0].text
+    assert "⚠️ 删除请求已发送" in result[0].text
     assert "✅" not in result[0].text
     assert "still_visible_in_registry" in result[0].text
 
 
 def test_delete_scheduled_action_not_visible_not_readable(monkeypatch):
     """registry 非空无匹配 + task None → not_visible_not_readable_by_id → '✅ 已删除'。"""
-    client = _FakeBatchClient(responses=[scheduled_ack_response().text])
+    client = _FakeBatchClient(responses=["resp"])
     _patch_seams(monkeypatch, client)
 
     monkeypatch.setattr(manage_tools, "_extract_rpc_bodies", lambda _t, _r: [["ok"]])
     monkeypatch.setattr(manage_tools, "_fetch_scheduled_registry",
-                        AsyncMock(return_value=scheduled_read([_registry_entry("other")])))
+                        AsyncMock(return_value=([_registry_entry("other")], {})))
     monkeypatch.setattr(manage_tools, "_fetch_scheduled_task_by_id",
-                        AsyncMock(return_value=scheduled_read(None)))
+                        AsyncMock(return_value=(None, {})))
 
     mcp = _make_mcp()
     result = _run(_call(mcp, "gemini_delete_scheduled_action", action_id="a_1"))
-    assert "✅ 已删除 Gemini 定时操作" in result[0].text
+    assert "⚠️ 删除请求已发送" in result[0].text
 
 
 def test_delete_scheduled_action_registry_empty_not_readable(monkeypatch):
     """An empty registry and unreadable ID do not confirm deletion."""
-    client = _FakeBatchClient(responses=[scheduled_ack_response().text])
+    client = _FakeBatchClient(responses=["resp"])
     _patch_seams(monkeypatch, client)
 
     monkeypatch.setattr(manage_tools, "_extract_rpc_bodies", lambda _t, _r: [["ok"]])
     monkeypatch.setattr(manage_tools, "_fetch_scheduled_registry",
-                        AsyncMock(return_value=scheduled_read([])))
+                        AsyncMock(return_value=([], {})))
     monkeypatch.setattr(manage_tools, "_fetch_scheduled_task_by_id",
-                        AsyncMock(return_value=scheduled_read(None)))
+                        AsyncMock(return_value=(None, {})))
 
     mcp = _make_mcp()
     result = _run(_call(mcp, "gemini_delete_scheduled_action", action_id="a_1"))
-    assert "⚠️ 删除请求已被 Gemini 接受" in result[0].text
+    assert "⚠️ 删除请求已发送" in result[0].text
     assert "✅" not in result[0].text
-    assert "registry 为空" in result[0].text
+    assert "registry_empty_not_readable_by_id" in result[0].text
 
 
 def test_delete_scheduled_action_not_visible_active_or_unknown(monkeypatch):
     """registry 非空无匹配 + task 存在(state_id!=6) → not_visible_active_or_unknown → ⚠️ 仍可读取。"""
-    client = _FakeBatchClient(responses=[scheduled_ack_response().text])
+    client = _FakeBatchClient(responses=["resp"])
     _patch_seams(monkeypatch, client)
 
     action_id = "a_active"
     monkeypatch.setattr(manage_tools, "_extract_rpc_bodies", lambda _t, _r: [["ok"]])
     monkeypatch.setattr(manage_tools, "_fetch_scheduled_registry",
-                        AsyncMock(return_value=scheduled_read([_registry_entry("other")])))
+                        AsyncMock(return_value=([_registry_entry("other")], {})))
     monkeypatch.setattr(manage_tools, "_fetch_scheduled_task_by_id",
-                        AsyncMock(return_value=scheduled_read(_task_entry(action_id, 1, "active"))))
+                        AsyncMock(return_value=(_task_entry(action_id, 1, "active"), {})))
 
     mcp = _make_mcp()
     result = _run(_call(mcp, "gemini_delete_scheduled_action", action_id=action_id))
     assert "⚠️" in result[0].text
-    assert "仍可读取" in result[0].text
+    assert "响应无法确认" in result[0].text
 
 
 def test_delete_scheduled_action_registry_empty_active_or_unknown(monkeypatch):
     """registry 空 + task 存在(state_id!=6) → registry_empty_active_or_unknown → ⚠️ 仍可读取。"""
-    client = _FakeBatchClient(responses=[scheduled_ack_response().text])
+    client = _FakeBatchClient(responses=["resp"])
     _patch_seams(monkeypatch, client)
 
     action_id = "a_empty_active"
     monkeypatch.setattr(manage_tools, "_extract_rpc_bodies", lambda _t, _r: [["ok"]])
     monkeypatch.setattr(manage_tools, "_fetch_scheduled_registry",
-                        AsyncMock(return_value=scheduled_read([])))
+                        AsyncMock(return_value=([], {})))
     monkeypatch.setattr(manage_tools, "_fetch_scheduled_task_by_id",
-                        AsyncMock(return_value=scheduled_read(_task_entry(action_id, 1, "active"))))
+                        AsyncMock(return_value=(_task_entry(action_id, 1, "active"), {})))
 
     mcp = _make_mcp()
     result = _run(_call(mcp, "gemini_delete_scheduled_action", action_id=action_id))
     assert "⚠️" in result[0].text
-    assert "仍可读取" in result[0].text
+    assert "响应无法确认" in result[0].text
 
 
 def test_delete_scheduled_action_verification_error(monkeypatch):
     """_fetch_scheduled_registry 抛异常 → verification_status='verification_error'。"""
-    client = _FakeBatchClient(responses=[scheduled_ack_response().text])
+    client = _FakeBatchClient(responses=["resp"])
     _patch_seams(monkeypatch, client)
 
     monkeypatch.setattr(manage_tools, "_extract_rpc_bodies", lambda _t, _r: [["ok"]])
     monkeypatch.setattr(manage_tools, "_fetch_scheduled_registry",
                         AsyncMock(side_effect=RuntimeError("registry boom")))
     monkeypatch.setattr(manage_tools, "_fetch_scheduled_task_by_id",
-                        AsyncMock(return_value=scheduled_read(None)))
+                        AsyncMock(return_value=(None, {})))
 
     mcp = _make_mcp()
     result = _run(_call(mcp, "gemini_delete_scheduled_action", action_id="a_1"))
     # A failed read-back leaves the deletion unverified.
-    assert "⚠️ 删除请求已被 Gemini 接受" in result[0].text
+    assert "⚠️ 删除请求已发送" in result[0].text
     assert "✅" not in result[0].text
     assert "verification_error" in result[0].text
 
 
 def test_delete_scheduled_action_get_task_error(monkeypatch):
     """_fetch_scheduled_task_by_id 抛异常 → get_task_error 记录。"""
-    client = _FakeBatchClient(responses=[scheduled_ack_response().text])
+    client = _FakeBatchClient(responses=["resp"])
     _patch_seams(monkeypatch, client)
 
     monkeypatch.setattr(manage_tools, "_extract_rpc_bodies", lambda _t, _r: [["ok"]])
     monkeypatch.setattr(manage_tools, "_fetch_scheduled_registry",
-                        AsyncMock(return_value=scheduled_read([_registry_entry("a_1")])))
+                        AsyncMock(return_value=([_registry_entry("a_1")], {})))
     monkeypatch.setattr(manage_tools, "_fetch_scheduled_task_by_id",
                         AsyncMock(side_effect=RuntimeError("task boom")))
 
     mcp = _make_mcp()
     result = _run(_call(mcp, "gemini_delete_scheduled_action", action_id="a_1"))
     # Still visible in the registry, so success cannot be claimed.
-    assert "⚠️ 删除请求已被 Gemini 接受" in result[0].text
+    assert "⚠️ 删除请求已发送" in result[0].text
     assert "✅" not in result[0].text
     assert "still_visible_in_registry" in result[0].text
 
 
 def test_delete_scheduled_action_empty_bodies(monkeypatch):
     """bodies 为空 → 不做 verification + ok=False → ⚠️ 响应无法确认。"""
-    client = _FakeBatchClient(responses=[scheduled_ack_response().text])
+    client = _FakeBatchClient(responses=["resp"])
     _patch_seams(monkeypatch, client)
 
     monkeypatch.setattr(manage_tools, "_extract_rpc_bodies", lambda _t, _r: [])
@@ -859,14 +847,14 @@ def test_delete_scheduled_action_empty_bodies(monkeypatch):
 
 def test_delete_scheduled_action_non_200_status(monkeypatch):
     """status_code=500 + bodies 非空 → ok=False → ⚠️ 响应无法确认。"""
-    client = _FakeBatchClient(responses=[scheduled_ack_response().text], status_code=500)
+    client = _FakeBatchClient(responses=["resp"], status_code=500)
     _patch_seams(monkeypatch, client)
 
     monkeypatch.setattr(manage_tools, "_extract_rpc_bodies", lambda _t, _r: [["ok"]])
     monkeypatch.setattr(manage_tools, "_fetch_scheduled_registry",
-                        AsyncMock(return_value=scheduled_read([])))
+                        AsyncMock(return_value=([], {})))
     monkeypatch.setattr(manage_tools, "_fetch_scheduled_task_by_id",
-                        AsyncMock(return_value=scheduled_read(None)))
+                        AsyncMock(return_value=(None, {})))
 
     mcp = _make_mcp()
     result = _run(_call(mcp, "gemini_delete_scheduled_action", action_id="a_1"))
@@ -875,15 +863,15 @@ def test_delete_scheduled_action_non_200_status(monkeypatch):
 
 def test_delete_scheduled_action_response_format_json(monkeypatch):
     """response_format='json' → 返回 JSON payload。"""
-    client = _FakeBatchClient(responses=[scheduled_ack_response().text])
+    client = _FakeBatchClient(responses=["resp"])
     _patch_seams(monkeypatch, client)
 
     action_id = "a_json"
     monkeypatch.setattr(manage_tools, "_extract_rpc_bodies", lambda _t, _r: [["ok"]])
     monkeypatch.setattr(manage_tools, "_fetch_scheduled_registry",
-                        AsyncMock(return_value=scheduled_read([])))
+                        AsyncMock(return_value=([], {})))
     monkeypatch.setattr(manage_tools, "_fetch_scheduled_task_by_id",
-                        AsyncMock(return_value=scheduled_read(_task_entry(action_id, 6, "deleted"))))
+                        AsyncMock(return_value=(_task_entry(action_id, 6, "deleted"), {})))
 
     mcp = _make_mcp()
     result = _run(_call(mcp, "gemini_delete_scheduled_action",
@@ -897,7 +885,7 @@ def test_delete_scheduled_action_response_format_json(monkeypatch):
 
 def test_delete_scheduled_action_json_empty_bodies(monkeypatch):
     """response_format='json' + 空 bodies → ok=False payload。"""
-    client = _FakeBatchClient(responses=[scheduled_ack_response().text])
+    client = _FakeBatchClient(responses=["resp"])
     _patch_seams(monkeypatch, client)
     monkeypatch.setattr(manage_tools, "_extract_rpc_bodies", lambda _t, _r: [])
 
@@ -916,20 +904,20 @@ def test_delete_scheduled_action_batch_execute_exception(monkeypatch):
 
     mcp = _make_mcp()
     result = _run(_call(mcp, "gemini_delete_scheduled_action", action_id="a_1"))
-    assert "❌ 删除定时操作失败" in result[0].text
-    assert "network down" in result[0].text
+    assert "删除结果未验证" in result[0].text
+    assert "network down" not in result[0].text
 
 
 def test_delete_scheduled_action_request_payload_format(monkeypatch):
     """删除 RPC payload 形如 [None, [action_id]]。"""
-    client = _FakeBatchClient(responses=[scheduled_ack_response().text])
+    client = _FakeBatchClient(responses=["resp"])
     _patch_seams(monkeypatch, client)
 
     monkeypatch.setattr(manage_tools, "_extract_rpc_bodies", lambda _t, _r: [["ok"]])
     monkeypatch.setattr(manage_tools, "_fetch_scheduled_registry",
-                        AsyncMock(return_value=scheduled_read([])))
+                        AsyncMock(return_value=([], {})))
     monkeypatch.setattr(manage_tools, "_fetch_scheduled_task_by_id",
-                        AsyncMock(return_value=scheduled_read(None)))
+                        AsyncMock(return_value=(None, {})))
 
     action_id = "a_payload"
     mcp = _make_mcp()

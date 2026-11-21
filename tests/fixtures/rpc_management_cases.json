@@ -1,1277 +1,18 @@
 {
-  "notebook_update_ack": {
-    "contract_key": "notebooks.update",
-    "cases": {
-      "success": {
-        "body": [
-          true
-        ]
-      },
-      "empty": {
-        "body": []
-      },
-      "rejected": {
-        "body": [
-          false
-        ]
-      },
-      "changed_shape": {
-        "body": [
-          1
-        ]
-      }
-    }
-  },
-  "notebook_get": {
-    "contract_key": "notebooks.get",
-    "cases": {
-      "success": {
-        "body": [
-          [
-            "notebooks/fixture",
-            [
-              "Fixture Notebook",
-              "Fixture description",
-              null,
-              null,
-              null,
-              null,
-              null,
-              null,
-              null,
-              null,
-              [
-                [
-                  [
-                    null,
-                    null,
-                    null,
-                    null,
-                    null,
-                    "sources/fixture"
-                  ]
-                ],
-                [
-                  [
-                    "sources/fixture",
-                    [
-                      "sources/fixture",
-                      "Fixture source",
-                      null,
-                      null,
-                      null,
-                      [
-                        "Fixture source text",
-                        1
-                      ],
-                      2,
-                      null,
-                      "text/plain"
-                    ]
-                  ]
-                ]
-              ],
-              null,
-              [
-                2,
-                null,
-                null,
-                null,
-                1,
-                []
-              ],
-              null,
-              [
-                null,
-                null,
-                null,
-                "sources/fixture"
-              ]
-            ],
-            [
-              "Fixture instructions",
-              [],
-              []
-            ],
-            false
-          ]
-        ]
-      },
-      "empty": {
-        "body": []
-      },
-      "rejected": {
-        "body": [],
-        "reject_code": 7
-      },
-      "changed_shape": {
-        "body": [
-          [
-            "notebooks/fixture",
-            [
-              "Gem metadata"
-            ]
-          ]
-        ]
-      }
-    }
-  },
-  "notebook_created": {
-    "contract_key": "notebooks.create",
-    "cases": {
-      "success": {
-        "body": [
-          "notebooks/fixture"
-        ]
-      },
-      "empty": {
-        "body": []
-      },
-      "rejected": {
-        "body": [],
-        "reject_code": 7
-      },
-      "changed_shape": {
-        "body": [
-          false
-        ]
-      }
-    }
-  },
-  "notebook_source_created": {
-    "contract_key": "notebooks.add_source",
-    "cases": {
-      "success": {
-        "body": [
-          [
-            "notebooks/fixture",
-            [
-              "Fixture Notebook",
-              "Fixture description",
-              null,
-              null,
-              null,
-              null,
-              null,
-              null,
-              null,
-              null,
-              [
-                [
-                  [
-                    null,
-                    null,
-                    null,
-                    null,
-                    null,
-                    "sources/fixture"
-                  ]
-                ],
-                [
-                  [
-                    "sources/fixture",
-                    [
-                      "sources/fixture",
-                      "Fixture source",
-                      null,
-                      null,
-                      null,
-                      [
-                        "Fixture source text",
-                        1
-                      ],
-                      2,
-                      null,
-                      "text/plain"
-                    ]
-                  ]
-                ]
-              ],
-              null,
-              [
-                2,
-                null,
-                null,
-                null,
-                1,
-                []
-              ],
-              null,
-              [
-                null,
-                null,
-                null,
-                "sources/fixture"
-              ]
-            ],
-            [
-              "Fixture instructions",
-              [],
-              []
-            ],
-            false
-          ]
-        ]
-      },
-      "empty": {
-        "body": []
-      },
-      "rejected": {
-        "body": [],
-        "reject_code": 7
-      },
-      "changed_shape": {
-        "body": [
-          [
-            "notebooks/fixture",
-            [
-              "changed"
-            ]
-          ]
-        ]
-      }
-    }
-  },
-  "native_void_ack": {
-    "contract_key": "notebooks.delete",
-    "cases": {
-      "success": {
-        "body": []
-      },
-      "empty": {
-        "body": null
-      },
-      "rejected": {
-        "body": null,
-        "reject_code": 7
-      },
-      "changed_shape": {
-        "body": {
-          "unexpected": true
-        }
-      }
-    }
-  },
-  "native_skill_list": {
-    "contract_key": "native_skills.list",
-    "cases": {
-      "success": {
-        "body": [
-          [
-            [
-              "skills/fixture",
-              "Fixture Skill",
-              "Fixture description",
-              "Fixture instructions",
-              true
-            ]
-          ]
-        ]
-      },
-      "empty": {
-        "body": []
-      },
-      "rejected": {
-        "body": [],
-        "reject_code": 7
-      },
-      "changed_shape": {
-        "body": [
-          [
-            [
-              "skills/fixture",
-              false
-            ]
-          ]
-        ]
-      }
-    }
-  },
-  "native_skill_get": {
-    "contract_key": "native_skills.get",
-    "cases": {
-      "success": {
-        "body": [
-          [
-            "skills/fixture",
-            "Fixture Skill",
-            "Fixture description",
-            "Fixture instructions",
-            true
-          ]
-        ]
-      },
-      "empty": {
-        "body": []
-      },
-      "rejected": {
-        "body": [],
-        "reject_code": 7
-      },
-      "changed_shape": {
-        "body": [
-          [
-            "skills/fixture",
-            false
-          ]
-        ]
-      }
-    }
-  },
-  "native_skill_save": {
-    "contract_key": "native_skills.save",
-    "cases": {
-      "success": {
-        "body": [
-          "skills/fixture",
-          [
-            "skills/fixture",
-            "Fixture Skill",
-            "Fixture description",
-            "Fixture instructions",
-            true
-          ]
-        ]
-      },
-      "empty": {
-        "body": []
-      },
-      "rejected": {
-        "body": [],
-        "reject_code": 7
-      },
-      "changed_shape": {
-        "body": [
-          "skills/fixture",
-          [
-            "other",
-            "Wrong identity"
-          ]
-        ]
-      }
-    }
-  },
-  "remy_void_ack": {
-    "contract_key": "scheduled.remy_delete",
-    "cases": {
-      "success": {
-        "body": []
-      },
-      "empty": {
-        "body": null
-      },
-      "rejected": {
-        "body": [],
-        "reject_code": 7
-      },
-      "changed_shape": {
-        "body": {
-          "unexpected": true
-        }
-      }
-    }
-  },
-  "remy_schedule_registry": {
-    "contract_key": "scheduled.remy_registry",
-    "cases": {
-      "success": {
-        "body": [
-          [
-            [
-              "schedule_fixture",
-              "Fixture schedule",
-              true,
-              [
-                [
-                  9,
-                  30
-                ]
-              ],
-              null,
-              null,
-              "Asia/Shanghai",
-              "Fixture instructions",
-              null,
-              1
-            ]
-          ],
-          false,
-          1
-        ]
-      },
-      "empty": {
-        "body": []
-      },
-      "rejected": {
-        "body": [],
-        "reject_code": 7
-      },
-      "changed_shape": {
-        "body": {
-          "unexpected": true
-        }
-      }
-    }
-  },
-  "remy_schedule_get": {
-    "contract_key": "scheduled.remy_get",
-    "cases": {
-      "success": {
-        "body": [
-          [
-            "schedule_fixture",
-            "Fixture schedule",
-            true,
-            [
-              [
-                9,
-                30
-              ]
-            ],
-            null,
-            null,
-            "Asia/Shanghai",
-            "Fixture instructions",
-            null,
-            1
-          ]
-        ]
-      },
-      "empty": {
-        "body": []
-      },
-      "rejected": {
-        "body": [],
-        "reject_code": 7
-      },
-      "changed_shape": {
-        "body": {
-          "unexpected": true
-        }
-      }
-    }
-  },
-  "task_goal": {
-    "contract_key": "tasks.get",
-    "cases": {
-      "success": {
-        "body": [
-          [
-            "goal_fixture",
-            "Private fixture description",
-            2,
-            null,
-            null,
-            null,
-            null,
-            null,
-            null,
-            null,
-            null,
-            null,
-            null,
-            "c_task_fixture"
-          ]
-        ]
-      },
-      "empty": {
-        "body": []
-      },
-      "rejected": {
-        "body": [],
-        "reject_code": 7
-      },
-      "changed_shape": {
-        "body": [
-          [
-            "goal_fixture",
-            null,
-            "DONE",
-            null,
-            null,
-            null,
-            null,
-            null,
-            null,
-            null,
-            null,
-            null,
-            null,
-            "c_task_fixture"
-          ]
-        ]
-      }
-    }
-  },
-  "music_chat": {
-    "contract_key": "media.music_chat",
-    "cases": {
-      "success": {
-        "body": [
-          [
-            [
-              [
-                null,
-                "r_1"
-              ],
-              null,
-              null,
-              [
-                [
-                  [
-                    "rc_1",
-                    null,
-                    null,
-                    null,
-                    null,
-                    null,
-                    null,
-                    null,
-                    null,
-                    null,
-                    null,
-                    null,
-                    [
-                      {
-                        "87": [
-                          [
-                            null,
-                            [
-                              null,
-                              4,
-                              "song.mp3",
-                              null,
-                              null,
-                              null,
-                              null,
-                              [
-                                "thumb",
-                                "https://cdn.example/song.mp3"
-                              ]
-                            ]
-                          ]
-                        ]
-                      }
-                    ]
-                  ]
-                ]
-              ]
-            ]
-          ]
-        ]
-      },
-      "empty": {
-        "body": [
-          []
-        ]
-      },
-      "rejected": {
-        "body": [],
-        "reject_code": 7
-      },
-      "changed_shape": {
-        "body": {
-          "unexpected": true
-        }
-      }
-    }
-  },
-  "conversation_page": {
-    "contract_key": "history.page",
-    "cases": {
-      "success": {
-        "body": [
-          null,
-          null,
-          [
-            [
-              "chat-1",
-              "Title",
-              false,
-              null,
-              null,
-              [
-                1700000000,
-                0
-              ]
-            ]
-          ]
-        ]
-      },
-      "empty": {
-        "body": [
-          null,
-          null,
-          []
-        ]
-      },
-      "rejected": {
-        "body": [],
-        "reject_code": 7
-      },
-      "changed_shape": {
-        "body": {
-          "unexpected": true
-        }
-      }
-    },
-    "malformed_items": [
-      [
-        null,
-        null,
-        [
-          null
-        ]
-      ],
-      [
-        null,
-        null,
-        [
-          {
-            "new_shape": "chat-1"
-          }
-        ]
-      ]
-    ]
-  },
-  "remy_goals_page": {
-    "contract_key": "history.remy_goals",
-    "cases": {
-      "success": {
-        "body": [
-          [
-            [
-              null,
-              "Goal",
-              1,
-              null,
-              "remy",
-              null,
-              null,
-              null,
-              null,
-              null,
-              null,
-              null,
-              null,
-              "goal-1"
-            ]
-          ]
-        ]
-      },
-      "empty": {
-        "body": [
-          []
-        ]
-      },
-      "rejected": {
-        "body": [],
-        "reject_code": 7
-      },
-      "changed_shape": {
-        "body": {
-          "unexpected": true
-        }
-      }
-    }
-  },
-  "notebook_list": {
-    "contract_key": "notebooks.list",
-    "cases": {
-      "success": {
-        "body": [
-          null,
-          null,
-          [
-            [
-              "notebook-1",
-              [
-                "Notebook"
-              ]
-            ]
-          ],
-          []
-        ]
-      },
-      "empty": {
-        "body": [
-          null,
-          null,
-          [],
-          []
-        ]
-      },
-      "rejected": {
-        "body": [],
-        "reject_code": 7
-      },
-      "changed_shape": {
-        "body": {
-          "unexpected": true
-        }
-      }
-    }
-  },
-  "notebook_move": {
-    "contract_key": "notebooks.move_chat",
-    "cases": {
-      "success": {
-        "body": [
-          null,
-          [
-            "chat-1",
-            "Title"
-          ]
-        ]
-      },
-      "empty": {
-        "body": []
-      },
-      "rejected": {
-        "body": [],
-        "reject_code": 7
-      },
-      "changed_shape": {
-        "body": {
-          "unexpected": true
-        }
-      }
-    }
-  },
-  "scheduled_registry": {
-    "contract_key": "scheduled.registry",
-    "cases": {
-      "success": {
-        "body": [
-          [
-            [
-              "task-1",
-              [],
-              []
-            ]
-          ]
-        ]
-      },
-      "empty": {
-        "body": [
-          []
-        ]
-      },
-      "rejected": {
-        "body": [],
-        "reject_code": 7
-      },
-      "changed_shape": {
-        "body": {
-          "unexpected": true
-        }
-      }
-    },
-    "malformed_items": [
-      [
-        [
-          null
-        ]
-      ],
-      [
-        [
-          [
-            "",
-            [],
-            []
-          ]
-        ]
-      ]
-    ]
-  },
-  "scheduled_get": {
-    "contract_key": "scheduled.get",
-    "cases": {
-      "success": {
-        "body": [
-          [
-            "task-1",
-            [],
-            []
-          ]
-        ]
-      },
-      "empty": {
-        "body": []
-      },
-      "rejected": {
-        "body": [],
-        "reject_code": 7
-      },
-      "changed_shape": {
-        "body": {
-          "unexpected": true
-        }
-      }
-    }
-  },
-  "scheduled_create": {
-    "contract_key": "scheduled.create_daily",
-    "cases": {
-      "success": {
-        "body": [
-          "task-1",
-          []
-        ]
-      },
-      "empty": {
-        "body": []
-      },
-      "rejected": {
-        "body": [],
-        "reject_code": 7
-      },
-      "changed_shape": {
-        "body": {
-          "unexpected": true
-        }
-      }
-    }
-  },
-  "public_links": {
-    "contract_key": "sharing.public_links",
-    "cases": {
-      "success": {
-        "body": [
-          [
-            [
-              null,
-              null,
-              [
-                true,
-                "Title"
-              ],
-              "link-1",
-              [
-                1700000000,
-                0
-              ]
-            ]
-          ]
-        ]
-      },
-      "empty": {
-        "body": [
-          []
-        ]
-      },
-      "rejected": {
-        "body": [],
-        "reject_code": 7
-      },
-      "changed_shape": {
-        "body": {
-          "unexpected": true
-        }
-      }
-    },
-    "malformed_items": [
-      [
-        [
-          null
-        ]
-      ],
-      [
-        [
-          [
-            null,
-            null,
-            {},
-            "link-1"
-          ]
-        ]
-      ],
-      [
-        [
-          [
-            null,
-            null,
-            [
-              false,
-              "Title"
-            ],
-            ""
-          ]
-        ]
-      ]
-    ]
-  },
-  "usage_entries": {
-    "contract_key": "usage.quota",
-    "cases": {
-      "success": {
-        "body": [
-          [
-            [
-              1,
-              2,
-              3
-            ]
-          ]
-        ]
-      },
-      "empty": {
-        "body": [
-          []
-        ]
-      },
-      "rejected": {
-        "body": [],
-        "reject_code": 7
-      },
-      "changed_shape": {
-        "body": {
-          "unexpected": true
-        }
-      }
-    }
-  },
-  "library_capabilities": {
-    "contract_key": "library.locale_capabilities",
-    "cases": {
-      "success": {
-        "body": [
-          [
-            [
-              [
-                "alias"
-              ],
-              "Name",
-              "Description",
-              "Details"
-            ]
-          ]
-        ]
-      },
-      "empty": {
-        "body": [
-          []
-        ]
-      },
-      "rejected": {
-        "body": [],
-        "reject_code": 7
-      },
-      "changed_shape": {
-        "body": {
-          "unexpected": true
-        }
-      }
-    },
-    "malformed_items": [
-      [
-        [
-          null
-        ]
-      ],
-      [
-        [
-          {
-            "changed": "alias"
-          }
-        ]
-      ]
-    ]
-  },
-  "tool_modes": {
-    "contract_key": "tool_modes.status",
-    "cases": {
-      "success": {
-        "body": [
-          false,
-          [
-            [
-              1,
-              true
-            ]
-          ]
-        ]
-      },
-      "empty": {
-        "body": [
-          false,
-          []
-        ]
-      },
-      "rejected": {
-        "body": [],
-        "reject_code": 7
-      },
-      "changed_shape": {
-        "body": {
-          "unexpected": true
-        }
-      }
-    }
-  },
-  "opaque": {
-    "contract_key": "library.index",
-    "cases": {
-      "success": {
-        "body": [
-          "value"
-        ]
-      },
-      "empty": {
-        "body": []
-      },
-      "rejected": {
-        "body": [],
-        "reject_code": 7
-      },
-      "changed_shape": {
-        "body": {
-          "unexpected": true
-        }
-      }
-    }
-  },
-  "mutation_ack": {
-    "contract_key": "scheduled.delete",
-    "cases": {
-      "success": {
-        "body": [
-          "ok"
-        ]
-      },
-      "empty": {
-        "body": []
-      },
-      "rejected": {
-        "body": [],
-        "reject_code": 7
-      },
-      "changed_shape": {
-        "body": {
-          "unexpected": true
-        }
-      }
-    }
-  },
-  "custom_gems": {
-    "contract_key": "gems.custom_registry",
-    "cases": {
-      "success": {
-        "body": [
-          null,
-          null,
-          [
-            [
-              "g_fixture",
-              [
-                "Writer",
-                "Drafts"
-              ],
-              [
-                "Write clearly"
-              ]
-            ]
-          ]
-        ]
-      },
-      "empty": {
-        "body": [
-          null,
-          null,
-          []
-        ]
-      },
-      "rejected": {
-        "body": [],
-        "reject_code": 7
-      },
-      "changed_shape": {
-        "body": [
-          null,
-          null,
-          [
-            {
-              "new_shape": true
-            }
-          ]
-        ]
-      }
-    }
-  },
-  "conversation_update": {
-    "contract_key": "history.update",
-    "cases": {
-      "success": {
-        "body": [
-          null,
-          [
-            "c_fixture",
-            "Renamed fixture",
-            true
-          ]
-        ]
-      },
-      "empty": {
-        "body": []
-      },
-      "rejected": {
-        "body": [],
-        "reject_code": 7
-      },
-      "changed_shape": {
-        "body": [
-          null,
-          {
-            "changed": true
-          }
-        ]
-      }
-    },
-    "malformed": [
-      {
-        "new_shape": []
-      },
-      [
-        null,
-        [
-          "c_fixture",
-          "Fixture",
-          "true"
-        ]
-      ]
-    ]
-  },
-  "library_page": {
-    "contract_key": "library.page",
-    "cases": {
-      "success": {
-        "body": [
-          [
-            [
-              [
-                "c_library_fixture",
-                "r_library_fixture"
-              ],
-              [
-                1700000000,
-                0
-              ],
-              5,
-              "Document one",
-              [
-                "Fixture text one"
-              ],
-              "rc_library_fixture"
-            ],
-            [
-              [
-                "c_library_fixture",
-                "r_library_fixture"
-              ],
-              [
-                1700000001,
-                0
-              ],
-              5,
-              "Document two",
-              [
-                "Fixture text two"
-              ],
-              "rc_library_fixture"
-            ]
-          ],
-          "continuation_fixture"
-        ]
-      },
-      "empty": {
-        "body": [
-          []
-        ]
-      },
-      "rejected": {
-        "body": null,
-        "reject_code": 7
-      },
-      "changed_shape": {
-        "body": {
-          "changed": "shape"
-        }
-      }
-    }
-  },
-  "library_delete": {
-    "contract_key": "library.delete",
-    "cases": {
-      "success": {
-        "body": [
-          null,
-          1,
-          []
-        ]
-      },
-      "empty": {
-        "body": []
-      },
-      "rejected": {
-        "body": null,
-        "reject_code": 7
-      },
-      "changed_shape": {
-        "body": {
-          "changed": "shape"
-        }
-      }
-    }
-  },
-  "public_link_create": {
-    "contract_key": "sharing.create",
-    "cases": {
-      "success": {
-        "body": [
-          null,
-          null,
-          "public_fixture"
-        ]
-      },
-      "empty": {
-        "body": []
-      },
-      "rejected": {
-        "body": null,
-        "reject_code": 7
-      },
-      "changed_shape": {
-        "body": {
-          "changed": "shape"
-        }
-      }
-    }
-  },
-  "sharing_void_ack": {
-    "contract_key": "sharing.delete",
-    "cases": {
-      "success": {
-        "body": [
-          null
-        ]
-      },
-      "empty": {
-        "body": []
-      },
-      "rejected": {
-        "body": null,
-        "reject_code": 7
-      },
-      "changed_shape": {
-        "body": {
-          "changed": "shape"
-        }
-      }
-    }
-  },
   "canvas_artifact": {
-    "contract_key": "canvas.get",
     "cases": {
+      "changed_shape": {
+        "body": {
+          "changed": "shape"
+        }
+      },
+      "empty": {
+        "body": []
+      },
+      "rejected": {
+        "body": null,
+        "reject_code": 7
+      },
       "success": {
         "body": [
           "artifact_fixture",
@@ -1286,24 +27,26 @@
           null,
           3
         ]
+      }
+    },
+    "contract_key": "canvas.get"
+  },
+  "canvas_chat_artifacts": {
+    "cases": {
+      "changed_shape": {
+        "body": {
+          "changed": "shape"
+        }
       },
       "empty": {
-        "body": []
+        "body": [
+          []
+        ]
       },
       "rejected": {
         "body": null,
         "reject_code": 7
       },
-      "changed_shape": {
-        "body": {
-          "changed": "shape"
-        }
-      }
-    }
-  },
-  "canvas_chat_artifacts": {
-    "contract_key": "canvas.chat_artifacts",
-    "cases": {
       "success": {
         "body": [
           [
@@ -1362,6 +105,16 @@
             ]
           ]
         ]
+      }
+    },
+    "contract_key": "canvas.chat_artifacts"
+  },
+  "canvas_versions": {
+    "cases": {
+      "changed_shape": {
+        "body": {
+          "changed": "shape"
+        }
       },
       "empty": {
         "body": [
@@ -1372,16 +125,6 @@
         "body": null,
         "reject_code": 7
       },
-      "changed_shape": {
-        "body": {
-          "changed": "shape"
-        }
-      }
-    }
-  },
-  "canvas_versions": {
-    "contract_key": "canvas.versions",
-    "cases": {
       "success": {
         "body": [
           [
@@ -1394,6 +137,187 @@
             ]
           ]
         ]
+      }
+    },
+    "contract_key": "canvas.versions"
+  },
+  "chat_metadata_page": {
+    "cases": {
+      "changed_shape": {
+        "body": [
+          null,
+          null,
+          [
+            {
+              "id": "c_fixture"
+            }
+          ]
+        ]
+      },
+      "empty": {
+        "body": [
+          null,
+          null,
+          []
+        ]
+      },
+      "rejected": {
+        "body": null,
+        "reject_code": 7
+      },
+      "success": {
+        "body": [
+          null,
+          null,
+          [
+            [
+              "c_fixture",
+              "Synthetic title",
+              true
+            ]
+          ]
+        ]
+      }
+    },
+    "contract_key": "history.metadata_page"
+  },
+  "conversation_page": {
+    "cases": {
+      "changed_shape": {
+        "body": [
+          null,
+          null,
+          [
+            {
+              "unknown": true
+            }
+          ]
+        ]
+      },
+      "empty": {
+        "body": [
+          null,
+          null,
+          []
+        ]
+      },
+      "rejected": {
+        "body": [],
+        "reject_code": 7
+      },
+      "success": {
+        "body": [
+          null,
+          null,
+          [
+            [
+              "chat-1",
+              "Title",
+              false,
+              null,
+              null,
+              [
+                1700000000,
+                0
+              ]
+            ]
+          ]
+        ]
+      }
+    },
+    "contract_key": "history.page"
+  },
+  "conversation_update": {
+    "cases": {
+      "changed_shape": {
+        "body": [
+          null,
+          {
+            "id": "c_fixture"
+          }
+        ]
+      },
+      "empty": {
+        "body": []
+      },
+      "rejected": {
+        "body": null,
+        "reject_code": 7
+      },
+      "success": {
+        "body": [
+          null,
+          [
+            "c_fixture",
+            "Renamed fixture",
+            true
+          ]
+        ]
+      }
+    },
+    "contract_key": "history.rename"
+  },
+  "library_capabilities": {
+    "cases": {
+      "changed_shape": {
+        "body": {
+          "unexpected": true
+        }
+      },
+      "empty": {
+        "body": [
+          []
+        ]
+      },
+      "rejected": {
+        "body": [],
+        "reject_code": 7
+      },
+      "success": {
+        "body": [
+          [
+            [
+              "alias"
+            ],
+            "Name",
+            "Description",
+            "Details"
+          ]
+        ]
+      }
+    },
+    "contract_key": "library.locale_capabilities"
+  },
+  "library_delete": {
+    "cases": {
+      "changed_shape": {
+        "body": {
+          "changed": "shape"
+        }
+      },
+      "empty": {
+        "body": []
+      },
+      "rejected": {
+        "body": null,
+        "reject_code": 7
+      },
+      "success": {
+        "body": [
+          null,
+          1,
+          []
+        ]
+      }
+    },
+    "contract_key": "library.delete"
+  },
+  "library_page": {
+    "cases": {
+      "changed_shape": {
+        "body": {
+          "changed": "shape"
+        }
       },
       "empty": {
         "body": [
@@ -1404,11 +328,1809 @@
         "body": null,
         "reject_code": 7
       },
+      "success": {
+        "body": [
+          [
+            [
+              [
+                "c_library_fixture",
+                "r_library_fixture"
+              ],
+              [
+                1700000000,
+                0
+              ],
+              5,
+              "Document one",
+              [
+                "Fixture text one"
+              ],
+              "rc_library_fixture"
+            ],
+            [
+              [
+                "c_library_fixture",
+                "r_library_fixture"
+              ],
+              [
+                1700000001,
+                0
+              ],
+              5,
+              "Document two",
+              [
+                "Fixture text two"
+              ],
+              "rc_library_fixture"
+            ]
+          ],
+          "continuation_fixture"
+        ]
+      }
+    },
+    "contract_key": "library.page"
+  },
+  "music_chat": {
+    "cases": {
+      "changed_shape": {
+        "body": {
+          "unexpected": true
+        }
+      },
+      "empty": {
+        "body": [
+          []
+        ]
+      },
+      "rejected": {
+        "body": [],
+        "reject_code": 7
+      },
+      "success": {
+        "body": [
+          [
+            [
+              [
+                null,
+                "r_1"
+              ],
+              null,
+              null,
+              [
+                [
+                  [
+                    "rc_1",
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    [
+                      {
+                        "87": [
+                          [
+                            null,
+                            [
+                              null,
+                              4,
+                              "song.mp3",
+                              null,
+                              null,
+                              null,
+                              null,
+                              [
+                                "thumb",
+                                "https://cdn.example/song.mp3"
+                              ]
+                            ]
+                          ]
+                        ]
+                      }
+                    ]
+                  ]
+                ]
+              ]
+            ]
+          ]
+        ]
+      }
+    },
+    "contract_key": "media.music_chat"
+  },
+  "mutation_ack": {
+    "cases": {
+      "changed_shape": {
+        "body": {
+          "unexpected": true
+        }
+      },
+      "empty": {
+        "body": []
+      },
+      "rejected": {
+        "body": [],
+        "reject_code": 7
+      },
+      "success": {
+        "body": [
+          "ok"
+        ]
+      }
+    },
+    "contract_key": "scheduled.delete"
+  },
+  "native_skill_get": {
+    "cases": {
+      "changed_shape": {
+        "body": [
+          [
+            "skills/fixture",
+            false
+          ]
+        ]
+      },
+      "empty": {
+        "body": []
+      },
+      "rejected": {
+        "body": [],
+        "reject_code": 7
+      },
+      "success": {
+        "body": [
+          [
+            "skills/fixture",
+            "Fixture Skill",
+            "Fixture description",
+            "Fixture instructions",
+            true
+          ]
+        ]
+      }
+    },
+    "contract_key": "native_skills.get"
+  },
+  "native_skill_list": {
+    "cases": {
+      "changed_shape": {
+        "body": [
+          [
+            [
+              "skills/fixture",
+              false
+            ]
+          ]
+        ]
+      },
+      "empty": {
+        "body": []
+      },
+      "rejected": {
+        "body": [],
+        "reject_code": 7
+      },
+      "success": {
+        "body": [
+          [
+            [
+              "skills/fixture",
+              "Fixture Skill",
+              "Fixture description",
+              "Fixture instructions",
+              true
+            ]
+          ]
+        ]
+      }
+    },
+    "contract_key": "native_skills.list"
+  },
+  "native_skill_save": {
+    "cases": {
+      "changed_shape": {
+        "body": [
+          "skills/fixture",
+          [
+            "other",
+            "Wrong identity"
+          ]
+        ]
+      },
+      "empty": {
+        "body": []
+      },
+      "rejected": {
+        "body": [],
+        "reject_code": 7
+      },
+      "success": {
+        "body": [
+          "skills/fixture",
+          [
+            "skills/fixture",
+            "Fixture Skill",
+            "Fixture description",
+            "Fixture instructions",
+            true
+          ]
+        ]
+      }
+    },
+    "contract_key": "native_skills.save"
+  },
+  "native_void_ack": {
+    "cases": {
+      "changed_shape": {
+        "body": {
+          "unexpected": true
+        }
+      },
+      "empty": {
+        "body": null
+      },
+      "rejected": {
+        "body": null,
+        "reject_code": 7
+      },
+      "success": {
+        "body": []
+      }
+    },
+    "contract_key": "notebooks.delete"
+  },
+  "notebook_conversation_page": {
+    "cases": {
+      "changed_shape": {
+        "body": [
+          null,
+          null,
+          [
+            {
+              "unexpected": true
+            }
+          ]
+        ]
+      },
+      "empty": {
+        "body": []
+      },
+      "rejected": {
+        "body": [],
+        "reject_code": 7
+      },
+      "success": {
+        "body": [
+          null,
+          null,
+          [
+            [
+              "c_fixture",
+              "Synthetic"
+            ]
+          ]
+        ]
+      }
+    },
+    "contract_key": "notebooks.chats"
+  },
+  "notebook_created": {
+    "cases": {
+      "changed_shape": {
+        "body": [
+          false
+        ]
+      },
+      "empty": {
+        "body": []
+      },
+      "rejected": {
+        "body": [],
+        "reject_code": 7
+      },
+      "success": {
+        "body": [
+          "notebooks/fixture"
+        ]
+      }
+    },
+    "contract_key": "notebooks.create"
+  },
+  "notebook_get": {
+    "cases": {
+      "changed_shape": {
+        "body": [
+          [
+            "notebooks/fixture",
+            [
+              "Gem metadata"
+            ]
+          ]
+        ]
+      },
+      "empty": {
+        "body": []
+      },
+      "rejected": {
+        "body": [],
+        "reject_code": 7
+      },
+      "success": {
+        "body": [
+          [
+            "notebooks/fixture",
+            [
+              "Fixture Notebook",
+              "Fixture description",
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              [
+                [
+                  [
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    "sources/fixture"
+                  ]
+                ],
+                [
+                  [
+                    "sources/fixture",
+                    [
+                      "sources/fixture",
+                      "Fixture source",
+                      null,
+                      null,
+                      null,
+                      [
+                        "Fixture source text",
+                        1
+                      ],
+                      2,
+                      null,
+                      "text/plain"
+                    ]
+                  ]
+                ]
+              ],
+              null,
+              [
+                2,
+                null,
+                null,
+                null,
+                1,
+                []
+              ],
+              null,
+              [
+                null,
+                null,
+                null,
+                "sources/fixture"
+              ]
+            ],
+            [
+              "Fixture instructions",
+              [],
+              []
+            ],
+            false
+          ]
+        ]
+      }
+    },
+    "contract_key": "notebooks.get"
+  },
+  "notebook_list": {
+    "cases": {
+      "changed_shape": {
+        "body": {
+          "unexpected": true
+        }
+      },
+      "empty": {
+        "body": [
+          null,
+          null,
+          [],
+          []
+        ]
+      },
+      "rejected": {
+        "body": [],
+        "reject_code": 7
+      },
+      "success": {
+        "body": [
+          null,
+          null,
+          [
+            [
+              "notebook-1",
+              [
+                "Notebook"
+              ]
+            ]
+          ],
+          []
+        ]
+      }
+    },
+    "contract_key": "notebooks.list"
+  },
+  "notebook_move": {
+    "cases": {
+      "changed_shape": {
+        "body": {
+          "unexpected": true
+        }
+      },
+      "empty": {
+        "body": []
+      },
+      "rejected": {
+        "body": [],
+        "reject_code": 7
+      },
+      "success": {
+        "body": [
+          null,
+          [
+            "chat-1",
+            "Title"
+          ]
+        ]
+      }
+    },
+    "contract_key": "notebooks.move_chat"
+  },
+  "notebook_source_created": {
+    "cases": {
+      "changed_shape": {
+        "body": [
+          [
+            "notebooks/fixture",
+            [
+              "changed"
+            ]
+          ]
+        ]
+      },
+      "empty": {
+        "body": []
+      },
+      "rejected": {
+        "body": [],
+        "reject_code": 7
+      },
+      "success": {
+        "body": [
+          [
+            "notebooks/fixture",
+            [
+              "Fixture Notebook",
+              "Fixture description",
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              [
+                [
+                  [
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    "sources/fixture"
+                  ]
+                ],
+                [
+                  [
+                    "sources/fixture",
+                    [
+                      "sources/fixture",
+                      "Fixture source",
+                      null,
+                      null,
+                      null,
+                      [
+                        "Fixture source text",
+                        1
+                      ],
+                      2,
+                      null,
+                      "text/plain"
+                    ]
+                  ]
+                ]
+              ],
+              null,
+              [
+                2,
+                null,
+                null,
+                null,
+                1,
+                []
+              ],
+              null,
+              [
+                null,
+                null,
+                null,
+                "sources/fixture"
+              ]
+            ],
+            [
+              "Fixture instructions",
+              [],
+              []
+            ],
+            false
+          ]
+        ]
+      }
+    },
+    "contract_key": "notebooks.add_source"
+  },
+  "notebook_update_ack": {
+    "cases": {
+      "changed_shape": {
+        "body": [
+          1
+        ]
+      },
+      "empty": {
+        "body": []
+      },
+      "rejected": {
+        "body": [
+          false
+        ]
+      },
+      "success": {
+        "body": [
+          true
+        ]
+      }
+    },
+    "contract_key": "notebooks.update"
+  },
+  "notebooklm_list": {
+    "cases": {
+      "changed_shape": {
+        "body": {
+          "unexpected": true
+        }
+      },
+      "empty": {
+        "body": [
+          []
+        ]
+      },
+      "rejected": {
+        "body": [],
+        "reject_code": 7
+      },
+      "success": {
+        "body": [
+          [
+            [
+              "notebooks/synthetic",
+              "Synthetic Notebook",
+              [
+                1793440000,
+                0
+              ],
+              1
+            ]
+          ]
+        ]
+      }
+    },
+    "contract_key": "notebooklm.list"
+  },
+  "notebooklm_picker": {
+    "cases": {
+      "changed_shape": {
+        "body": {
+          "unexpected": true
+        }
+      },
+      "empty": {
+        "body": [
+          {
+            "data": {
+              "viewer": {
+                "rpcs": {
+                  "listNotebooks": {
+                    "notebooks": []
+                  }
+                }
+              }
+            },
+            "path": []
+          }
+        ]
+      },
+      "rejected": {
+        "body": [],
+        "reject_code": 7
+      },
+      "success": {
+        "body": [
+          {
+            "data": {
+              "viewer": {
+                "rpcs": {
+                  "listNotebooks": {
+                    "notebooks": [
+                      {
+                        "createTime": "2026-11-01T00:00:00Z",
+                        "displayName": "Synthetic NotebookLM",
+                        "id": "fixture-notebook-id",
+                        "sourceCount": 2.0
+                      }
+                    ]
+                  }
+                }
+              }
+            },
+            "path": []
+          }
+        ]
+      }
+    },
+    "contract_key": "notebooklm.picker"
+  },
+  "opaque": {
+    "cases": {
+      "changed_shape": {
+        "body": {
+          "unexpected": true
+        }
+      },
+      "empty": {
+        "body": []
+      },
+      "rejected": {
+        "body": [],
+        "reject_code": 7
+      },
+      "success": {
+        "body": [
+          "value"
+        ]
+      }
+    },
+    "contract_key": "library.index"
+  },
+  "public_link_create": {
+    "cases": {
       "changed_shape": {
         "body": {
           "changed": "shape"
         }
+      },
+      "empty": {
+        "body": []
+      },
+      "rejected": {
+        "body": null,
+        "reject_code": 7
+      },
+      "success": {
+        "body": [
+          null,
+          null,
+          "public_fixture"
+        ]
       }
-    }
+    },
+    "contract_key": "sharing.create"
+  },
+  "public_links": {
+    "cases": {
+      "changed_shape": {
+        "body": {
+          "unexpected": true
+        }
+      },
+      "empty": {
+        "body": [
+          []
+        ]
+      },
+      "rejected": {
+        "body": [],
+        "reject_code": 7
+      },
+      "success": {
+        "body": [
+          [
+            [
+              [
+                "link-1",
+                "Title",
+                false,
+                null,
+                "https://example.com"
+              ]
+            ]
+          ]
+        ]
+      }
+    },
+    "contract_key": "sharing.public_links"
+  },
+  "remy_goals_page": {
+    "cases": {
+      "changed_shape": {
+        "body": {
+          "unexpected": true
+        }
+      },
+      "empty": {
+        "body": [
+          []
+        ]
+      },
+      "rejected": {
+        "body": [],
+        "reject_code": 7
+      },
+      "success": {
+        "body": [
+          [
+            [
+              null,
+              "Goal",
+              1,
+              null,
+              "remy",
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              "goal-1"
+            ]
+          ]
+        ]
+      }
+    },
+    "contract_key": "history.remy_goals"
+  },
+  "remy_schedule_get": {
+    "cases": {
+      "changed_shape": {
+        "body": {
+          "unexpected": true
+        }
+      },
+      "empty": {
+        "body": []
+      },
+      "rejected": {
+        "body": [],
+        "reject_code": 7
+      },
+      "success": {
+        "body": [
+          [
+            "schedule_fixture",
+            "Fixture schedule",
+            true,
+            [
+              [
+                9,
+                30
+              ]
+            ],
+            null,
+            null,
+            "Asia/Shanghai",
+            "Fixture instructions",
+            null,
+            1
+          ]
+        ]
+      }
+    },
+    "contract_key": "scheduled.remy_get"
+  },
+  "remy_schedule_list": {
+    "cases": {
+      "changed_shape": {
+        "body": [
+          null
+        ]
+      },
+      "empty": {
+        "body": [
+          [],
+          false
+        ]
+      },
+      "rejected": {
+        "body": null,
+        "reject_code": 7
+      },
+      "success": {
+        "body": [
+          [
+            [
+              "schedule-fixture",
+              "Synthetic schedule",
+              null,
+              [
+                [
+                  9,
+                  0
+                ]
+              ],
+              null,
+              null,
+              "Asia/Shanghai",
+              "Return marker",
+              "",
+              1,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              1
+            ]
+          ],
+          false
+        ]
+      }
+    },
+    "contract_key": "task_schedules.list"
+  },
+  "remy_schedule_registry": {
+    "cases": {
+      "changed_shape": {
+        "body": {
+          "unexpected": true
+        }
+      },
+      "empty": {
+        "body": []
+      },
+      "rejected": {
+        "body": [],
+        "reject_code": 7
+      },
+      "success": {
+        "body": [
+          [
+            [
+              "schedule_fixture",
+              "Fixture schedule",
+              true,
+              [
+                [
+                  9,
+                  30
+                ]
+              ],
+              null,
+              null,
+              "Asia/Shanghai",
+              "Fixture instructions",
+              null,
+              1
+            ]
+          ],
+          false,
+          1
+        ]
+      }
+    },
+    "contract_key": "scheduled.remy_registry"
+  },
+  "remy_schedule_reply": {
+    "cases": {
+      "changed_shape": {
+        "body": {}
+      },
+      "empty": {
+        "body": [
+          null
+        ]
+      },
+      "rejected": {
+        "body": null,
+        "reject_code": 7
+      },
+      "success": {
+        "body": [
+          [
+            "schedule-fixture",
+            "Synthetic schedule",
+            null,
+            [
+              [
+                9,
+                0
+              ]
+            ],
+            null,
+            null,
+            "Asia/Shanghai",
+            "Return marker",
+            "",
+            1,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            1
+          ]
+        ]
+      }
+    },
+    "contract_key": "task_schedules.read"
+  },
+  "remy_void_ack": {
+    "cases": {
+      "changed_shape": {
+        "body": {
+          "unexpected": true
+        }
+      },
+      "empty": {
+        "body": null
+      },
+      "rejected": {
+        "body": [],
+        "reject_code": 7
+      },
+      "success": {
+        "body": []
+      }
+    },
+    "contract_key": "scheduled.remy_delete"
+  },
+  "research_chat_plan": {
+    "cases": {
+      "changed_shape": {
+        "arguments": {
+          "chat_id": "c_fixture"
+        },
+        "body": {
+          "unexpected": true
+        }
+      },
+      "empty": {
+        "arguments": {
+          "chat_id": "c_fixture"
+        },
+        "body": [
+          []
+        ]
+      },
+      "rejected": {
+        "arguments": {
+          "chat_id": "c_fixture"
+        },
+        "body": [],
+        "reject_code": 7
+      },
+      "success": {
+        "arguments": {
+          "chat_id": "c_fixture"
+        },
+        "body": [
+          [
+            [
+              [
+                null,
+                "r_fixture"
+              ],
+              null,
+              null,
+              [
+                [
+                  [
+                    "rc_fixture",
+                    [
+                      "Synthetic response"
+                    ],
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    [
+                      2
+                    ],
+                    null,
+                    null,
+                    null,
+                    [
+                      {
+                        "56": [
+                          "Synthetic plan",
+                          [
+                            [
+                              null,
+                              "Step",
+                              "Synthetic step"
+                            ]
+                          ],
+                          null,
+                          [
+                            "Start research"
+                          ]
+                        ]
+                      }
+                    ]
+                  ]
+                ]
+              ]
+            ]
+          ]
+        ]
+      }
+    },
+    "contract_key": "research.chat_plan"
+  },
+  "research_chat_progress": {
+    "cases": {
+      "changed_shape": {
+        "body": {
+          "unexpected": true
+        }
+      },
+      "empty": {
+        "body": [
+          []
+        ]
+      },
+      "rejected": {
+        "body": [],
+        "reject_code": 7
+      },
+      "success": {
+        "body": [
+          [
+            [
+              null,
+              null,
+              null,
+              [
+                [
+                  [
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    [
+                      1
+                    ],
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    [
+                      [
+                        "doc",
+                        null,
+                        "synthetic",
+                        "task",
+                        ""
+                      ]
+                    ]
+                  ]
+                ]
+              ]
+            ]
+          ]
+        ]
+      }
+    },
+    "contract_key": "research.chat_progress"
+  },
+  "scheduled_create": {
+    "cases": {
+      "changed_shape": {
+        "body": {
+          "unexpected": true
+        }
+      },
+      "empty": {
+        "body": []
+      },
+      "rejected": {
+        "body": [],
+        "reject_code": 7
+      },
+      "success": {
+        "body": [
+          "task-1",
+          []
+        ]
+      }
+    },
+    "contract_key": "scheduled.create_daily"
+  },
+  "scheduled_get": {
+    "cases": {
+      "changed_shape": {
+        "body": {
+          "unexpected": true
+        }
+      },
+      "empty": {
+        "body": []
+      },
+      "rejected": {
+        "body": [],
+        "reject_code": 7
+      },
+      "success": {
+        "body": [
+          [
+            "task-1",
+            [],
+            []
+          ]
+        ]
+      }
+    },
+    "contract_key": "scheduled.get"
+  },
+  "scheduled_registry": {
+    "cases": {
+      "changed_shape": {
+        "body": {
+          "unexpected": true
+        }
+      },
+      "empty": {
+        "body": [
+          []
+        ]
+      },
+      "rejected": {
+        "body": [],
+        "reject_code": 7
+      },
+      "success": {
+        "body": [
+          [
+            [
+              [
+                "task-1",
+                [],
+                []
+              ]
+            ]
+          ]
+        ]
+      }
+    },
+    "contract_key": "scheduled.registry"
+  },
+  "sharing_void_ack": {
+    "cases": {
+      "changed_shape": {
+        "body": {
+          "changed": "shape"
+        }
+      },
+      "empty": {
+        "body": []
+      },
+      "rejected": {
+        "body": null,
+        "reject_code": 7
+      },
+      "success": {
+        "body": [
+          null
+        ]
+      }
+    },
+    "contract_key": "sharing.delete"
+  },
+  "task_browser_answer": {
+    "cases": {
+      "changed_shape": {
+        "body": {
+          "unexpected": true
+        }
+      },
+      "empty": {
+        "body": []
+      },
+      "rejected": {
+        "body": null,
+        "reject_code": 7
+      },
+      "success": {
+        "body": [
+          "v=0\r\n",
+          "answer",
+          "fixture-session",
+          []
+        ]
+      }
+    },
+    "contract_key": "tasks.browser_offer"
+  },
+  "task_browser_credentials": {
+    "cases": {
+      "changed_shape": {
+        "body": {
+          "unexpected": true
+        }
+      },
+      "empty": {
+        "body": [
+          []
+        ]
+      },
+      "rejected": {
+        "body": null,
+        "reject_code": 7
+      },
+      "success": {
+        "body": [
+          [
+            [
+              [
+                "stun:example.test:3478"
+              ]
+            ]
+          ]
+        ]
+      }
+    },
+    "contract_key": "tasks.browser_credentials"
+  },
+  "task_goal": {
+    "cases": {
+      "changed_shape": {
+        "body": {
+          "unexpected": true
+        }
+      },
+      "empty": {
+        "body": [
+          null,
+          null
+        ]
+      },
+      "rejected": {
+        "body": [],
+        "reject_code": 7
+      },
+      "success": {
+        "body": [
+          [
+            null,
+            "Synthetic Task",
+            3,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            "c_taskfixture",
+            null,
+            null,
+            [
+              1793440000,
+              0
+            ],
+            null,
+            null,
+            false,
+            null
+          ],
+          null
+        ]
+      }
+    },
+    "contract_key": "tasks.get"
+  },
+  "task_goal_page": {
+    "cases": {
+      "changed_shape": {
+        "body": {
+          "unexpected": true
+        }
+      },
+      "empty": {
+        "body": [
+          [],
+          null
+        ]
+      },
+      "rejected": {
+        "body": [],
+        "reject_code": 7
+      },
+      "success": {
+        "body": [
+          [
+            [
+              null,
+              "Synthetic Task",
+              3,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              "c_taskfixture",
+              null,
+              null,
+              [
+                1793440000,
+                0
+              ],
+              null,
+              null,
+              false,
+              null
+            ]
+          ],
+          "next_page"
+        ]
+      }
+    },
+    "contract_key": "tasks.list"
+  },
+  "task_progress_turn": {
+    "cases": {
+      "changed_shape": {
+        "body": {
+          "unexpected": true
+        }
+      },
+      "empty": {
+        "body": [
+          null
+        ]
+      },
+      "rejected": {
+        "body": null,
+        "reject_code": 7
+      },
+      "success": {
+        "body": [
+          [
+            [
+              "c_fixture",
+              "r_fixture"
+            ],
+            null,
+            null,
+            [
+              [
+                [
+                  "rc_fixture",
+                  null,
+                  null,
+                  null,
+                  null,
+                  null,
+                  null,
+                  null,
+                  null,
+                  null,
+                  null,
+                  null,
+                  null,
+                  null,
+                  null,
+                  null,
+                  null,
+                  null,
+                  null,
+                  null,
+                  null,
+                  null,
+                  null,
+                  null,
+                  null,
+                  null,
+                  null,
+                  null,
+                  null,
+                  null,
+                  null,
+                  null,
+                  null,
+                  null,
+                  null,
+                  null,
+                  null,
+                  [
+                    null,
+                    [
+                      [
+                        [
+                          "Synthetic activity"
+                        ],
+                        null,
+                        "browser",
+                        null,
+                        [
+                          [
+                            1
+                          ]
+                        ],
+                        null,
+                        null,
+                        [
+                          [
+                            "source"
+                          ]
+                        ]
+                      ]
+                    ]
+                  ]
+                ]
+              ]
+            ]
+          ]
+        ]
+      }
+    },
+    "contract_key": "tasks.progress_turn"
+  },
+  "task_progress_turn_list": {
+    "cases": {
+      "changed_shape": {
+        "body": {
+          "unexpected": true
+        }
+      },
+      "empty": {
+        "body": [
+          []
+        ]
+      },
+      "rejected": {
+        "body": null,
+        "reject_code": 7
+      },
+      "success": {
+        "body": [
+          [
+            [
+              [
+                "c_fixture",
+                "r_fixture"
+              ],
+              null,
+              null,
+              [
+                [
+                  [
+                    "rc_fixture",
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    [
+                      null,
+                      [
+                        [
+                          [
+                            "Synthetic activity"
+                          ],
+                          null,
+                          "browser",
+                          null,
+                          [
+                            [
+                              1
+                            ]
+                          ],
+                          null,
+                          null,
+                          [
+                            [
+                              "source"
+                            ]
+                          ]
+                        ]
+                      ]
+                    ]
+                  ]
+                ]
+              ]
+            ]
+          ]
+        ]
+      }
+    },
+    "contract_key": "tasks.progress_latest"
+  },
+  "task_schedule_refs": {
+    "cases": {
+      "changed_shape": {
+        "body": {
+          "unexpected": true
+        }
+      },
+      "empty": {
+        "body": [
+          null,
+          null
+        ]
+      },
+      "rejected": {
+        "body": null,
+        "reject_code": 7
+      },
+      "success": {
+        "body": [
+          [
+            null,
+            "Synthetic Task",
+            3,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            "c_taskfixture",
+            null,
+            null,
+            [
+              1793440000,
+              0
+            ],
+            null,
+            null,
+            false,
+            null
+          ],
+          []
+        ]
+      }
+    },
+    "contract_key": "tasks.schedule_refs"
+  },
+  "tool_modes": {
+    "cases": {
+      "changed_shape": {
+        "body": {
+          "unexpected": true
+        }
+      },
+      "empty": {
+        "body": [
+          false,
+          []
+        ]
+      },
+      "rejected": {
+        "body": [],
+        "reject_code": 7
+      },
+      "success": {
+        "body": [
+          false,
+          [
+            [
+              1,
+              true
+            ]
+          ]
+        ]
+      }
+    },
+    "contract_key": "tool_modes.status"
+  },
+  "usage_entries": {
+    "cases": {
+      "changed_shape": {
+        "body": {
+          "unexpected": true
+        }
+      },
+      "empty": {
+        "body": [
+          []
+        ]
+      },
+      "rejected": {
+        "body": [],
+        "reject_code": 7
+      },
+      "success": {
+        "body": [
+          [
+            [
+              1,
+              2,
+              3
+            ]
+          ]
+        ]
+      }
+    },
+    "contract_key": "usage.quota"
+  },
+  "workflow_turn": {
+    "cases": {
+      "changed_shape": {
+        "body": {
+          "unexpected": true
+        }
+      },
+      "empty": {
+        "arguments": {
+          "chat_id": "c_fixture",
+          "rcid": "rc_fixture",
+          "rid": "r_fixture"
+        },
+        "body": [
+          []
+        ]
+      },
+      "rejected": {
+        "body": [],
+        "reject_code": 7
+      },
+      "success": {
+        "arguments": {
+          "chat_id": "c_fixture",
+          "rcid": "rc_fixture",
+          "rid": "r_fixture"
+        },
+        "body": [
+          [
+            [
+              [
+                null,
+                "r_fixture"
+              ],
+              null,
+              null,
+              [
+                [
+                  [
+                    "rc_fixture",
+                    [
+                      "Synthetic complete reply"
+                    ],
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    [
+                      2
+                    ]
+                  ]
+                ]
+              ]
+            ]
+          ]
+        ]
+      }
+    },
+    "contract_key": "web_workflow.turn"
   }
 }

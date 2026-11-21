@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import asyncio
+import json
+import logging
 from types import SimpleNamespace
 
 import src.skill_server as skill_server
 from src.adapters import attach_domain_result, domain_failure_text, domain_text
 from src.adapters.mcp_sdk import TextContent
+from src.adapters.mcp_results import exception_text
 from src.domain import DomainErrorCode, DomainResult
 
 
@@ -75,6 +78,22 @@ def test_matching_error_code_prefix_remains_backward_compatible() -> None:
 
     assert content[0].text == text
     assert _payload(content[0])["error"]["code"] == "SESSION_NOT_FOUND"
+
+
+def test_legacy_message_hint_never_returns_private_exception_details(caplog) -> None:
+    secret = "https://example.com/download?token=private-token"
+    with caplog.at_level(logging.ERROR):
+        content = exception_text(
+            RuntimeError(secret), logger=logging.getLogger("tests.adapter.failure"),
+            operation="account.read", preserve_message=True,
+        )
+
+    payload = _payload(content[0])
+    assert payload["error"]["code"] == "INTERNAL_ERROR"
+    assert "INTERNAL_ERROR" in content[0].text
+    assert secret not in content[0].text
+    assert secret not in json.dumps(payload)
+    assert secret not in caplog.text
 
 
 def test_compact_session_chat_does_not_mislabel_auth_failure_as_missing_session(monkeypatch) -> None:

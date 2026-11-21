@@ -1,0 +1,6 @@
+{
+  "success": {"nonce": "!fixture_nonce", "context": "fixture_context", "mode": 1, "content": ["fixture", 0, null, null, null, null, 0]},
+  "empty": {"nonce": null, "context": null, "mode": null, "content": []},
+  "rejected": {"nonce": "!fixture_nonce", "context": "fixture_context", "mode": 7, "content": ["fixture", 0, null, null, null, null, 0]},
+  "changed_shape": {"nonce": "!fixture_nonce", "context": "fixture_context", "mode": 1, "content": {"unexpected": "fixture"}}
+}

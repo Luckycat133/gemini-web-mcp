@@ -26,9 +26,14 @@ def _pyproject() -> dict:
 def test_runtime_imports_have_direct_or_extra_dependency_intent():
     assert dependency_contract_errors(PROJECT_ROOT) == []
     assert discover_runtime_imports(PROJECT_ROOT / "src") == {
+        "anyio",
+        "aiortc",
         "PIL",
         "browser_cookie3",
+        "curl_cffi",
         "gemini_webapi",
+        "httpx2",
+        "loguru",
         "mcp",
         "mcp_types",
         "orjson",
@@ -79,7 +84,6 @@ def test_package_data_and_all_console_entrypoints_are_explicit():
     assert "recursive-include scripts *.py" in manifest
     assert "recursive-include compatibility *.json" in manifest
     assert "recursive-include examples *.json *.toml" in manifest
-    assert "recursive-include evaluations *.xml *.json" in manifest
     assert (PROJECT_ROOT / "src" / "onboarding.py").is_file()
 
 

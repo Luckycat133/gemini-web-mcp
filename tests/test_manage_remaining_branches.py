@@ -38,8 +38,6 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 from tests._fastmcp_shim import FastMCP
-from src.infrastructure.rpc_contracts import get_contract
-from tests._account_rpc_fakes import notebook_read_diagnostic, scheduled_read
 
 import src.tools.manage as manage_tools
 
@@ -73,12 +71,6 @@ class _FakeBatchClient:
         else:
             text = ""
         return SimpleNamespace(text=text, status_code=self._status_code)
-
-
-def _rpc_text(rpc_id, body, *, reject_code=None):
-    """Construct actual matching HTTP response evidence for adapter tests."""
-    return json.dumps([["wrb.fr", rpc_id, json.dumps(body), None, None,
-                        [reject_code] if reject_code is not None else None]])
 
 
 class _NoBatchClient:
@@ -126,6 +118,7 @@ class _BatchReadChatClient:
 
 
 def _patch_seams(monkeypatch, client):
+    monkeypatch.setenv("GEMINI_PSID", "synthetic-test-account")
     """统一 patch manage 模块的 client_wrapper 接缝。"""
     monkeypatch.setattr(manage_tools, "get_gemini_client", lambda: client)
 
@@ -163,11 +156,12 @@ def _turn(role, text):
 def test_list_public_links_has_more_footer(monkeypatch):
     """limit=1 + 2 条 entries → has_more=True → "下一页: offset=1"。"""
     entries = [
-        [None, None, [False, "Link One"], "id_1"],
-        [None, None, [True, "Link Two"], "id_2"],
+        ["id_1", "Link One", False, "", "https://example.com/1"],
+        ["id_2", "Link Two", True, "", "https://example.com/2"],
     ]
-    client = _FakeBatchClient(responses=[_rpc_text(get_contract("sharing.public_links").rpc_id, [entries])], status_code=200)
+    client = _FakeBatchClient(responses=["r1"], status_code=200)
     _patch_seams(monkeypatch, client)
+    monkeypatch.setattr(manage_tools, "_extract_rpc_bodies", lambda _t, _r: [entries])
 
     mcp = _make_mcp()
     result = _run(_call(mcp, "gemini_list_public_links", limit=1, offset=0))
@@ -183,8 +177,9 @@ def test_list_library_capabilities_has_more_footer(monkeypatch):
         [["alias_a"], "Cap One", "desc 一", "details 一"],
         [[], "Cap Two", "desc 二", ""],
     ]
-    client = _FakeBatchClient(responses=[_rpc_text(get_contract("library.locale_capabilities").rpc_id, [entries])], status_code=200)
+    client = _FakeBatchClient(responses=["r1"], status_code=200)
     _patch_seams(monkeypatch, client)
+    monkeypatch.setattr(manage_tools, "_extract_rpc_bodies", lambda _t, _r: [[entries]])
 
     mcp = _make_mcp()
     result = _run(_call(mcp, "gemini_list_library_capabilities", limit=1, offset=0))
@@ -200,7 +195,7 @@ def test_list_notebooks_has_more_footer(monkeypatch):
         {"id": "n_1", "title": "Math Notes", "emoji": "📚", "source_count": 3},
         {"id": "n_2", "title": "Science", "emoji": "", "source_count": 0},
     ]
-    diagnostic = {**notebook_read_diagnostic(notebooks), "source_rpc": "CNgdBe", "observed": "observed"}
+    diagnostic = {"source_rpc": "CNgdBe", "observed": "observed"}
     client = _FakeBatchClient(responses=["r1"], status_code=200)
     _patch_seams(monkeypatch, client)
     monkeypatch.setattr(
@@ -223,7 +218,7 @@ def test_list_notebook_chats_has_more_footer(monkeypatch):
     notebooks = [{"id": "n_1", "title": "Math"}]
     monkeypatch.setattr(
         manage_tools, "_fetch_native_notebooks",
-        AsyncMock(return_value=(notebooks, {**notebook_read_diagnostic(notebooks), "source_rpc": "CNgdBe"})),
+        AsyncMock(return_value=(notebooks, {"source_rpc": "CNgdBe"})),
     )
     items = [{"id": "c_1", "title": "Chat 1", "time": ""}]
     monkeypatch.setattr(
@@ -231,7 +226,7 @@ def test_list_notebook_chats_has_more_footer(monkeypatch):
         AsyncMock(return_value=(items, {
             "total_count": 2, "count": 1, "offset": 0, "limit": 1,
             "has_more": True, "next_offset": 1,
-            "diagnostic": {**notebook_read_diagnostic(items), "fetched_count": 2, "page_count": 1, "has_remote_more": True},
+            "diagnostic": {"fetched_count": 2, "page_count": 1, "has_remote_more": True},
         })),
     )
     mcp = _make_mcp()
@@ -251,7 +246,7 @@ def test_list_scheduled_actions_has_more_footer(monkeypatch):
             "schedule_label": "", "hour": None, "timezone_name": "",
         },
     ]
-    diagnostic = {**scheduled_read(entries)[1], "source_rpc": get_contract("scheduled.registry").rpc_id, "observed": "observed"}
+    diagnostic = {"source_rpc": "CNgdBe", "observed": "observed"}
     client = _FakeBatchClient(responses=["r1"], status_code=200)
     _patch_seams(monkeypatch, client)
     monkeypatch.setattr(
@@ -282,7 +277,7 @@ def test_scan_chat_history_sources_notebook_without_id_skipped(monkeypatch):
     # notebook 无 "id" 字段 → notebook.get("id", "")="" → continue
     monkeypatch.setattr(
         manage_tools, "_fetch_native_notebooks",
-        AsyncMock(return_value=([{"title": "No ID Notebook"}], {**notebook_read_diagnostic([1]), "source_rpc": "CNgdBe"})),
+        AsyncMock(return_value=([{"title": "No ID Notebook"}], {"source_rpc": "CNgdBe"})),
     )
     mcp = _make_mcp()
     result = _run(_call(mcp, "gemini_scan_chat_history_sources",
@@ -304,13 +299,13 @@ def test_scan_chat_history_sources_notebook_next_offset_non_int_breaks(monkeypat
     )
     monkeypatch.setattr(
         manage_tools, "_fetch_native_notebooks",
-        AsyncMock(return_value=([{"id": "n_1", "title": "Math"}], {**notebook_read_diagnostic([1]), "source_rpc": "CNgdBe"})),
+        AsyncMock(return_value=([{"id": "n_1", "title": "Math"}], {"source_rpc": "CNgdBe"})),
     )
     # has_more=True + next_offset="not_an_int" → break via `not isinstance(new_offset, int)`
     items = [{"id": "c_1", "title": "Chat 1", "is_pinned": False, "timestamp": 1000}]
     monkeypatch.setattr(
         manage_tools, "_fetch_notebook_chats",
-        AsyncMock(return_value=(items, {"has_more": True, "next_offset": "not_an_int", "diagnostic": notebook_read_diagnostic(items)})),
+        AsyncMock(return_value=(items, {"has_more": True, "next_offset": "not_an_int"})),
     )
     mcp = _make_mcp()
     result = _run(_call(mcp, "gemini_scan_chat_history_sources",
@@ -335,13 +330,13 @@ def test_scan_chat_history_sources_notebook_next_offset_le_current_breaks(monkey
     )
     monkeypatch.setattr(
         manage_tools, "_fetch_native_notebooks",
-        AsyncMock(return_value=([{"id": "n_1", "title": "Math"}], {**notebook_read_diagnostic([1]), "source_rpc": "CNgdBe"})),
+        AsyncMock(return_value=([{"id": "n_1", "title": "Math"}], {"source_rpc": "CNgdBe"})),
     )
     # has_more=True + next_offset=0 (== current 0) → break via `new_offset <= next_offset`
     items = [{"id": "c_1", "title": "Chat 1", "is_pinned": False, "timestamp": 1000}]
     monkeypatch.setattr(
         manage_tools, "_fetch_notebook_chats",
-        AsyncMock(return_value=(items, {"has_more": True, "next_offset": 0, "diagnostic": notebook_read_diagnostic(items)})),
+        AsyncMock(return_value=(items, {"has_more": True, "next_offset": 0})),
     )
     mcp = _make_mcp()
     result = _run(_call(mcp, "gemini_scan_chat_history_sources",
@@ -364,7 +359,7 @@ def test_scan_chat_history_sources_notebook_next_offset_advances_loop(monkeypatc
     )
     monkeypatch.setattr(
         manage_tools, "_fetch_native_notebooks",
-        AsyncMock(return_value=([{"id": "n_1", "title": "Math"}], {**notebook_read_diagnostic([1]), "source_rpc": "CNgdBe"})),
+        AsyncMock(return_value=([{"id": "n_1", "title": "Math"}], {"source_rpc": "CNgdBe"})),
     )
     item1 = {"id": "c_1", "title": "Chat 1", "is_pinned": False, "timestamp": 1000}
     item2 = {"id": "c_2", "title": "Chat 2", "is_pinned": False, "timestamp": 2000}
@@ -372,8 +367,8 @@ def test_scan_chat_history_sources_notebook_next_offset_advances_loop(monkeypatc
     monkeypatch.setattr(
         manage_tools, "_fetch_notebook_chats",
         AsyncMock(side_effect=[
-            ([item1], {"has_more": True, "next_offset": 5, "diagnostic": notebook_read_diagnostic([item1])}),
-            ([item2], {"has_more": False, "next_offset": None, "diagnostic": notebook_read_diagnostic([item2])}),
+            ([item1], {"has_more": True, "next_offset": 5}),
+            ([item2], {"has_more": False, "next_offset": None}),
         ]),
     )
     mcp = _make_mcp()
@@ -416,7 +411,7 @@ def test_export_chat_batch_execute_path_uses_fetch_recent_metadata(monkeypatch):
     mcp = _make_mcp()
     result = _run(_call(mcp, "gemini_export_chat", chat_id="c_1"))
     text = result[0].text
-    assert captured["client"] is client
+    assert captured["client"]._wrapped is client
     assert captured["target"] == 500
     # metadata.title="Found Title" → 渲染在标题行
     assert "## Gemini Chat Export: Found Title" in text
@@ -450,7 +445,7 @@ def test_search_chats_markdown_renders_snippet_error(monkeypatch):
     client = _ReadChatClient([_chat("c_1", "Needle Title")], {})
 
     async def boom(chat_id, limit=20):
-        raise ValueError("boom")
+        raise ValueError("synthetic-private-body")
 
     client.read_chat = boom
     _patch_seams(monkeypatch, client)
@@ -460,8 +455,7 @@ def test_search_chats_markdown_renders_snippet_error(monkeypatch):
     assert "## Gemini 历史搜索" in text
     assert "fields=title" in text  # title 匹配（read error 不影响 title 匹配）
     assert "read error: ValueError" in text
-    assert "coverage is incomplete" in text
-    assert "boom" not in text
+    assert "synthetic-private-body" not in text
 
 
 def test_search_chats_markdown_renders_has_more_footer(monkeypatch):

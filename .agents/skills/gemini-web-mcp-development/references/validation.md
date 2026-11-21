@@ -1,48 +1,111 @@
-# 分层验证与证据记录
+# Validation and MCP v2 Fingerprint Review
 
-当前 checkout 的 `AGENTS.md`、`docs/agent-verification.md` 与测试代码决定真实命令。先检查环境和版本，不能把下面清单的存在当成执行证据。此 Skill 修改本身只需相关文档/脚本检查；未来 runtime 改动再跑相应完整门禁。
+## Evidence already established
 
-## 可直接运行的 Skill 检查
+For reviewed SHA `5c9f53087398f614958acf06d3c9d14f54958c52`, remote CI run
+43433504485 and CodeQL run 43433504654 succeeded. CI includes complete Python
+3.11/3.12 offline suites, targeted contracts, profile/stdio smoke, clean-wheel
+and isolated onboarding, Skill validation and direct repository installation.
+The owner also reports local fingerprint/contract/protocol passes. Treat those
+as local evidence until their working-tree revision is identified; do not erase
+local changes or assert the local and remote trees are identical.
+
+No additional runtime or Gemini acceptance follows from this documentation
+review. Reuse unchanged gates at the same revision/environment; rerun affected
+gates after behavior changes. Do not hardcode volatile passing-test counts.
+
+## Fingerprint contract: what is and is not checked
+
+`scripts/snapshot_mcp_v2_contract.py` imports each surface in a credential-stripped
+subprocess with browser loading and refresh disabled. It records format 1,
+SDK major 2 and these five keys:
+
+- `primary:model`: `src.server`, explicit model profile;
+- `compact`: `src.skill_server`, model profile;
+- `account`, `function`, `assist`: their dedicated modules.
+
+Each tool entry contains name and SHA-256 of canonical input schema, output
+schema and annotations. Tools are sorted by name. Descriptions, original
+registration order, server instructions, semantic behavior and provider
+availability are NOT covered by this hash. Test those separately.
+
+`tests/fixtures/mcp_v2_tool_contract.json` is the reviewed expected snapshot;
+`tests/test_mcp_sdk_v2.py` compares it and validates structured results. The
+adapter's conservative SDK-label compaction does not authorize removal of schema
+constraints or changing the business envelope to force a match.
+
+### Deliberate refresh procedure
+
+1. Capture checkout SHA/dirty diff, Python, `mcp`, `mcp-types`, Pydantic and provider
+   SDK versions. Identify whether drift comes from code, dependencies or compaction.
+2. Build a temporary candidate, NOT directly over the checked-in fixture:
 
 ```bash
-SKILL_DIR=.agents/skills/gemini-web-mcp-development
-python "$SKILL_DIR/scripts/plan.py" check
-python "$SKILL_DIR/scripts/test_plan.py"
-skills-ref validate "$SKILL_DIR"
+CANDIDATE=$(mktemp)
+python scripts/snapshot_mcp_v2_contract.py > "$CANDIDATE"
+diff -u tests/fixtures/mcp_v2_tool_contract.json "$CANDIDATE"
+```
+
+3. For each changed digest, inspect actual old/new schemas and annotations. State
+   changed defaults, required fields, unions, side effects and consumer impact.
+   An unchanged digest is not evidence that descriptions or runtime stayed equal.
+4. Only for reviewed intentional changes, copy the candidate to the fixture;
+   otherwise fix the regression. Never regenerate every golden after a failure.
+5. Run SDK adapter/schema tests, both surface tests, profile/protocol smoke and
+   the affected business tests. Broader runtime/release changes use the full gates.
+
+For documentation-only changes do not regenerate MCP fingerprints.
+
+## Protocol and domain-result semantics
+
+Real smoke uses SDK Client `mode=auto` (2026-07-28) and `mode=legacy`
+(2025-11-25), catalog discovery and representative auth-free calls. Test the
+unset-profile Function default separately from explicit model/core profiles.
+
+The current content-block tools use `structuredContent.result[...]`; domain-backed
+blocks carry `_meta.domain_result`. The smoke explicitly tests some
+`INVALID_ARGUMENT`/`AUTH_REQUIRED` rejections as protocol-complete non-error
+responses with domain `ok=false`. Do not conflate transport completion with job
+completion, or silently switch to direct `DomainResult` output/isError behavior.
+If improving this design, add a versioned migration and positive/negative tests.
+
+Source-level unit tests and `tests._fastmcp_shim` do not prove transport. Protocol
+smoke is not a real generation, account read, or downstream file-use test.
+
+## Boundary-specific checks
+
+| Change | First checks / required evidence |
+| --- | --- |
+| Skill/docs/plan | development Skill tests, plan integrity and checker regressions, references, metadata, whitespace |
+| Catalog/schema/annotations | `test_function_surface.py`, `test_account_surface.py`, `test_mcp_sdk_v2.py`, profile and real stdio smoke |
+| Detached work / stores | `test_background_operations.py`, `test_operation_store.py`, `test_operations.py`, relevant media/Task/Research tests, real multi-process fault cases |
+| Exact session recovery | `test_session_sdk_recovery.py`, `test_session_cleanup_guards.py`, relevant chat tests |
+| Task answers/files | `test_task_jobs.py`, `test_task_files.py`, input/setup/confirmation regressions; goal, original reply and attachment inventory |
+| Cleanup / account fence | cleanup store/runtime, owned-cleanup, account-read/mutation fencing, schedule guards and identity migrations |
+| Browser actions/preferences | browser session/turn/retry/action-store and preference tests; no auto-approval or input replay |
+| Release migration | old input/output adapters, old database fixtures, explicit refusal/rollback; current tests alone cannot cover deleted capabilities |
+| Package/client | clean installed wheel, all advertised entrypoints, resources, protocol eras and isolated onboarding |
+
+Re-read `scripts/run_contract_checklist.py` for maintained exact filenames before
+invoking them. Never invent test paths for removed services.
+
+## Documentation and plan checks
+
+```bash
+python -m pytest -q tests/test_development_skill.py
+python .agents/skills/gemini-web-mcp-development/scripts/plan.py check
+python .agents/skills/gemini-web-mcp-development/scripts/test_plan.py
+skills-ref validate .agents/skills/<skill-name>
 git diff --check
 ```
 
-`skills-ref` 需按 SK01 的官方工具安装；不可用时明确报告未运行，不用自制格式检查冒充官方结果。内置检查器验证任务 DAG、case/source 映射、链接和进度，不依赖 Gemini/MCP/网络。初始进度：
+Use the actual Skill name in the validator command. The plan checker verifies
+references, case ownership, version agreement and evidence-file integrity; it
+cannot establish runtime truth. Its `--complete` target means the whole declared
+backlog, not merely current dual-surface protocol smoke. Rebase old private
+progress without inventing new passing receipts.
 
-```bash
-python "$SKILL_DIR/scripts/plan.py" init --progress "$PRIVATE_RUN_DIR/progress.json"
-python "$SKILL_DIR/scripts/plan.py" next --progress "$PRIVATE_RUN_DIR/progress.json"
-python "$SKILL_DIR/scripts/plan.py" check-progress \
-  --progress "$PRIVATE_RUN_DIR/progress.json" --evidence-root "$PRIVATE_RUN_DIR"
-```
-
-`PRIVATE_RUN_DIR` 由执行者指定仓库外私有目录，不是固定机器路径。init 拒绝覆盖。每包记录 status、revision、implementation、blocker 和 evidence；不要把包含账号信息的进度推到公开仓库。
-
-状态：planned→active→implemented→accepted。blocked 表示不能继续的具体依赖；缺少在线验收但代码和非在线门禁已完成时保持 implemented，并在 evidence 中记录 blocked。implemented 必须有提交 SHA、实现说明和该包要求的 docs/offline 通过证据；accepted 还需全部门禁及已 accepted 依赖。
-
-证据条目格式：
-
-```json
-{
-  "case": "A01", "gate": "docs", "result": "passed",
-  "revision": "<40-character-implementation-commit-SHA>",
-  "at": "2026-11-07T12:00:00Z",
-  "report": "reports/P00-A01-docs.json", "sha256": "<64-character-report-SHA256>"
-}
-```
-
-report 是 evidence-root 内的 JSON，包含与条目相同的 case/gate/result/revision/at，以及非空 `scope` 字符串数组、`checks` 数组（每项 `name`、`result`）。另记录 command、environment、客户端/依赖版本、独立 oracle、产物校验及清理摘要。passed report 的每项 check 都必须 passed。敏感原始数据另存，不嵌进此记录。
-
-同 case/gate 可追加多次记录，保留失败历史；以当前 revision 下最新时间结果为准，时间相同的冲突拒绝。修改实现后重新测试，不能把旧 revision 的通过记录搬过来。`--complete` 强制读取报告并校验 hash、全部 required case/gate 与依赖状态。
-
-最后的 A52 先记录独立证据审计，再运行 `--complete`，保存检查器输出作附加收据；不要产生“必须先有本次 checker 成功报告才能运行 checker”的循环。检查器只验证记录与文件一致，不证明测试诚实、账号可用或覆盖了所有参数。人工审核覆盖账本与真实结果仍是硬门。
-
-## Runtime 门禁
+## Full gates for broad runtime changes / release readiness
 
 ```bash
 python -m ruff check src tests scripts
@@ -51,27 +114,59 @@ python -m pytest -q
 python scripts/run_contract_checklist.py
 python scripts/smoke_profiles.py
 python scripts/smoke_mcp_protocol.py
-```
-
-先跑变化涉及的 test_*.py；广泛 runtime/协议变更跑全部门禁。不要凭历史测试总数验收。每个 RPC parser 覆盖成功、合法空、拒绝、变形、身份错配与多 envelope；不把 all-mock suite 当兼容上游。
-
-持久化使用真实 SQLite 临时数据库和两个进程，不只 mock：迁移、并发 reserve、payload 冲突、租约丢失、late callback、账号变更、磁盘满/权限错误、过期、提交未知窗口与 SIGKILL。图片/音视频完整解码；文件用独立格式 reader；远端变更用新读回而非旧缓存或同一 ack。
-
-协议测试走真实 SDK stdio：实际 discover/initialize、list/call、input/outputSchema、structuredContent/text、annotations、pagination、错误与超时。新生成面和现有五面都需适用兼容检查。golden 更新说明语义原因，不能批量覆盖掩盖回归。
-
-## 在线门禁
-
-live 从不在 PR CI 自动跑。先核对既有授权、账号类别、配额预算、资源范围与清理责任。完整 canary 使用 `gemini-live-canary` 专用账号/environment，遵守 `scripts/run_live_canary.py` 的 flag 与两个 opt-in 变量；用脚本实际 --help 确认选项。日常账号有界手测单列，不冒充 full canary。
-
-逐项运行 acceptance.md 并展开 capabilities×actions×被支持 selector/input 类的子项。账号不可用、无权限或上游退役记录原因和当前证据；不能通过扩大权限或制造数百次请求来求通过。只清理由本轮明确拥有且已授权删除的资源，用精确 ID 和新读回对账；不能用标题相似性扫删私人历史。
-
-录制/MFA/登录/付款/共享同意由用户完成。公开源码/帮助不能证明实际账号结果。收据不包含 Cookie、headers、prompt、对话正文、私密 ID、签名媒体 URL 或原始 HAR。
-
-## 包和真实客户端门禁
-
-```bash
 python scripts/package_release.py --outdir dist
 python scripts/check_version_consistency.py --artifacts-dir dist
+git diff --check
 ```
 
-在干净环境运行仓库的 `scripts/smoke_installed_wheel.py`，用实际 --help 确认参数；在 checkout 外隔离 uvx onboarding。检查所有 runtime Skill 资产和新入口，安装后实际读 package data。客户端配置解析、SDK 协议、真实客户端安装、真实上游调用是四种不同证据；每个宣称支持的 OS/客户端组合单独记录。
+Run installed-wheel smoke outside the checkout, including `pip check`, real
+entrypoints/resources and both protocol eras. Test isolated source installation:
+
+```bash
+REVIEWED_SHA=replace-with-reviewed-40-character-commit
+SOURCE="git+https://github.com/Luckycat133/gemini-web-mcp@${REVIEWED_SHA}"
+uvx --from "$SOURCE" gemini-mcp-onboarding
+```
+
+Do not install from the superseded 20261101 branch in new examples. Current
+0.2.1 metadata reflects the development source, not permission to overwrite a
+published release. Preserve all published tags, including v0.2.0/v0.2.1/v0.2.2.
+
+## Recovery acceptance beyond schema hashes
+
+Exercise server disconnect and actual worker termination separately, at reserve,
+submission, locator capture, save, manifest and cleanup boundaries. Assert no
+additional provider start, correct account and original reply identity, protection
+of uncertain results, and verification of complete local files after restart.
+Missing/corrupt files stay partial/unavailable; source loss does not enable replay.
+
+Status must not become a hidden result read. Result may resume observation and
+cleanup under the stored policy; its annotations and tests must reflect that.
+Ordinary sessions are process-local until a new durable-session feature passes
+A10. Same-handle reuse is not request-content equivalence. No public cancel is
+claimed. Retention tests include protected-operation exceptions and account change.
+
+## Agent-use, live and installed acceptance
+
+Maintain positive trigger evaluations and near-miss negative cases, plus real
+end-to-end tasks described in tool-design.md. Test verified artifact downstream
+handoff, not just printed paths. Optional protocol-native MCP Tasks would require
+separate negotiation; they are not Gemini's native Task or detached workers.
+
+A bounded 2026-08-08 or later dated account run proves only its own scope. Current
+claims need explicitly authorized bounded MCP calls on the evaluated commit.
+Never expose credentials/raw private content in reports, exhaust real quota for
+a negative test or silently consume the paid video API. Track all owned resources
+and verify cleanup; do not delete unrelated user content.
+
+The full canary's dedicated-account/environment and opt-in gates remain intact.
+A skipped canary is not passed live evidence. Report fixture, offline, protocol,
+package, agent and live results separately, with command, revision and dependencies.
+
+## Primary standards checked for this review
+
+- [MCP 2026-07-28 tools](https://modelcontextprotocol.io/specification/2026-07-28/server/tools): structured-content/schema and tool semantics; check the matching legacy version too.
+- [Agent Skills specification](https://agentskills.io/specification): frontmatter, progressive disclosure and portable relative references.
+
+These standards inform the review; the repository's explicit current compatibility
+behavior must still be migrated deliberately rather than silently rewritten.

@@ -3,18 +3,73 @@
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable, Sequence
+from contextlib import contextmanager
+from contextvars import ContextVar
+import inspect
+import sqlite3
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Iterator
 
 from ..domain import DomainErrorCode, DomainResult, DomainWarning, OperationState
-from ..infrastructure.rpc_contracts import RawRPCData, execute_contract, get_contract
+from ..infrastructure.account_identity import current_account_key
+from ..infrastructure.rpc_contracts import execute_contract, get_contract
 from ..infrastructure.rpc_parsers import parse_contract_body, parse_rpc_envelope
 
 
-_DELETION_HISTORY_FILTERS: tuple[tuple[object, ...], ...] = (
-    (False, None, True),
-    (True, None, True),
-)
+_read_account: ContextVar[str | None] = ContextVar("gemini_history_read_account", default=None)
+
+
+def check_account_read() -> None:
+    owner = _read_account.get()
+    if owner and current_account_key() != owner:
+        raise PermissionError("Gemini account changed or is unavailable.")
+
+
+@contextmanager
+def account_read_scope(owner: str) -> Iterator[None]:
+    token = _read_account.set(owner)
+    try:
+        check_account_read()
+        yield
+        check_account_read()
+    finally:
+        _read_account.reset(token)
+
+
+class _AccountReadClient:
+    def __init__(self, client: Any):
+        self._wrapped = client
+
+    def __getattr__(self, name: str) -> Any:
+        value = getattr(self._wrapped, name)
+        if not callable(value):
+            check_account_read()
+            return value
+        def call(*args: Any, **kwargs: Any) -> Any:
+            check_account_read()
+            result = value(*args, **kwargs)
+            if inspect.isawaitable(result):
+                async def checked() -> Any:
+                    try:
+                        check_account_read()
+                    except Exception:
+                        if inspect.iscoroutine(result):
+                            result.close()
+                        raise
+                    try:
+                        output = await result
+                    finally:
+                        check_account_read()
+                    return output
+                return checked()
+            check_account_read()
+            return result
+        return call
+
+
+def bind_account_read_client(client: Any) -> Any:
+    return _AccountReadClient(client) if _read_account.get() else client
+
 
 
 def format_timestamp(timestamp: object) -> str:
@@ -95,6 +150,27 @@ def chat_to_dict(chat: object) -> dict[str, Any]:
     }
 
 
+def compact_history_payload(action: str, payload: dict[str, Any]) -> dict[str, Any]:
+    """Keep actionable identities and pagination; omit repeated metadata prose."""
+    if action not in {"list", "search", "read"}:
+        return payload
+    keys = ("chat_id", "query", "count", "match_count", "scanned_count", "total_count",
+            "offset", "limit", "has_more", "next_offset", "scan_turns", "turns")
+    result = {key: payload[key] for key in keys if key in payload}
+    diagnostic = payload.get("diagnostic")
+    if isinstance(diagnostic, dict):
+        coverage = {key: diagnostic[key] for key in ("source", "source_rpc", "fetched_count", "has_remote_more")
+                    if key in diagnostic}
+        coverage["scope"] = "current_metadata_page" if action == "search" else "fetched_metadata"
+        result["coverage"] = coverage
+    items_key = "matches" if action == "search" else "items"
+    if items_key in payload:
+        fields = ("id", "title", "is_pinned", "matched_fields", "snippets")
+        result[items_key] = [{key: item[key] for key in fields if key in item}
+                             for item in payload[items_key]]
+    return result
+
+
 def normalize_chat_item(chat: object) -> dict[str, Any]:
     """Normalize object/mapping history records while preserving observed fields."""
     normalized = dict(chat) if isinstance(chat, dict) and "id" in chat else {}
@@ -103,116 +179,6 @@ def normalize_chat_item(chat: object) -> dict[str, Any]:
         canonical["time"] = str(normalized["time"])
     normalized.update(canonical)
     return normalized
-
-
-class HistoryMetadataReadError(RuntimeError):
-    """Carry safe typed read-back failure through legacy metadata loaders."""
-
-    def __init__(self, result: DomainResult[dict[str, Any]]) -> None:
-        self.result = result
-        super().__init__("History metadata read-back could not be verified.")
-
-
-def history_metadata_failure(diagnostic: dict[str, Any]) -> DomainResult[dict[str, Any]]:
-    code = DomainErrorCode.UPSTREAM_REJECTED if diagnostic.get("reject_code") is not None else DomainErrorCode.UPSTREAM_CHANGED
-    return DomainResult.failure(code, "The history metadata response could not be verified.",
-                                verification_status="read_back_unavailable", details=diagnostic)
-
-
-async def read_history_metadata_page(
-    client: Any, *, contract_key: str = "history.page", **arguments: Any,
-) -> DomainResult[dict[str, Any]]:
-    contract = get_contract(contract_key)
-    response = await execute_contract(client, contract.key, **arguments)
-    response_text = str(getattr(response, "text", "") or "")
-    envelope = parse_rpc_envelope(response_text, contract.rpc_id)
-    diagnostic = {"contract_key": contract.key, "status_code": getattr(response, "status_code", None),
-                  "reject_code": envelope.reject_code, "response_length": len(response_text)}
-    if diagnostic["status_code"] == 200 and envelope.parsed and envelope.reject_code is None and envelope.single_body:
-        body = envelope.bodies[0]
-        parsed = parse_contract_body(contract, body)
-        diagnostic["parser_status"] = parsed.status
-        token = body[1] if isinstance(body, list) and len(body) > 1 else None
-        if parsed.ok and not parsed.warnings and isinstance(parsed.value, list) and (token is None or isinstance(token, str)):
-            return DomainResult.success({"items": parsed.value, "continuation": token},
-                                        verification_status="observed", details=diagnostic)
-    return history_metadata_failure(diagnostic)
-
-
-async def fetch_history_metadata(client: Any, target_count: int) -> DomainResult[dict[str, Any]]:
-    """Refresh both history buckets, keeping cache-only compatibility explicit."""
-    if not hasattr(client, "_batch_execute"):
-        if not hasattr(client, "list_chats"):
-            return DomainResult.failure(DomainErrorCode.CAPABILITY_UNAVAILABLE,
-                                        "The current client cannot list history metadata.",
-                                        verification_status="capability_unavailable")
-        cached = list(client.list_chats() or [])
-        return DomainResult.success({"items": cached, "diagnostic": {
-            "source": "client_cache", "fetched_count": len(cached), "has_remote_more": False,
-        }}, verification_status="observed")
-    target_count = clamp_int(target_count, default=50, minimum=1, maximum=5000)
-    combined: dict[str, dict[str, Any]] = {}
-    more = False
-    for pinned in (True, False):
-        token: str | None = None
-        seen_tokens: set[str] = set()
-        count = 0
-        while count < target_count:
-            result = await read_history_metadata_page(
-                client, filter_payload=[pinned, None, True],
-                page_size=min(max(target_count, 10), 100), next_page_token=token,
-            )
-            if not result.ok:
-                return result
-            assert result.data is not None
-            entries = result.data["items"]
-            for item in entries:
-                previous = combined.get(item["id"])
-                if previous is not None and any(previous.get(key) != item.get(key) for key in ("title", "is_pinned")):
-                    return DomainResult.failure(
-                        DomainErrorCode.UPSTREAM_CHANGED,
-                        "The history pages returned conflicting metadata for the same chat.",
-                        retryable=True, suggested_action="Refresh the history metadata before relying on this state.",
-                        verification_status="metadata_conflict", details={"conflicting_record_count": 1},
-                    )
-                combined.setdefault(item["id"], item)
-            count += len(entries)
-            token = result.data["continuation"]
-            if not token or not entries:
-                break
-            if token in seen_tokens:
-                more = True
-                break
-            seen_tokens.add(token)
-        more = more or bool(token)
-    items = list(combined.values())
-    return DomainResult.success({"items": items, "diagnostic": {
-        "source": "history.page", "has_remote_more": more,
-        "max_offset": 5000, "fetched_count": len(items),
-    }}, verification_status="observed")
-
-
-def _remote_pagination(pagination: dict[str, Any], diagnostic: dict[str, Any]) -> tuple[DomainWarning, ...]:
-    next_offset = pagination["offset"] + pagination["count"]
-    max_offset = diagnostic.get("max_offset")
-    more_records = bool(diagnostic.get("has_remote_more") or pagination["has_more"])
-    bounded = more_records and isinstance(max_offset, int) and next_offset > max_offset
-    if not bounded:
-        if not diagnostic.get("has_remote_more") or pagination["has_more"]:
-            return ()
-        if pagination["count"] > 0:
-            pagination["has_more"] = True
-            pagination["next_offset"] = next_offset
-            return ()
-    if not more_records:
-        return ()
-    pagination.update(has_more=False, next_offset=None)
-    diagnostic.update(coverage_complete=False, stopped_reason="source_bound_reached")
-    return (DomainWarning(
-        "HISTORY_SOURCE_INCOMPLETE",
-        "The bounded history source has more remote records, but this page cannot advance.",
-        "Use the deeper history metadata scan with a larger source bound.",
-    ),)
 
 
 def list_chats_result(
@@ -234,27 +200,15 @@ def list_chats_result(
             "has_remote_more": False,
         }
     )
-    warnings = _remote_pagination(pagination, observed)
+    if observed.get("has_remote_more") and not pagination["has_more"]:
+        pagination["has_more"] = True
+        pagination["next_offset"] = pagination["offset"] + pagination["count"]
     payload = {**pagination, "items": page, "diagnostic": observed}
     return DomainResult.success(
         payload,
-        operation_state=OperationState.PARTIAL if warnings else OperationState.COMPLETED,
-        warnings=warnings,
-        verification_status="bounded_incomplete" if warnings else "observed",
+        verification_status="observed",
         details={"source": observed.get("source") or observed.get("source_rpc") or "unknown"},
     )
-
-
-async def list_chat_history_result(
-    client: Any, limit: int, offset: int, *, max_limit: int = 50,
-) -> DomainResult[dict[str, Any]]:
-    target = clamp_int(limit, default=10, minimum=1, maximum=max_limit) + clamp_int(offset, 0, 0, 5000)
-    fetched = await fetch_history_metadata(client, target)
-    if not fetched.ok:
-        return fetched
-    assert fetched.data is not None
-    return list_chats_result(fetched.data["items"], limit, offset,
-                             diagnostic=fetched.data["diagnostic"], max_limit=max_limit)
 
 
 def turn_to_dict(turn: object, max_chars: int) -> dict[str, str]:
@@ -320,8 +274,6 @@ async def search_chats_result(
     max_chars_per_turn: int = 1000,
     diagnostic: dict[str, Any] | None = None,
     max_limit: int = 50,
-    max_turns_per_chat: int = 50,
-    max_chars: int = 4000,
 ) -> DomainResult[dict[str, Any]]:
     """Search one source page and expose the same typed contract to both adapters."""
     needle = str(query or "").strip()
@@ -350,14 +302,14 @@ async def search_chats_result(
             "has_remote_more": False,
         }
     )
-    warnings = list(_remote_pagination(pagination, observed))
+    if observed.get("has_remote_more") and not pagination["has_more"]:
+        pagination["has_more"] = True
+        pagination["next_offset"] = pagination["offset"] + pagination["count"]
 
-    safe_turn_limit = clamp_int(turns_per_chat, default=20, minimum=1, maximum=max_turns_per_chat)
-    safe_chars = clamp_int(max_chars_per_turn, default=1000, minimum=100, maximum=max_chars)
+    safe_turn_limit = clamp_int(turns_per_chat, default=20, minimum=1, maximum=50)
+    safe_chars = clamp_int(max_chars_per_turn, default=1000, minimum=100, maximum=4000)
     lowered = needle.lower()
     matches: list[dict[str, Any]] = []
-    read_failures: list[dict[str, str]] = []
-    content_read_count = 0
 
     for item in page:
         fields: list[str] = []
@@ -375,13 +327,8 @@ async def search_chats_result(
                     safe_turn_limit,
                     safe_chars,
                 )
-                if _history is None:
-                    raise RuntimeError("Chat content was not returned")
-                content_read_count += 1
             except Exception as error:
-                failure = {"chat_id": item["id"], "error_type": type(error).__name__}
-                read_failures.append(failure)
-                snippets.append({"error": failure["error_type"]})
+                snippets.append({"error": type(error).__name__})
                 turns = []
             for index, turn in enumerate(turns, 1):
                 if turn_matches_query(turn, needle):
@@ -400,21 +347,6 @@ async def search_chats_result(
                 match["snippets"] = snippets[:5]
             matches.append(match)
 
-    if scan_turns:
-        missing_ids = [item for item in page if not item["id"]]
-        read_failures.extend({"chat_id": "", "error_type": "MissingChatID"} for _item in missing_ids)
-        observed.update(
-            content_read_count=content_read_count,
-            content_read_failure_count=len(read_failures),
-            content_scan_complete=not read_failures,
-        )
-    if read_failures:
-        warnings.append(DomainWarning(
-            "HISTORY_CONTENT_READ_FAILED",
-            "Some chat contents could not be read; content search coverage is incomplete.",
-            "Retry the failed chat IDs before concluding that no content matches exist.",
-        ))
-
     payload = {
         "query": needle,
         "scan_turns": scan_turns,
@@ -425,43 +357,10 @@ async def search_chats_result(
         "diagnostic": observed,
         "note": "正文搜索只会在 scan_turns=true 时读取当前页聊天内容。",
     }
-    if read_failures:
-        payload["read_failures"] = read_failures
-        if content_read_count == 0:
-            return DomainResult.failure(
-                DomainErrorCode.VERIFICATION_FAILED,
-                "No chat content on the requested page could be read for content search.",
-                data=payload, retryable=True, warnings=warnings,
-                verification_status="content_scan_failed",
-                suggested_action="Retry the failed chat reads before relying on content search results.",
-                details={"source": observed.get("source") or observed.get("source_rpc") or "unknown"},
-            )
     return DomainResult.success(
         payload,
-        operation_state=OperationState.PARTIAL if warnings else OperationState.COMPLETED,
-        warnings=warnings,
-        verification_status="content_scan_incomplete" if read_failures else "bounded_incomplete" if warnings else "observed",
+        verification_status="observed",
         details={"source": observed.get("source") or observed.get("source_rpc") or "unknown"},
-    )
-
-
-async def search_chat_history_result(
-    client: Any, query: str, limit: int, offset: int, *, scan_turns: bool = False,
-    turns_per_chat: int = 20, max_chars_per_turn: int = 1000, max_limit: int = 50,
-    max_turns_per_chat: int = 50, max_chars: int = 4000,
-) -> DomainResult[dict[str, Any]]:
-    if not str(query or "").strip() or (scan_turns and not hasattr(client, "read_chat")):
-        return await search_chats_result(client, [], query, limit, offset, scan_turns=scan_turns)
-    target = clamp_int(limit, default=10, minimum=1, maximum=max_limit) + clamp_int(offset, 0, 0, 5000)
-    fetched = await fetch_history_metadata(client, target)
-    if not fetched.ok:
-        return fetched
-    assert fetched.data is not None
-    return await search_chats_result(
-        client, fetched.data["items"], query, limit, offset,
-        scan_turns=scan_turns, turns_per_chat=turns_per_chat, max_chars_per_turn=max_chars_per_turn,
-        diagnostic=fetched.data["diagnostic"], max_limit=max_limit,
-        max_turns_per_chat=max_turns_per_chat, max_chars=max_chars,
     )
 
 
@@ -535,7 +434,7 @@ async def export_chat_result(
                         metadata = item
                         break
             except Exception as error:
-                metadata["metadata_warning"] = f"{type(error).__name__}: {error}"
+                metadata["metadata_warning"] = type(error).__name__
 
     payload = chat_export_payload(
         normalized_chat_id,
@@ -564,6 +463,10 @@ def _deletion_payload(chat_id: str, deleted: bool | None, status: str, source: s
 async def delete_chat_result(
     client: object,
     chat_id: str,
+    *,
+    expected_account: str | None = None,
+    account_key_provider: Callable[[], str | None] = current_account_key,
+    reconcile_owned_cleanup: bool = False,
 ) -> DomainResult[dict[str, Any]]:
     """Request deletion and distinguish accepted work from positive read-back evidence."""
     normalized_chat_id = str(chat_id or "").strip()
@@ -582,7 +485,22 @@ async def delete_chat_result(
             verification_status="capability_unavailable",
         )
 
-    await client.delete_chat(normalized_chat_id)  # type: ignore[attr-defined]
+    owner = expected_account or account_key_provider()
+    def account_failure() -> DomainResult[dict[str, Any]]:
+        return DomainResult.failure(DomainErrorCode.AUTH_REQUIRED, "Gemini account changed or is unavailable.",
+                                    verification_status="account_mismatch")
+    if not owner or account_key_provider() != owner:
+        return account_failure()
+    from ..thinking_client import mutation_scope
+    try:
+        with mutation_scope(owner=owner, account_key_provider=account_key_provider):
+            await client.delete_chat(normalized_chat_id)  # type: ignore[attr-defined]
+    except Exception:
+        if account_key_provider() != owner:
+            return account_failure()
+        raise
+    if account_key_provider() != owner:
+        return account_failure()
     if not hasattr(client, "_batch_execute"):
         return DomainResult.success(
             _deletion_payload(normalized_chat_id, None, "not_available", None),
@@ -592,37 +510,53 @@ async def delete_chat_result(
         )
 
     try:
-        absent, observation_details = await observe_chat_absence(client, normalized_chat_id)
+        absent, observation_details = await observe_chat_absence(client, normalized_chat_id,
+                                                                  expected_account=owner,
+                                                                  account_key_provider=account_key_provider)
+        if account_key_provider() != owner:
+            return account_failure()
     except Exception as error:
+        if account_key_provider() != owner:
+            return account_failure()
         return DomainResult.failure(
             DomainErrorCode.VERIFICATION_FAILED,
             "The chat deletion request returned, but read-back verification failed.",
-            data=_deletion_payload(normalized_chat_id, None, "read_back_error", "history.page"),
+            data=_deletion_payload(normalized_chat_id, None, "read_back_error", "history.exact"),
             retryable=True,
             suggested_action="Read the chat again before retrying deletion.",
             verification_status="read_back_error",
-            details={"source": "history.page", "error_type": type(error).__name__},
+            details={"source": "history.exact", "error_type": type(error).__name__},
         )
 
     if absent is None:
         return DomainResult.success(
-            _deletion_payload(normalized_chat_id, None, "not_available", "history.page"),
+            _deletion_payload(normalized_chat_id, None, "not_available", "history.exact"),
             operation_state=OperationState.ACCEPTED,
             verification_status="not_available",
             details=observation_details,
         )
 
     if absent:
+        warnings: tuple[DomainWarning, ...] = ()
+        if reconcile_owned_cleanup:
+            from ..client_wrapper import _cleanup_manager
+
+            try:
+                _cleanup_manager.record_explicit_verified_absence(normalized_chat_id, expected_account=owner)
+            except (OSError, sqlite3.Error):
+                warnings = (DomainWarning(code="cleanup_ledger_unverified",
+                                          message="The chat is absent, but its local cleanup ledger could not be updated."),)
         return DomainResult.success(
-            _deletion_payload(normalized_chat_id, True, "verified_absent", "history.page"),
+            _deletion_payload(normalized_chat_id, True, "verified_absent", "history.exact"),
             verification_status="verified_absent",
             details=observation_details,
+            warnings=warnings,
         )
 
     return DomainResult.failure(
         DomainErrorCode.VERIFICATION_FAILED,
         "The chat is still readable after the deletion request.",
-        data=_deletion_payload(normalized_chat_id, False, "still_present", "history.page"),
+        data=_deletion_payload(normalized_chat_id, False, "still_present", "history.exact"),
         retryable=True,
         suggested_action="Retry later or inspect the chat before issuing another deletion request.",
         verification_status="still_present",
@@ -634,82 +568,35 @@ async def observe_chat_absence(
     client: object,
     chat_id: str,
     *,
-    page_size: int = 100,
-    max_pages_per_source: int = 50,
+    expected_account: str | None = None,
+    account_key_provider: Callable[[], str | None] = current_account_key,
 ) -> tuple[bool | None, dict[str, Any]]:
-    """Check the canonical recent/pinned metadata buckets without treating ``read_chat(None)`` as absence."""
+    """Verify an exact conversation independently of recent, pinned or Notebook lists."""
+    if expected_account and account_key_provider() != expected_account:
+        raise PermissionError("Gemini account changed or is unavailable.")
     if not hasattr(client, "_batch_execute"):
         return None, {"source": None, "complete": False, "reason": "batch_execute_unavailable"}
 
-    contract = get_contract("history.page")
-    safe_page_size = clamp_int(page_size, default=100, minimum=1, maximum=100)
-    safe_max_pages = clamp_int(max_pages_per_source, default=50, minimum=1, maximum=200)
-    page_count = 0
+    contract = get_contract("history.exact")
+    response = await execute_contract(client, contract.key, chat_id=chat_id, limit=1)
+    if expected_account and account_key_provider() != expected_account:
+        raise PermissionError("Gemini account changed or is unavailable.")
+    if getattr(response, "status_code", None) != 200:
+        raise RuntimeError("Exact conversation read-back failed its HTTP status check.")
 
-    for filter_values in _DELETION_HISTORY_FILTERS:
-        next_page_token: str | None = None
-        seen_tokens: set[str] = set()
-        for _page_index in range(safe_max_pages):
-            response = await client._batch_execute(  # type: ignore[attr-defined]
-                [
-                    RawRPCData(
-                        contract.rpc_id,
-                        contract.build_payload(
-                            filter_payload=list(filter_values),
-                            page_size=safe_page_size,
-                            next_page_token=next_page_token,
-                        ),
-                    )
-                ],
-                source_path=contract.source_path,
-                close_on_error=False,
-            )
-            response_text = str(getattr(response, "text", "") or "")
-            if getattr(response, "status_code", None) != 200:
-                raise RuntimeError("History metadata read-back did not return HTTP 200.")
-            envelope = parse_rpc_envelope(response_text, contract.rpc_id)
-            if not envelope.parsed or envelope.reject_code is not None or not envelope.single_body:
-                raise RuntimeError("History metadata read-back did not return a usable RPC envelope.")
+    envelope = parse_rpc_envelope(str(getattr(response, "text", "") or ""), contract.rpc_id)
+    details = {"source": contract.key, "source_rpc": contract.rpc_id, "complete": True}
+    if envelope.parsed and envelope.reject_code == 5 and not envelope.bodies:
+        return True, details
+    if not envelope.parsed or envelope.reject_code is not None or len(envelope.bodies) != 1:
+        raise RuntimeError("Exact conversation read-back did not return a usable RPC envelope.")
 
-            body = envelope.bodies[0]
-            parsed = parse_contract_body(contract, body)
-            if not parsed.ok or not isinstance(parsed.value, list):
-                raise RuntimeError("History metadata read-back changed shape.")
-
-            page_count += 1
-            if any(str(item.get("id") or "") == chat_id for item in parsed.value if isinstance(item, dict)):
-                return False, {
-                    "source": contract.key,
-                    "source_rpc": contract.rpc_id,
-                    "complete": True,
-                    "pages_checked": page_count,
-                }
-
-            next_page_token = (
-                body[1]
-                if isinstance(body, list) and len(body) > 1 and isinstance(body[1], str) and body[1]
-                else None
-            )
-            if next_page_token is None:
-                break
-            if next_page_token in seen_tokens:
-                raise RuntimeError("History metadata read-back repeated a continuation token.")
-            seen_tokens.add(next_page_token)
-        else:
-            return None, {
-                "source": contract.key,
-                "source_rpc": contract.rpc_id,
-                "complete": False,
-                "pages_checked": page_count,
-                "reason": "page_bound_reached",
-            }
-
-    return True, {
-        "source": contract.key,
-        "source_rpc": contract.rpc_id,
-        "complete": True,
-        "pages_checked": page_count,
-    }
+    parsed = parse_contract_body(contract, envelope.bodies[0], chat_id=chat_id)
+    if parsed.status == "success":
+        return False, details
+    if parsed.status == "empty":
+        return None, {**details, "complete": False, "reason": "empty_turns"}
+    raise RuntimeError("Exact conversation read-back changed shape.")
 
 
 def turn_matches_query(turn: dict[str, str], query: str) -> bool:

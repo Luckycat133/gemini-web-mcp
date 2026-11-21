@@ -94,7 +94,8 @@ def handle_error(exception: Exception) -> dict[str, Any]:
     
     # 默认错误处理
     return {
-        "message": str(exception),
+        "message": "请求失败，请查看诊断信息。",
+        "error_type": type(exception).__name__,
         "solution": "未知错误，请检查日志或联系管理员",
         "actionable": False,
         "tool": None
@@ -130,7 +131,7 @@ def wrap_tool_error(func):
         try:
             return await func(*args, **kwargs)
         except Exception as e:
-            logger.error(f"工具执行错误: {e}")
+            logger.error("工具执行错误 error_type=%s", type(e).__name__)
             error_info = handle_error(e)
             return [format_error_response(error_info)]
     return wrapper

@@ -7,7 +7,13 @@ import json
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
+import pytest
+
+from src import client_wrapper
 from src.adapters.mcp_sdk import MCPServer
+from src.infrastructure.account_identity import current_account_key
+from src.infrastructure.cleanup_store import CleanupStore
+from src.remote_chat_cleanup_manager import RemoteChatCleanupManager
 import src.skill_server as skill_server
 import src.tools.manage as manage_tools
 
@@ -25,6 +31,7 @@ def _domain_result(content):
 
 
 def _patch_clients(monkeypatch, client) -> None:
+    monkeypatch.setenv("GEMINI_PSID", "synthetic-test-account")
     monkeypatch.setattr(skill_server, "get_gemini_client", lambda: client)
     monkeypatch.setattr(manage_tools, "get_gemini_client", lambda: client)
     monkeypatch.setattr(skill_server, "initialize_client", AsyncMock())
@@ -43,7 +50,13 @@ async def _primary_content(mcp: MCPServer, name: str, arguments: dict):
 
 def _history_page_response(items: list[object], next_page_token: str | None = None) -> SimpleNamespace:
     body = [None, next_page_token, items]
-    return SimpleNamespace(status_code=200, text=json.dumps([["wrb.fr", "MaZiqc", json.dumps(body), None, None, None, "generic"]]))
+    return SimpleNamespace(text=json.dumps([["wrb.fr", "MaZiqc", json.dumps(body), None, None, None, "generic"]]))
+
+
+def _exact_conversation_response(chat_id: str, *, absent: bool) -> SimpleNamespace:
+    frame = (["wrb.fr", "hNvQHb", None, None, None, [5]] if absent
+             else ["wrb.fr", "hNvQHb", json.dumps([[[[chat_id, "r_fixture"]]]])])
+    return SimpleNamespace(status_code=200, text=json.dumps([frame]))
 
 
 def test_history_list_has_identical_typed_data_on_primary_and_compact(monkeypatch) -> None:
@@ -295,7 +308,7 @@ def test_history_delete_reports_identical_unverified_acceptance_on_both_surfaces
 def test_history_delete_verifies_absence_on_both_surfaces(monkeypatch) -> None:
     client = SimpleNamespace(
         delete_chat=AsyncMock(),
-        _batch_execute=AsyncMock(return_value=_history_page_response([])),
+        _batch_execute=AsyncMock(return_value=_exact_conversation_response("c_delete", absent=True)),
     )
     _patch_clients(monkeypatch, client)
 
@@ -314,19 +327,44 @@ def test_history_delete_verifies_absence_on_both_surfaces(monkeypatch) -> None:
         "deleted": True,
         "verification": {
             "status": "verified_absent",
-            "source": "history.page",
+            "source": "history.exact",
         },
     }
     assert compact[0].text == "Deleted and verified absent: c_delete"
     assert primary[0].text == "已删除并回读确认聊天不存在: c_delete"
 
 
+@pytest.mark.parametrize("compact, absent", [(False, True), (True, True), (False, False)])
+def test_explicit_delete_reconciles_only_the_verified_owned_row(monkeypatch, tmp_path, compact, absent) -> None:
+    client = SimpleNamespace(
+        delete_chat=AsyncMock(),
+        _batch_execute=AsyncMock(return_value=_exact_conversation_response("c_delete", absent=absent)),
+    )
+    _patch_clients(monkeypatch, client)
+    path = tmp_path / "owned.sqlite3"
+    monkeypatch.setattr(client_wrapper, "_cleanup_manager", RemoteChatCleanupManager(
+        store_path=path, account_key_provider=current_account_key,
+    ))
+    ledger = CleanupStore(path)
+    account = current_account_key()
+    assert account is not None
+    for owner in (account, "another-account"):
+        ledger.schedule(owner, "c_delete", 0, "test", retain=True)
+
+    if compact:
+        content = _run(skill_server.history(action="delete", chat_id="c_delete"))
+    else:
+        content = _run(_primary_content(_primary_mcp(), "gemini_delete_chat", {"chat_id": "c_delete"}))
+
+    assert _domain_data(content)["deleted"] is absent
+    assert ledger.get(account, "c_delete")["state"] == ("completed" if absent else "retained")
+    assert ledger.get("another-account", "c_delete")["state"] == "retained"
+
+
 def test_history_delete_fails_closed_when_chat_is_still_present(monkeypatch) -> None:
     client = SimpleNamespace(
         delete_chat=AsyncMock(),
-        _batch_execute=AsyncMock(
-            return_value=_history_page_response([["c_delete", "Still here", False, None, None, [1700000000, 0]]])
-        ),
+        _batch_execute=AsyncMock(return_value=_exact_conversation_response("c_delete", absent=False)),
     )
     _patch_clients(monkeypatch, client)
 
@@ -345,7 +383,7 @@ def test_history_delete_fails_closed_when_chat_is_still_present(monkeypatch) -> 
         "deleted": False,
         "verification": {
             "status": "still_present",
-            "source": "history.page",
+            "source": "history.exact",
         },
     }
     assert _domain_result(compact)["ok"] is False
@@ -376,10 +414,19 @@ def test_history_delete_fails_closed_when_read_back_errors(monkeypatch) -> None:
         "deleted": None,
         "verification": {
             "status": "read_back_error",
-            "source": "history.page",
+            "source": "history.exact",
         },
     }
     assert _domain_result(compact)["error"]["code"] == "VERIFICATION_FAILED"
     assert _domain_result(primary)["error"]["code"] == "VERIFICATION_FAILED"
     assert "private upstream detail" not in compact[0].text
     assert "private upstream detail" not in primary[0].text
+
+
+def test_compact_delete_preserves_auth_required_when_no_data(monkeypatch):
+    from src.domain import DomainErrorCode, DomainResult
+    result = DomainResult.failure(DomainErrorCode.AUTH_REQUIRED, "Gemini authentication is required.")
+    monkeypatch.setattr(skill_server, "_delete_chat_result", AsyncMock(return_value=result))
+    content = _run(skill_server._history_delete_text(object(), "c_fixture"))
+    assert content[0].meta["domain_result"]["error"]["code"] == "AUTH_REQUIRED"
+    assert "authentication" in content[0].text.lower()

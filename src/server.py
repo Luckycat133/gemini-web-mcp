@@ -14,9 +14,10 @@ from .adapters import MCPServer, TextContent, domain_error_boundary, domain_text
 from .client_wrapper import (
     get_cookie_from_browser,
     get_cookie_status,
-    init_cookie_manager_integration,
+    init_startup_infrastructure,
     list_browser_cookie_profiles,
     reset_client_async,
+    server_lifespan,
 )
 from .domain import DomainResult
 from .error_handler import format_error_response, handle_error
@@ -27,7 +28,7 @@ from .services.manifest import (
     tool_manifest_payload as _tool_manifest_payload,
 )
 from .tools import groups_enable_manage, register_tools
-from .tools.annotations import DESTRUCTIVE_REMOTE, MUTATES_LOCAL, READ_ONLY_LOCAL
+from .tools.annotations import READ_ONLY_LOCAL
 
 ResponseFormat = Literal["markdown", "json"]
 
@@ -38,22 +39,25 @@ logger = logging.getLogger(__name__)
 TOOL_GROUPS = os.environ.get("GEMINI_TOOLS", "core").split(",")
 
 mcp = MCPServer(
+    lifespan=server_lifespan,
     name="Gemini Web MCP Server",
     version=__version__,
     instructions=f"""
 # Gemini Web MCP Server (v{__version__})
 
-## 模型与模式
-- flash-lite / flash / pro 保留稳定别名；也接受当前运行时目录名称（如 4 Argon）
-- 先用 gemini_list_models 核对当前账号目录；静态清单不是账号权限证明
-- thinking_level: low / medium / high；standard=low、extended=high 保持兼容
-- thinking 保留为 flash 的旧兼容模型别名
-- task_mode=true 选择网页原生任务；通过 gemini_history(action="task_status", chat_id=...) 读回状态
+## 可用模型
+- flash-lite → Web UI 3.5 Flash-Lite
+- flash / fast → Web UI 3.8 Flash
+- pro → Web UI 3.1 Pro
+- argon → Web UI 4 Argon（仅按运行时注册表解析，不猜测 ID）
+- 默认 Flash；Argon 适合写作、创意和特别困难的推理
+- thinking_level=low/medium/high；standard/extended 兼容低/高；Lite 仅在当前账号基础 Flash 额度耗尽时允许，思考强度不可选
+- thinking 保留为旧兼容别名
 
 ## 工具组（可配置）
 - model/chat: 只调用 Gemini 模型
 - history: 只读历史 list/scan/search/read/export
-- history-organize: 历史重命名/固定 + native Notebook 移动
+- history-organize: 历史整理 + native Notebook 移动
 - account-read: 账号 Web surface 只读盘点
 - scheduled-admin: 明确授权后管理定时操作
 - core: 通用内容工作流，包含聊天、媒体、文件/URL、Deep Research
@@ -76,47 +80,36 @@ Cookie 辅助工具始终可用，不依赖额外工具组。
 """,
 )
 
-# 选择性注册工具组
-register_tools(mcp, TOOL_GROUPS)
+# 选择性注册工具组 — 默认只加载底座（chat/media/file/research）
+# 若 GEMINI_TOOLS 指定了任何按需工具组，则切换为 full 模式
+_register_mode = "full" if groups_enable_manage(TOOL_GROUPS) else "default"
+register_tools(mcp, TOOL_GROUPS, mode=_register_mode)
 
 
 def _tool_groups_include_manage() -> bool:
-    return groups_enable_manage(TOOL_GROUPS)
+    return _register_mode == "full"
 
 
-if not _tool_groups_include_manage():
-
-    @mcp.tool(annotations=READ_ONLY_LOCAL)
-    async def gemini_get_tool_manifest(
-        scope: ManifestScope = "all",
-        response_format: ResponseFormat = "markdown",
-    ) -> list[TextContent]:
-        """
-        返回面向 agent 的 Gemini MCP 工具清单。
-
-        默认 core/prompts 配置也会暴露这个只读入口；manage/all 配置由 manage 工具组注册。
-        """
-        payload = _tool_manifest_payload(scope)
-        if response_format == "json":
-            return [TextContent(type="text", text=json.dumps(payload, ensure_ascii=False, indent=2))]
-        return [TextContent(type="text", text=_format_tool_manifest_markdown(payload))]
+# ── 基础设施工具（仅在 full 模式下向 agent 暴露；default 模式下仅供后台自动化） ──
 
 
-@mcp.tool(annotations=DESTRUCTIVE_REMOTE)
+@mcp.tool(annotations=READ_ONLY_LOCAL)
+async def gemini_get_tool_manifest(
+    scope: ManifestScope = "all",
+    response_format: ResponseFormat = "markdown",
+) -> list[TextContent]:
+    """返回面向 agent 的 Gemini MCP 工具清单。"""
+    payload = _tool_manifest_payload(scope)
+    if response_format == "json":
+        return [TextContent(type="text", text=json.dumps(payload, ensure_ascii=False, indent=2))]
+    return [TextContent(type="text", text=_format_tool_manifest_markdown(payload))]
+
+
+@mcp.tool()
 @domain_error_boundary("gemini_reset", logger)
 async def gemini_reset() -> list[TextContent]:
-    """重置客户端和全部本地会话，并立即删除未设置 retain_chat 的远端聊天。
-
-    已保留聊天不会删除；远端清理失败会返回 partial 和可重试诊断。
-    """
-    reset_result = await reset_client_async()
-    if reset_result is not None:
-        data = reset_result.to_dict()["data"]
-        data["client_state"] = "reset"
-        text = "✅ 客户端已重置"
-        if reset_result.warnings:
-            text += "\n⚠️ 远端聊天清理未完成：" + "；".join(warning.message for warning in reset_result.warnings)
-        return domain_text(reset_result, text, data=data)
+    """重置客户端"""
+    await reset_client_async()
     return domain_text(
         DomainResult.success(
             {"client_state": "reset"},
@@ -127,7 +120,7 @@ async def gemini_reset() -> list[TextContent]:
     )
 
 
-@mcp.tool(annotations=READ_ONLY_LOCAL)
+@mcp.tool()
 async def gemini_doctor(
     browser: str = "chrome",
     validate_browser: bool = False,
@@ -140,7 +133,7 @@ async def gemini_doctor(
     return [TextContent(type="text", text=_format_doctor_markdown(payload))]
 
 
-@mcp.tool(annotations=READ_ONLY_LOCAL)
+@mcp.tool()
 async def gemini_get_cookie_status() -> list[TextContent]:
     """获取 Cookie 状态"""
     status = get_cookie_status()
@@ -150,15 +143,20 @@ async def gemini_get_cookie_status() -> list[TextContent]:
     has_cookie = bool(status.get("has_cookie"))
     needs_refresh = bool(status.get("needs_refresh", False))
     cookie_text = "已设置" if has_cookie else "未设置"
-    refresh_text = "需要刷新" if needs_refresh else "无需刷新"
+    refresh_text = ("需要刷新" if needs_refresh else "无需刷新") if has_cookie else "暂无可刷新凭据"
+    auto_load = status.get("browser_auto_load")
+    auto_load_text = "开启" if auto_load is True else "关闭" if auto_load is False else "未知"
+    auth_reason = status.get("browser_auth_reason")
+    auth_note = f"\n浏览器认证诊断: {auth_reason}" if auth_reason else ""
     return [TextContent(type="text", text=f"""📊 Cookie 状态
-状态: {status.get('status', 'unknown')}
+状态: {status.get('status', 'unknown')}（本地凭据状态）
 Cookie: {cookie_text}
 来源: {status.get('source', 'unknown')}
-刷新: {refresh_text}""")]
+浏览器自动读取: {auto_load_text}
+刷新: {refresh_text}{auth_note}""")]
 
 
-@mcp.tool(annotations=READ_ONLY_LOCAL)
+@mcp.tool()
 async def gemini_list_browser_cookie_profiles(
     browser: str = "chrome",
     validate: bool = True,
@@ -199,7 +197,7 @@ async def gemini_list_browser_cookie_profiles(
         return [format_error_response(error_info)]
 
 
-@mcp.tool(annotations=MUTATES_LOCAL)
+@mcp.tool()
 async def gemini_get_cookie_from_browser(browser: str = "chrome", profile: str = "") -> list[TextContent]:
     """从浏览器获取 Cookie"""
     try:
@@ -208,17 +206,35 @@ async def gemini_get_cookie_from_browser(browser: str = "chrome", profile: str =
             suffix = f" profile={profile}" if profile else ""
             return [TextContent(type="text", text=f"✅ 已从 {browser}{suffix} 获取 Cookie")]
         else:
+            reason = get_cookie_status().get("browser_auth_reason")
+            if reason:
+                return [TextContent(type="text", text=f"❌ 浏览器 Cookie 获取失败 [{reason}]")]
             return [TextContent(type="text", text="❌ 获取失败，请确保浏览器已登录 Gemini 网页版")]
     except Exception as e:
         error_info = handle_error(e)
         return [format_error_response(error_info)]
 
 
+
 def main():
-    """启动服务器"""
+    """启动服务器 — 基础设施后台自动化，AI 只看到默认底座工具。"""
+    if os.environ.get("GEMINI_TOOLS", "function").strip() in {"", "function", "functions"}:
+        from .surfaces.function import main as function_main
+        function_main()
+        return
     logger.info("🚀 启动 Gemini Web MCP Server (v%s)", __version__)
-    logger.info(f"🔧 加载工具组: {', '.join(TOOL_GROUPS)}")
-    init_cookie_manager_integration()
+    logger.info(f"🔧 加载工具组: {', '.join(TOOL_GROUPS)} (mode=default)")
+
+    # ── 基础设施自动化（AI 不可见）──────────────────────────────
+    init_startup_infrastructure()
+
+    # 运行健康预检，异常时仅记录日志，不阻塞启动
+    try:
+        _doctor_payload(browser="chrome", validate_browser=False)
+        logger.info("✅ 基础设施自动化就绪")
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("⚠️ 基础设施自动化部分失败: %s", exc)
+
     mcp.run()
 
 

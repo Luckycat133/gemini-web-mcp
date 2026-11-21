@@ -11,6 +11,8 @@ import asyncio
 from datetime import datetime
 from types import SimpleNamespace
 
+from gemini_webapi.types import Candidate, Citation, ModelOutput
+
 from src.domain import DomainErrorCode, DomainResult
 from src.services import (
     ChatOperationData,
@@ -21,6 +23,8 @@ from src.services import (
     SearchService,
     observed_sources_from_response,
 )
+from src.services.search import observed_sources_from_frames
+from src.infrastructure.rpc_parsers import CandidateSourceEvidence
 
 
 def _response(text="answer text", citations=()):
@@ -36,7 +40,7 @@ def _response(text="answer text", citations=()):
 
 
 class _StubChatService:
-    """Minimal ChatService stand-in; SearchService only calls generate()."""
+    """Minimal ChatService stand-in for the collected-stream workflow."""
 
     def __init__(self, *, response=None, error=None, failure=None):
         self._response = response
@@ -61,6 +65,9 @@ class _StubChatService:
             effective_backend="gemini-3-flash",
             verification_status="upstream_response_received",
         )
+
+    async def generate_stream(self, request: ChatRequest) -> DomainResult[ChatOperationData]:
+        return await self.generate(request)
 
 
 def _search(stub: _StubChatService, **kwargs):
@@ -343,3 +350,37 @@ def test_observed_sources_from_response_keeps_only_unique_http_urls():
 def test_observed_sources_from_response_tolerates_missing_citations():
     assert observed_sources_from_response(_response(citations=[])) == ()
     assert observed_sources_from_response(SimpleNamespace(text="answer")) == ()
+
+
+def test_streamed_sources_preserve_only_the_final_reply_candidate_identity():
+    citation = Citation(id=1, title="NASA", url="https://nasa.gov/artemis")
+    other = Citation(id=2, title="Unrelated", url="https://example.org/unrelated")
+
+    def frame(cid, rid, rcid, citations):
+        return ModelOutput(metadata=[cid, rid], candidates=[Candidate(rcid=rcid, text="answer", citations=citations)])
+
+    early = frame("c_one", "r_one", "rc_one", [citation])
+    wrong_chat = frame("c_other", "r_one", "rc_one", [other])
+    wrong_turn = frame("c_one", "r_other", "rc_one", [other])
+    wrong_candidate = frame("c_one", "r_one", "rc_other", [other])
+    final = frame("c_one", "r_one", "rc_one", [])
+    assert observed_sources_from_frames((early, wrong_chat, wrong_turn, wrong_candidate, final), final) == (
+        ObservedSource(url="https://nasa.gov/artemis", title="NASA"),
+    )
+
+
+def test_streamed_sources_without_identity_do_not_promote_earlier_frames():
+    early = _response(citations=[{"url": "https://example.org/early"}])
+    final = _response(citations=[])
+    assert observed_sources_from_frames((early, final), final) == ()
+
+
+def test_retrieved_sources_remain_answer_only_and_warn_about_unverified_support():
+    selected = Candidate(rcid="r_selected", text="answer")
+    object.__setattr__(selected, "_retrieved_sources", (CandidateSourceEvidence("https://www.python.org/", "Python", "absent", ((0, 6),)),))
+    response = ModelOutput(metadata=["c_search_svc", "r_response"], candidates=[selected])
+    result = _search(_StubChatService(response=response), query="latest release")
+    assert result.data is not None
+    assert result.data.grounding_state is GroundingState.ANSWER_ONLY
+    assert result.data.sources[0].role == "retrieved_only"
+    assert [warning.code for warning in result.warnings] == ["retrieved_sources_unverified"]

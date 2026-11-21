@@ -1,0 +1,20 @@
+{
+  "gemini-mcp-account": {
+    "gemini_account": "6b7dad86e06847e45040864f530bed03396a0c75345aab73b81097a50336d3ba",
+    "gemini_cleanup": "df4d12368c727c5f565d50aa396eca5d85bf5601693cc478364c8cf400e30ece",
+    "gemini_gems": "56e0a487affeab4dece41c28009008695b28b2134057cc2d4dce50a1b8082fc1",
+    "gemini_history": "3c6144631e76da5944189ca888b7f4a10d74d6d85edbf2b443b119bec9f27856",
+    "gemini_notebooks": "9fc1b10ed285163eb5c85ecfff5d8b0fa29ef0b2e6f0ec5030221f718d600a80",
+    "gemini_prompts": "7f5f8679c1913172ba22f0b06933dc7749e18f29092777b252b227255c227832",
+    "gemini_scheduled": "229196ad9adc2ddfd904384d876aa30e30f4fca807858a343bfa4ad78985bca1"
+  },
+  "gemini-mcp-create": {
+    "gemini_cancel_operation": "7f30be74abbe0a12cc33acd5b53239ef8e2ba3bafbdfbfefc7002f9433230030",
+    "gemini_edit_image": "46976b2226313dda4b50fdbc3f819a34a25afcc8ae9e3dd42a232feb7281ddb0",
+    "gemini_generate_image": "448a9e4f9ca9cc247dcfe0fad4d1e567b8163cd309945e643d8912f4ef0ff3ac",
+    "gemini_generate_music": "1271dbc46913977c44cd3d14b9be1fddfaced59fb8b5c2baba2b27f4e7939e04",
+    "gemini_generate_video": "1256940bdaaf933c25188f43190e4ee21c684f04125fff79ed3aa9841e5d226e",
+    "gemini_get_operation_result": "302b6118e8410fbf93b8e29f2f7e5e32c169e5faa73511d18921c82ce925fec7",
+    "gemini_get_operation_status": "e94021c7a57903db3c51a3f1903952821abb3e16385f8980030afd8cb9eaf63f"
+  }
+}

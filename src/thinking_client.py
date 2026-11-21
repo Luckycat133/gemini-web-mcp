@@ -1,44 +1,37 @@
-"""Gemini Web request-scoped selectors and timeout compatibility."""
+"""Gemini Web thinking-level transport compatibility."""
 
 from __future__ import annotations
 
-import asyncio
-import inspect
 from contextlib import contextmanager
 from contextvars import ContextVar
-from dataclasses import dataclass, field, replace
-from typing import Any, AsyncGenerator, Callable, Iterator, Sequence
+from dataclasses import dataclass, replace
+import re
+from typing import Any, AsyncGenerator, Callable, Iterator
 
 import orjson
 from gemini_webapi import GeminiClient
 from gemini_webapi.client import ChatSession
-from gemini_webapi.constants import Endpoint
-from gemini_webapi.types import ModelOutput
+from gemini_webapi.constants import Endpoint, Model, MODEL_HEADER_KEY
+from gemini_webapi.exceptions import UsageLimitExceededError, TimeoutError as SDKTimeoutError
+from gemini_webapi.types import AvailableModel, ModelOutput
+
+from .services.cleanup_scope import observe_upstream_identity
 
 from .constants import (
+    is_generation_failure_reply,
     resolve_learning_mode_config,
-    resolve_model_name,
     resolve_thinking_level_id,
     resolve_thinking_mode_id,
     supported_learning_modes,
 )
-from .domain.conversations import is_valid_remote_chat_id
-from .domain.inputs import NativeAttachment
-from .infrastructure.import_contracts import build_native_attachments
-from .infrastructure.web_request_contracts import (
-    FEATURE_MODE_INDEX,
-    NATIVE_TASK_MODE_ID,
-    TASK_REQUEST_FLAG_INDEX,
-    NativeMediaRequestShapeError,
-    NativeTaskRequestShapeError,
-    NativeToolRequestShapeError,
-    THINKING_LEVEL_INDEX,
-    THINKING_MODE_INDEX,
-    ThinkingRequestShapeError,
-    native_media_mode_id,
-    native_tool_mode_id,
-    synchronize_thinking_headers,
+from .infrastructure.rpc_contracts import (
+    VideoTransportChanged, WebWorkflowTransportChanged, apply_notebook_attachments,
+    apply_task_generation_transport, apply_video_generation_transport,
 )
+from .infrastructure.rpc_parsers import CandidateSourceEvidence, parse_candidate_attribution_sources
+from .infrastructure.account_identity import current_account_key
+from .infrastructure.model_policy_store import ModelPolicyStore
+from .services.model_policy import ModelPolicyError, ModelSelection, current_model_policy
 
 
 @dataclass(frozen=True)
@@ -47,171 +40,84 @@ class WebRequestOptions:
 
     thinking_mode_id: int | None = None
     thinking_level_id: int | None = None
+    thinking_level_name: str | None = None
     learning_mode_id: int | None = None
     learning_x9b_field: str | None = None
     learning_x9b_value: int | None = None
-    media_mode_id: int | None = None
-    task_mode: bool = False
-    tool_mode_id: int | None = None
-    native_attachments: tuple[list[Any], ...] = ()
+    video_generation: bool = False
+    task_generation: bool = False
+    task_conversation_id: str | None = None
+    task_action_choice_id: str | None = None
+    notebooks: tuple[tuple[str, str], ...] = ()
 
 
 _web_request: ContextVar[WebRequestOptions | None] = ContextVar(
     "gemini_web_request",
     default=None,
 )
-
-_request_timeout: ContextVar[tuple[object, float] | None] = ContextVar("gemini_request_timeout", default=None)
-_timeout_initializing_task: ContextVar[tuple[int, int] | None] = ContextVar("gemini_timeout_initializing_task", default=None)
-_generation_once: ContextVar[object | None] = ContextVar("gemini_generation_once", default=None)
-
-
-@dataclass
-class MediaRequestObservation:
-    """Remember only the chat allocated by one fresh media request.
-
-    The SDK rolls ChatSession metadata back after a failed stream. Recording
-    the CID as metadata arrives preserves recovery evidence through that
-    rollback, cancellation, or an outer asyncio.timeout.
-    """
-
-    on_chat_observed: Callable[[str], None] | None = None
-    chat_id: str | None = field(default=None, init=False)
-    _started: bool = field(default=False, init=False)
-
-    def start(self) -> None:
-        if self._started:
-            raise ValueError("A media observation belongs to a single generation request.")
-        self._started = True
-
-    def observe(self, metadata: list[Any]) -> None:
-        if metadata and is_valid_remote_chat_id(metadata[0]):
-            changed = metadata[0] != self.chat_id
-            self.chat_id = metadata[0]
-            if changed and self.on_chat_observed is not None:
-                self.on_chat_observed(self.chat_id)
-
-
-class _OwnedMediaChatSession(ChatSession):
-    """A blank request-owned SDK session with isolated, observable metadata."""
-
-    __slots__ = ("_request_metadata", "_request_observation")
-
-    def __init__(
-        self, client: GeminiClient, observation: MediaRequestObservation, *, model: Any = None, gem: Any = None,
-    ) -> None:
-        # SDK2.0's DEFAULT_METADATA is shared mutable state (2.1 copies it).
-        # Use properties backed by our own blank list in both versions, so a
-        # previous chat can neither enter this request nor be mutated by it.
-        self._request_metadata: list[Any] = ["", "", "", None, None, None, None, None, None, ""]
-        self._request_observation = observation
-        session_options = {}
-        if model is not None:
-            session_options["model"] = model
-        if gem is not None:
-            session_options["gem"] = gem
-        super().__init__(client, **session_options)
-
-    @property
-    def observed_chat_id(self) -> str | None:
-        """Source identity remains available after SDK metadata rollback."""
-        return self._request_observation.chat_id
-
-    @property
-    def metadata(self) -> list[Any]:
-        # The SDK retains this value as its rollback backup. It must not alias
-        # the mutable request state that later stream frames update.
-        return list(self._request_metadata)
-
-    @metadata.setter
-    def metadata(self, value: list[Any]) -> None:
-        if not isinstance(value, list):
-            return
-        for index, item in enumerate(value[:10]):
-            if item is not None:
-                self._request_metadata[index] = item
-        self._request_observation.observe(self._request_metadata)
-
-    @property
-    def cid(self) -> Any:
-        return self._request_metadata[0]
-
-    @cid.setter
-    def cid(self, value: str) -> None:
-        self._request_metadata[0] = value
-        self._request_observation.observe(self._request_metadata)
-
-    @property
-    def rid(self) -> Any:
-        return self._request_metadata[1]
-
-    @rid.setter
-    def rid(self, value: str) -> None:
-        self._request_metadata[1] = value
-
-    @property
-    def rcid(self) -> Any:
-        return self._request_metadata[2]
-
-    @rcid.setter
-    def rcid(self, value: str) -> None:
-        self._request_metadata[2] = value
-
-
-def _with_owned_media_session(
-    client: GeminiClient,
-    args: tuple[Any, ...],
-    kwargs: dict[str, Any],
-    observation: MediaRequestObservation,
-) -> tuple[tuple[Any, ...], dict[str, Any]]:
-    if kwargs.get("chat") is not None or (len(args) > 4 and args[4] is not None):
-        raise ValueError("Owned media generation cannot use an existing chat.")
-    observation.start()
-    chat = _OwnedMediaChatSession(client, observation)
-    kwargs = {**kwargs, "current_retry": 0}
-    if len(args) > 4:
-        args = (*args[:4], chat, *args[5:])
-    else:
-        kwargs["chat"] = chat
-    return args, kwargs
-
-
-def _is_scoped_timeout_initialization(client: object) -> bool:
-    owner = _timeout_initializing_task.get()
-    if owner is None or owner[0] != id(client):
-        return False
-    try:
-        return owner[1] == id(asyncio.current_task())
-    except RuntimeError:
-        return False
+_video_generation: ContextVar[bool] = ContextVar("gemini_video_generation", default=False)
+_task_generation: ContextVar[bool] = ContextVar("gemini_task_generation", default=False)
+_task_conversation: ContextVar[str | None] = ContextVar("gemini_task_conversation", default=None)
+_task_action_choice: ContextVar[str | None] = ContextVar("gemini_task_action_choice", default=None)
+_notebook_context: ContextVar[tuple[tuple[str, str], ...]] = ContextVar("gemini_notebook_context", default=())
+_candidate_evidence: ContextVar[dict[str, tuple[CandidateSourceEvidence, ...]] | None] = ContextVar(
+    "gemini_candidate_evidence", default=None
+)
+_strict_session_recovery: ContextVar[bool] = ContextVar("gemini_strict_session_recovery", default=False)
+_mutation_dispatch_owner: ContextVar[tuple[str, Callable[[], str | None]] | None] = ContextVar(
+    "gemini_mutation_dispatch_owner", default=None
+)
 
 
 @contextmanager
-def client_request_timeout(client: object, timeout_seconds: float) -> Iterator[None]:
-    """Scope upstream watchdog/recovery settings to one request and its tasks."""
-    token = _request_timeout.set((client, timeout_seconds))
+def mutation_scope(*, owner: str | None = None,
+                   account_key_provider: Callable[[], str | None] | None = None) -> Iterator[None]:
+    """Keep a single account and disable SDK retries during a mutation."""
+    provider = account_key_provider or current_account_key
+    bound = owner or provider()
+    if not bound or provider() != bound:
+        raise PermissionError("Gemini account changed or is unavailable.")
+    token = _mutation_dispatch_owner.set((bound, provider))
     try:
         yield
     finally:
-        _request_timeout.reset(token)
+        _mutation_dispatch_owner.reset(token)
+
+
+gem_mutation_scope = mutation_scope
 
 
 @contextmanager
-def client_generation_once(client: object) -> Iterator[None]:
-    """Prevent SDK submission retries inside one client-owned workflow.
-
-    The SDK's generation decorator can repost an uncertain request after an
-    API/parse failure. Research plan and confirmation are mutations whose
-    recovery must read the existing source rather than generate again. This
-    scope affects only generation; initialization and read-back keep their own
-    retry policies. Child tasks inherit the scope without changing the shared
-    client or another client's concurrent request.
-    """
-    token = _generation_once.set(client)
+def strict_session_recovery_scope() -> Iterator[None]:
+    """Leave incomplete session streams to identity-bound application recovery."""
+    token = _strict_session_recovery.set(True)
     try:
         yield
     finally:
-        _generation_once.reset(token)
+        _strict_session_recovery.reset(token)
+
+
+def _policy_family(model: AvailableModel) -> str:
+    labels = (model.model_name, model.display_name, *model.aliases)
+    if any(re.search(r"(?<![a-z0-9])flash[\s_-]*lite(?![a-z0-9])", label.lower()) for label in labels):
+        return "lite"
+    normalized = model.model_name.strip().lower().replace(" ", "-")
+    if re.fullmatch(r"(?:gemini-)?(?:\d+(?:\.\d+)?-)?flash", normalized):
+        return "flash"
+    return "other"
+
+
+def _task_model_supported(model: AvailableModel) -> bool:
+    """Allow only an unambiguous Task family in discovered model metadata."""
+    if _policy_family(model) == "lite":
+        return False
+    families = set()
+    for label in (model.model_name, model.display_name, *model.aliases):
+        normalized = re.sub(r"[\s_-]+", "-", label.strip().lower())
+        match = re.fullmatch(r"(?:gemini-)?(?:\d+(?:\.\d+)?-)?(flash|argon|pro)", normalized)
+        if match:
+            families.add(match.group(1))
+    return families in ({"flash"}, {"argon"})
 
 
 def _encode_learning_x9b(field_name: str, value: int) -> list[Any]:
@@ -250,101 +156,62 @@ def inject_web_request_options(
     options: WebRequestOptions,
 ) -> dict[str, Any]:
     """Add Web UI-only fields to a StreamGenerate request."""
-    if options.task_mode and (options.media_mode_id is not None or options.learning_mode_id is not None or options.tool_mode_id is not None):
-        raise ValueError("task_mode cannot be combined with media_mode or learning_mode.")
-    if options.tool_mode_id is not None and (options.media_mode_id is not None or options.learning_mode_id is not None):
-        raise ValueError("Native composer tools cannot be combined with media or companion learning modes.")
-    feature_mode_id = NATIVE_TASK_MODE_ID if options.task_mode else options.media_mode_id if options.media_mode_id is not None else options.tool_mode_id
-    shape_error = (
-        NativeTaskRequestShapeError if options.task_mode
-        else NativeMediaRequestShapeError if options.media_mode_id is not None
-        else NativeToolRequestShapeError if options.tool_mode_id is not None or options.native_attachments
-        else ThinkingRequestShapeError if options.thinking_level_id is not None else None
-    )
     f_req = request_data.get("f.req")
+    if options.task_action_choice_id is not None and not options.task_generation:
+        raise WebWorkflowTransportChanged("Task confirmation choice requires Task continuation.")
+    workflow = options.task_generation or bool(options.notebooks)
     if not isinstance(f_req, str):
-        if shape_error is not None:
-            raise shape_error("Gemini Web request is missing its serialized f.req payload.")
+        if workflow:
+            raise WebWorkflowTransportChanged("Web workflow request is unavailable.")
+        if options.video_generation:
+            raise VideoTransportChanged("Video generation transport request is unavailable")
         return request_data
 
     try:
         outer_request = orjson.loads(f_req)
-    except orjson.JSONDecodeError as error:
-        if shape_error is not None:
-            raise shape_error("Gemini Web request envelope is not valid JSON.") from error
+    except orjson.JSONDecodeError:
+        if workflow:
+            raise WebWorkflowTransportChanged("Web workflow envelope changed.") from None
+        if options.video_generation:
+            raise VideoTransportChanged("Video generation transport envelope changed") from None
         raise
     if not isinstance(outer_request, list) or len(outer_request) < 2:
-        if shape_error is not None:
-            raise shape_error("Gemini Web request envelope shape changed.")
+        if workflow:
+            raise WebWorkflowTransportChanged("Web workflow envelope changed.")
+        if options.video_generation:
+            raise VideoTransportChanged("Video generation transport envelope changed")
         return request_data
 
     inner_payload = outer_request[1]
     if not isinstance(inner_payload, str):
-        if shape_error is not None:
-            raise shape_error("Gemini Web request payload shape changed.")
+        if workflow:
+            raise WebWorkflowTransportChanged("Web workflow payload is unavailable.")
+        if options.video_generation:
+            raise VideoTransportChanged("Video generation transport payload is unavailable")
         return request_data
 
     try:
         inner_request = orjson.loads(inner_payload)
-    except orjson.JSONDecodeError as error:
-        if shape_error is not None:
-            raise shape_error("Gemini Web request payload is not valid JSON.") from error
+    except orjson.JSONDecodeError:
+        if workflow:
+            raise WebWorkflowTransportChanged("Web workflow payload changed.") from None
+        if options.video_generation:
+            raise VideoTransportChanged("Video generation transport payload changed") from None
         raise
     if not isinstance(inner_request, list):
-        if shape_error is not None:
-            raise shape_error("Gemini Web request payload shape changed.")
+        if workflow:
+            raise WebWorkflowTransportChanged("Web workflow request changed.")
+        if options.video_generation:
+            raise VideoTransportChanged("Video generation transport request shape changed")
         return request_data
 
-    if options.thinking_level_id is not None and (
-        len(inner_request) < 69 or not isinstance(inner_request[0], list)
-        or not inner_request[0] or not isinstance(inner_request[0][0], str)
-    ):
-        raise ThinkingRequestShapeError("Thinking StreamGenerate request shape changed.")
-
-    if feature_mode_id is not None:
-        feature_error = (NativeTaskRequestShapeError if options.task_mode else
-                         NativeMediaRequestShapeError if options.media_mode_id is not None else NativeToolRequestShapeError)
-        if (
-            len(inner_request) <= FEATURE_MODE_INDEX
-            or not isinstance(inner_request[0], list)
-            or not inner_request[0]
-            or not isinstance(inner_request[0][0], str)
-        ):
-            raise feature_error("Native feature StreamGenerate request shape changed.")
-        if inner_request[FEATURE_MODE_INDEX] not in (None, feature_mode_id):
-            raise feature_error("Native request conflicts with an existing feature selector.")
-        inner_request[FEATURE_MODE_INDEX] = feature_mode_id
-
-    if options.task_mode and len(inner_request) > TASK_REQUEST_FLAG_INDEX:
-        task_flag = inner_request[TASK_REQUEST_FLAG_INDEX]
-        if task_flag is not None and type(task_flag) is not bool:
-            raise NativeTaskRequestShapeError("Native Task request flag shape changed.")
-
-    required_length = 81 if feature_mode_id is None else len(inner_request)
-    if options.task_mode:
-        required_length = max(required_length, TASK_REQUEST_FLAG_INDEX + 1)
-    if options.thinking_level_id is not None:
-        required_length = max(required_length, 81)
-    if options.learning_mode_id:
-        required_length = max(required_length, 56)
-    if len(inner_request) < required_length:
-        inner_request.extend([None] * (required_length - len(inner_request)))
-
-    if options.task_mode:
-        # Match the explicit Task startup selection, including a false SDK
-        # default if a future builder materializes this optional boolean.
-        inner_request[TASK_REQUEST_FLAG_INDEX] = True
-
-    if options.native_attachments:
-        query = inner_request[0] if inner_request else None
-        if not isinstance(query, list) or len(query) < 4 or not isinstance(query[0], str):
-            raise NativeToolRequestShapeError("Native attachment query shape changed.")
-        existing_files = query[3]
-        if existing_files is not None and not isinstance(existing_files, list):
-            raise NativeToolRequestShapeError("Existing attachment collection shape changed.")
-        if len(existing_files or []) + len(options.native_attachments) > 10:
-            raise ValueError("At most ten combined local/native attachments are supported per request.")
-        query[3] = [*(existing_files or []), *options.native_attachments]
+    if (len(inner_request) >= 81 and not (workflow or options.video_generation or options.learning_mode_id)
+            and type(inner_request[79]) is int and inner_request[79] > 0
+            and type(inner_request[80]) is int and inner_request[80] == options.thinking_level_id):
+        # The SDK already writes low and high to the ordinary request body.
+        return request_data
+    if len(inner_request) < 81:
+        inner_request.extend([None] * (81 - len(inner_request)))
 
     if options.learning_mode_id:
         if not options.learning_x9b_field or options.learning_x9b_value is None:
@@ -355,10 +222,24 @@ def inject_web_request_options(
         )
         inner_request[55] = _encode_learning_goa(options.learning_mode_id)
 
-    if options.thinking_level_id is not None:
-        if options.thinking_mode_id is not None:
-            inner_request[THINKING_MODE_INDEX] = options.thinking_mode_id
-        inner_request[THINKING_LEVEL_INDEX] = options.thinking_level_id
+    if options.thinking_level_id:
+        selector = inner_request[79]
+        if (type(selector) is not int or selector <= 0) and options.thinking_mode_id:
+            inner_request[79] = options.thinking_mode_id
+        inner_request[80] = options.thinking_level_id
+
+    if options.video_generation:
+        if options.learning_mode_id:
+            raise ValueError("Video generation cannot use a learning mode")
+        apply_video_generation_transport(inner_request)
+
+    if options.task_generation:
+        if options.video_generation or options.learning_mode_id:
+            raise ValueError("Task mode cannot be combined with another generation feature.")
+        apply_task_generation_transport(inner_request, conversation_id=options.task_conversation_id,
+                                        action_choice_id=options.task_action_choice_id)
+    if options.notebooks:
+        apply_notebook_attachments(inner_request, options.notebooks, use_file_reference=not options.task_generation)
 
     patched = dict(request_data)
     outer_request[1] = orjson.dumps(inner_request).decode("utf-8")
@@ -366,72 +247,232 @@ def inject_web_request_options(
     return patched
 
 
+class _ObservedChatSession(ChatSession):
+    """Expose SDK metadata as it arrives, including before its first output."""
+
+    def __setattr__(self, name: str, value: Any) -> None:
+        super().__setattr__(name, value)
+        if name in {"metadata", "cid"}:
+            observe_upstream_identity(self)
+
+
 class ThinkingLevelGeminiClient(GeminiClient):
-    """Gemini client with scoped thinking, learning, and native media selectors."""
+    """Gemini client that carries the current Web UI thinking-level selector."""
 
-    def start_owned_chat(
-        self, *, model: Any = None, gem: Any = None, on_chat_observed: Callable[[str], None] | None = None,
-    ) -> ChatSession:
-        """Allocate a blank observable session for one mutation workflow.
+    async def _batch_execute(self, *args: Any, **kwargs: Any) -> Any:
+        scoped = _mutation_dispatch_owner.get()
+        owner, provider = scoped if scoped else (None, current_account_key)
+        if owner:
+            if provider() != owner:
+                raise PermissionError("Gemini account changed or is unavailable.")
+            kwargs["current_retry"] = 0
+        try:
+            result = await super()._batch_execute(*args, **kwargs)
+        except Exception:
+            if owner and provider() != owner:
+                raise PermissionError("Gemini account changed or is unavailable.") from None
+            raise
+        if owner and provider() != owner:
+            raise PermissionError("Gemini account changed or is unavailable.")
+        return result
 
-        This shares metadata ownership with media requests, independently of
-        response parsing or artifact kind. Observations survive SDK rollback
-        and are delivered before the next stream frame can fail.
+    def start_chat(self, **kwargs: Any) -> ChatSession:
+        return _ObservedChatSession(geminiclient=self, **kwargs)
+
+    def create_cleanup_chat(self) -> ChatSession:
+        return self.start_chat()
+
+    async def read_chat(self, cid: str, limit: int = 10) -> Any:
+        if _strict_session_recovery.get():
+            # The SDK fallback accepts any latest candidate other than the
+            # previous one and then rewrites its RID. Do not let it manufacture
+            # a completed session reply from another turn. The caller retains
+            # observed identities and performs exact read-only recovery.
+            raise SDKTimeoutError("The session stream is incomplete; exact-turn recovery is required.")
+        return await super().read_chat(cid, limit=limit)
+
+    async def _generate(self, *args: Any, **kwargs: Any) -> AsyncGenerator[ModelOutput, None]:
+        # A failed stream can already have created a remote turn. Replaying it
+        # inside the SDK retry decorator could start the generation twice.
+        kwargs["current_retry"] = 0
+        if not self._running:
+            await self.init(timeout=self.timeout, auto_close=self.auto_close, close_delay=self.close_delay,
+                            auto_refresh=self.auto_refresh, refresh_interval=self.refresh_interval,
+                            verbose=self.verbose, watchdog_timeout=self.watchdog_timeout)
+        if not self._running:
+            raise ModelPolicyError("The model registry is unavailable before generation.")
+        requested = kwargs.get("model")
+        if requested is None or requested == Model.UNSPECIFIED:
+            requested_name = "flash"
+            selected = self._resolve_policy_model("gemini-flash")
+        elif isinstance(requested, str):
+            requested_name = requested
+            selected = self._resolve_policy_model(requested)
+        elif isinstance(requested, Model):
+            requested_name = requested.model_name
+            resolved = self._resolve_enum_model(requested)
+            selected = self._resolve_policy_model(resolved)
+        elif isinstance(requested, dict):
+            try:
+                descriptor = AvailableModel.from_dict(requested)
+            except (ValueError, TypeError) as error:
+                raise ModelPolicyError("The requested model is unavailable in the discovered registry.") from error
+            requested_name = descriptor.model_name
+            selected = self._resolve_policy_model(descriptor)
+        else:
+            requested_name = str(getattr(requested, "model_name", ""))
+            selected = self._resolve_policy_model(requested)
+        account = current_account_key()
+        policy = current_model_policy()
+        store = ModelPolicyStore()
+        request_started = store.clock()
+        family = _policy_family(selected)
+        if family == "lite" and policy.purpose in {"task", "notebook_chat"}:
+            raise ModelPolicyError("Flash-Lite is unavailable for Task workflows.")
+        if policy.purpose == "task" and not _task_model_supported(selected):
+            raise ModelPolicyError("The requested model is unavailable for Task workflows.")
+        exhausted = store.flash_exhausted(account) if family in {"flash", "lite"} else False
+        reason = None
+        if family == "lite" and not exhausted:
+            raise ModelPolicyError("Flash-Lite model unavailable without verified Flash quota exhaustion.")
+        if family == "flash" and exhausted and policy.purpose == "query" and policy.allow_fallback:
+            selected = self._resolve_policy_model("gemini-flash-lite")
+            if _policy_family(selected) != "lite":
+                raise ModelPolicyError("The requested fallback model is unavailable.")
+            family, reason = "lite", "flash_quota_exhausted"
+        kwargs["model"] = selected
+        options = _web_request.get()
+        selectable = family != "lite"
+        if not selectable:
+            kwargs["extended_thinking"] = False
+            if options is not None:
+                options = replace(options, thinking_mode_id=None, thinking_level_id=None, thinking_level_name=None)
+        token = _web_request.set(options)
+        selection = ModelSelection(requested_model=requested_name, effective_model=selected.model_name,
+                                   fallback_reason=reason, thinking_selectable=selectable,
+                                   effective_thinking_level=((options.thinking_level_name if options else None)
+                                   or ("extended" if kwargs.get("extended_thinking") else "standard"))
+                                   if selectable else None)
+        completed = False
+        observed_success = False
+        basic_thinking = (options is None or options.thinking_level_id in (None, 1)) and not kwargs.get(
+            "extended_thinking"
+        )
+        try:
+            async for response in super()._generate(*args, **kwargs):
+                reply_text = getattr(response, "text", "")
+                if reply_text:
+                    observed_success = not is_generation_failure_reply(reply_text)
+                object.__setattr__(response, "_mcp_model_selection", selection)
+                observe_upstream_identity(response)
+                yield response
+            completed = True
+        except UsageLimitExceededError as error:
+            setattr(error, "code", "UPSTREAM_LIMIT_EXCEEDED")
+            if (family == "flash" and policy.purpose == "query" and account
+                    and current_account_key() == account and not kwargs.get("deep_research")
+                    and basic_thinking
+                    and not kwargs.get("req_file_data")
+                    and not (options and options.learning_mode_id)
+                    and not _video_generation.get()):
+                store.record_flash_exhausted(account)
+            raise
+        finally:
+            _web_request.reset(token)
+            if (completed and observed_success and family == "flash" and policy.purpose == "query"
+                    and not kwargs.get("deep_research") and basic_thinking
+                    and not kwargs.get("req_file_data") and not (options and options.learning_mode_id)
+                    and not _video_generation.get() and account and current_account_key() == account):
+                store.clear_flash_exhausted(account, observed_before=request_started)
+
+    def _resolve_policy_model(self, value: Any) -> AvailableModel:
+        try:
+            selected = self._resolve_model_by_name(value) if isinstance(value, str) else value
+        except (ValueError, LookupError) as error:
+            raise ModelPolicyError("The requested model is unavailable in the discovered registry.") from error
+        registry = getattr(self, "_model_registry", {})
+        if not isinstance(selected, AvailableModel) or not isinstance(registry, dict):
+            raise ModelPolicyError("The requested model is unavailable in the discovered registry.")
+        matches = [model for model in registry.values() if isinstance(model, AvailableModel)
+                   and model.model_id == selected.model_id]
+        if len(matches) != 1 or not matches[0].is_available:
+            raise ModelPolicyError("The requested model is unavailable in the discovered registry.")
+        if isinstance(value, str):
+            normalized = value.strip().lower()
+            known_families = {"flash", "fast", "3.5 flash", "3.8 flash", "gemini-3-flash",
+                              "gemini-3-flash-thinking", "thinking", "gemini-flash", "pro", "3.1 pro",
+                              "gemini-3-pro", "gemini-pro", "lite", "3.1 flash-lite", "3.5 flash-lite",
+                              "flash-lite", "gemini-flash-lite", "gemini-3-flash-lite",
+                              "argon", "4 argon", "gemini-argon", "gemini-4-argon"}
+            exact = {matches[0].model_name.lower(), matches[0].model_id.lower(),
+                     *(alias.lower() for alias in matches[0].aliases)}
+            if normalized not in known_families and normalized not in exact:
+                raise ModelPolicyError("The requested model is unavailable in the discovered registry.")
+        return matches[0]
+
+    def _resolve_model_by_name(self, name: str) -> AvailableModel:
+        """Resolve known model families without the SDK's ambiguous token fallback.
+
+        SDK 2.1.1 can match ``gemini-3-flash`` to ``gemini-flash-lite``
+        before it reaches ``gemini-flash``. Only select a discovered model
+        whose exact name or explicit alias identifies the requested family.
         """
-        observation = MediaRequestObservation(on_chat_observed=on_chat_observed)
-        observation.start()
-        return _OwnedMediaChatSession(self, observation, model=model, gem=gem)
+        normalized = name.strip().lower()
+        families = {
+            "flash": "gemini-flash",
+            "fast": "gemini-flash",
+            "3.5 flash": "gemini-flash",
+            "3.8 flash": "gemini-flash",
+            "gemini-3-flash": "gemini-flash",
+            "gemini-3-flash-thinking": "gemini-flash",
+            "thinking": "gemini-flash",
+            "gemini-flash": "gemini-flash",
+            "pro": "gemini-pro",
+            "3.1 pro": "gemini-pro",
+            "gemini-3-pro": "gemini-pro",
+            "gemini-pro": "gemini-pro",
+            "argon": "gemini-argon",
+            "4 argon": "gemini-argon",
+            "gemini-argon": "gemini-argon",
+            "gemini-4-argon": "gemini-argon",
+            "lite": "gemini-flash-lite",
+            "3.1 flash-lite": "gemini-flash-lite",
+            "3.5 flash-lite": "gemini-flash-lite",
+            "flash-lite": "gemini-flash-lite",
+            "gemini-flash-lite": "gemini-flash-lite",
+            "gemini-3-flash-lite": "gemini-flash-lite",
+        }
+        canonical = families.get(normalized)
+        if canonical is None:
+            return super()._resolve_model_by_name(name)
+        models = list(getattr(self, "_model_registry", {}).values())
+        for exact in (normalized, canonical):
+            matches = [model for model in models if model.model_name.lower() == exact]
+            if len(matches) == 1:
+                return matches[0]
+            if len(matches) > 1:
+                raise ValueError(f"Ambiguous discovered model: {name}")
+        alias_matches = [
+            model for model in models
+            if normalized in {str(alias).lower() for alias in model.aliases}
+            and re.sub(r"^gemini-(?:\d+(?:\.\d+)?-)?", "", model.model_name.lower())
+            == canonical.removeprefix("gemini-")
+        ]
+        if len(alias_matches) == 1:
+            return alias_matches[0]
+        if len(alias_matches) > 1:
+            raise ValueError(f"Ambiguous discovered model: {name}")
+        raise ValueError(f"Requested model is not available in the discovered registry: {name}")
 
-    @property
-    def timeout(self) -> float:
-        default = float(GeminiClient.timeout.__get__(self, type(self)))
-        scope = _request_timeout.get()
-        return max(default, scope[1]) if scope is not None and scope[0] is self else default
-
-    @timeout.setter
-    def timeout(self, value: float) -> None:
-        if not _is_scoped_timeout_initialization(self):
-            GeminiClient.timeout.__set__(self, value)
-
-    @property
-    def watchdog_timeout(self) -> float:
-        default = float(GeminiClient.watchdog_timeout.__get__(self, type(self)))
-        scope = _request_timeout.get()
-        if scope is None or scope[0] is not self:
-            return default
-        return min(max(default, 120.0), max(scope[1], 120.0))
-
-    @watchdog_timeout.setter
-    def watchdog_timeout(self, value: float) -> None:
-        if not _is_scoped_timeout_initialization(self):
-            GeminiClient.watchdog_timeout.__set__(self, value)
+    def _parse_candidate(self, candidate_data: list[Any], cid: str, rid: str, rcid: str) -> Any:
+        result = super()._parse_candidate(candidate_data, cid, rid, rcid)
+        evidence = _candidate_evidence.get()
+        if evidence is not None:
+            evidence[rcid] = parse_candidate_attribution_sources(candidate_data)
+        return result
 
     async def init(self, *args: Any, **kwargs: Any) -> None:
-        scope = _request_timeout.get()
-        if scope is not None and scope[0] is self:
-            # Upstream reconnect forwards its timeout getters into init(). Keep
-            # request overrides out of the singleton defaults and background
-            # refresh tasks created by that initialization.
-            default_timeout = GeminiClient.timeout.__get__(self, type(self))
-            default_watchdog = GeminiClient.watchdog_timeout.__get__(self, type(self))
-            init_args = list(args)
-            if init_args:
-                init_args[0] = default_timeout
-            else:
-                kwargs["timeout"] = default_timeout
-            if len(init_args) > 5:
-                init_args[5] = default_watchdog
-            else:
-                kwargs["watchdog_timeout"] = default_watchdog
-            timeout_token = _request_timeout.set(None)
-            initializing_token = _timeout_initializing_task.set((id(self), id(asyncio.current_task())))
-            try:
-                await super().init(*init_args, **kwargs)
-            finally:
-                _timeout_initializing_task.reset(initializing_token)
-                _request_timeout.reset(timeout_token)
-        else:
-            await super().init(*args, **kwargs)
+        await super().init(*args, **kwargs)
         self._install_thinking_transport()
 
     async def generate_content(
@@ -440,25 +481,15 @@ class ThinkingLevelGeminiClient(GeminiClient):
         model: Any = None,
         thinking_level: str | None = None,
         learning_mode: str | None = None,
-        media_mode: str | None = None,
-        task_mode: bool = False,
-        tool_mode: str | None = None,
-        native_attachments: Sequence[NativeAttachment] = (),
-        media_observation: MediaRequestObservation | None = None,
         **kwargs: Any,
     ) -> ModelOutput:
-        token = self._set_web_request(model, thinking_level, learning_mode, media_mode, task_mode, tool_mode, native_attachments)
+        if _video_generation.get() or _task_generation.get():
+            if kwargs.get("deep_research"):
+                raise ValueError("A dedicated generation feature cannot start Deep Research")
+            kwargs["deep_research"] = True
+        token = self._set_web_request(model, thinking_level, learning_mode)
         try:
-            request = _web_request.get()
-            if request and request.task_mode and media_observation is not None:
-                raise ValueError("task_mode does not accept media artifact observation.")
-            if media_observation is not None:
-                args, kwargs = _with_owned_media_session(self, args, kwargs, media_observation)
-            if _generation_once.get() is self or request and (request.media_mode_id is not None or request.task_mode or request.tool_mode_id is not None or request.native_attachments):
-                # gemini-webapi's running decorator consumes this before its
-                # HTTP kwargs. A parse/API failure must not duplicate creation.
-                kwargs["current_retry"] = 0
-            args, kwargs = self._with_upstream_thinking(args, kwargs, GeminiClient.generate_content)
+            self._apply_native_thinking_level(kwargs, thinking_level)
             args, kwargs = self._with_learning_prompt(args, kwargs, learning_mode)
             if model is None:
                 return await super().generate_content(*args, **kwargs)
@@ -472,152 +503,102 @@ class ThinkingLevelGeminiClient(GeminiClient):
         model: Any = None,
         thinking_level: str | None = None,
         learning_mode: str | None = None,
-        media_mode: str | None = None,
-        task_mode: bool = False,
-        tool_mode: str | None = None,
-        native_attachments: Sequence[NativeAttachment] = (),
-        media_observation: MediaRequestObservation | None = None,
         **kwargs: Any,
     ) -> AsyncGenerator[ModelOutput, None]:
-        token = self._set_web_request(model, thinking_level, learning_mode, media_mode, task_mode, tool_mode, native_attachments)
+        if _video_generation.get() or _task_generation.get():
+            if kwargs.get("deep_research"):
+                raise ValueError("A dedicated generation feature cannot start Deep Research")
+            kwargs["deep_research"] = True
+        token = self._set_web_request(model, thinking_level, learning_mode)
+        evidence_token = _candidate_evidence.set({})
         try:
-            request = _web_request.get()
-            if request and request.task_mode and media_observation is not None:
-                raise ValueError("task_mode does not accept media artifact observation.")
-            if media_observation is not None:
-                args, kwargs = _with_owned_media_session(self, args, kwargs, media_observation)
-            if _generation_once.get() is self or request and (request.media_mode_id is not None or request.task_mode or request.tool_mode_id is not None or request.native_attachments):
-                kwargs["current_retry"] = 0
-            args, kwargs = self._with_upstream_thinking(args, kwargs, GeminiClient.generate_content_stream)
+            self._apply_native_thinking_level(kwargs, thinking_level)
             args, kwargs = self._with_learning_prompt(args, kwargs, learning_mode)
             if model is None:
                 stream = super().generate_content_stream(*args, **kwargs)
             else:
                 stream = super().generate_content_stream(*args, model=model, **kwargs)
             async for output in stream:
+                evidence = _candidate_evidence.get() or {}
+                candidates = getattr(output, "candidates", ())
+                if evidence and isinstance(candidates, (list, tuple)):
+                    for candidate in candidates:
+                        rcid = getattr(candidate, "rcid", None)
+                        if isinstance(rcid, str) and rcid in evidence:
+                            object.__setattr__(candidate, "_retrieved_sources", evidence.pop(rcid))
                 yield output
         finally:
+            _candidate_evidence.reset(evidence_token)
             _web_request.reset(token)
 
     @staticmethod
-    def _with_upstream_thinking(
-        args: tuple[Any, ...], kwargs: dict[str, Any], method: Any,
-    ) -> tuple[tuple[Any, ...], dict[str, Any]]:
-        request = _web_request.get()
-        parameters = inspect.signature(method).parameters
-        if (
-            request is not None
-            and request.thinking_level_id is not None
-            and "extended_thinking" in parameters
-        ):
-            # The SDK accepts only a bool. Seed its supported parameter, then
-            # synchronize the exact enum in the final header and body below.
-            # SDK2.0 must never receive an unknown HTTP argument.
-            extended = request.thinking_level_id == 2
-            positional = [
-                item.name for item in parameters.values()
-                if item.kind in (inspect.Parameter.POSITIONAL_ONLY, inspect.Parameter.POSITIONAL_OR_KEYWORD)
-                and item.name != "self"
-            ]
-            if "extended_thinking" in positional:
-                index = positional.index("extended_thinking")
-                if len(args) > index:
-                    # Preserve the SDK's legal positional calling convention;
-                    # adding a keyword would bind its eighth argument twice.
-                    return (
-                        (*args[:index], extended, *args[index + 1:]),
-                        {key: value for key, value in kwargs.items() if key != "extended_thinking"},
-                    )
-            return args, {**kwargs, "extended_thinking": extended}
-        return args, kwargs
+    def _apply_native_thinking_level(kwargs: dict[str, Any], thinking_level: str | None) -> None:
+        """Keep the SDK model-header selector aligned with the active project level."""
+        options = _web_request.get()
+        level = resolve_thinking_level_id(thinking_level) if thinking_level is not None else (
+            options.thinking_level_id if options else None
+        )
+        if level is not None:
+            kwargs["extended_thinking"] = level == 2
 
     def _set_web_request(
         self,
         model: Any,
         thinking_level: str | None,
         learning_mode: str | None,
-        media_mode: str | None = None,
-        task_mode: bool = False,
-        tool_mode: str | None = None,
-        native_attachments: Sequence[NativeAttachment] = (),
     ):
-        existing = _web_request.get()
-        if thinking_level is None and learning_mode is None and media_mode is None and tool_mode is None and not native_attachments and not task_mode and existing:
-            return _web_request.set(existing)
+        previous = _web_request.get()
+        if thinking_level is None and learning_mode is None and previous:
+            if _video_generation.get() and previous.learning_mode_id:
+                raise ValueError("Video generation cannot use a learning mode")
+            if _video_generation.get():
+                return _web_request.set(replace(previous, video_generation=True))
+            return _web_request.set(previous)
 
         level_id = resolve_thinking_level_id(thinking_level)
         if thinking_level is not None and level_id is None:
-            raise ValueError("thinking_level 仅支持 low/medium/high、standard/extended 或协议值 deep_think。")
+            raise ValueError("thinking_level 仅支持 low/medium/high 或 standard/extended。")
 
         learning_config = resolve_learning_mode_config(learning_mode)
         if learning_mode is not None and learning_config is None:
             raise ValueError(f"learning_mode 仅支持 {supported_learning_modes()}。")
+        if _video_generation.get() and learning_config is not None:
+            raise ValueError("Video generation cannot use a learning mode")
 
-        mode_id = self._thinking_mode_id(model)
-        if level_id is not None and isinstance(model, str) and model and mode_id is None:
-            raise ValueError("The selected model has no observed thinking category; refresh the model registry.")
+        mode_id = resolve_thinking_mode_id(model)
         options = WebRequestOptions(
             thinking_mode_id=mode_id,
             thinking_level_id=level_id,
+            thinking_level_name=({"低": "low", "中": "medium", "高": "high", "标准": "standard",
+                                  "扩展": "extended"}.get(thinking_level.strip().lower(),
+                                                        thinking_level.strip().lower())
+                                 if thinking_level is not None else None),
             learning_mode_id=(
-                int(learning_config["id"]) if learning_config is not None and "id" in learning_config else None  # type: ignore[call-overload]
+                int(learning_config["id"]) if learning_config is not None else None  # type: ignore[call-overload]
             ),
             learning_x9b_field=(
-                str(learning_config["x9b_field"]) if learning_config is not None and "x9b_field" in learning_config else None
+                str(learning_config["x9b_field"]) if learning_config is not None else None
             ),
             learning_x9b_value=(
-                int(learning_config["x9b_value"]) if learning_config is not None and "x9b_value" in learning_config else None  # type: ignore[call-overload]
+                int(learning_config["x9b_value"]) if learning_config is not None else None  # type: ignore[call-overload]
             ),
-            tool_mode_id=int(learning_config["feature_mode_id"]) if learning_config is not None and "feature_mode_id" in learning_config else None,  # type: ignore[call-overload]
+            video_generation=_video_generation.get(),
+            task_generation=_task_generation.get(),
+            task_conversation_id=_task_conversation.get(),
+            task_action_choice_id=_task_action_choice.get(),
+            notebooks=_notebook_context.get(),
         )
-        if thinking_level is None and learning_mode is None and (media_mode is not None or task_mode) and existing:
-            options = existing
-        options = replace(options, media_mode_id=(
-            native_media_mode_id(media_mode) if media_mode is not None
-            else (existing.media_mode_id if existing else None)
-        ), task_mode=task_mode or bool(existing and existing.task_mode))
-        if tool_mode is not None:
-            if learning_mode is not None:
-                raise ValueError("tool_mode cannot be combined with learning_mode.")
-            options = replace(options, tool_mode_id=native_tool_mode_id(tool_mode))
-        if native_attachments:
-            options = replace(options, native_attachments=tuple(build_native_attachments(native_attachments)))
-        if options.task_mode and (options.media_mode_id is not None or options.learning_mode_id is not None or options.tool_mode_id is not None):
-            raise ValueError("task_mode cannot be combined with media_mode or learning_mode.")
-        if options.media_mode_id is not None and options.learning_mode_id is not None:
-            raise ValueError("media_mode cannot be combined with learning_mode.")
-        if options.tool_mode_id is not None and (options.media_mode_id is not None or options.learning_mode_id is not None):
-            raise ValueError("Native composer tools cannot be combined with media or companion learning modes.")
         if not any(
             (
-                options.thinking_level_id is not None,
+                options.thinking_level_id,
                 options.learning_mode_id,
-                options.media_mode_id,
-                options.task_mode,
-                options.tool_mode_id,
-                options.native_attachments,
+                options.video_generation,
+                options.task_generation,
+                options.notebooks,
             )
         ):
             return _web_request.set(None)
         return _web_request.set(options)
-
-    def _thinking_mode_id(self, model: Any) -> int | None:
-        """Prefer this account's dynamic model category over compatibility data."""
-        if isinstance(model, str):
-            resolver = getattr(self, "resolve_model", None)
-            list_models = getattr(self, "list_models", None)
-            if callable(resolver) and callable(list_models):
-                try:
-                    models = list_models()
-                except AttributeError:
-                    models = None  # An uninitialized/older SDK has no registry.
-                if models:
-                    resolved = resolver(resolve_model_name(model))
-                    mode_id = resolve_thinking_mode_id(resolved)
-                    if mode_id is None:
-                        raise ThinkingRequestShapeError("The discovered model has no valid thinking category.")
-                    return mode_id
-        return resolve_thinking_mode_id(model)
 
     @contextmanager
     def thinking_scope(self, model: Any, thinking_level: str) -> Iterator[None]:
@@ -629,22 +610,36 @@ class ThinkingLevelGeminiClient(GeminiClient):
             _web_request.reset(token)
 
     @contextmanager
-    def media_scope(self, mode: str) -> Iterator[None]:
-        """Keep an observed native media selector local to one workflow."""
-        token = self._set_web_request(None, None, None, mode)
+    def video_generation_scope(self) -> Iterator[None]:
+        """Enable the observed video transport for this task only."""
+        token = _video_generation.set(True)
         try:
             yield
         finally:
-            _web_request.reset(token)
+            _video_generation.reset(token)
 
     @contextmanager
-    def task_scope(self) -> Iterator[None]:
-        """Select native Task mode for one helper/session workflow."""
-        token = self._set_web_request(None, None, None, task_mode=True)
+    def task_generation_scope(self, conversation_id: str | None = None, *,
+                              action_choice_id: str | None = None) -> Iterator[None]:
+        """Select the observed Task workflow without changing model or preferences."""
+        token = _task_generation.set(True)
+        context_token = _task_conversation.set(conversation_id)
+        choice_token = _task_action_choice.set(action_choice_id)
         try:
             yield
         finally:
-            _web_request.reset(token)
+            _task_generation.reset(token)
+            _task_conversation.reset(context_token)
+            _task_action_choice.reset(choice_token)
+
+    @contextmanager
+    def notebook_scope(self, notebooks: tuple[tuple[str, str], ...]) -> Iterator[None]:
+        """Carry freshly resolved notebook references for this request only."""
+        token = _notebook_context.set(notebooks)
+        try:
+            yield
+        finally:
+            _notebook_context.reset(token)
 
     def _with_learning_prompt(
         self,
@@ -653,7 +648,7 @@ class ThinkingLevelGeminiClient(GeminiClient):
         learning_mode: str | None,
     ) -> tuple[tuple[Any, ...], dict[str, Any]]:
         config = resolve_learning_mode_config(learning_mode)
-        if not config or not config.get("prompt_prefix"):
+        if not config:
             return args, kwargs
 
         prefix = str(config["prompt_prefix"])
@@ -685,34 +680,35 @@ class ThinkingLevelGeminiClient(GeminiClient):
         def stream_with_thinking(method: str, url: str, *args: Any, **kwargs: Any):
             request = _web_request.get()
             data = kwargs.get("data")
-            if url == Endpoint.GENERATE and _generation_once.get() is self and "current_retry" in kwargs:
-                raise ValueError("Upstream generation retry control was not consumed.")
-            if request and url == Endpoint.GENERATE:
-                if request.task_mode and "current_retry" in kwargs:
-                    raise NativeTaskRequestShapeError("Upstream Task retry control was not consumed.")
-                if request.media_mode_id is not None and "current_retry" in kwargs:
-                    raise NativeMediaRequestShapeError("Upstream native media retry control was not consumed.")
-                if (request.tool_mode_id is not None or request.native_attachments) and "current_retry" in kwargs:
-                    raise NativeToolRequestShapeError("Upstream native tool retry control was not consumed.")
-                if not isinstance(data, dict):
-                    if request.task_mode:
-                        raise NativeTaskRequestShapeError("Native Task StreamGenerate form data shape changed.")
-                    if request.media_mode_id is not None:
-                        raise NativeMediaRequestShapeError("Native media StreamGenerate form data shape changed.")
-                    if request.tool_mode_id is not None or request.native_attachments:
-                        raise NativeToolRequestShapeError("Native tool StreamGenerate form data shape changed.")
-                    if request.thinking_level_id is not None:
-                        raise ThinkingRequestShapeError("Thinking StreamGenerate form data shape changed.")
-                    return stream(method, url, *args, **kwargs)
+            if (request and (request.task_generation or request.notebooks) and url == Endpoint.GENERATE
+                    and not isinstance(data, dict)):
+                raise WebWorkflowTransportChanged("Web workflow request is unavailable.")
+            if request and request.video_generation and url == Endpoint.GENERATE and not isinstance(data, dict):
+                raise VideoTransportChanged("Video generation transport request is unavailable")
+            if request and url == Endpoint.GENERATE and isinstance(data, dict):
                 kwargs["data"] = inject_web_request_options(data, request)
-                if request.thinking_level_id is not None or request.learning_mode_id:
-                    headers = dict(kwargs.get("headers") or {})
-                    if request.thinking_level_id is not None:
-                        headers = synchronize_thinking_headers(
-                            headers, mode_id=request.thinking_mode_id, level_id=request.thinking_level_id,
-                        )
-                    headers["x-goog-ext-73010990-jspb"] = "[0,0,0]"
-                    kwargs["headers"] = headers
+                headers = dict(kwargs.get("headers") or {})
+                if request.thinking_level_id is not None:
+                    raw_header = headers.get(MODEL_HEADER_KEY)
+                    if raw_header is None:
+                        if request.thinking_level_id == 4:
+                            raise ValueError("Thinking-level model header is unavailable.")
+                    else:
+                        try:
+                            model_header = orjson.loads(raw_header)
+                            # The SDK appends thinking level and session ID to
+                            # model headers with either capacity layout.
+                            if (not isinstance(model_header, list) or len(model_header) < 17
+                                    or type(model_header[-3]) is not int or type(model_header[-2]) is not int
+                                    or not isinstance(model_header[-1], str)):
+                                raise ValueError
+                            if model_header[-2] != request.thinking_level_id:
+                                model_header[-2] = request.thinking_level_id
+                                headers[MODEL_HEADER_KEY] = orjson.dumps(model_header).decode()
+                        except (ValueError, TypeError):
+                            raise ValueError("Thinking-level model header has changed.") from None
+                headers["x-goog-ext-73010990-jspb"] = "[0,0,0]"
+                kwargs["headers"] = headers
             return stream(method, url, *args, **kwargs)
 
         session.stream = stream_with_thinking

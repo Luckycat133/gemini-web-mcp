@@ -42,9 +42,10 @@ async def _snapshot_module(module_name: str) -> list[dict[str, Any]]:
 def _safe_environment(profile: str) -> dict[str, str]:
     environment = os.environ.copy()
     environment.pop("PYTHONPATH", None)
-    for name in ("GEMINI_PSID", "GEMINI_PSIDTS", "GEMINI_PSIDCC"):
+    for name in ("GEMINI_PSID", "GEMINI_PSIDTS", "GEMINI_PSIDCC", "GEMINI_API_KEY", "GEMINI_SKILL_MODE"):
         environment.pop(name, None)
     environment["GEMINI_AUTO_REFRESH"] = "false"
+    environment["GEMINI_BROWSER_AUTO_LOAD"] = "false"
     environment["GEMINI_TOOLS"] = profile
     return environment
 
@@ -66,7 +67,7 @@ def _probe(module_name: str, profile: str) -> list[dict[str, Any]]:
 
 
 def build_snapshot() -> dict[str, object]:
-    """Return the checked contract for primary, compact and three focused surfaces."""
+    """Return the checked contract for representative primary and compact surfaces."""
 
     return {
         "format": 1,
@@ -74,9 +75,9 @@ def build_snapshot() -> dict[str, object]:
         "surfaces": {
             "primary:model": _probe("src.server", "model"),
             "compact": _probe("src.skill_server", "model"),
-            "assist": _probe("src.surfaces.assist", "model"),
-            "create": _probe("src.surfaces.create", "model"),
-            "account": _probe("src.surfaces.account", "model"),
+            "account": _probe("src.surfaces.account", "function"),
+            "function": _probe("src.surfaces.function", "function"),
+            "assist": _probe("src.surfaces.assist", "function"),
         },
     }
 

@@ -1,69 +1,167 @@
-# 执行路线与工作包
+# Dual-Surface Development and Acceptance Roadmap
 
-权威任务依赖和验收映射在 [plan.json](../assets/plan.json)。所有包初始 planned；已有基础由 baseline 记录，不把旧实现算成本计划验收通过。工作包可拆成多个小 PR，保持 ID 与 case 映射。
+Revision: 2026-11-14. Source baseline: `5c9f53087398f614958acf06d3c9d14f54958c52`.
+Read [architecture.md](architecture.md) for current contracts and
+[validation.md](validation.md) for the evidence boundary.
 
-## 顺序
+## Settled boundaries and current result
 
-| 批次 | 工作包 | 可交付结果 |
+One distribution, Function and Account; shared services; explicit handles;
+metadata-only recovery stores; MCP-owned ledger cleanup. These are implemented
+foundations, not questions to reopen. Both full generation and full content
+management remain equal product goals. Tool count is not feature coverage.
+
+The owner reports local fingerprint synchronization, full contract tests and
+protocol smoke passing. The reviewed remote SHA also has passing CI/CodeQL:
+CI run 43433504485 includes Python 3.11/3.12 suites, contracts, profiles, modern/
+legacy stdio, clean-wheel/onboarding and Skill installation. CodeQL run
+43433504654 passed. This is revision-scoped evidence, not new live acceptance or
+proof that removed 0.2.2 functionality has migrated. Preserve those gates;
+do not spend the next milestone rebuilding or repeatedly rerunning unchanged gates.
+
+## Next executable order
+
+| Slice | Work packages | Deliverable and exit condition |
 | --- | --- | --- |
-| 0 | P00 → P01 | 刷新覆盖、修真实边界问题，建立不掩盖未知/截断的基线 |
-| 1 | P02、P03、P04；P05 可在基础策略明确后并行 | 能力/素材/持久任务与交互安装的共同底座 |
-| 2A | G01 → G02、G03、G04、G05、G06、G07、G08 | 生成线所有模型及原生模式逐项接通 |
-| 2B | M01 → M02、M03、M04、M05、M06、M07、M08 | 管理线全资源发现、批量整理、导出和管理 |
-| 3 | X01、Q01、D01、R01 | 两套互通、真实 agent 验收、发布验证与交付 |
+| 0. Reconcile integration | P00/P01/D01 | Action-by-action released-to-current matrix; version/storage/entrypoint migration decision; current plan/checker works |
+| 1. Shared recovery and references | P02/P03/P04 | Capability/ref contracts; failure-boundary tests; explicit same-handle versus new-intent behavior; no duplicate starts |
+| 2A. Generation | G01/G02/G03/G04/G05/G06 | Extend Function, not a third server; multi-reference/continued creation; Web/API separation; real report and file handoff |
+| 2B. Management | M01/M02/M03/M04/M05/M06/M07/M08 | Restore missing released actions first; complete lookup/export and resumable exact-target changes |
+| 3. Remaining native generation | G07/G08 | Real native file/Canvas/audio/learning artifacts, separately evidenced by kind |
+| 4. Installation and combined acceptance | P05/X01/Q01/D01/R01 | Installed client tasks, cross-surface handoff, coverage reconciliation, versioned release candidate |
 
-不用等待所有在线条件才能继续离线工作。依赖包达到 implemented 且其接口/离线测试可审查时可启动下游；accepted 必须满足全部门禁。最先串通两条最小垂直流程：一次多模态生成→产物→继续编辑；跨页查找→完整读→计划→批量整理→导出。之后按完整矩阵补齐，不把垂直样例当全量支持。
+Independent generation and management slices can proceed in parallel after
+shared contracts settle. Migration work must not stall unrelated additive work.
+A blocked account check is not a reason to stop all offline implementation, nor
+a reason to mark that check accepted.
 
-## 共同工作包
+### Capability disposition required before integration
 
-### P00 — 刷新基线与能力覆盖
+| Released or existing workflow | Current observation | Required treatment |
+| --- | --- | --- |
+| Function media background starts | Implemented, including images | Preserve and extend; do not propose async images as new work |
+| Task/Notebook Chat, preferences, browser inputs | Implemented branch contracts | Preserve exact identity and effects; do not turn setup into text confirmation |
+| Released `gemini-mcp-create` | No current entrypoint | Restore a thin compatible adapter or make an explicitly approved breaking migration |
+| Released seven Account `request` facades | Replaced by flat tools under the same command | Test old input/output/annotations separately; name equality is not compatibility |
+| Released unified state DB, idempotency/cancel | Different current stores and APIs | Synthetic old-DB migration/refusal/rollback tests; no silent rebind, reset or fake cancel |
+| Canvas, Library, public sharing | Not re-exposed by current business catalog | Port service behavior and user-level regressions, or retain explicit open gaps |
+| Native Skills ZIP and richer Notebook source actions | Current native management is not proof of every released action | Inventory list/get/update/upload/export actions individually |
+| Native Remy / Task / Chat schedule contracts | Several distinct backends and identities | Map trigger/actions and callers, not just surviving RPC rows |
+| Ordinary session restart | Process-local today | New opt-in persistence is a future capability, not existing operation recovery |
 
-输入：当前 git 状态、代码与测试、官方资料。检查发布状态、两套目标和现有兼容面；生成实际工具/schema/依赖摘要。列每项功能、账号可用性、协议证据、最近验收，明确新能力发现流程。建立 source ID 到工作包映射。输出脱敏 baseline/coverage 差异和待实现清单；禁止删除已发现但难实现的条目。
+Record each old entrypoint/action as retained, adapted, planned, explicitly
+retired or blocked with evidence. When replacing implementation-detail tests,
+port the observable behavior tests first. Do not delete requirements or weaken
+checks merely to obtain green CI. The current passing suite remains valid for
+its current contracts; it does not answer this separate migration question.
 
-### P01 — 可信读取与权限边界
+## Work packages retained from the full plan
 
-复核 `read_chat_result`、分页、导出：None、错误 CID、畸形返回、截断不能成为 observed complete。为只读 profile 的 reset/cleanup 副作用写回归，服务层实施 policy。保持旧工具名称与保守 annotations；必要时新增纯本地 reset，并说明旧 destructive reset 的权限拒绝。统一 thinking choices 来源，修 release 文档过时文字。不得一次扩大成全仓格式化。
+The IDs and case ownership in `assets/plan.json` remain stable. Rebase old private
+progress to this plan revision; never carry accepted status forward automatically.
+Implementation and acceptance remain separate. The following sections are
+executable backlog requirements, not assertions that every item is unfinished.
 
-### P02 — 能力目录
+### P00 — Reconcile baseline, coverage and evidence
 
-扩展 manifest/account/runtime model owners。按账号读取模型、mode、输入限制和原生参数；static manifest 与 live availability 分开。缓存有 TTL/账号隔离，未知字段/退役模型/限额降级产生明确结果。生成套件不必启用私密历史管理即可查能力。alias 只能映射经观察的能力，不硬编码新模型 hex ID。
+Compare the reviewed branch, current working tree, main and published v0.2.2.
+Inventory actual tools/actions and the removed module/test behaviors. Record
+source SHA, dependency versions, protocol eras, gate reports and coverage gaps.
+Exit A01: every goal has an owner and a current disposition; baseline CI is
+credited without presenting historical account checks as today's results.
 
-### P03 — 素材、产物与引用
+### P01 — Freeze wire meaning and trustworthy read/write boundaries
 
-复用 inputs/artifacts/understanding/import contracts，统一有序多输入、native reference 和生成物引用，提供客户端可获取的交付方式。识别真实 provider 文件格式，保存 provenance；不静默跨 Google 服务互换 ID。持久定位与安全下载/解压、权限/空间不足、远程客户端路径差异都纳入测试。
+Review the five MCP fingerprint surfaces and both protocol eras. Keep the
+current wrapper and domain-error semantics explicit. Test false-empty reads,
+wrong IDs, union destructive annotations and read-only profile leakage. Resolve
+published-client migration, not just branch golden equality. Exit A02/A03:
+invalid reads never prove absence; legacy requests have tested compatibility or
+an explicit approved migration. Do not overwrite the golden to hide a regression.
 
-### P04 — 持久任务与续接
+### P02 — Discover actual account capabilities and model policy
 
-扩展现有 OperationService、state_store、SessionService：图片纳入 durable handles，普通会话 metadata 续接，幂等 payload 冲突、跨进程租约、账号 lineage、迁移/过期、提交未知窗口与取消证据。同步 fast path 有等待预算，超时返回原 handle。新只读 status 不触发清理；collect 明示副作用。保留旧兼容行为。
+Reuse current runtime model discovery and policy. Make necessary capability
+metadata usable by Function without general account-history privileges. Record
+input/action support, policy denial, unavailable and unknown separately. Preserve
+explicit selection, Lite quota evidence, body/header consistency and provider
+identity. Exit A04/A05: fixture drift and bounded live calls agree; no hidden
+paid-API fallback or deliberate real-quota exhaustion.
 
-### P05 — 两套交互安装与诊断
+### P03 — Common resource references and usable artifacts
 
-在人用 setup 中选择客户端、生成/管理/read-admin、浏览器 profile、产物目录和授权范围；配置 preview、确认、原子写、备份及 rollback。无 TTY 提供明确非交互参数，不挂住 MCP stdin。默认 preflight 不读 Cookie、不网络生成；MCP stdout 只有协议，日志 stderr。复用 doctor/onboarding，不做独立聊天 UI。权限不足/多账号/FFmpeg/Pillow 缺失给可操作诊断。
+Extend existing artifact/understanding/media storage rather than recreating
+removed `CreationService`. Keep account/provider/kind and exact turn identity,
+ordered inputs, input/output lineage and lossless original files. Separate
+preview, native output and local conversion. Exit A06/A07: no dropped input or
+wrong-account reference; local and supported remote-client handoff are honest.
 
-## 生成与管理细节
+### P04 — Complete failure-boundary and continuation contracts
 
-G01–G08 见 [generation.md](generation.md)，M01–M08 见 [management.md](management.md)。每个包都关联明确验收 case，不能只完成清单里的第一个例子。
+Reuse separate OperationStore/CleanupStore and detached workers. Cover loss
+before dispatch, after provider submission but before locator persistence,
+after save and before cleanup. Same handle does not validate prompt equality.
+Define changed-intent rejection/fingerprint policy without storing raw prompts.
+Ordinary session persistence is a separate new feature; current `recover_only`
+remains process-local until implemented. Cancellation is a future versioned
+contract, not a requirement to fabricate success. Exit A08/A09/A10: same-job
+recovery never replays generation; storage migration is explicit; persistent
+sessions are accepted only after real continuation tests.
 
-## 集成与交付
+### P05 — Interactive setup without protocol pollution
 
-### X01 — 跨套件交接与保留策略
+Reuse onboarding/doctor and expose Function/Account choices with config diff,
+atomic writes and rollback. TTY setup is separate from MCP stdio; noninteractive
+usage remains supported. Exit A11: clean auth-free install works without reading
+private content or silently writing credentials.
 
-同账号下支持查旧素材→继续生成→整理新产物、研究→报告→Notebook、批量导出期间保留来源。显式资源授权与 hold 转移可崩溃恢复。来源删除与资源 move 并发时不误删。跨账号的共享 handle 拒绝，不做自动复制私密内容。
+### X01 — Cross-surface handoff and retention
 
-### Q01 — 全覆盖 agent 与兼容验收
+Use an existing managed resource as generation input, then organize/export the
+new artifact. Preserve identity and intentional user works. Task schedules,
+active sessions, unresolved replies and unread/unverified native attachments
+remain protected. Exit A45/A46: all owned sources accounted for, no unrelated
+resource or Notebook deletion, and the downstream consumer uses verified output.
 
-建立每个公开 action 和能力变体的正/负 case、调用预算、独立 oracle；模拟变更、响应丢失与进程 kill。用实际 MCP 客户端和有授权测试账号跑矩阵，记录首轮成功、恢复成功、重复提交、误删、工具选择和下游产物可用性。新发现模型/操作加入矩阵而非忽略。零误删、零未授权访问、零隐式重新生成是硬门；随机生成质量另设人工 rubric，不伪造 100% 内容质量。
+### Q01 — Expanded action matrix and agent acceptance
 
-### D01 — 分发与平台支持
+Port missing user-level tests from released workflows, then expand parameterized
+coverage by action/model/input/selector. Evaluate both lanes and interruptions
+with independent expected outcomes. Current full-suite totals are not coverage
+metrics. Exit A47/A48: complete declared matrix, actual downstream handoff and
+zero duplicate starts/unauthorized destructive actions in the exercised scope.
 
-更新新入口、运行 Skill、package data、版本与 schema fixtures、客户端样例。现有 macOS/Linux 路径先保住；Windows 为单独能力子项，只有安全状态文件/凭据权限实现与真实 OS 测试后才宣称支持。无条件宣称跨平台不是默认目标。清洁 wheel/uvx、独立 Skill 安装和实际客户端验收都必须保留。
+### D01 — Installed compatibility and client/platform evidence
 
-### R01 — 最终验收与发布候选
+Verify current entrypoints and explicitly migrated/reinstated released clients
+from a clean wheel. Separate live acceptance from auth-free protocol smoke.
+Current 0.2.1 source metadata is not a releasable update over published 0.2.2;
+select a fresh version after scope review and synchronize metadata together.
+Exit A49/A50: reproducible installation, tested upgrade/refusal/rollback and an
+honest client/OS matrix. No automatic publication or tag mutation.
 
-完整覆盖账本逐项对账，运行 completion checker，人工抽核证据。不以 blocked/skipped 充数。按真实改动评估下一版本；本计划不预先发布 0.3.0，不改已发布 tag。交付 review PR、升级/回滚说明、按账号能力的限制和完成报告；合并/发版遵守用户与仓库门禁。
+### R01 — Release and complete-scope accounting
 
-## 并行所有权与变更控制
+Reconcile every original generation/management requirement, including missing
+Canvas/Library/sharing/native formats. Retired upstream functions require dated
+proof and an explicit scope change, not a passing substitute. Exit A51/A52:
+required evidence for the declared scope is complete; blocked/skipped stays
+visible. A partial compatible release can ship only with its real limited scope,
+not a claim of full Gemini Web parity.
 
-先稳定 P02/P03/P04 的 contract；generation 与 management 可各自负责独立服务。domain、state_store、RPC registry、package metadata 由一个整合 owner 串行合并。小任务不强行开多 agent。跨文件协作先约定接口，禁止两人同时改同一注册/迁移文件而覆盖对方。
+## Generation and management packages
 
-一次 PR 尽量完成一个可验收结果；需要破坏性兼容改动先给迁移方案。上游新变化要更新 sources/coverage 和受影响包，仍保留原失败记录。只有用户决定改变产品范围时才缩减目标。
+Detailed target requirements remain in [generation.md](generation.md) (G01–G08)
+and [management.md](management.md) (M01–M08), with procedures in
+[acceptance.md](acceptance.md). They now use current shared owners; new features
+are explicitly proposals. Prioritize G03 alongside M01/M02 and the missing M06/M07
+actions; do not spend both lanes' budget on more Task-browser controls alone.
+
+## Remaining Owner Choice
+
+The two surfaces and both full product goals are settled. The recommended default
+is to preserve released behavior with thin adapters where feasible, isolate old
+state until migration is tested, and advance generation/management together.
+A deliberate breaking release or a newly advertised client/OS support guarantee
+requires an explicit decision and evidence; neither blocks documentation or
+unrelated additive implementation. Do not repeatedly ask to reconfirm this scope.

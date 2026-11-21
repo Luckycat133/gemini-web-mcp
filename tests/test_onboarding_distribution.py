@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import re
-import shlex
 import tomllib
 from pathlib import Path
 
@@ -18,26 +17,38 @@ SKILLS_CLI = "skills@1.5.21"
 
 def _server_from_json(name: str, root_key: str) -> tuple[dict, dict]:
     payload = json.loads((CLIENTS / name).read_text(encoding="utf-8"))
+    assert set(payload[root_key]) == {"gemini"}
     server = payload[root_key]["gemini"]
     return payload, server
 
 
-def _assert_primary_model_server(server: dict) -> None:
+def _assert_function_server(server: dict) -> None:
     if "type" in server:
         assert server["type"] == "stdio"
     assert server["command"] == "uvx"
-    assert server["args"] == ["--from", CANONICAL_GIT_SOURCE, "gemini-mcp-server"]
-    assert server["env"]["GEMINI_TOOLS"] == "model"
+    assert server["args"] == ["--from", CANONICAL_GIT_SOURCE, "gemini-mcp-function"]
+    assert "GEMINI_TOOLS" not in server["env"]
     assert server["env"]["GEMINI_AUTO_REFRESH"] == "false"
+
+
+def _normalize_shell_continuations(text: str) -> str:
+    """Collapse copyable backslash-newline commands without constraining formatting."""
+
+    return " ".join(
+        token
+        for line in text.splitlines()
+        for token in line.removesuffix("\\").split()
+    )
 
 
 def test_codex_configuration_parses_and_forwards_host_secrets() -> None:
     payload = tomllib.loads((CLIENTS / "codex.config.toml").read_text(encoding="utf-8"))
+    assert set(payload["mcp_servers"]) == {"gemini"}
     server = payload["mcp_servers"]["gemini"]
 
     assert server["command"] == "uvx"
-    assert server["args"] == ["--from", CANONICAL_GIT_SOURCE, "gemini-mcp-server"]
-    assert server["env"] == {"GEMINI_TOOLS": "model", "GEMINI_AUTO_REFRESH": "false"}
+    assert server["args"] == ["--from", CANONICAL_GIT_SOURCE, "gemini-mcp-function"]
+    assert server["env"] == {"GEMINI_AUTO_REFRESH": "false"}
     assert server["env_vars"] == ["GEMINI_PSID", "GEMINI_PSIDTS", "GEMINI_PSIDCC"]
     assert server["startup_timeout_sec"] == 60
     assert server["tool_timeout_sec"] == 720
@@ -46,7 +57,7 @@ def test_codex_configuration_parses_and_forwards_host_secrets() -> None:
 def test_claude_desktop_configuration_uses_explicit_local_placeholders() -> None:
     _, server = _server_from_json("claude-desktop.json", "mcpServers")
 
-    _assert_primary_model_server(server)
+    _assert_function_server(server)
     assert server["env"]["GEMINI_PSID"] == "REPLACE_WITH_SECURE_1PSID"
     assert server["env"]["GEMINI_PSIDTS"] == "REPLACE_OR_REMOVE_IF_UNAVAILABLE"
 
@@ -54,7 +65,7 @@ def test_claude_desktop_configuration_uses_explicit_local_placeholders() -> None
 def test_claude_code_configuration_expands_environment_variables() -> None:
     _, server = _server_from_json("claude-code.mcp.json", "mcpServers")
 
-    _assert_primary_model_server(server)
+    _assert_function_server(server)
     assert server["env"]["GEMINI_PSID"] == "${GEMINI_PSID}"
     assert server["env"]["GEMINI_PSIDTS"] == "${GEMINI_PSIDTS:-}"
     assert server["timeout"] == 720000
@@ -63,7 +74,7 @@ def test_claude_code_configuration_expands_environment_variables() -> None:
 def test_vscode_configuration_uses_password_inputs_and_servers_root() -> None:
     payload, server = _server_from_json("vscode.mcp.json", "servers")
 
-    _assert_primary_model_server(server)
+    _assert_function_server(server)
     assert {item["id"] for item in payload["inputs"]} == {"gemini-psid", "gemini-psidts"}
     assert all(item["type"] == "promptString" and item["password"] is True for item in payload["inputs"])
     assert server["env"]["GEMINI_PSID"] == "${input:gemini-psid}"
@@ -82,19 +93,23 @@ def test_public_docs_distinguish_expected_routing_from_observation() -> None:
     assert "not recorded as a dedicated-account full canary" in changelog
 
 
-def test_public_skill_install_commands_resolve_repository_sources() -> None:
+def test_runtime_and_development_skills_have_distinct_roles_and_install_paths() -> None:
+    runtime = (PROJECT_ROOT / ".agents" / "skills" / "gemini-web-mcp" / "SKILL.md").read_text(
+        encoding="utf-8"
+    )
+    development = (
+        PROJECT_ROOT / ".agents" / "skills" / "gemini-web-mcp-development" / "SKILL.md"
+    ).read_text(encoding="utf-8")
+    normalized_development = _normalize_shell_continuations(development)
     client_doc = (PROJECT_ROOT / "docs" / "client-examples.md").read_text(encoding="utf-8")
-    commands = [
-        shlex.split(line.strip())
-        for line in re.sub(r"\\\s*\n\s*", " ", client_doc).splitlines()
-        if line.strip().startswith("npx ") and SKILLS_CLI in line
-    ]
 
-    for name in ("gemini-web-mcp", "gemini-web-mcp-development"):
-        assert (PROJECT_ROOT / ".agents" / "skills" / name / "SKILL.md").is_file()
-        matching = [args for args in commands if "--skill" in args and args[args.index("--skill") + 1] == name]
-        assert matching
-        assert all("--copy" in args and "--yes" in args and args[args.index("--agent") + 1] == "codex" for args in matching)
+    assert "Use this Skill to complete the user's task with Gemini" in runtime
+    assert "do not use for repository implementation" in runtime.lower()
+    assert "Develop, refactor, evaluate, package, and release" in development
+    assert "--skill gemini-web-mcp-development --agent codex --copy --yes" in normalized_development
+    assert client_doc.count(SKILLS_CLI) == 2
+    assert "--skill gemini-web-mcp" in client_doc
+    assert "--skill gemini-web-mcp-development" in client_doc
 
 
 def test_public_onboarding_docs_do_not_depend_on_the_broken_release_url() -> None:
@@ -117,3 +132,11 @@ def test_public_readme_badges_do_not_hardcode_volatile_test_counts() -> None:
         text = path.read_text(encoding="utf-8")
         assert "tests-CI%20verified" in text
         assert re.search(r"tests-[0-9]+", text) is None
+
+
+def test_client_document_explains_optional_account_and_offline_function_preflight() -> None:
+    text = (PROJECT_ROOT / "docs" / "client-examples.md").read_text(encoding="utf-8")
+    assert "gemini-mcp-function" in text and "gemini-mcp-account" in text
+    assert "not enabled by the supplied default files" in text
+    assert "INVALID_ARGUMENT" in text and "gemini_ask" in text
+    assert "MCP-owned ledger" in text and "never title matches" in text

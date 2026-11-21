@@ -1,0 +1,287 @@
+{
+  "preference_list": {
+    "contract_key": "preferences.list",
+    "cases": {
+      "success": {
+        "body": [
+          [
+            [
+              [
+                [
+                  "fixture_tool",
+                  "read_item"
+                ],
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                [
+                  [
+                    "ordered",
+                    "first"
+                  ],
+                  [
+                    "ordered",
+                    "second"
+                  ]
+                ]
+              ],
+              [
+                "grant-fixture",
+                2,
+                "preserved-grant-extra"
+              ],
+              null,
+              null,
+              [
+                null,
+                null,
+                null,
+                "Read fixture",
+                1
+              ],
+              2
+            ]
+          ],
+          ""
+        ]
+      },
+      "empty": {
+        "body": [
+          [],
+          ""
+        ]
+      },
+      "rejected": {
+        "body": null,
+        "reject_code": 7
+      },
+      "changed_shape": {
+        "body": [
+          [
+            [
+              [
+                [
+                  "fixture_tool",
+                  "read_item"
+                ],
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                [
+                  [
+                    "ordered",
+                    "first"
+                  ],
+                  [
+                    "ordered",
+                    "second"
+                  ]
+                ]
+              ],
+              [
+                "grant-fixture",
+                2,
+                "preserved-grant-extra"
+              ],
+              null,
+              null,
+              [
+                null,
+                null,
+                null,
+                "Read fixture",
+                1
+              ],
+              2
+            ]
+          ],
+          "unknown-continuation"
+        ]
+      }
+    }
+  },
+  "preference_update": {
+    "contract_key": "preferences.update",
+    "cases": {
+      "success": {
+        "body": [
+          [
+            [
+              [
+                "fixture_tool",
+                "read_item"
+              ],
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              [
+                [
+                  "ordered",
+                  "first"
+                ],
+                [
+                  "ordered",
+                  "second"
+                ]
+              ]
+            ],
+            [
+              "grant-fixture",
+              2,
+              "preserved-grant-extra"
+            ],
+            null,
+            null,
+            [
+              null,
+              null,
+              null,
+              "Read fixture",
+              1
+            ],
+            2
+          ]
+        ]
+      },
+      "empty": {
+        "body": []
+      },
+      "rejected": {
+        "body": null,
+        "reject_code": 7
+      },
+      "changed_shape": {
+        "body": [
+          false
+        ]
+      }
+    }
+  },
+  "preference_catalog": {
+    "contract_key": "preferences.catalog",
+    "cases": {
+      "success": {
+        "body": [
+          [
+            [
+              "fixture_app",
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              [
+                [
+                  [
+                    [
+                      "fixture_tool",
+                      "read_item"
+                    ],
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    [
+                      [
+                        "ordered",
+                        "first"
+                      ],
+                      [
+                        "ordered",
+                        "second"
+                      ]
+                    ]
+                  ],
+                  null,
+                  null,
+                  null,
+                  [
+                    null,
+                    null,
+                    null,
+                    "Read fixture",
+                    1
+                  ],
+                  2
+                ]
+              ]
+            ]
+          ]
+        ]
+      },
+      "empty": {
+        "body": []
+      },
+      "rejected": {
+        "body": null,
+        "reject_code": 7
+      },
+      "changed_shape": {
+        "body": [
+          [
+            {
+              "unexpected": "app"
+            }
+          ]
+        ]
+      }
+    }
+  },
+  "preference_revoke": {
+    "contract_key": "preferences.revoke",
+    "cases": {
+      "success": {
+        "body": [
+          null
+        ]
+      },
+      "empty": {
+        "body": []
+      },
+      "rejected": {
+        "body": null,
+        "reject_code": 7
+      },
+      "changed_shape": {
+        "body": {
+          "unexpected": "response"
+        }
+      }
+    }
+  }
+}

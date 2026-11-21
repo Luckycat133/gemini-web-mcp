@@ -105,10 +105,9 @@ def exception_text(
     prefix: str = "Error",
     preserve_message: bool = False,
 ) -> list[TextContent]:
+    """Render a classified error; the legacy preservation hint never exposes exception text."""
     result = result_from_exception(error, logger=logger, operation=operation)
     assert result.error is not None
-    if preserve_message:
-        return domain_text(result, f"{prefix}: {error}")
     text = f"{prefix}: {result.error.code.value}: {result.error.message}"
     if result.error.suggested_action:
         text += f"\nSuggested action: {result.error.suggested_action}"

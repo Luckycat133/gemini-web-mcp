@@ -24,10 +24,9 @@ _format_cleanup_markdown）也零行为覆盖。作为破坏性工具（dry_run=
 
 import asyncio
 import json
+import pytest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
-
-from tests._account_rpc_fakes import scheduled_ack_response, scheduled_read
 
 from src.adapters.mcp_sdk import MCPServer
 
@@ -39,6 +38,11 @@ from src.tools.manage import (
     _split_cleanup_markers,
     register_manage_tools,
 )
+
+
+@pytest.fixture(autouse=True)
+def _synthetic_account(monkeypatch):
+    monkeypatch.setenv("GEMINI_PSID", "synthetic-test-account")
 
 
 # ---------------------------------------------------------------------------
@@ -238,12 +242,11 @@ def test_payload_chats_dry_run_no_match():
 
 
 def test_payload_chats_dry_run_false_deletes_successfully():
-    """Only a complete remote history read-back counts as deleted."""
-    client = _make_client_with_chats([{"id": "codex-1", "title": "T"}])
-    body = [None, None, []]
+    """Only an exact remote absence read-back counts as deleted."""
+    client = _make_client_with_chats([{"id": "c_codex-1", "title": "T"}])
     client._batch_execute = AsyncMock(return_value=SimpleNamespace(
         status_code=200,
-        text=json.dumps([["wrb.fr", "MaZiqc", json.dumps(body), None, None, None, "generic"]]),
+        text=json.dumps([["wrb.fr", "hNvQHb", None, None, None, [5], "generic"]]),
     ))
 
     payload = asyncio.run(_cleanup_test_artifacts_payload(
@@ -253,7 +256,7 @@ def test_payload_chats_dry_run_false_deletes_successfully():
     assert payload["deleted_chat_count"] == 1
     assert payload["matched_chats"][0]["deleted"] is True
     assert payload["matched_chats"][0]["delete_error"] == ""
-    client.delete_chat.assert_awaited_once_with("codex-1")
+    client.delete_chat.assert_awaited_once_with("c_codex-1")
 
 
 def test_payload_chats_accepted_without_read_back_is_not_counted_deleted():
@@ -283,7 +286,7 @@ def test_payload_chats_dry_run_false_delete_raises_records_error():
 
     assert payload["deleted_chat_count"] == 0
     assert payload["matched_chats"][0]["deleted"] is False
-    assert "RuntimeError: network down" in payload["matched_chats"][0]["delete_error"]
+    assert payload["matched_chats"][0]["delete_error"] == "RuntimeError"
 
 
 def test_payload_chats_dry_run_false_without_delete_chat_capability():
@@ -432,16 +435,16 @@ def test_payload_scheduled_dry_run_matches(monkeypatch):
 def test_payload_scheduled_dry_run_false_deletes(monkeypatch):
     """target=scheduled + dry_run=False + task_state_id=6 → deleted=True, verification_status='deleted_state_by_id'。"""
     client = MagicMock()
-    client._batch_execute = AsyncMock(return_value=scheduled_ack_response())
+    client._batch_execute = AsyncMock(return_value=SimpleNamespace(text='["wrb.fr","Q4Gw3c","body"]', status_code=200))
 
     entries = [{"id": "task-codex-1", "title": "Codex", "instructions": "", "schedule_label": ""}]
     monkeypatch.setattr(
         manage_tools, "_fetch_scheduled_registry",
-        AsyncMock(return_value=scheduled_read(entries)),
+        AsyncMock(return_value=(entries, {"ok": True})),
     )
     monkeypatch.setattr(
         manage_tools, "_fetch_scheduled_task_by_id",
-        AsyncMock(return_value=scheduled_read({"id": "task-codex-1", "task_state_id": 6})),
+        AsyncMock(return_value=({"task_state_id": 6}, {})),
     )
     monkeypatch.setattr(manage_tools, "_extract_rpc_bodies", lambda *a, **kw: ["body"])
 
@@ -456,11 +459,11 @@ def test_payload_scheduled_dry_run_false_deletes(monkeypatch):
 
 def test_payload_scheduled_failed_read_back_is_not_counted_deleted(monkeypatch):
     client = MagicMock()
-    client._batch_execute = AsyncMock(return_value=scheduled_ack_response())
+    client._batch_execute = AsyncMock(return_value=SimpleNamespace(text="response", status_code=200))
     entry = {"id": "task-codex-1", "title": "Codex", "instructions": "", "schedule_label": ""}
     registry = AsyncMock(side_effect=[([entry], {}), RuntimeError("read-back unavailable")])
     monkeypatch.setattr(manage_tools, "_fetch_scheduled_registry", registry)
-    monkeypatch.setattr(manage_tools, "_fetch_scheduled_task_by_id", AsyncMock(return_value=scheduled_read(None)))
+    monkeypatch.setattr(manage_tools, "_fetch_scheduled_task_by_id", AsyncMock(return_value=(None, {})))
     monkeypatch.setattr(manage_tools, "_extract_rpc_bodies", lambda *_args: [["ok"]])
 
     payload = asyncio.run(_cleanup_test_artifacts_payload(
@@ -489,7 +492,7 @@ def test_payload_scheduled_delete_error(monkeypatch):
 
     assert payload["deleted_scheduled_count"] == 0
     assert payload["matched_scheduled_actions"][0]["verification_status"] == "delete_error"
-    assert "RuntimeError: rpc failed" in payload["matched_scheduled_actions"][0]["delete_error"]
+    assert payload["matched_scheduled_actions"][0]["delete_error"] == "RuntimeError"
 
 
 def test_payload_scheduled_missing_batch_execute_records_error():

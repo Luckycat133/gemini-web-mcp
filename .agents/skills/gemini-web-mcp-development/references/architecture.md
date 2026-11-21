@@ -1,54 +1,174 @@
-# 架构与共享契约
+# Implemented Dual-Surface Contracts
 
-## 两套产品，一份运行时
+Reviewed source: `5c9f53087398f614958acf06d3c9d14f54958c52` (2026-11-14 review).
+Re-read source after rebasing; this document separates implemented behavior from
+future targets in the generation/management backlog.
 
-目标默认入口：生成套件拟新增 `gemini-mcp-generate` / `src/surfaces/generate.py`，管理套件沿用 `gemini-mcp-account`。这些新名字在实现前不是可运行命令。原有 assist/create、primary/compact 全部保留；新入口通过共享注册函数和服务组合，不复制业务逻辑。管理提供明确 read/admin 策略，生成只暴露本次任务需要的账号资源定位，不默认扫描历史。
+## Entrypoints and compatibility
 
-新增运行 Skill 拟为 `gemini-generate`；管理继续 `gemini-account`。旧 `gemini-assist`、`gemini-create`、`gemini-web-mcp` 保留兼容指导。不要为了维持某个工具数而塞入无类型万能 `action: str`，也不要一个网页按钮建一个工具。
+| Entrypoint | Source | Current boundary |
+| --- | --- | --- |
+| `gemini-mcp-function` | `src/surfaces/function.py` | Function catalog |
+| `gemini-mcp-account-next` | `src/surfaces/account.py` | Explicit Account catalog |
+| `gemini-mcp-account` | `src_legacy/surfaces/account.py` | Released seven typed account facades |
+| `gemini-mcp-create` | `src_legacy/surfaces/create.py` | Released seven creation and operation tools |
+| `gemini-mcp-server` | `src/server.py` | Function when `GEMINI_TOOLS` is unset; explicit profiles retain branch behavior |
+| `gemini-mcp-assist` | `src/surfaces/assist.py` | Five-tool assist compatibility surface |
+| `gemini-mcp-skill-server` | `src/skill_server.py` | Branch compact compatibility surface |
+| `gemini-mcp-onboarding` | `src/onboarding.py` | Installation/protocol checks, not another business server |
 
-## Owner
+There is no current `gemini-mcp-create` console entrypoint. The released 0.2.2
+Account command has the same name but different request facades and results.
+Branch compatibility is NOT full released-client compatibility.
 
-- `src/domain/`：请求联合类型、结果、资源引用、覆盖度和确认契约。
-- `src/services/`：生成、读取、变更、任务、批量、备份、能力发现；不 import MCP 类型。
-- `src/adapters/mcp_sdk.py`：唯一 MCP SDK/协议 import 边界。其余 adapters 负责旧参数兼容、输出 schema、内容块和权限入口。
-- `src/infrastructure/{rpc_contracts,rpc_parsers,web_request_contracts,import_contracts,canvas_contracts}.py`：有来源的协议构造与纯解析。不得散落新 RPC 字符串或数组索引。
-- shared client/cookie/session/cleanup managers 保留生命周期所有权。`src/tools/manage.py` 只注册兼容工具，不供服务反向依赖。
+### Function catalog
 
-## 新增领域契约（设计目标，不是当前 API）
+`gemini_ask`, `gemini_understand_image`, `gemini_understand`, `gemini_research`,
+`gemini_start_chat`, `gemini_send_message`, `gemini_list_sessions`,
+`gemini_reset_session`, `gemini_generate_image`, `gemini_edit_image`,
+`gemini_generate_video`, `gemini_generate_music`, `gemini_run_task`,
+`gemini_get_operation_status`, `gemini_get_operation_result`,
+`gemini_list_research_report_actions`, `gemini_create_from_research_report`.
 
-| 类型 | 必须包含/约束 |
+### Account catalog
+
+`gemini_history`, `gemini_manage_chat`, `gemini_delete_chat`, `gemini_notebooks`,
+`gemini_manage_notebook`, `gemini_move_chat_to_notebook`, `gemini_tasks`,
+`gemini_task_browser`, `gemini_skills`, `gemini_account_inventory`,
+`gemini_list_scheduled_actions`, `gemini_get_scheduled_action`,
+`gemini_create_scheduled_action`, `gemini_delete_scheduled_action`,
+`gemini_manage_gems`, `gemini_cleanup`, `gemini_preferences`.
+
+Membership comes from `src/surfaces/catalogs.py`; schemas and side effects come
+from actual registration and services. Do not add a tool just to match this prose.
+
+## Shared ownership
+
+| Concern | Current owner |
 | --- | --- |
-| Capability | stable capability ID、账号内部作用域、mode/model 组合、输入/输出类型、参数约束、availability（available/unavailable/unknown）、协议版本、证据与观测时间；未观测额度不能填 0 |
-| ResourceRef | opaque handle、kind、provider namespace、服务端绑定 account scope、provider ID/version、来源关系；调用者提供的 scope 不授予权限 |
-| InputRef | 有序 input ID、local/remote/provider/artifact 类型、媒体类型和用户角色说明；角色说明不伪装成原生控制字段 |
-| ConversationRef | 稳定本地句柄、上游续接 metadata、账号与保留策略、最后确认 turn/version、并发版本；禁止存正文来冒充上游续接 |
-| Artifact | 原始与派生产物 ID、parent/source refs、mime、size、hash、readiness、verified decoder、origin（provider_native/local_conversion）、location；文件路径仅本机有效 |
-| Coverage | sources_requested/scanned、pages、continuation、truncated、missing/rejected、snapshot/observed_at、complete；不声称无上游快照保证的强一致性 |
-| MutationPlan | frozen target IDs + versions、动作/参数摘要、影响、expires_at、approval binding、逐项执行状态；版本冲突不扩大选择 |
-| BackupManifest | 格式版本、资源/关系、消息顺序和分支、附件 hash、缺失原因、覆盖度、cursor、导出时间；备份不等于原样恢复 |
+| SDK/protocol import and content-wrapper compaction | `src/adapters/mcp_sdk.py` |
+| Domain state and artifacts | `src/domain/` |
+| Business registration and presentation | `src/surfaces/`, reusable registrars in `src/tools/` |
+| Detached starts | `src/services/background.py`, `src/operation_worker.py` |
+| Status/result and recoverable media/report/Task work | `src/services/operations.py`, `media_jobs.py`, `task_jobs.py`, `research.py` |
+| Verified saved results | `src/services/media_storage.py`, `research_result_storage.py`, `artifacts.py` |
+| Persistence and account identity | `src/infrastructure/operation_store.py`, `cleanup_store.py`, `account_identity.py` |
+| Session/authentication/cleanup lifetime | shared client, session and remote-cleanup managers |
+| Provider contracts and parsers | `src/infrastructure/` |
 
-采用现有 `DomainResult` envelope；新状态先做兼容映射，别让旧客户端把未知状态当 success。账号作用域只在可信服务端派生；日志和公开报告不暴露身份哈希、凭据或真实 resource ID。
+Account currently reuses registrars from `src/tools/manage.py`. That is adapter
+composition, not a reason to duplicate services. Services must not import MCP
+servers or depend on a registration module. A future registrar extraction must
+preserve behavior and is not a prerequisite for delivering user capabilities.
 
-## 操作状态与提交语义
+## MCP v2 wire boundary
 
-复用 OperationService：accepted → running/queued → completed；保留 partial/timed_out/failed/cancel_requested/expired 的区别。需要用户输入的上游任务不得自动判失败或擅自确认外部动作。
+The adapter subclasses the official SDK; it is not a new protocol stack. It
+defaults `structured_output=True` and conservatively compacts only a recognized
+SDK TextContent/ImageContent wrapper, removing descriptive labels. Business
+schemas and validation constraints remain intact; unknown shapes are untouched.
 
-持久化先后顺序：reserve handle → 获取 lease → 记录提交意图 → 唯一一次 start → 尽早记录 provider locator → 记录产物定位信息 → 独立验证 → 记录终态 → 按保留策略清理。数据库 commit 与上游请求之间没有分布式事务；无 locator 的中断必须报告 submission_unknown，不得宣称 exactly-once。
+For domain-backed content-block tools, the current structured wire shape is:
 
-幂等按账号、操作类型和 key 隔离。同 key 不同请求应冲突而非返回错误任务；可使用本地私钥 HMAC 的规范化请求指纹，状态库只存指纹，密钥放私有凭据存储。不要保存明文 prompt，也不要用未加盐 prompt hash 泄漏可猜内容。数据库迁移兼容旧无指纹记录，不推测它们的请求内容。
+```text
+structuredContent.result[i]._meta.domain_result
+    ok / data / error / warnings / meta
+```
 
-恢复仅查询已有 provider work；read/status 与会导致下载/清理的 collect/recover 在新入口区分。旧 status 的既有副作用保留说明与保守 annotations，不默默改变兼容行为。
+Do not assume every non-domain helper contains that field. The smoke tests
+intentionally accept some domain rejections inside `isError=false`,
+`resultType=complete` responses. This is the existing application contract, not
+an assertion that MCP recommends treating all tool failures as success. Any
+migration to `isError=true` or a direct domain output schema is separately
+reviewed, versioned and tested for both protocol eras.
 
-## 保留、会话与账号切换
+## Execution and recovery matrix
 
-每个资源记录用途与保留关系。一次性工具调用可以采用既有清理策略；创作会话、Notebook 成员、用户明确保留的作品、未交付的长任务默认 hold。关系交接应先取得 hold，再移动/关联并读回，最后释放旧 hold。删除整个来源时检查依赖，明确列出影响。
+| Workflow | Start | Recovery / limitation |
+| --- | --- | --- |
+| Ask without Notebook IDs | Direct Chat | No durable ordinary Ask job implied |
+| Ask with Notebook IDs | Background ordinary Chat, `execution_mode=chat` | Persistent handle; not a native Task |
+| `gemini_run_task` | Background native Task, `execution_mode=task` | Exact goal AND completed original answer; attachment completeness |
+| Function image/edit/video/music | Background handle | Resume observation/materialization, never resubmit generation |
+| Research | Background by default | Exact original report; verified saved artifact before cleanup |
+| Ordinary session send | Process-local session | `recover_only=true` reads the uncertain original turn in the original process |
 
-普通会话复用 provider metadata 续接。每次 send 加跨进程锁/乐观版本检查，避免两客户端写错分支。Cookie 刷新和切账号不能混同：仅有已验证的同账号 lineage 才继承句柄；无法验证时 fail closed，不跨账号接管清理。
+Defaults, bounds and model support must be read from the request schema and
+current account policy. Complex prompts, app requests and Notebook context do
+not automatically select Task. Assist retains `gemini_search` and does not gain
+Function-only Notebook arguments.
 
-## 存储与输入安全
+`get_operation_status` reads recorded/observed metadata; it may validate local
+files, read upstream progress or update local metadata. It must not generate,
+fetch arbitrary account history or turn into result materialization. `result`
+can resume a recovery observer, fetch/save/verify files and apply stored cleanup;
+it is declared destructive. Local-only status is not promised.
 
-恢复 SQLite 仍只存 metadata/locators，迁移需旧版本 fixture、并发初始化、崩溃与文件权限测试。全文索引、备份、语义摘要分别是 opt-in 私有内容存储，必须有大小预算、保留/清除、账号隔离和索引删除传播；不能默认把账号内容发送给另一个 LLM 做索引。
+## Persistence, ownership and idempotency
 
-下载校验 scheme、host、重定向和私网地址；不把 Google 凭据转发到任意 URL。本地输入和输出拒绝路径穿越、符号链接逃逸和非预期覆盖；限文件大小、解压后大小/数量/层数、解码资源和下载时间。导入 Skill 的脚本不运行，Canvas app 不在开发机自动执行。远端文件返回 MCP resource/link，不能让远程客户端误用服务器绝对路径。
+- `GEMINI_OPERATION_DB_PATH` selects `OperationStore`; reviewed schema version 6
+  includes operation identity, artifact hashes/locators and Task guards/input
+  metadata. `GEMINI_CLEANUP_DB_PATH` selects the separate cleanup ledger.
+  Task browser action deduplication has its own owner; do not conflate these stores.
+- `GEMINI_STATE_DB_PATH` belongs to the different released architecture. Renaming
+  an environment variable does not migrate data or preserve old handles.
+- Detached workers receive ephemeral request data through anonymous stdin, not
+  a durable prompt spool. Claims/heartbeats fence workers. A server disconnect is
+  not a worker crash; a recorded handle is not proof the provider accepted work.
+- Persist observed CID/RID/candidate/provider IDs before relying on them. A crash
+  before any provider locator may be unrecoverable without a new explicitly
+  authorized request. Unknown submission is never automatically retried.
+- The current retry handle is `operation_id`, not the released `idempotency_key`
+  API. Existing-handle calls return existing work after account/kind checks;
+  payload equivalence is not established. New intent needs a new handle.
+- Keep seven-day retention, with protected operations retaining recoverability
+  under implemented locator/protection rules. Do not promise unconditional expiry
+  or global unbounded operation listing. Account mismatch/unbound fails closed.
+- Credentials, prompts, raw responses and report/answer bytes are excluded from
+  ledgers. Verified result files are deliberately persistent outside them.
+  New content indexes/backups require separate opt-in storage and retention.
 
-浏览器是按能力启用的可选 adapter，不是自动 fallback：只在确认未提交或明确恢复路径时操作，不能接口超时后再点击生成。用户自己完成登录、验证码、账号同意和头像录制。共享本机浏览器不能变成公开无鉴权 HTTP 服务。
+## Exact completion and cleanup
+
+Task/Notebook workers save a full verified answer, not just a preview. Task also
+records the complete recognized native attachment inventory; an unknown shape
+is not an empty inventory. Missing downloads keep protection. Restarted reads
+recheck files; a deleted/corrupted artifact does not justify provider replay.
+
+Uncertain session turns block new sends and use the exact turn's recovery path,
+not the SDK latest-reply fallback. Protect active/in-flight sessions from stale
+timers. Cleanup is account-scoped and limited to the MCP-owned ledger; it does
+not sweep titles or delete Notebook objects/sources. Scheduled Task relationships
+also protect their threads. Retention and artifact success are distinct states.
+
+## Models, transport and account mutations
+
+Fresh user-status evidence is required before Web dispatch; Cookie extraction
+or SDK initialization alone is insufficient. Preserve same-account fencing
+across permitted pre-dispatch refresh; no hidden generation replay.
+
+Low/medium/high and compatibility aliases must keep body/header selection
+consistent. The current Lite policy requires recent same-account basic Flash
+quota evidence and locked thinking; it is not a fallback for every failure.
+Do not exhaust real quota to test this policy. Keep explicit Pro/Argon intent.
+
+Default video is Web. Explicit `gemini-omni-1.2-flash` selects the paid API using
+`GEMINI_API_KEY`; only that current route accepts `duration_seconds` 3..15.
+Do not reinterpret those API options as Web controls or silently switch providers.
+
+Account reads minimize body access. Exact chat mutations use pre-read and
+independent read-back; sent-but-unverified updates keep `changed=null`.
+Notebook source-picker and `source=gemini` project views are resolved by observed
+ID/type, never prefix conversion. Notebook deletion can delete its conversations.
+Task schedules differ from Chat scheduled actions. Preference read-back proves
+stored values, not runtime effects. Task browser inputs require original reply
+IDs, frame hash and unique action ID; no input replay or automatic permission
+approval. Connection setup/OAuth, confirmations and browser input are different.
+
+## Explicit non-claims
+
+No public cancel, Task pause/resume, exclusive browser handoff or Task export is
+promised. ProcessSession probes are experimental. Report `audio_overview` and
+`custom_app` outputs are scripts/specifications, not native audio or deployment.
+Canvas/Library/sharing/ZIP and other released workflows need action-level migration
+accounting. Neither retained RPC fixtures nor green new-surface tests prove parity.

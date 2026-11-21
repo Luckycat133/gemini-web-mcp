@@ -19,13 +19,12 @@
       "command": "uvx",
       "args": [
         "--from",
-        "git+https://github.com/Luckycat133/gemini-web-mcp@main",
-        "gemini-mcp-server"
+        "git+https://github.com/Luckycat133/gemini-web-mcp@codex/gemini-tools-polish-20261101",
+        "gemini-mcp-function"
       ],
       "env": {
         "GEMINI_PSID": "${input:gemini-psid}",
         "GEMINI_PSIDTS": "${input:gemini-psidts}",
-        "GEMINI_TOOLS": "model",
         "GEMINI_AUTO_REFRESH": "false"
       }
     }

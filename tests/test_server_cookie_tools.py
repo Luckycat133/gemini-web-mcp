@@ -21,10 +21,18 @@ cookie 相关工具仅有注解形状测试（test_server_utility_tools_have_ann
 
 import asyncio
 import json
+import os
+import sys
 
+os.environ["GEMINI_TOOLS"] = "all"
+
+if "src.server" in sys.modules:
+    del sys.modules["src.server"]
 import src.server as server
 
-
+# Cookie 工具 handlers 定义在 src.tools.infrastructure，并从该模块的全局命名空间
+# 调用 get_cookie_status / list_browser_cookie_profiles / get_cookie_from_browser，
+# 故需 monkeypatch 该模块（而非 src.server）才能生效。
 async def _call_tool(name, **kwargs):
     """通过 server.mcp.call_tool 调用工具，返回 TextContent 列表。"""
     return (await server.mcp.call_tool(name, kwargs)).content
@@ -68,14 +76,13 @@ def test_get_cookie_status_available_with_cookie(monkeypatch):
     assert "env" in text
 
 
-def test_get_cookie_status_available_without_cookie_needs_refresh(monkeypatch):
-    """可用 + has_cookie=False + needs_refresh=True → 未设置 + 需要刷新。"""
+def test_get_cookie_status_reports_autoload_denial_without_claiming_refresh(monkeypatch):
     monkeypatch.setattr(server, "get_cookie_status", lambda: {
         "available": True,
-        "status": "EXPIRED",
+        "status": "unknown",
         "has_cookie": False,
-        "needs_refresh": True,
-        "source": "browser_chrome",
+        "browser_auto_load": True,
+        "browser_auth_reason": "BROWSER_COOKIE_ACCESS_DENIED",
     })
 
     async def run():
@@ -83,9 +90,9 @@ def test_get_cookie_status_available_without_cookie_needs_refresh(monkeypatch):
 
     result = asyncio.run(run())
     text = result[0].text
-    assert "EXPIRED" in text
     assert "未设置" in text
-    assert "需要刷新" in text
+    assert "暂无可刷新凭据" in text
+    assert "浏览器自动读取: 开启" in text and "BROWSER_COOKIE_ACCESS_DENIED" in text
 
 
 # ---------------------------------------------------------------------------
@@ -196,7 +203,7 @@ def test_list_browser_cookie_profiles_response_format_json(monkeypatch):
 def test_list_browser_cookie_profiles_handles_exception(monkeypatch):
     """list_browser_cookie_profiles 抛异常 → handle_error 兜底返回错误响应。"""
     def raise_error(browser, validate=True):
-        raise RuntimeError("browser not found")
+        raise RuntimeError("synthetic-private-body")
 
     monkeypatch.setattr(server, "list_browser_cookie_profiles", raise_error)
 
@@ -206,7 +213,8 @@ def test_list_browser_cookie_profiles_handles_exception(monkeypatch):
     result = asyncio.run(run())
     # handle_error + format_error_response 返回错误文本，不抛异常给调用方
     assert len(result) == 1
-    assert "browser not found" in result[0].text or "error" in result[0].text.lower()
+    assert "错误:" in result[0].text and "请求失败" in result[0].text
+    assert "synthetic-private-body" not in result[0].text
 
 
 # ---------------------------------------------------------------------------

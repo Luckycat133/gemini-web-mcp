@@ -7,8 +7,8 @@
   / `parse_response` / `get_stream_text_piece`：零直接覆盖
 - `constants.resolve_model_name` / `normalize_model_alias` / `resolve_media_request`
   / `describe_model_name` / `supported_learning_modes`：纯查表函数零覆盖
-- `media._safe_media_filename` / `_media_timeout`
-  / `_prepend_backend_note` / `_media_from_music_card`：零覆盖
+- `media._safe_media_filename` / `_media_timeout` / `media_timeout_scope`
+  / `_prepend_backend_note` / `_media_from_music_card`：边界行为覆盖
 - `file._validate_url`：4 分支纯函数零覆盖；`_validate_file_path`：纯转发壳
 
 本文件以纯输入输出断言为主，仅在 `_media_from_music_card` 用 SimpleNamespace fake client。
@@ -32,6 +32,7 @@ from src.tools.media import (
     _prepend_backend_note,
     _safe_media_filename,
 )
+from src.services.media_generation import media_timeout_scope
 from src.tools.utils import (
     extract_remote_chat_id,
     get_stream_text_piece,
@@ -333,8 +334,6 @@ def test_resolve_model_name_known_alias_returns_configured_name():
     assert resolve_model_name("flash-lite") == "Flash-Lite"
     assert resolve_model_name("3.5 Flash-Lite") == "Flash-Lite"
     assert resolve_model_name("3.8 Flash") == "gemini-3-flash"
-    assert resolve_model_name("thinking") == "gemini-3-flash"
-    assert resolve_model_name("gemini-3-flash-thinking") == "gemini-3-flash"
 
 
 def test_resolve_model_name_unknown_passthrough():
@@ -376,7 +375,7 @@ def test_describe_model_name_unknown_returns_unspecified():
 
 def test_supported_learning_modes_returns_expected_string():
     """返回稳定的 user-facing 模式串。"""
-    expected = "guided_learning/guided, interactive_quiz/quiz, flashcards, practice_test, study_guide/exam_prep"
+    expected = "interactive_quiz/quiz, flashcards, practice_test, study_guide/exam_prep"
     assert supported_learning_modes() == expected
 
 
@@ -420,12 +419,12 @@ def test_resolve_media_request_music_thinking_level_does_not_claim_backend():
     assert out["effective_alias"] == "pro"
 
 
-def test_resolve_media_request_video_does_not_claim_omni_mode():
-    """通用聊天的视频参数不能冒充 Omni 视频模式。"""
+def test_resolve_media_request_video_uses_the_observed_mode_without_claiming_backend_version():
+    """专用视频请求模式与上游实际模型版本分开报告。"""
     out = resolve_media_request("flash", "video")
-    assert out["backend_label"] == "Gemini Web video feature"
+    assert out["backend_label"] == "Gemini Web video mode"
     assert out["effective_alias"] == "flash"
-    assert "实际后端版本" in out["note"]
+    assert "视频轨道验证" in out["note"]
 
 
 # ---------------------------------------------------------------------------
@@ -486,6 +485,40 @@ def test_media_timeout_non_image_default_600():
     """非 image + 无显式值 → 600。"""
     assert _media_timeout("music", None) == 600
     assert _media_timeout("video", None) == 600
+
+
+# ---------------------------------------------------------------------------
+# media timeout lease
+# ---------------------------------------------------------------------------
+
+
+def test_media_timeout_scope_does_not_create_missing_attributes():
+    client = SimpleNamespace()
+    with media_timeout_scope(client, 300):
+        assert not hasattr(client, "timeout")
+    assert not hasattr(client, "timeout")
+    assert not hasattr(client, "watchdog_timeout")
+
+
+def test_media_timeout_scope_raises_timeout_and_restores_baseline():
+    client = SimpleNamespace(timeout=100.0, watchdog_timeout=200.0)
+    with media_timeout_scope(client, 300):
+        assert client.timeout == 300.0
+        assert client.watchdog_timeout == 300.0
+    assert (client.timeout, client.watchdog_timeout) == (100.0, 200.0)
+
+
+def test_media_timeout_scope_does_not_lower_existing_values():
+    client = SimpleNamespace(timeout=400.0, watchdog_timeout=400.0)
+    with media_timeout_scope(client, 200):
+        assert (client.timeout, client.watchdog_timeout) == (400.0, 400.0)
+
+
+def test_media_timeout_scope_preserves_larger_watchdog_baseline():
+    client = SimpleNamespace(timeout=50.0, watchdog_timeout=50.0)
+    with media_timeout_scope(client, 30):
+        assert client.watchdog_timeout == 50.0
+    assert client.watchdog_timeout == 50.0
 
 
 # ---------------------------------------------------------------------------
@@ -610,8 +643,13 @@ def test_validate_url_valid_returns_url_unchanged():
     assert value == url
 
 
+def test_validate_url_accepts_single_label_hostnames():
+    for url in ("https://x", "http://localhost:8080/path"):
+        assert _validate_url(url) == (True, url)
+
+
 def test_validate_url_handles_urlparse_exception():
-    """urlparse 抛异常 → 返回失败 + 异常信息。
+    """Malformed URLs have a stable failure without exposing parser details.
 
     用 monkeypatch 替换 urlparse 触发异常路径。
     """
@@ -626,10 +664,15 @@ def test_validate_url_handles_urlparse_exception():
     try:
         ok, msg = _validate_url("https://x")
         assert ok is False
-        assert "URL 验证失败" in msg
-        assert "boom" in msg
+        assert msg == "URL 格式无效"
+        assert "boom" not in msg
     finally:
         file_module.urlparse = original  # type: ignore[assignment]
+
+
+def test_validate_url_rejects_malformed_ipv6_and_port():
+    assert _validate_url("https://[invalid") == (False, "URL 格式无效")
+    assert _validate_url("https://example.test:bad") == (False, "URL 格式无效")
 
 
 # ---------------------------------------------------------------------------

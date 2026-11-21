@@ -21,3 +21,6 @@ dist/
 
 # local agent data (WorkBuddy memory/skills)
 .workbuddy/
+
+# Claude agent context migration backups (external tool artifacts, not project files)
+.agent-context-migration/

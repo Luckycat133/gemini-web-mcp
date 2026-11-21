@@ -1,4 +1,4 @@
 interface:
   display_name: "Gemini Web MCP Development"
-  short_description: "Build and verify Gemini generation and content management"
-  default_prompt: "Use $gemini-web-mcp-development to inspect this checkout, execute the two-track development plan in dependency order, and verify each work package with recorded evidence. Preserve existing work and continue all unblocked packages."
+  short_description: "Review and develop both Gemini MCP business surfaces"
+  default_prompt: "Use $gemini-web-mcp-development to inspect the current revision, preserve its MCP v2 contracts, and implement the next verified generation or account-management slice from the roadmap."
