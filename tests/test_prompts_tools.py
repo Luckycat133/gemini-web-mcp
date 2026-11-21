@@ -4,8 +4,8 @@
 test_tool_workflows.py::test_prompt_list_exposes_full_id_for_cleanup 间接覆盖
 了 create + list 的 happy path，关键行为契约零断言：
 
-- PromptManager._load_prompts：文件不存在 / JSON 解析异常 / 正常加载既有数据
-- PromptManager._save_prompts：写入异常（目录不存在）吞咽不崩溃
+- Prompt library load：文件不存在 / JSON 解析异常 / 正常加载既有数据
+- Prompt library write：写入异常（目录不存在）明确失败
 - PromptManager.create_prompt：返回 uuid、持久化、字段齐全
 - PromptManager.get_prompt：命中 / 未命中
 - PromptManager.list_prompts：空 / 无分类过滤 / 按分类过滤 / 按 created_at 降序
@@ -24,9 +24,12 @@ import asyncio
 import json
 import threading
 
+from pathlib import Path
+
 from src.adapters.mcp_sdk import MCPServer
 
 import src.tools.prompts as prompts_tools
+from src.services import prompts as prompt_storage
 
 
 # ---------------------------------------------------------------------------
@@ -44,6 +47,11 @@ def _make_mcp():
     return mcp
 
 
+def _write_fixture(manager, rows):
+    complete = {key: {"name": key, "content": "fixture", **value} for key, value in rows.items()}
+    Path(manager.file_path).write_text(json.dumps({"prompts": complete}), encoding="utf-8")
+
+
 def _set_singleton(manager):
     """设置模块级单例，供工具调用时 get_prompt_manager() 返回。"""
     prompts_tools._prompt_manager = manager
@@ -54,7 +62,7 @@ def _reset_singleton():
 
 
 # ---------------------------------------------------------------------------
-# PromptManager._load_prompts
+# Prompt library load
 # ---------------------------------------------------------------------------
 
 
@@ -111,7 +119,7 @@ def test_load_prompts_reads_existing_prompts(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# PromptManager._save_prompts
+# Prompt library write
 # ---------------------------------------------------------------------------
 
 
@@ -120,7 +128,7 @@ def test_save_prompts_propagates_write_exception(tmp_path):
     target = tmp_path / "no_such_dir" / "prompts.json"
     mgr = prompts_tools.PromptManager(str(target))
     try:
-        mgr._save_prompts()
+        mgr.create_prompt("Missing directory", "Unwritten")
     except OSError:
         pass
     else:
@@ -133,10 +141,10 @@ def test_prompt_mutations_roll_back_memory_when_persistence_fails(tmp_path, monk
     prompt_id = mgr.create_prompt(name="Original", content="Keep")
     saved = target.read_text(encoding="utf-8")
 
-    def failed_save():
+    def failed_save(_data):
         raise OSError("disk unavailable")
 
-    monkeypatch.setattr(mgr, "_save_prompts", failed_save)
+    monkeypatch.setattr(mgr.library, "_atomic_write", failed_save)
     for mutation in (
         lambda: mgr.create_prompt(name="New", content="Discard"),
         lambda: mgr.update_prompt(prompt_id, name="Changed"),
@@ -163,7 +171,7 @@ def test_failed_serialization_preserves_existing_prompt_file(tmp_path, monkeypat
         file.write("partial")
         raise OSError("serialization interrupted")
 
-    monkeypatch.setattr(prompts_tools.json, "dump", partial_dump)
+    monkeypatch.setattr(prompt_storage.json, "dump", partial_dump)
     try:
         mgr.create_prompt(name="New", content="Discard")
     except OSError:
@@ -172,7 +180,7 @@ def test_failed_serialization_preserves_existing_prompt_file(tmp_path, monkeypat
         raise AssertionError("A partial serialization must fail")
 
     assert target.read_text(encoding="utf-8") == saved
-    assert sorted(path.name for path in tmp_path.iterdir()) == ["p.json"]
+    assert sorted(path.name for path in tmp_path.iterdir()) == [".p.json.lock", "p.json"]
 
 
 def test_tool_create_reports_storage_failure_and_keeps_memory_empty(tmp_path):
@@ -254,14 +262,14 @@ def test_list_prompts_without_category_returns_all_sorted_desc(tmp_path):
     """无 category → 返回全部，按 created_at 降序。"""
     mgr = prompts_tools.PromptManager(str(tmp_path / "p.json"))
     # 手动注入不同 created_at 以验证排序
-    mgr.prompts = {
+    _write_fixture(mgr, {
         "a": {"id": "a", "name": "A", "category": "x",
               "created_at": "2026-01-01T00:00:00"},
         "b": {"id": "b", "name": "B", "category": "y",
               "created_at": "2026-02-01T00:00:00"},
         "c": {"id": "c", "name": "C", "category": "x",
               "created_at": "2026-03-01T00:00:00"},
-    }
+    })
     result = mgr.list_prompts()
     assert [p["id"] for p in result] == ["c", "b", "a"]
 
@@ -269,14 +277,14 @@ def test_list_prompts_without_category_returns_all_sorted_desc(tmp_path):
 def test_list_prompts_with_category_filters_and_sorts(tmp_path):
     """有 category → 仅返回该分类，仍按 created_at 降序。"""
     mgr = prompts_tools.PromptManager(str(tmp_path / "p.json"))
-    mgr.prompts = {
+    _write_fixture(mgr, {
         "a": {"id": "a", "name": "A", "category": "x",
               "created_at": "2026-01-01T00:00:00"},
         "b": {"id": "b", "name": "B", "category": "y",
               "created_at": "2026-02-01T00:00:00"},
         "c": {"id": "c", "name": "C", "category": "x",
               "created_at": "2026-03-01T00:00:00"},
-    }
+    })
     result = mgr.list_prompts(category="x")
     assert [p["id"] for p in result] == ["c", "a"]
 
@@ -293,11 +301,11 @@ def test_list_categories_empty_returns_empty_list(tmp_path):
 
 def test_list_categories_returns_sorted_unique(tmp_path):
     mgr = prompts_tools.PromptManager(str(tmp_path / "p.json"))
-    mgr.prompts = {
+    _write_fixture(mgr, {
         "a": {"id": "a", "category": "zeta"},
         "b": {"id": "b", "category": "alpha"},
         "c": {"id": "c", "category": "zeta"},  # 重复
-    }
+    })
     assert mgr.list_categories() == ["alpha", "zeta"]
 
 
@@ -628,11 +636,11 @@ def test_tool_get_renders_no_description_placeholder_when_absent(tmp_path):
     """
     mgr = prompts_tools.PromptManager(str(tmp_path / "p.json"))
     pid = "manual-no-desc"
-    mgr.prompts[pid] = {
+    _write_fixture(mgr, {pid: {
         "id": pid, "name": "N", "content": "C", "category": "g",
         "created_at": "2026-01-01T00:00:00", "updated_at": "2026-01-01T00:00:00",
         # 故意不设 description 键
-    }
+    }})
     _set_singleton(mgr)
     try:
         mcp = _make_mcp()

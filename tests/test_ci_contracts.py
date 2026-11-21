@@ -40,6 +40,7 @@ def test_targeted_contract_checklist_covers_stable_architecture_boundaries() -> 
     assert {
         "tests/test_domain_results.py",
         "tests/test_mcp_sdk_v2.py",
+        "tests/test_prompt_compatibility.py",
         "tests/test_conversation_lifecycle.py",
         "tests/test_chat_service.py",
         "tests/test_chat_timeouts.py",
@@ -135,6 +136,7 @@ def test_representative_profile_snapshots_are_explicit_and_exhaustive() -> None:
     assert len(FUNCTION_TOOLS) == 17 and len(ACCOUNT_TOOLS) == 17
     assert not FUNCTION_TOOLS & ACCOUNT_TOOLS
     assert set(PRIMARY_PROFILE_TOOLS) == {
+        "prompts",
         "core",
         "media",
         "model",
@@ -145,7 +147,8 @@ def test_representative_profile_snapshots_are_explicit_and_exhaustive() -> None:
         "all",
     }
     assert all(PRIMARY_PROFILE_TOOLS.values())
-    assert len(PRIMARY_PROFILE_TOOLS["all"]) == 48
+    assert len(PRIMARY_PROFILE_TOOLS["all"]) == 49
+    assert {"gemini_prompts", "gemini_manage_prompts"} <= PRIMARY_PROFILE_TOOLS["prompts"]
     assert {"gemini_get_operation_status", "gemini_get_operation_result"} <= PRIMARY_PROFILE_TOOLS["all"]
     assert COMPACT_TOOLS == {
         "chat",

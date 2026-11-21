@@ -14,6 +14,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 CONTRACT_TESTS = (
     "tests/test_domain_results.py",
     "tests/test_mcp_sdk_v2.py",
+    "tests/test_prompt_compatibility.py",
     "tests/test_conversation_lifecycle.py",
     "tests/test_chat_service.py",
     "tests/test_chat_timeouts.py",

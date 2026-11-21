@@ -1,6 +1,6 @@
 # v0.2.2 account compatibility ledger
 
-Released [facades](https://github.com/Luckycat133/gemini-web-mcp/blob/362a368f6c68b01c6eb143586db45743c5222e2c/src/surfaces/account.py) and [request models](https://github.com/Luckycat133/gemini-web-mcp/blob/362a368f6c68b01c6eb143586db45743c5222e2c/src/domain/account_requests.py), against [the candidate Account registration](https://github.com/Luckycat133/gemini-web-mcp/blob/2c4bb80fdba9a27cab13c1b4564fbb40aa8b2fa9/src/surfaces/account.py). This is a static migration inventory; no account, cookies or live service was used.
+Released [facades](https://github.com/Luckycat133/gemini-web-mcp/blob/362a368f6c68b01c6eb143586db45743c5222e2c/src/surfaces/account.py) and [request models](https://github.com/Luckycat133/gemini-web-mcp/blob/362a368f6c68b01c6eb143586db45743c5222e2c/src/domain/account_requests.py), against [the candidate Account registration](https://github.com/Luckycat133/gemini-web-mcp/blob/2c4bb80fdba9a27cab13c1b4564fbb40aa8b2fa9/src/surfaces/account.py). This migration inventory includes the locally verified Prompt slice; no account, cookies or live service was used.
 
 ## Facade decisions
 
@@ -10,11 +10,13 @@ Released [facades](https://github.com/Luckycat133/gemini-web-mcp/blob/362a368f6c
 | `gemini_notebooks(request: NotebooksRequest)` | Same name, different request shape, and defaults to NotebookLM rather than released native Gemini Web Notebook semantics. Use explicit backend selection in future mapping; prove read/write parity per action. |
 | `gemini_scheduled(request: ScheduledRequest)` | Split list/get/create/delete declarations. Released backend-specific triggers, update/pause/resume, and task schedule separation need explicit action-level checks. |
 | `gemini_gems(request: GemsRequest)` | Candidate gemini_manage_gems is a differently shaped entry. Confirm action mapping, exact ID, and verification behavior. |
-| `gemini_prompts(request: PromptsRequest)` | No matching candidate Account catalog entry; separate compatibility profiles are not evidence of Account facade parity. |
+| `gemini_prompts(request: PromptsRequest)` | Restored on the explicit legacy server profile `GEMINI_TOOLS=prompts`: nested request, direct structured results, seven local actions, and shared locked `prompts.json` with `gemini_manage_prompts`. Not a default Account catalog entry. |
 | `gemini_account(request: AccountRequest)` | Inventory/preferences/managed skills are separate declarations. Nested Canvas, Library, public sharing and Skills ZIP remain not demonstrated as equivalent. |
 | `gemini_cleanup(request: CleanupRequest)` | Same name, different request shape. Verify ownership rules, status/run/cancel, and durable scope independently; do not replay jobs. |
 
-No listed facade preserves its released request signature. Do not migrate clients by flattening arguments mechanically. Check response envelopes, typed errors, action annotations, read-back verification and same-account identity. Validate unknown or in-progress operation handling without replaying external writes. Preserve old state files and existing handles until migration is proven.
+Only the explicit local Prompt profile restores the released request signature. Do not migrate clients by flattening arguments mechanically. Check response envelopes, typed errors, action annotations, read-back verification and same-account identity. Validate unknown or in-progress operation handling without replaying external writes. Preserve old state files and existing handles until migration is proven.
+
+The Prompt profile preserves released IDs and pagination. Rendering accepts named string variables, escaped braces and bounded string formatting; attribute/index traversal, nested format fields and unbounded padding are intentionally not supported. It requires no Gemini credential or call and does not establish broader Account facade parity.
 
 ## Released action literals
 

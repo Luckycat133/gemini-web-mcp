@@ -172,7 +172,7 @@
     <answer>gemini_move_chat_to_notebook</answer>
   </qa_pair>
   <qa_pair>
-    <question>Inspect the manifest entry for the local prompt-library tool. Which availability group must be enabled for gemini_manage_prompts? Answer with the group name only.</question>
+    <question>Which explicit availability group exposes both gemini_manage_prompts and the typed gemini_prompts facade with local template rendering? Answer with the group name only.</question>
     <answer>prompts</answer>
   </qa_pair>
   <qa_pair>

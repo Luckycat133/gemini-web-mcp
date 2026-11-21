@@ -14,6 +14,10 @@ import tempfile
 from pathlib import Path
 
 PRIMARY_PROFILE_TOOLS = {
+    "prompts": frozenset({
+        "gemini_manage_prompts", "gemini_prompts", "gemini_doctor", "gemini_get_cookie_from_browser",
+        "gemini_get_cookie_status", "gemini_get_tool_manifest", "gemini_list_browser_cookie_profiles", "gemini_reset",
+    }),
     "media": frozenset({
         "gemini_generate_media", "gemini_generate_music", "gemini_get_operation_status", "gemini_get_operation_result",
         "gemini_doctor", "gemini_get_cookie_from_browser", "gemini_get_cookie_status", "gemini_get_tool_manifest",
@@ -170,6 +174,7 @@ PRIMARY_PROFILE_TOOLS = {
             "gemini_list_scheduled_actions",
             "gemini_list_sessions",
             "gemini_manage_prompts",
+            "gemini_prompts",
             "gemini_manage_gems",
             "gemini_move_chat_to_notebook",
             "gemini_notebooks",

@@ -187,6 +187,13 @@ The table includes workflows available through the default and explicit compatib
 
 ## Development Status
 
+For a v0.2.2 client that needs only the local Prompt library, use the existing
+`gemini-mcp-server` entrypoint with `GEMINI_TOOLS=prompts` and the same working
+directory. `gemini_prompts(request)` restores the typed local actions, including
+pagination and template rendering. Both Prompt tools use the same locked
+`prompts.json`; neither requires a Gemini account. This opt-in profile does not
+restore the other v0.2.2 Account tools.
+
 On 2026-11-06, the signed-in Chrome session verified Flash image generation and editing through MCP, including result retrieval after reconnecting and automatic conversation cleanup. Task browser controls with the saved Always allow setting completed without prompting when the run used a remote browser. Plain Flash Chat, grounded search, session follow-up, ordinary Notebook Chat, and image understanding did not produce verified answers in those checks.
 
 See the [live verification record](docs/development-status.md#flash-and-browser-permission-follow-up-2026-11-06) and [tool quality matrix](docs/tool-quality.md) for the evidence and remaining gaps. The package and Skill metadata remain `0.2.1`; changes on this branch are listed under [Unreleased](docs/changelog.md#unreleased).

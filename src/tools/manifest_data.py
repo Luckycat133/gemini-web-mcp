@@ -560,6 +560,15 @@ TOOL_MANIFEST: list[dict[str, Any]] = [
         "pagination": False,
     },
     {
+        "name": "gemini_prompts",
+        "group": "prompts",
+        "purpose": "Use the released typed local Prompt actions, including list pages and template render.",
+        "read_only": False,
+        "destructive": True,
+        "privacy": "local_prompt_library",
+        "pagination": True,
+    },
+    {
         "name": "gemini_manage_prompts",
         "group": "prompts",
         "purpose": "Manage local prompt snippets when GEMINI_TOOLS=prompts is enabled.",

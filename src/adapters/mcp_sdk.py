@@ -12,6 +12,7 @@ from copy import deepcopy
 from typing import Any, TypeVar
 
 from mcp.server import MCPServer as SDKMCPServer
+from mcp_types import CallToolResult as CallToolResult
 from mcp_types import Icon, ImageContent, TextContent, Tool, ToolAnnotations
 
 
