@@ -42,6 +42,20 @@ CI 覆盖 Python 3.11/3.12 全量离线测试、契约、profile 与真实 stdio
 状态文件先用分支独立私有路径。更换版本前备份并记录有效句柄，只有已验证迁移才共用旧数据。
 无 locator 的未知提交不能自动重新生成。现有 operation 恢复不等于普通会话已支持跨进程续接。
 
+### v0.2.2 未完成媒体操作的回滚
+
+v0.2.2 Create 的 video/music 句柄保存在 `GEMINI_STATE_DB_PATH` 指定的旧数据库
+（默认 `state.sqlite3`，账户范围依赖同目录的 `state.sqlite3.key`；自定义路径使用对应的 `.key`）。
+Function 的 status/result 读取 `GEMINI_OPERATION_DB_PATH` 的另一套账本。合成测试确认：
+在独立路径启动时，旧句柄返回 `operation_not_found`，不会提交、清理或改写旧账本；
+把新变量指向旧库只会遭遇 schema 不兼容，不是迁移。
+
+未完成的任务不要重提，也不要把旧 `idempotency_key` 当成新 `operation_id`。
+先以 v0.2.2 Create、原账户、原数据库和身份 key 查询原句柄，等待取回结果后再切换；
+如已切换，回退客户端入口与版本并指回原路径，不覆盖新账本。保留两个版本的独立状态。
+这只是回滚路径，不是迁移成功或真实账号的验收。
+
+
 发布时先查询实际已发布版本，选择新的正确版本并同步 metadata；不按旧 Skill 指令发布 v0.2.1，
 不自动 merge/tag/release。本轮只更新开发指导与计划，不改运行时或指纹。
 
