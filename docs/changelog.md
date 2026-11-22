@@ -11,8 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.3.0] - 2026-11-22
 
-Packaging and release preparation. Publication is recorded only by the matching GitHub Release.
-See the [0.x release ledger](release-ledger.md) for the verified tag history.
+Published as [v0.3.0](https://github.com/Luckycat133/gemini-web-mcp/releases/tag/v0.3.0) on 2026-11-22 from commit `1116125e3113701f02acf3cc40c52a5290ca9968`. The [release workflow](https://github.com/Luckycat133/gemini-web-mcp/actions/runs/44978973789) passed; its wheel, sdist, and two Skill ZIPs were verified. See the [0.x release ledger](release-ledger.md) for the tag history.
 
 - Keep the checked-out repository source in the development Skill install command and verify the command's actual arguments.
 - Persist and reverify Task terminal results before accepting cached completion or releasing cleanup. Resume current-account workflows ahead of inactive accounts.
