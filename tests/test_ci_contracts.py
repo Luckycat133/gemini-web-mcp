@@ -268,8 +268,58 @@ def test_tag_release_reverifies_assets_before_the_only_publish_command() -> None
     assert SKILLS_REF_SHA in workflow
     assert "needs: verify-and-build" in workflow
     assert workflow.count("gh release create") == 1
+    assert workflow.count("contents: write") == 1
+    assert "paths: [release/v0.3.0.publish]" in workflow
+    assert "github.repository == 'Luckycat133/gemini-web-mcp'" in workflow
+    assert "github.ref == 'refs/heads/main'" in workflow
+    assert "git diff --name-status HEAD^ HEAD" in workflow
+    assert 'git ls-remote origin refs/heads/main' in workflow
+    assert 'for workflow in ci.yml codeql.yml' in workflow
+    assert 'head_sha=$GITHUB_SHA' in workflow
+    assert 'gh api --method POST "repos/$GITHUB_REPOSITORY/git/refs"' in workflow
+    assert '--target "$GITHUB_SHA"' in workflow
+    assert not (PROJECT_ROOT / "release/v0.3.0.publish").is_file() or (
+        PROJECT_ROOT / "release/v0.3.0.publish").read_text(encoding="utf-8").splitlines()[0] == "v0.3.0"
     publish_index = workflow.index("gh release create")
     reverify_index = workflow.index("Re-verify downloaded assets before publishing")
     assert reverify_index < publish_index
-    assert 'check_version_consistency.py --tag "$GITHUB_REF_NAME" --artifacts-dir dist' in workflow
+    assert 'check_version_consistency.py --tag "$RELEASE_TAG" --artifacts-dir dist' in workflow
     assert "--verify-tag --generate-notes" in workflow
+
+def test_release_marker_preflight_requires_one_file_and_reviewed_parent(tmp_path) -> None:
+    workflow = RELEASE_WORKFLOW.read_text(encoding="utf-8")
+    marker_step = workflow.split("name: Verify authorized release marker on exact current main", 1)[1]
+    script = marker_step.split("        run: |\n", 1)[1].split("\n      - name:", 1)[0]
+
+    def git(*args: str) -> str:
+        return subprocess.check_output(
+            ["git", "-c", "user.name=Offline Test", "-c", "user.email=fixture@example.invalid", *args],
+            cwd=tmp_path, text=True, stderr=subprocess.PIPE,
+        ).strip()
+
+    def preflight(sha: str) -> int:
+        return subprocess.run(
+            ["bash", "-euo", "pipefail", "-c", script],
+            cwd=tmp_path, env={**os.environ, "RELEASE_TAG": "v0.3.0", "GITHUB_SHA": sha},
+            capture_output=True, check=False,
+        ).returncode
+
+    git("init", "-b", "main")
+    git("remote", "add", "origin", str(tmp_path))
+    git("commit", "--allow-empty", "-m", "reviewed preparation")
+    preparation = git("rev-parse", "HEAD")
+    assert preflight(preparation) != 0
+
+    marker = tmp_path / "release/v0.3.0.publish"
+    marker.parent.mkdir()
+    marker.write_text(f"v0.3.0\n{preparation}\n", encoding="utf-8")
+    git("add", "--", "release/v0.3.0.publish")
+    git("commit", "-m", "authorize exact reviewed release")
+    launch = git("rev-parse", "HEAD")
+    assert preflight(launch) == 0
+    assert preflight(preparation) != 0
+
+    marker.write_text(f"v0.3.0\n{launch}\n", encoding="utf-8")
+    git("add", "--", "release/v0.3.0.publish")
+    git("commit", "-m", "do not rearm with an edit")
+    assert preflight(git("rev-parse", "HEAD")) != 0
