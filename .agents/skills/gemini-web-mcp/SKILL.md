@@ -4,7 +4,7 @@ description: "Use this skill when an agent should extend itself with Gemini Web:
 license: MIT-0
 compatibility: "Requires Python 3.11+ and a connected Gemini Web MCP server. The function server covers assistance, understanding, media, and Deep Research; the separate account server handles explicit account work. Assist and compact compatibility servers remain supported. Media completion requires verified artifacts, and availability depends on the account and upstream service. Live calls require Gemini Web account Cookies."
 metadata:
-  version: "0.2.2"
+  version: "0.3.0"
   openclaw:
     emoji: "♊️"
     homepage: https://github.com/Luckycat133/gemini-web-mcp

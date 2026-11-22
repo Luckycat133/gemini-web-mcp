@@ -5,19 +5,19 @@ Use this evergreen kit when announcing or redistributing Gemini Web MCP. Do not 
 ## Canonical links
 
 - Repository: https://github.com/Luckycat133/gemini-web-mcp
-- Development source: https://github.com/Luckycat133/gemini-web-mcp/tree/codex/gemini-tools-polish-20261101
+- Development source: https://github.com/Luckycat133/gemini-web-mcp/tree/main
 - Release history: https://github.com/Luckycat133/gemini-web-mcp/releases
-- Runtime skill: https://github.com/Luckycat133/gemini-web-mcp/tree/codex/gemini-tools-polish-20261101/.agents/skills/gemini-web-mcp
+- Runtime skill: https://github.com/Luckycat133/gemini-web-mcp/tree/main/.agents/skills/gemini-web-mcp
 - ClawHub runtime skill: https://clawhub.ai/skills/gemini-web-mcp
-- Development skill: https://github.com/Luckycat133/gemini-web-mcp/tree/codex/gemini-tools-polish-20261101/.agents/skills/gemini-web-mcp-development
-- Client examples: https://github.com/Luckycat133/gemini-web-mcp/blob/codex/gemini-tools-polish-20261101/docs/client-examples.md
+- Development skill: https://github.com/Luckycat133/gemini-web-mcp/tree/main/.agents/skills/gemini-web-mcp-development
+- Client examples: https://github.com/Luckycat133/gemini-web-mcp/blob/main/docs/client-examples.md
 
 ## Verified install snippets
 
 Install in an isolated environment, start the real MCP stdio server, and call an auth-free text tool:
 
 ```bash
-uvx --from git+https://github.com/Luckycat133/gemini-web-mcp@codex/gemini-tools-polish-20261101 gemini-mcp-onboarding
+uvx --from git+https://github.com/Luckycat133/gemini-web-mcp@main gemini-mcp-onboarding
 ```
 
 Replace the branch after `@` with a reviewed commit SHA for an immutable install. The command checks `profile=function`, `enabled_tools=17` and `text_tool=gemini_ask` without forwarding Gemini Cookies or calling Gemini. See [source integration notes](source-update-integration.md) for the differences from the published 0.2.2 release.
@@ -28,11 +28,11 @@ Install the runtime skill for agents that operate the server:
 clawhub install gemini-web-mcp
 ```
 
-This development branch keeps the Python package and public Skills at `0.2.1`. Check the ClawHub listing for the version it actually distributes. To install the development branch's copy:
+The current source declares version `0.3.0` for the Python package and Skills. Check the ClawHub listing for the version it actually distributes. To install from current main:
 
 ```bash
 npx --yes skills@1.5.21 add \
-  "https://github.com/Luckycat133/gemini-web-mcp#codex/gemini-tools-polish-20261101" \
+  "https://github.com/Luckycat133/gemini-web-mcp#main" \
   --skill gemini-web-mcp \
   --agent codex --copy --yes
 ```
@@ -41,7 +41,7 @@ Install the development skill for contributors changing the repository:
 
 ```bash
 npx --yes skills@1.5.21 add \
-  "https://github.com/Luckycat133/gemini-web-mcp#codex/gemini-tools-polish-20261101" \
+  "https://github.com/Luckycat133/gemini-web-mcp#main" \
   --skill gemini-web-mcp-development \
   --agent codex --copy --yes
 ```
@@ -49,7 +49,7 @@ npx --yes skills@1.5.21 add \
 For local development:
 
 ```bash
-git clone --branch codex/gemini-tools-polish-20261101 https://github.com/Luckycat133/gemini-web-mcp.git
+git clone --branch main https://github.com/Luckycat133/gemini-web-mcp.git
 cd gemini-web-mcp
 python -m venv .venv
 . .venv/bin/activate
@@ -59,7 +59,7 @@ gemini-mcp-function
 
 ## Product summary
 
-Gemini Web MCP is an agent-first MCP Python SDK v2 gateway and paired skill set. The development branch exposes two entrypoints: `gemini-mcp-function` for Chat, Task, media and research, and `gemini-mcp-account-next` for explicit management of chats, Notebooks, native Skills, preferences and schedules. Each offers 17 tools.
+Gemini Web MCP is an agent-first MCP Python SDK v2 gateway and paired skill set. The current main exposes the newer entrypoints `gemini-mcp-function` for Chat, Task, media and research, and `gemini-mcp-account-next` for explicit management of chats, Notebooks, native Skills, preferences and schedules. Each offers 17 tools.
 
 The runtime skill and development skill are deliberately separate. Shared history services keep primary and compact typed results aligned, destructive results distinguish accepted requests from positive read-back evidence, and media results preserve requested, effective, and observed backend fields while treating a deliverable as local only after file/MIME/size metadata verification.
 
@@ -87,7 +87,7 @@ I built Gemini Web MCP, an agent-first MCP Python SDK v2 gateway plus separate r
 The development source separates Chat, Task, media and research from explicit account administration. Structured media results distinguish expected routing from observed backend evidence and verify local artifacts independently from response prose.
 
 Credential-free MCP preflight:
-uvx --from git+https://github.com/Luckycat133/gemini-web-mcp@codex/gemini-tools-polish-20261101 gemini-mcp-onboarding
+uvx --from git+https://github.com/Luckycat133/gemini-web-mcp@main gemini-mcp-onboarding
 
 The project uses reverse-engineered Gemini Web behavior and carries explicit account/Terms-of-Service risk. PR checks stay offline; live behavior is only claimed when separately observed with an opted-in dedicated account.
 

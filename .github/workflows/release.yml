@@ -4,21 +4,47 @@ on:
   push:
     tags:
       - "v*.*.*"
+    branches: [main]
+    paths: [release/v0.3.0.publish]
 
 env:
   GEMINI_AUTO_REFRESH: "false"
   PIP_DISABLE_PIP_VERSION_CHECK: "1"
+  RELEASE_TAG: ${{ github.ref == 'refs/heads/main' && 'v0.3.0' || github.ref_name }}
+
+concurrency:
+  group: release-${{ github.ref == 'refs/heads/main' && 'v0.3.0' || github.ref_name }}
+  cancel-in-progress: false
 
 jobs:
   verify-and-build:
     name: Verify tag and build release assets
+    if: >-
+      (github.event_name == 'push' && github.ref_type == 'tag') ||
+      (github.repository == 'Luckycat133/gemini-web-mcp' && github.event_name == 'push' &&
+       github.ref == 'refs/heads/main')
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
+      actions: read
       contents: read
     steps:
-      - name: Checkout tagged source
+      - name: Checkout exact release source
         uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          fetch-depth: 2
+      - name: Verify authorized release marker on exact current main
+        if: github.ref == 'refs/heads/main'
+        shell: bash
+        run: |
+          test "$RELEASE_TAG" = v0.3.0
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$(git ls-remote origin refs/heads/main)" = "$(printf '%s\trefs/heads/main' "$GITHUB_SHA")"
+          marker=release/v0.3.0.publish
+          test "$(git diff --name-status HEAD^ HEAD)" = "$(printf 'A\t%s' "$marker")"
+          printf '%s\n' v0.3.0 "$(git rev-parse HEAD^)" | cmp - "$marker"
       - name: Set up Python 3.12
         uses: actions/setup-python@v7
         with:
@@ -31,7 +57,7 @@ jobs:
           python -m pip install "skills-ref @ git+https://github.com/agentskills/agentskills.git@38a2ff82958afee88dadf4831509e6f7e9d8ef4e#subdirectory=skills-ref"
       - name: Verify tag, repository metadata, and dependency intent
         run: |
-          python scripts/check_version_consistency.py --tag "$GITHUB_REF_NAME"
+          python scripts/check_version_consistency.py --tag "$RELEASE_TAG"
           python scripts/check_dependency_contract.py
       - name: Run static and offline release gates
         run: |
@@ -49,9 +75,9 @@ jobs:
           python scripts/smoke_mcp_protocol.py
           python scripts/smoke_mcp_protocol.py --profile core
       - name: Build versioned release assets
-        run: python scripts/package_release.py --outdir dist --tag "$GITHUB_REF_NAME"
+        run: python scripts/package_release.py --outdir dist --tag "$RELEASE_TAG"
       - name: Verify generated asset names and wheel metadata
-        run: python scripts/check_version_consistency.py --tag "$GITHUB_REF_NAME" --artifacts-dir dist
+        run: python scripts/check_version_consistency.py --tag "$RELEASE_TAG" --artifacts-dir dist
       - name: Set up pinned uv
         uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
       - name: Verify one-command release onboarding in an isolated uv environment
@@ -70,6 +96,22 @@ jobs:
           "$RUNNER_TEMP/gemini-release-smoke/bin/python" "$GITHUB_WORKSPACE/scripts/smoke_profiles.py"
           "$RUNNER_TEMP/gemini-release-smoke/bin/python" "$GITHUB_WORKSPACE/scripts/smoke_mcp_protocol.py"
           "$RUNNER_TEMP/gemini-release-smoke/bin/python" "$GITHUB_WORKSPACE/scripts/smoke_mcp_protocol.py" --profile core
+      - name: Verify exact main CI and CodeQL before staging
+        if: github.ref == 'refs/heads/main'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          for workflow in ci.yml codeql.yml; do
+            conclusion=
+            for attempt in {1..30}; do
+              conclusion="$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/$workflow/runs?branch=main&event=push&head_sha=$GITHUB_SHA&per_page=1" \
+                --jq '.workflow_runs[0].conclusion // ""')"
+              [[ -n "$conclusion" ]] && break
+              sleep 20
+            done
+            test "$conclusion" = success
+          done
       - name: Stage verified release assets
         uses: actions/upload-artifact@v7
         with:
@@ -86,8 +128,11 @@ jobs:
     permissions:
       contents: write
     steps:
-      - name: Checkout tagged source
+      - name: Checkout exact release source
         uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
       - name: Set up Python 3.12
         uses: actions/setup-python@v7
         with:
@@ -98,8 +143,32 @@ jobs:
           name: verified-release-assets
           path: dist
       - name: Re-verify downloaded assets before publishing
-        run: python scripts/check_version_consistency.py --tag "$GITHUB_REF_NAME" --artifacts-dir dist
-      - name: Create immutable GitHub Release
+        run: python scripts/check_version_consistency.py --tag "$RELEASE_TAG" --artifacts-dir dist
+      - name: Create verified GitHub Release
+        shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" dist/* --verify-tag --generate-notes
+        run: |
+          target=()
+          if [[ "$GITHUB_REF" == refs/heads/main ]]; then
+            test "$RELEASE_TAG" = v0.3.0
+            test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+            test "$(git ls-remote origin refs/heads/main)" = "$(printf '%s\trefs/heads/main' "$GITHUB_SHA")"
+            tag_target() {
+              git ls-remote origin "refs/tags/$RELEASE_TAG" "refs/tags/$RELEASE_TAG^{}" |
+                awk 'END { print $1 }'
+            }
+            found="$(tag_target)"
+            if [[ -z "$found" ]]; then
+              # Create only; never update or force an existing tag.
+              gh api --method POST "repos/$GITHUB_REPOSITORY/git/refs" \
+                -f "ref=refs/tags/$RELEASE_TAG" -f "sha=$GITHUB_SHA" >/dev/null
+            fi
+            test "$(tag_target)" = "$GITHUB_SHA"
+            if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+              echo "Release already exists; refusing to replace a release or its assets."
+              exit 1
+            fi
+            target=(--repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA")
+          fi
+          gh release create "$RELEASE_TAG" dist/* "${target[@]}" --verify-tag --generate-notes

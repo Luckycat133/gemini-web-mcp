@@ -3,7 +3,7 @@ name: gemini-assist
 description: "Use this skill when the user wants a second opinion, critique, code or design review, current-web search that names its sources, image or screenshot understanding, file, URL, or mixed-input understanding, or Deep Research. Prefer this focused skill over the gemini-web-mcp compatibility skill for pure assistance and understanding workloads. Do not use it for pure image, video, or music generation, Gemini account administration, or repository development; route those requests to the creation, account, or development capability instead."
 license: MIT-0
 metadata:
-  version: "0.2.2"
+  version: "0.3.0"
   openclaw:
     emoji: "♊️"
     homepage: https://github.com/Luckycat133/gemini-web-mcp
@@ -51,7 +51,7 @@ The following table describes the five-tool assist compatibility server; on the 
 The dedicated assistance entrypoint is `gemini-mcp-assist`; the MCP server name is `gemini_assist_mcp`.
 
 ```bash
-uvx --from git+https://github.com/Luckycat133/gemini-web-mcp@codex/gemini-tools-polish-20261101 gemini-mcp-assist
+uvx --from git+https://github.com/Luckycat133/gemini-web-mcp@main gemini-mcp-assist
 ```
 
 The catalog is exactly five tools: `gemini_ask`, `gemini_search`, `gemini_understand_image`, `gemini_understand`, and `gemini_research`.

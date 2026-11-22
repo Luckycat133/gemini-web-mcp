@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+import shlex
 import tomllib
 from pathlib import Path
 
@@ -107,6 +108,14 @@ def test_runtime_and_development_skills_have_distinct_roles_and_install_paths() 
     assert "do not use for repository implementation" in runtime.lower()
     assert "Develop, refactor, evaluate, package, and release" in development
     assert "--skill gemini-web-mcp-development --agent codex --copy --yes" in normalized_development
+    install_commands = [
+        shlex.split(command.removesuffix("\n").replace("\\\n", " "))
+        for command in re.findall(r"```bash\n(npx[^`]+)```", development)
+    ]
+    assert install_commands == [[
+        "npx", "--yes", SKILLS_CLI, "add", "$PWD",
+        "--skill", "gemini-web-mcp-development", "--agent", "codex", "--copy", "--yes",
+    ]]
     assert client_doc.count(SKILLS_CLI) == 2
     assert "--skill gemini-web-mcp" in client_doc
     assert "--skill gemini-web-mcp-development" in client_doc

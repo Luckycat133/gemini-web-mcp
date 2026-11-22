@@ -2,7 +2,7 @@
   "schema_version": 1,
   "plan_revision": "2026-11-14",
   "baseline_commit": "5c9f53087398f614958acf06d3c9d14f54958c52",
-  "package_version": "0.2.2",
+  "package_version": "0.3.0",
   "goals": ["All account-available Gemini Web generation workflows", "Complete Gemini Web content and related configuration management"],
   "gates": ["docs", "offline", "protocol", "live", "agent", "package"],
   "packages": [

@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-11-22
+
+Packaging and release preparation. Publication is recorded only by the matching GitHub Release.
+See the [0.x release ledger](release-ledger.md) for the verified tag history.
+
+- Keep the checked-out repository source in the development Skill install command and verify the command's actual arguments.
+- Persist and reverify Task terminal results before accepting cached completion or releasing cleanup. Resume current-account workflows ahead of inactive accounts.
+- Preserve exact YAML descriptions in native Skill uploads, including typed-looking strings and line breaks.
+- Restore the released Create and Account entrypoints alongside the newer Function and opt-in Account-next tools. Backward-compatible local receipt lookup does not claim recovery of the original media bytes.
+
 - Preserve the released Create and typed Account contracts alongside the redesigned Function and opt-in Account surfaces.
 
 ### Changed

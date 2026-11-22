@@ -2,7 +2,7 @@
   <img src="docs/assets/gemini-web-mcp-banner.svg" alt="Gemini Web MCP" width="100%">
 </p>
 
-<h1 align="center">Gemini Web MCP (v0.2.2)</h1>
+<h1 align="center">Gemini Web MCP (v0.3.0)</h1>
 
 Existing clients can continue using `gemini-mcp-create` and `gemini-mcp-account` with their released contracts. Use `gemini-mcp-account-next` for the new 17-tool Account surface. See the [migration guide](docs/source-update-integration.md#旧公开命令的兼容入口).
 
@@ -12,7 +12,7 @@ Existing clients can continue using `gemini-mcp-create` and `gemini-mcp-account`
 
 <p align="center">
   <a href="https://github.com/Luckycat133/gemini-web-mcp/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/Luckycat133/gemini-web-mcp/actions/workflows/ci.yml/badge.svg"></a>
-  <a href="https://github.com/Luckycat133/gemini-web-mcp/tree/codex/gemini-tools-polish-20261101/.agents/skills/gemini-web-mcp"><img alt="Codex Skill" src="https://img.shields.io/badge/Codex%20Skill-installable-0B6BFF"></a>
+  <a href="https://github.com/Luckycat133/gemini-web-mcp/tree/main/.agents/skills/gemini-web-mcp"><img alt="Codex Skill" src="https://img.shields.io/badge/Codex%20Skill-installable-0B6BFF"></a>
   <a href="https://www.gnu.org/licenses/agpl-3.0.html"><img alt="License" src="https://img.shields.io/badge/License-AGPL--3.0--only-blue.svg"></a>
   <a href="docs/changelog.md"><img alt="Verified" src="https://img.shields.io/badge/tests-CI%20verified-1F8A70"></a>
 </p>
@@ -29,7 +29,7 @@ Existing clients can continue using `gemini-mcp-create` and `gemini-mcp-account`
 
 Gemini Web MCP exposes Gemini Web capabilities to MCP-compatible clients such as Codex, Claude Desktop, VS Code MCP clients, and other agent runtimes.
 
-These instructions install the development source from [PR #39](https://github.com/Luckycat133/gemini-web-mcp/pull/39). The published 0.2.2 release has different entrypoints and state storage. See the [source integration notes](docs/source-update-integration.md) before switching from an existing release.
+These instructions install source from the current main branch. The older 0.2.2 release has a separate state store; the current source retains its Create and Account entrypoints alongside the newer Function and Account-next surfaces. See the [source integration notes](docs/source-update-integration.md) before switching from an existing release.
 
 Configure `gemini-mcp-function` and `gemini-mcp-account-next` as separate MCP entries. Enable the six function tools for Chat, Task, media, Research and operation recovery. Enable the six account tools when a task calls for existing conversation history, chat management, Notebooks or native Task metadata. Either entry can run on its own. The earlier 17-tool catalogs are available through the explicit `function-full` and `account-full` profiles.
 
@@ -49,17 +49,17 @@ The supported runtime is `mcp>=2,<3` plus `mcp-types>=2,<3`. CI exercises both c
 
 ## Install The Runtime Skill
 
-The repository runtime Skill is `0.2.2`. Install the public listing from ClawHub (and verify its displayed version when publication state matters):
+The repository runtime Skill is `0.3.0`. Install the public listing from ClawHub (and verify its displayed version when publication state matters):
 
 ```bash
 clawhub install gemini-web-mcp
 ```
 
-Or install the development branch's copy with the cross-agent `skills` CLI:
+Or install the current main source with the cross-agent `skills` CLI:
 
 ```bash
 npx --yes skills@1.5.21 add \
-  "https://github.com/Luckycat133/gemini-web-mcp#codex/gemini-tools-polish-20261101" \
+  "https://github.com/Luckycat133/gemini-web-mcp#main" \
   --skill gemini-web-mcp \
   --agent codex --copy --yes
 ```
@@ -68,14 +68,14 @@ This runtime skill teaches an agent how to operate the installed tools safely. R
 
 ```bash
 npx --yes skills@1.5.21 add \
-  "https://github.com/Luckycat133/gemini-web-mcp#codex/gemini-tools-polish-20261101" \
+  "https://github.com/Luckycat133/gemini-web-mcp#main" \
   --skill gemini-web-mcp-development \
   --agent codex --copy --yes
 ```
 
 The two roles are intentionally separate: `gemini-web-mcp` is for tool use; `gemini-web-mcp-development` owns implementation, tests, packaging, compatibility, and releases. `.agents/skills` is the single repository source so clients that scan both `.agents` and `.codex` do not discover duplicate names.
 
-Changes listed under **Unreleased** are available from this development branch. Check the public Skill listing for its separately published version.
+See [release history and candidate changes](docs/changelog.md). Check the public Skill listing for its separately published version.
 
 The runtime skill bundle is released on ClawHub under MIT-0. The MCP server source and the
 repository-development skill remain [AGPL-3.0-only](LICENSE).
@@ -85,7 +85,7 @@ repository-development skill remain [AGPL-3.0-only](LICENSE).
 One-command, credential-free proof (requires [uv](https://docs.astral.sh/uv/)):
 
 ```bash
-uvx --from git+https://github.com/Luckycat133/gemini-web-mcp@codex/gemini-tools-polish-20261101 gemini-mcp-onboarding
+uvx --from git+https://github.com/Luckycat133/gemini-web-mcp@main gemini-mcp-onboarding
 ```
 
 This installs into an isolated environment, starts `gemini-mcp-function`, verifies its six-tool catalog and checks the typed `INVALID_ARGUMENT` response to an empty `gemini_ask` prompt. It forwards no Gemini Cookies and makes no Gemini request. Replace the branch after `@` with a reviewed commit SHA for an immutable install.
@@ -99,7 +99,7 @@ Desktop MCP client configuration for automatic Cookie discovery from an authoriz
       "command": "uvx",
       "args": [
         "--from",
-        "gemini-mcp-server[all] @ git+https://github.com/Luckycat133/gemini-web-mcp@codex/gemini-tools-polish-20261101",
+        "gemini-mcp-server[all] @ git+https://github.com/Luckycat133/gemini-web-mcp@main",
         "gemini-mcp-function"
       ]
     }
@@ -110,7 +110,7 @@ Desktop MCP client configuration for automatic Cookie discovery from an authoriz
 For local development from source:
 
 ```bash
-git clone --branch codex/gemini-tools-polish-20261101 https://github.com/Luckycat133/gemini-web-mcp.git
+git clone --branch main https://github.com/Luckycat133/gemini-web-mcp.git
 cd gemini-web-mcp
 python -m venv .venv
 . .venv/bin/activate
@@ -198,11 +198,11 @@ restore the other v0.2.2 Account tools.
 
 On 2026-11-06, the signed-in Chrome session verified Flash image generation and editing through MCP, including result retrieval after reconnecting and automatic conversation cleanup. Task browser controls with the saved Always allow setting completed without prompting when the run used a remote browser. Plain Flash Chat, grounded search, session follow-up, ordinary Notebook Chat, and image understanding did not produce verified answers in those checks.
 
-See the [live verification record](docs/development-status.md#flash-and-browser-permission-follow-up-2026-11-06) and [tool quality matrix](docs/tool-quality.md) for the evidence and remaining gaps. The package and Skill metadata remain `0.2.2`; changes on this branch are listed under [Unreleased](docs/changelog.md#unreleased).
+See the [live verification record](docs/development-status.md#flash-and-browser-permission-follow-up-2026-11-06) and [tool quality matrix](docs/tool-quality.md) for the evidence and remaining gaps. The source package and Skill metadata are `0.3.0`. See the [changelog](docs/changelog.md); ClawHub availability is separate.
 
 ## Distribution Assets
 
-The one-command preflight installs this development branch (or a pinned commit) through `uvx`. For the published interface, use the matching tag and asset from [release history](https://github.com/Luckycat133/gemini-web-mcp/releases).
+The one-command preflight installs from main (or a pinned commit) through `uvx`. For the published interface, use the matching tag and asset from [release history](https://github.com/Luckycat133/gemini-web-mcp/releases).
 
 The tag release workflow builds:
 

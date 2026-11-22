@@ -1,13 +1,13 @@
 # Client installation and verified onboarding
 
-These examples use the [development branch from PR #39](source-update-integration.md) through `uvx`, which creates an isolated tool environment. For an immutable install, replace the branch after `@` with a reviewed commit SHA. The published 0.2.2 release uses different server entrypoints and account schemas.
+These examples use the [main branch](source-update-integration.md) through `uvx`, which creates an isolated tool environment. For an immutable install, replace the branch after `@` with a reviewed commit SHA. The previous 0.2.2 release uses its own state store. The current source retains its Create and Account entrypoints; the separate Account-next profile is opt-in.
 
 ## One-command offline proof
 
 With [uv](https://docs.astral.sh/uv/) installed, this command installs the current source, starts `gemini-mcp-function`, checks its 17-tool catalog and verifies the typed `INVALID_ARGUMENT` response to an empty `gemini_ask` prompt:
 
 ```bash
-uvx --from git+https://github.com/Luckycat133/gemini-web-mcp@codex/gemini-tools-polish-20261101 gemini-mcp-onboarding
+uvx --from git+https://github.com/Luckycat133/gemini-web-mcp@main gemini-mcp-onboarding
 ```
 
 The command removes Gemini Cookie variables from the child process and makes no Gemini request. Check for `mode=offline`, `credentials_accessed=false`, `profile=function`, `enabled_tools=17`, and `text_tool=gemini_ask`.
@@ -21,7 +21,7 @@ For browser discovery, install the browser dependencies too. A full desktop entr
 ```json
 {
   "command": "uvx",
-  "args": ["--from", "gemini-mcp-server[all] @ git+https://github.com/Luckycat133/gemini-web-mcp@codex/gemini-tools-polish-20261101", "gemini-mcp-function"]
+  "args": ["--from", "gemini-mcp-server[all] @ git+https://github.com/Luckycat133/gemini-web-mcp@main", "gemini-mcp-function"]
 }
 ```
 
@@ -59,7 +59,7 @@ For explicitly requested account management, add a second server configuration. 
   "mcpServers": {
     "gemini-account": {
       "command": "uvx",
-      "args": ["--from", "gemini-mcp-server[all] @ git+https://github.com/Luckycat133/gemini-web-mcp@codex/gemini-tools-polish-20261101", "gemini-mcp-account-next"]
+      "args": ["--from", "gemini-mcp-server[all] @ git+https://github.com/Luckycat133/gemini-web-mcp@main", "gemini-mcp-account-next"]
     }
   }
 }
@@ -74,7 +74,7 @@ The older `gemini-mcp-assist` and `gemini-mcp-skill-server` entrypoints remain c
 Live examples require the flag as well as Cookie configuration. Text uses the function assistance tool:
 
 ```bash
-uvx --from git+https://github.com/Luckycat133/gemini-web-mcp@codex/gemini-tools-polish-20261101 \
+uvx --from git+https://github.com/Luckycat133/gemini-web-mcp@main \
   gemini-mcp-onboarding chat \
   --allow-live-account \
   --prompt 'Reply with exactly: Gemini MCP is connected'
@@ -84,7 +84,7 @@ The image example installs the image-verification extra, starts the function sur
 
 ```bash
 uvx \
-  --from 'gemini-mcp-server[image] @ git+https://github.com/Luckycat133/gemini-web-mcp@codex/gemini-tools-polish-20261101' \
+  --from 'gemini-mcp-server[image] @ git+https://github.com/Luckycat133/gemini-web-mcp@main' \
   gemini-mcp-onboarding image \
   --allow-live-account \
   --prompt 'A two-color geometric cat icon on a plain background' \
@@ -111,7 +111,7 @@ Install the runtime workflow skill when an agent should operate the MCP tools:
 
 ```bash
 npx --yes skills@1.5.21 add \
-  "https://github.com/Luckycat133/gemini-web-mcp#codex/gemini-tools-polish-20261101" \
+  "https://github.com/Luckycat133/gemini-web-mcp#main" \
   --skill gemini-web-mcp \
   --agent codex --copy --yes
 ```
@@ -120,7 +120,7 @@ Contributors changing this repository should install the separate development wo
 
 ```bash
 npx --yes skills@1.5.21 add \
-  "https://github.com/Luckycat133/gemini-web-mcp#codex/gemini-tools-polish-20261101" \
+  "https://github.com/Luckycat133/gemini-web-mcp#main" \
   --skill gemini-web-mcp-development \
   --agent codex --copy --yes
 ```

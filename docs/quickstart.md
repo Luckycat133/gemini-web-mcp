@@ -11,7 +11,7 @@
 ## 1. 无账号预检
 
 ```bash
-uvx --from git+https://github.com/Luckycat133/gemini-web-mcp@codex/gemini-tools-polish-20261101 gemini-mcp-onboarding
+uvx --from git+https://github.com/Luckycat133/gemini-web-mcp@main gemini-mcp-onboarding
 ```
 
 `uvx` 会创建隔离环境并运行 `gemini-mcp-onboarding`。该客户端启动真实
@@ -19,7 +19,7 @@ uvx --from git+https://github.com/Luckycat133/gemini-web-mcp@codex/gemini-tools-
 `INVALID_ARGUMENT`。预检会移除 `GEMINI_PSID`、`GEMINI_PSIDTS` 和
 `GEMINI_PSIDCC`，并输出 `mode=offline`、`credentials_accessed=false`；它不会访问 Gemini。
 
-预检应输出 `profile=function`、`enabled_tools=17` 和 `text_tool=gemini_ask`。命令安装 [PR #39 的开发分支](source-update-integration.md)，需要固定版本时，把 `@` 后的分支名换成已审核的 commit SHA。
+预检应输出 `profile=function`、`enabled_tools=17` 和 `text_tool=gemini_ask`。命令安装 [当前 main 分支](source-update-integration.md)，需要固定版本时，把 `@` 后的分支名换成已审核的 commit SHA。
 
 ## 2. 配置实时账号
 
@@ -49,7 +49,7 @@ export GEMINI_PSIDTS='your __Secure-1PSIDTS value'
       "command": "uvx",
       "args": [
         "--from",
-        "gemini-mcp-server[all] @ git+https://github.com/Luckycat133/gemini-web-mcp@codex/gemini-tools-polish-20261101",
+        "gemini-mcp-server[all] @ git+https://github.com/Luckycat133/gemini-web-mcp@main",
         "gemini-mcp-function"
       ]
     }
@@ -76,7 +76,7 @@ export GEMINI_PSIDTS='your __Secure-1PSIDTS value'
 文本验证使用普通 Chat，并启用默认自动清理。命令必须显式允许账号访问：
 
 ```bash
-uvx --from git+https://github.com/Luckycat133/gemini-web-mcp@codex/gemini-tools-polish-20261101 \
+uvx --from git+https://github.com/Luckycat133/gemini-web-mcp@main \
   gemini-mcp-onboarding chat \
   --allow-live-account \
   --prompt 'Reply with exactly: Gemini MCP is connected'
@@ -87,7 +87,7 @@ uvx --from git+https://github.com/Luckycat133/gemini-web-mcp@codex/gemini-tools-
 
 ```bash
 uvx \
-  --from 'gemini-mcp-server[image] @ git+https://github.com/Luckycat133/gemini-web-mcp@codex/gemini-tools-polish-20261101' \
+  --from 'gemini-mcp-server[image] @ git+https://github.com/Luckycat133/gemini-web-mcp@main' \
   gemini-mcp-onboarding image \
   --allow-live-account \
   --prompt 'A two-color geometric cat icon on a plain background' \
