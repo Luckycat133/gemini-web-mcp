@@ -2,11 +2,11 @@
 
 ## Settled Boundaries
 
-- One repository, shared services and two business surfaces: `gemini-mcp-function` and `gemini-mcp-account`.
-- The function catalog covers assistance, sessions, media, research and operation recovery; the account catalog covers explicitly requested account work.
-- No `GEMINI_TOOLS` means the function surface. Explicit profiles, assist and compact remain compatibility routes.
+- One repository and shared services support two independent MCP entries, `gemini-mcp-function` and `gemini-mcp-account`.
+- The default catalogs have six tools each. Function owns generation and operation recovery. Account owns explicit conversation and resource management and read-only Task metadata.
+- No `GEMINI_TOOLS` means the function surface. `function-full` and `account-full` expose the prior catalogs. Assist, compact and other legacy profiles remain compatibility routes.
 - Function media always starts in the background; preserve the same handle for recovery. Cancellation is not implemented.
-- Account `gemini_cleanup` is restricted to the MCP-owned ledger and does not match titles.
+- Full-account `gemini_cleanup` is restricted to the MCP-owned ledger.
 
 ## Validation Packages
 

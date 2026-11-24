@@ -8,12 +8,18 @@ Load only the Skill whose trigger matches the current task. A Skill may be reuse
 
 | Skill | Use here for |
 |---|---|
+| `gemini-web-mcp` | Runtime compatibility router for Gemini Web MCP workflows (chat, search, understanding, Deep Research, media, Task, account) |
+| `gemini-assist` | Focused runtime Skill for pure assistance, grounded search, image/mixed-input understanding, and async Deep Research (`gemini-mcp-assist`) |
 | `gemini-web-mcp-development` | Implemented versus target MCP surfaces; focused shared-service, package and live-evidence checks |
-| `mcp-builder` | Existing MCP authoring guidance |
+| `mcp-builder` (global) | Existing MCP authoring guidance (provided via global Skills directory; no local duplicate) |
 | `github-actions` | CI, canary, and release workflows |
 | `managing-python-dependencies` | Python environment and dependency changes |
 | `architecture-patterns` | Opt-in boundaries for MCP and external-service architecture |
 | `python-packaging` | Python package metadata, builds, and distribution checks |
+| `python-pypi-package-builder` | End-to-end PyPI packaging, PEP 440/SemVer versioning, and OIDC Trusted Publishing |
+| `directory-submissions` | MCP Registry (`server.json`), Glama (`glama.json`), Gemini/Cursor/Claude plugin manifests, `skills.sh`, and directory submissions |
+| `clawhub` | ClawHub skill publishing, syncing, verification, and discovery workflows |
+| `github-release` | GitHub Releases, SemVer tagging, and Keep a Changelog release workflows |
 
 ## Maintenance rules
 

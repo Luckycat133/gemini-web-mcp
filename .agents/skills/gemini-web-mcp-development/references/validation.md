@@ -53,7 +53,7 @@ For every dedicated surface, test:
 
 ### Function and Account Catalogs
 
-Verify the function and explicit account tools match the current registered catalogs, including schemas and annotations. Function `gemini_ask` covers current-web requests with source evidence and Notebook-backed ordinary Chat; `gemini_run_task` explicitly starts Task. The assist compatibility server retains its five-tool catalog including `gemini_search`, without Notebook attachment arguments. Function media, Task and Notebook Chat starts always return a handle; account cleanup is limited to the MCP-owned ledger, not title matching. Cookie, Doctor and local Prompts stay outside both catalogs. The explicit legacy profiles, assist and compact remain available.
+Verify the two six-tool default catalogs on independent connections, including their schemas and annotations. Verify that both explicit full profiles retain the previous 17-tool contracts. `gemini_ask` covers current-web questions, typed inputs, local session turns and background ordinary Notebook Chat. `gemini_run_task` starts Task. Media, Task and Notebook Chat start by returning a handle. Status reads and result recovery expose their own annotations. Default Task metadata is read-only, exact chat deletion is separate, and `account-full` cleanup is limited to the MCP-owned ledger. Keep the five-tool assist, compact and other legacy catalogs compatible.
 
 Golden catalogs and schemas are reviewed contracts. Do not regenerate them automatically after failure.
 
@@ -65,8 +65,10 @@ Golden catalogs and schemas are reviewed contracts. Do not regenerate them autom
 - model/thinking controls;
 - structured failure/text agreement;
 - no mixed-input machinery required for pure text.
+- typed inputs, Notebook context and session options reject conflicting combinations before dispatch.
+- session start sends the first turn, continuation inherits the original model and thinking level, and exact recovery replays no prompt.
 - current-web and natural-language app requests preserve observed sources and truthful grounding; app execution is not inferred from prose.
-- Model routing: the client gate implements account-bound basic Flash text-quota evidence and fixed Lite thinking; verify default Flash, 60-second expiry and basic-Flash-success revocation, no replay of the original request, and requested/effective/fallback/selectability metadata. Installed-SDK offline and public MCP integration checks passed; do not exhaust an account to test the unverified live quota boundary. Advanced-thinking, file, research and media-only limits do not authorize Lite. Preserve explicit Pro/Argon choices even when unavailable.
+- Model routing: the client gate implements account-bound basic Flash text-quota evidence and fixed Lite thinking; verify the Flash compatibility default preferring discovered Hydrogen, exact Neon/Carbon selectors, current-account plan restrictions, 60-second expiry and basic-Flash-success revocation, no replay of the original request, and requested/effective/fallback/selectability metadata. Installed-SDK offline and public MCP integration checks passed; do not exhaust an account to test the unverified live quota boundary. Advanced-thinking, file, research and media-only limits do not authorize Lite. Refuse unavailable explicit legacy Pro/Argon choices without substituting Neon or Hydrogen. Check media composer modes separately from chat selectors and never infer a generator version from a static route label.
 
 ### `gemini_search` (assist compatibility)
 
@@ -103,7 +105,7 @@ Golden catalogs and schemas are reviewed contracts. Do not regenerate them autom
 - Workers save and verify the full answer Artifact before cleanup even when the caller has not requested the result. Cover crash recovery before/after save, restart local retrieval, file size/hash validation and unread/unknown cleanup protection.
 - Notebook objects and sources are never temporary-chat cleanup targets; explicit retention preserves only the owned chat lifecycle requested by the caller.
 - Account Notebook defaults to source-picker metadata. The same product's `source="gemini"` project view must use strict envelopes; missing/error envelopes cannot become an empty success. Move targets need fresh exact-ID/type resolution and independent read-back, without guessed ID conversion.
-- Task account list/get expose metadata only; delete requires an exact Task chat ID, no mutation replay and independent absence verification. Check union destructive annotations for `gemini_tasks` and destructive `gemini_run_task`.
+- Default account `gemini_tasks` has read-only list/get/progress. The `account-full` version has a destructive union and requires exact IDs and independent absence verification for deletion. Check the destructive `gemini_run_task` annotation separately.
 - Authorized live source-QA evidence needs a synthetic marker absent from the prompt, public MCP disconnect/restart retrieval and independent chat absence; ordinary Notebook Chat must not create a Task goal.
 - Verify Notebook/source app mutations through fresh metadata or exact source evidence, not the generated answer alone. Keep rich Task control, Task schedules and experimental ProcessSession probes separate from current production claims.
 
@@ -222,7 +224,7 @@ SOURCE="git+https://github.com/Luckycat133/gemini-web-mcp@${REVIEWED_SHA}"
 uvx --from "$SOURCE" gemini-mcp-onboarding
 ```
 
-The active package and public Skills use `0.2.1`; preserve `v0.2.0` as immutable history.
+Read the active version from `pyproject.toml` and verify that the public Skills match it. Preserve published tags as release history.
 
 ## Compatibility Runtime Skill
 

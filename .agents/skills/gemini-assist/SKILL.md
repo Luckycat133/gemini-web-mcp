@@ -3,7 +3,7 @@ name: gemini-assist
 description: "Use this skill when the user wants a second opinion, critique, code or design review, current-web search that names its sources, image or screenshot understanding, file, URL, or mixed-input understanding, or Deep Research. Prefer this focused skill over the gemini-web-mcp compatibility skill for pure assistance and understanding workloads. Do not use it for pure image, video, or music generation, Gemini account administration, or repository development; route those requests to the creation, account, or development capability instead."
 license: MIT-0
 metadata:
-  version: "0.2.1"
+  version: "0.20.8"
   openclaw:
     emoji: "♊️"
     homepage: https://github.com/Luckycat133/gemini-web-mcp
@@ -32,7 +32,7 @@ Extend the current task with Gemini assistance: a second opinion, grounded curre
 
 This surface deliberately exposes no history, Cookie, Scheduled, Gem, Prompt, manifest, or cleanup tools.
 
-When the default `gemini-mcp-function` surface is connected, prefer its `gemini_ask` for ordinary questions, current-web requests and natural-language app requests. Flash is the default, and no web or tool enable switch is exposed. Observed source evidence is returned, but answer prose does not prove that an external app action or Task was executed.
+When the default `gemini-mcp-function` surface is connected, prefer its `gemini_ask` for ordinary questions, current-web requests and natural-language app requests. The Flash compatibility default prefers discovered Hydrogen, and no web or tool enable switch is exposed. Observed source evidence is returned, but answer prose does not prove that an external app action or Task was executed.
 
 ## Choose The Tool
 
@@ -58,7 +58,7 @@ The catalog is exactly five tools: `gemini_ask`, `gemini_search`, `gemini_unders
 
 For an existing Notebook's sources, use the function server's `gemini_ask(notebook_ids=...)`, which returns a background ordinary-chat handle. Explicit multi-step Task execution uses function `gemini_run_task`; it is a separate mode. Those function-only arguments and Task tools are not part of this five-tool assist schema. Notebook/Task account metadata and explicit deletion use the account server; preserve the original operation handle for result recovery.
 
-Use Flash by default for web search and multimodal understanding. All observed models can reason and understand images; choose by task and style. For writing, creative work, character dialogue or difficult reasoning, the project owner's experience favors Argon when available; independently check long-form consistency and constraints. Pro is for an explicit choice or a concrete higher-tier need, not a default. Argon's runtime availability and route must be verified.
+Use the Flash compatibility default, which prefers discovered Hydrogen, for web search and multimodal understanding. Explicit Neon and Carbon choices must match the current account registry and verified plan. Legacy Argon and Pro remain available only when independently discovered, with no silent substitution. Earlier Argon writing preferences describe historical experience; independently check long-form consistency and constraints.
 
 Community snapshot (2026-10-31): [Flash users](https://www.reddit.com/r/GeminiAI/comments/1wjmz5x/actually_gemini_38_flash_is_a_beast/) report useful everyday coding, but [search users](https://www.reddit.com/r/GeminiAI/comments/1xeq89i/is_gemini_flash_38_web_search_broken/) also report skipped retrieval. [An Argon writing comparison](https://discuss.ai.google.dev/t/first-test-of-gemini-4-argon-much-better-immersion-but-stricter-with-explicit-adult-roleplay-than-gemini-3-x/189556) favors immersion; [other users](https://www.reddit.com/r/GeminiAI/comments/1xcbqfu/1_week_later_thoughts_on_gemini_4_argon/) describe both strengths and multi-step failures. [Pro feedback](https://www.reddit.com/r/Bard/comments/1rc68fg/how_was_your_experience_in_using_gemini_31_pro_in/) includes better context/coding in some settings and hallucinations in others. These are individual experiences across different products, not a universal ranking. Preserve the Flash default and verify sources and task results.
 
@@ -84,7 +84,7 @@ Do not relabel a source-free answer as grounded and do not invent source URLs. W
 
 ## Information, Not Artifacts
 
-Search and understanding return information to the calling agent. Synthesize the answer or analysis into the user's task instead of dumping raw Gemini output. A ready Deep Research report can be retrieved with its saved operation handle; default cleanup follows extraction unless retention was requested.
+Search and understanding return information to the calling agent. Synthesize the answer or analysis into the user's task instead of dumping raw Gemini output. The worker saves and verifies a ready Deep Research report before source cleanup. Retrieve the full local report through the original operation handle, including after restart or interrupted delivery.
 
 ## Deep Research Starts Asynchronously
 
@@ -93,7 +93,7 @@ Search and understanding return information to the calling agent. Synthesize the
 - the structured result carries an opaque `operation_id` plus the preserved `upstream_operation_id` and `upstream_chat_id`;
 - `state` is `accepted` when the confirmation returned no progress evidence, or the observed upstream state; a started run is never a completed report;
 - `timeout_seconds` bounds only the plan and start phases, never the report itself;
-- `retain_chat` defaults to false; an unread research chat remains protected from automatic deletion, and taking its verified result triggers cleanup unless the caller explicitly chose retention;
+- `retain_chat` defaults to false; the worker saves and verifies the full local report before scheduling source cleanup. The original handle can recover that saved report after restart or an interrupted response;
 - preserve every returned identifier and never start a duplicate run because one call timed out.
 
 For tracking and duplicate prevention when the first call disconnects before returning, generate a random handle before calling: `op_` followed by 32 lowercase hexadecimal characters (for example, Python `"op_" + secrets.token_hex(16)`). Pass it as `operation_id`. While its record remains in the same database, reusing the handle ignores the new query and retention settings. For an unverified plan outcome, it may recover the original completed plan and atomically confirm it once using the saved model and thinking level. A previously claimed confirmation is never resent; otherwise the saved state is returned. Without a caller-supplied handle, a connection lost before the first response may leave the caller unable to locate the saved operation.

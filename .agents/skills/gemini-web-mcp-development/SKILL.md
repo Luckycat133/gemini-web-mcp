@@ -6,7 +6,7 @@ metadata:
   author: Luckycat133
   project: gemini-web-mcp
   scope: development
-  version: "0.2.1"
+  version: "0.20.8"
 ---
 
 # Gemini Web MCP Development
@@ -45,6 +45,10 @@ Read the branch version from `pyproject.toml` and compare it with fetched publis
 
 A green offline suite proves repository contracts. It does not prove current Gemini Web behavior.
 
+## Update local IDE installations
+
+When the local clients use `~/.local/bin/gemini-mcp-function`, deploy verified changes to that shared runtime. Run `.venv/bin/python scripts/update_local_mcp.py` from the tested checkout. If the branch predates the updater, build its wheel with `uv build --wheel` and pass the wheel's absolute path with `--wheel` to the updater in the deployment worktree. Use `git worktree list` to locate it. Reconnect active MCP sessions to load the updated tools.
+
 ## Current source before target topology
 
 The source/contract routing table in [validation.md](references/validation.md)
@@ -74,26 +78,36 @@ One repository and Python distribution exposes two focused surfaces:
 
 | Surface | Console entrypoint | Scope |
 | --- | --- | --- |
-| Function | `gemini-mcp-function` | 17 tools for assistance, sessions, Task, media, research and operations |
-| Account | `gemini-mcp-account` | 17 explicit account tools |
+| Function | `gemini-mcp-function` | Six tools for Chat, Task, media, Research, status and results |
+| Account | `gemini-mcp-account` | Six tools for existing conversations, Notebooks and read-only Task metadata |
 
-The main command without `GEMINI_TOOLS` defaults to the function surface; explicit profiles retain their compatibility semantics. The older `gemini-mcp-assist` and compact servers remain supported. All surfaces reuse shared services and the same operation store. Cookie, Doctor and local Prompts are outside both business catalogs. `gemini_cleanup` is limited to MCP-owned ledger entries, never title matching.
+These are independent MCP connections. The main command without `GEMINI_TOOLS` defaults to the function surface. Use `GEMINI_TOOLS=function-full` or `GEMINI_TOOLS=account-full` with `gemini-mcp-server` to expose either prior 17-tool catalog. Assist, compact and other explicit profiles retain their compatibility semantics. All surfaces reuse shared services and operation storage. The full account `gemini_cleanup` is limited to MCP-owned ledger entries.
 
-Function tools: `gemini_ask`, `gemini_understand_image`, `gemini_understand`, `gemini_research`, `gemini_start_chat`, `gemini_send_message`, `gemini_list_sessions`, `gemini_reset_session`, `gemini_generate_image`, `gemini_edit_image`, `gemini_generate_video`, `gemini_generate_music`, `gemini_run_task`, `gemini_get_operation_status`, `gemini_get_operation_result`, `gemini_list_research_report_actions`, `gemini_create_from_research_report`.
+The default function tools are `gemini_ask`, `gemini_research`, `gemini_run_task`, `gemini_create_media`, `gemini_get_operation_status` and `gemini_get_operation_result`. Keep status and result separate so status is read-only while result recovery may trigger owned-chat cleanup.
 
-Use `gemini_ask` for ordinary questions, current-web requests and natural-language app requests. Flash is the default; no web or tool enable switch is exposed. Preserve observed sources and grounding evidence. Function Ask with `notebook_ids` starts background ordinary Chat (`execution_mode="chat"`, default timeout 600 seconds); Ask without Notebook IDs keeps the direct-response path. `gemini_run_task` explicitly starts background Task (`execution_mode="task"`) and accepts optional Notebook IDs. Keep these modes separate: complex questions, App requests, Notebook context and asynchronous execution do not by themselves require Task. Default to Chat; choose Task for explicit Task or delegated workflows needing ongoing execution, tracked work or browser operation. Check action-specific app availability. Task supports discovered Flash/Argon only; saved browser/action preferences use account `gemini_preferences`; stored read-back never proves runtime effects. Low/medium/high thinking maps to 1/4/2 in both request body and model header; standard/extended remain low/high aliases and Lite is locked. The five-tool assist compatibility schema retains `gemini_search` and does not gain the function-only Notebook arguments. Do not infer successful external app changes from response prose.
+`function-full` preserves the earlier request schemas, including `gemini_understand_image`, `gemini_understand`, `gemini_start_chat`, `gemini_send_message`, `gemini_list_sessions`, `gemini_reset_session`, `gemini_generate_image`, `gemini_edit_image`, `gemini_generate_video`, `gemini_generate_music`, `gemini_list_research_report_actions` and `gemini_create_from_research_report`.
 
-Account tools: `gemini_history`, `gemini_manage_chat`, `gemini_delete_chat`, `gemini_notebooks`, `gemini_tasks`, `gemini_task_browser`, `gemini_skills`, `gemini_manage_notebook`, `gemini_move_chat_to_notebook`, `gemini_account_inventory`, `gemini_list_scheduled_actions`, `gemini_get_scheduled_action`, `gemini_create_scheduled_action`, `gemini_delete_scheduled_action`, `gemini_manage_gems`, `gemini_cleanup`, `gemini_preferences`.
+Use `gemini_ask` for ordinary questions, current-web requests and natural-language app requests. The Flash compatibility default prefers discovered Hydrogen. Explicit Neon/Carbon and legacy selections must match the current registry. Preserve observed sources and grounding evidence. Keep typed `inputs`, `notebook_ids` and session options mutually exclusive. Notebook IDs start background ordinary Chat (`execution_mode="chat"`, default timeout 600 seconds). `gemini_run_task` explicitly starts background Task (`execution_mode="task"`) and accepts optional Notebook IDs. Choose Task for an explicitly requested Task or delegated execution that needs tracking or browser operation. Check action-specific app availability and verify changes by resource read-back. Task supports current discovered Hydrogen/Neon/Carbon according to the verified plan, with legacy Flash/Argon compatibility only when discovered. Saved settings in `account-full` have separate runtime evidence. Low/medium/high thinking maps to 1/4/2 in the body and model header. Standard/extended remain low/high aliases and Lite is locked. The five-tool assist compatibility schema retains `gemini_search` with its original arguments.
 
-Account history defaults to compact metadata and pagination with bounded explicit text reads. `gemini_manage_chat` renames, pins or unpins an exact chat ID after a fresh metadata pre-read and independent read-back. Preserve unknown `changed=null` after a sent but unverified mutation, and never replay it automatically. Keep API model IDs distinct from discovered Cookie transport selectors; official low/medium/high names alone do not establish Web protocol numbers.
+The default account tools are `gemini_history`, `gemini_manage_chat`, `gemini_delete_chat`, `gemini_notebooks`, `gemini_manage_notebook` and `gemini_tasks`.
 
-Account `gemini_notebooks` defaults to `source="notebooklm"` source-picker metadata. `source="gemini"` retains the same integrated Notebook product's project view; move targets require fresh exact-ID/type resolution in that view, not guessed prefix conversion. `gemini_tasks` list/get are metadata only; explicit exact-ID delete requires independent absence verification. Its union annotation and `gemini_run_task` are destructive. Task schedules are not Chat scheduled actions. Task progress, schedules and explicit browser inputs are available; exclusive handoff, automatic permission approval, Task pause/resume and export are unavailable; experimental ProcessSession probes are not a production transport.
+`account-full` preserves the earlier schemas, including `gemini_task_browser`, `gemini_skills`, `gemini_move_chat_to_notebook`, `gemini_account_inventory`, `gemini_list_scheduled_actions`, `gemini_get_scheduled_action`, `gemini_create_scheduled_action`, `gemini_delete_scheduled_action`, `gemini_manage_gems`, `gemini_cleanup` and `gemini_preferences`.
 
-Function media tools always start in the background. Research defaults to background. Preserve the same operation handle for status/result. Cancellation is not implemented. A report `audio_overview` is a script and `custom_app` is an application specification, not generated audio or deployment.
+Account history defaults to compact metadata and bounded explicit text reads. `gemini_manage_chat` renames, pins, unpins or moves an exact chat with independent read-back. Keep an uncertain mutation unverified and preserve account ownership. `gemini_notebooks` defaults to `source="notebooklm"` source-picker metadata. Resolve move targets as exact IDs in the `source="gemini"` project view. Keep exact chat deletion separate. Default `gemini_tasks` is read-only list/get/progress. The full profile adds Task mutations and schedules with a destructive union annotation. Task and Chat schedules use different contracts.
+
+`gemini_create_media` uses one background submission for `image`, `edit_image`, `video` or `music`, with omitted media model selecting discovered Hydrogen. Default `wait_seconds=120` waits on that operation; result recovery accepts 0–120 seconds without resubmission. Web video supports 10/15 seconds and landscape/portrait choices. Keep exact paid API model selection explicit and separate from discovered Cookie transport selectors. Default Research submission is background-only. Preserve the same operation handle for status/result. A report `audio_overview` is a script and `custom_app` is an application specification.
+
+Web music/video default to native browser ProcessSession with model verification after prompt entry; only explicit `GEMINI_WEB_MEDIA_TRANSPORT=sdk` selects compatibility transport. Preserve observed JS-auth cookie attributes and accept independently verified audio-bearing MP4 without promising MP3. Reuse exact completed reply evidence, local-artifact verification, protection release and existing canonical cleanup/read-back; unknown CID/RID/candidate identity stays protected. Final wheel and native live evidence remain separate from the 2026-11-21 matrix.
+
+Primary/compact native `background=false` calls share `services.native_media_inline.submit_and_wait_native_media`: submit one protected operation, wait on its original handle within the budget, preserve partial/wait_elapsed on timeout, and keep unknown/save-failed work protected without cleanup. Completed results retain legacy local artifacts, explicit filename and `generated_media/` default; default filenames are opaque and prompts do not enter the ledger. SDK/API sync behavior is unchanged. `InlineMediaArtifactData` belongs in `domain/results.py`, not an adapter or service-owned result type.
+
+Native video supports exactly one validated local `image_path`, with upload preview/token verification before one Send; unknown or changed attachment evidence refuses submission. Recheck captured account/credentials after every awaited read before observe/checkpoint/artifact use. Drift must not persist new RID/RCID metadata: retain at most the previously captured CID under its original owner, keeping cleanup protection. DOM upload or a source probe reaching a pre-Send guard does not verify live reference-video delivery; record final-build live acceptance separately.
+
+Preserve optional music controls across every music adapter: `music_duration=short|standard` and `music_vocals=instrumental|vocals|auto`. Both default to `None`, keeping actual webpage defaults; do not infer defaults from prompt wording or the first menu item. Verify requested native selections before one send and reject explicit SDK requests containing these controls before dispatch. An independent Neon Short/Instrumental browser success does not verify the new MCP options. The current delivery includes the guarded workflow; keep per-request successes, refusals and unknown outcomes distinct rather than claiming universal live support.
 
 Task and Notebook Chat workers preserve the original CID/RID/candidate and read exact completed-answer evidence. They save and verify the full local answer Artifact before automatic owned-chat cleanup, independently of a caller requesting the result. Task additionally requires a complete recognized native file inventory and verified saved attachments; failed downloads or changed shapes cannot release protection. Restarted reads verify saved files under the original handle. Legacy answer-only caches remain partial without inventing an empty inventory. Unknown work stays protected, and Notebook objects/sources are not temporary-chat cleanup targets. Keep answer bytes out of SQLite; persist only verified Artifact locators and metadata.
 
-Ordinary session uncertainty blocks new prompts; `gemini_send_message(recover_only=true)` reads the previous exact turn without generation replay or SDK latest-reply fallback. This requires the original active process, unlike persistent operation handles. Keep active/in-flight sessions protected from stale cleanup timers. Treat native App connection setup separately from confirmation choices and never turn a text reply into OAuth. Cookie extraction and SDK init success do not establish authentication; reject an unauthenticated fresh user status before dispatch, with at most one same-account pre-dispatch credential refresh.
+Ordinary session uncertainty blocks new prompts. `gemini_ask(session_id=..., recover_only=true)` reads the previous exact turn in the original active process. `function-full` retains `gemini_send_message` for that path. Keep active sessions protected from stale cleanup timers. Handle native App connection setup separately from confirmation choices. Require a fresh authenticated user status before dispatch, with at most one same-account pre-dispatch credential refresh.
 
 Read [architecture.md](references/architecture.md) before changing boundaries.
 
@@ -205,7 +219,7 @@ Do not claim a live capability from fixtures, package smoke, a skipped canary, o
 - Do not add tools only to mirror every observed Gemini UI entry.
 - Do not scatter volatile RPC IDs or response indices outside the registry/parser boundary.
 - Do not hardcode volatile passing-test counts.
-- Preserve `v0.2.0`; use `v0.2.1` for this patch line.
+- Preserve published tags. `pyproject.toml` defines the active development version and the matching tag name for an authorized release.
 
 ## References
 
@@ -236,4 +250,4 @@ Remaining gaps:
 Owner decision required:
 ```
 
-Task schedules are separate from Chat scheduled actions: use `gemini_tasks` schedule actions, preserve timezone and up to nine fractional seconds, and independently verify each mutation. Associated schedules protect MCP-owned Task threads. For `gemini_task_browser`, install `[browser-control]`; input requires exact reply IDs, the prior frame hash and a unique action ID. The Task must remain in state 3 or 5; never replay an action ID or auto-approve login/permissions. Frames and input dispatch do not verify website effects or exclusive pause.
+Use `account-full` for Task schedules and explicit browser inputs. Preserve timezone and up to nine fractional seconds, and independently verify schedule mutations. Associated schedules protect MCP-owned Task threads. For `gemini_task_browser`, install `[browser-control]`. Input requires exact reply IDs, the prior frame hash and a unique action ID. The Task must remain in state 3 or 5. Verify website effects independently of frames and input dispatch.

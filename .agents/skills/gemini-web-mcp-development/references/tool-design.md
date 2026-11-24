@@ -12,11 +12,11 @@ A large tool catalog, a successful raw RPC, or response prose alone is not produ
 
 ### Function surface
 
-Use `gemini-mcp-function` for assistance, understanding, session chat, Task, media generation, research, report derivatives and operation recovery. Use `gemini_ask` for ordinary and current-web questions and natural-language app requests; it defaults to Flash and retains observed source evidence. Function Ask with `notebook_ids` starts background ordinary Chat, while `gemini_run_task` explicitly starts Task; preserve `execution_mode="chat"|"task"`. Both default to a 600-second phase timeout and return a persistent handle. The five-tool assist compatibility schema retains `gemini_search` and does not expose the function-only Notebook arguments. Function media starts are also always background operations. Propagate structured source and Artifact evidence; app mutations require resource read-back.
+Use `gemini-mcp-function` for Chat, Task, media, Research and operation recovery. `gemini_ask` keeps the Flash compatibility default, preferring discovered Hydrogen, and retains observed sources. Exact Neon/Carbon choices and verified plan restrictions use the current account registry. Its `inputs`, Notebook IDs and session options are mutually exclusive. Notebook IDs start background ordinary Chat, while `gemini_run_task` starts Task. Preserve `execution_mode="chat"|"task"` and the original operation handle. `gemini_create_media` starts one background operation, defaults its media model to discovered Hydrogen and waits up to 120 seconds on that original handle. Zero returns immediately; result recovery also accepts 0–120 seconds without re-submitting. Web video supports 10/15 seconds and landscape/portrait choices. Report derivatives belong to `function-full`. Assist preserves the compatibility `gemini_search` schema. Verify app changes by resource read-back.
 
 ### Account surface
 
-Use `gemini-mcp-account` only for explicit requests about history, Notebooks, Task metadata, Chat scheduled actions, Gems, account inventory or MCP-owned cleanup. Notebook metadata defaults to the source-picker view; `source="gemini"` is the same integrated product's project view. Moves require fresh target resolution in that view without guessed ID conversion. `gemini_tasks` provides metadata-only list/get, bounded progress, Task schedules and explicit exact-ID deletion with independent absence verification; `gemini_task_browser` supports verified frames and explicit one-shot input; its union annotation is destructive. The cleanup tool only operates on the MCP-owned ledger, never on title matches, and does not delete Notebook objects or sources. Cookie, Doctor and local Prompts are outside both business catalogs.
+Use the independent `gemini-mcp-account` connection for explicit requests about existing conversations, Notebooks or Task metadata. For `gemini_manage_chat(action="move_to_notebook")`, resolve a fresh exact target in the `source="gemini"` project view. Keep chat deletion in `gemini_delete_chat` so the client can distinguish its annotation. Default `gemini_tasks` provides read-only list, get and progress. Load `account-full` for Task mutations and schedules, verified browser frames and explicit input, or other extended account operations. Its cleanup tool only operates on the MCP-owned ledger.
 
 Task schedules and Chat scheduled actions need separate contracts. Rich Task permission prompts, browser handoff, step control, schedules and export are not all exposed. A visible app or public rendering field does not establish a complete execution contract.
 
@@ -128,11 +128,11 @@ Hosts may aggregate multiple servers, so generic names collide and reduce model 
 
 Choose a dedicated tool when the user intent, input schema, or completion contract is materially different.
 
-Keep `gemini_ask` separate from `gemini_understand` because pure text second-opinion work is common and should not require a mixed-input schema.
+Keep pure text simple in `gemini_ask` by making typed `inputs` optional. Existing specialized understanding tools remain available in compatibility catalogs.
 
-Keep `gemini_understand_image` separate from `gemini_understand` because single-image tasks are frequent and deserve a simple schema.
+Group media with a small `kind` enum because submission, artifact verification and operation recovery share a contract. Validate kind-specific parameters before dispatch.
 
-Use one shared operation service, but expose explicit status/result tools on primary dedicated surfaces. The compatibility low-token server may use an action facade while it remains supported.
+Use one shared operation service. Expose separate status and result tools because status is read-only and result recovery can trigger owned-chat cleanup. Keep exact conversation deletion separate from metadata updates. Apply annotations at the whole-tool boundary.
 
 ## Assistance Tool Contracts
 
@@ -144,7 +144,9 @@ Input:
 prompt
 optional context
 model / thinking controls
-function-only optional notebook_ids / timeout_seconds / operation_id
+optional inputs
+or notebook_ids / timeout_seconds / operation_id
+or start_session / session_id / recover_only
 ```
 
 Output:
@@ -157,7 +159,7 @@ source conversation/lifecycle metadata when relevant
 
 The calling agent compares or incorporates the answer; it should not merely quote it without completing the task.
 
-With Notebook IDs, Ask returns a background operation handle instead of a direct answer. Keep ordinary Chat semantics; do not set Task flags. The worker verifies the exact completed original reply, saves and verifies its full local answer Artifact before owned-chat cleanup, and allows restart result retrieval. Status reads metadata only. Without Notebook IDs, Ask preserves its direct-response behavior, and a function-only `operation_id` is invalid.
+With Notebook IDs, Ask returns a background operation handle for ordinary Chat. The worker verifies the original completed reply and local Artifact before owned-chat cleanup. With typed inputs, preserve per-input outcomes. With a local session, use the exact session handle and recover a previous unverified turn before allowing a new send. The ordinary path returns inline. The caller-supplied `operation_id` is only for Notebook Chat.
 
 ### `gemini_run_task`
 
@@ -186,7 +188,7 @@ grounding_state
 
 `grounding_state = grounded | answer_only | unavailable | failed`. Grounded requires a structured citation or verified source-attribution span; `retrieved_only` evidence does not prove answer support.
 
-### `gemini_understand_image`
+### `gemini_understand_image` (compatibility)
 
 Input:
 
@@ -203,7 +205,7 @@ observations tied to the image
 input Artifact identity
 ```
 
-### `gemini_understand`
+### `gemini_understand` (compatibility)
 
 Input is a bounded typed list:
 
@@ -226,13 +228,7 @@ Starts asynchronously by default. Input contains the research question and bound
 
 ## Creation Tool Contracts
 
-Each modality-specific tool starts the operation and returns either:
-
-- a completed Artifact;
-- a queued/running operation handle;
-- a truthful partial/empty/failed result.
-
-Image tools may often complete synchronously. Video/music should normally use OperationService.
+`gemini_create_media` submits background `image`, `edit_image`, `video` or `music` and returns the original handle. Require an input image for edits. Reserve video duration for explicit paid API video. Return verified artifacts through operation recovery. Keep modality-specific compatibility routes on the full profile.
 
 ## Artifact Handoff
 
@@ -282,7 +278,7 @@ Do not expose a global unbounded operation list to ordinary function agents. Acc
 The current `gemini-web-mcp` Skill must be useful now:
 
 - task-first capability lanes;
-- compact default when it can finish;
+- separate function and account connections enabled as needed;
 - narrow primary profile for files/URLs/Research;
 - manifest only for discovery/recovery;
 - Artifact downstream use;

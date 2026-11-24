@@ -10,30 +10,22 @@ The Skill is instructions, not an MCP server installation. First run the credent
 uvx --from git+https://github.com/Luckycat133/gemini-web-mcp@codex/gemini-tools-polish-20261101 gemini-mcp-onboarding
 ```
 
-For Codex, connect the compact server as a small default surface:
-
-```bash
-codex mcp add gemini-compact -- uvx --from git+https://github.com/Luckycat133/gemini-web-mcp@codex/gemini-tools-polish-20261101 gemini-mcp-skill-server
-codex mcp list
-```
-
-Connect `gemini-mcp-function` for assistance, chat, media and Research, or `gemini-mcp-account` for explicitly requested account operations. The compact and assist servers and explicit `GEMINI_TOOLS` profiles remain compatibility options. Client configuration examples are in the project documentation. Restart or reload the client if newly connected tools are not visible in the current task.
-
-For focused assistance or the primary content surface in Codex:
+Connect `gemini-mcp-function` for Chat, Task, media and Research or `gemini-mcp-account` for existing conversation and resource management. In Codex, run only the command for the surface the task needs.
 
 ```bash
 codex mcp add gemini-function -- uvx --from git+https://github.com/Luckycat133/gemini-web-mcp@codex/gemini-tools-polish-20261101 gemini-mcp-function
 codex mcp add gemini-account -- uvx --from git+https://github.com/Luckycat133/gemini-web-mcp@codex/gemini-tools-polish-20261101 gemini-mcp-account
 ```
 
+Use `codex mcp list` to confirm the entry. To load the prior catalog for an advanced workflow, configure an independent `gemini-mcp-server` entry with `GEMINI_TOOLS=function-full` or `account-full`. Assist, compact and other legacy profiles remain available.
+
 This setup does not authenticate a Gemini account. Keep Cookie values in the client host's secret environment; never put them in command arguments, committed files, or chat. An authentication error after the offline preflight means the connection works but live Gemini access still needs account setup.
 
 ## Tool Missing or Wrong Schema
 
-1. Call `gemini_get_tool_manifest` or low-token `account(action="manifest")`.
-2. Check the current enabled surface/profile.
-3. Switch to the narrow primary profile required by the workflow.
-4. Do not enable `all` unless the task is repository maintenance or comprehensive verification.
+1. Inspect the current connection's tool list and selected profile.
+2. Switch to the narrow entry required by the workflow.
+3. Use `gemini_get_tool_manifest` or compact `account(action="manifest")` when the connected compatibility surface provides it.
 
 ## Authentication Failure
 
@@ -73,10 +65,10 @@ If quick search returns an answer but no observed sources:
 1. preserve every operation/upstream ID;
 2. use the retained upstream chat ID to inspect the chat; history reads can be truncated or show only a completion notice;
 3. do not restart automatically;
-4. if the report is absent, try primary `gemini_create_from_research_report(chat_id=..., artifact_type="webpage")` and verify the returned file;
+4. if the report is absent and the request needs a derivative, use `function-full` for `gemini_create_from_research_report(chat_id=..., artifact_type="webpage")` with the exact source chat ID and verify the returned file;
 5. use the same operation handle with the relevant status/result action; if no upstream identity was observed, report the recovery limit without starting a duplicate.
 
-For an ordinary active session, use function `gemini_send_message(session_id=..., recover_only=true)` with no message or images. This reads the previous unverified exact turn without resending it. Do not substitute the latest chat reply, send another prompt, or confuse process-local session recovery with restart-safe operation handles. New messages remain blocked while the prior reply is unverified.
+For an ordinary active session, use `gemini_ask(session_id=..., recover_only=true)` to read the exact unverified turn. The original process must still hold the session. New messages remain blocked while the prior reply is unverified. In `function-full`, the equivalent call uses `gemini_send_message`.
 
 ## Artifact Missing or Partial
 
@@ -86,10 +78,16 @@ For an ordinary active session, use function `gemini_send_message(session_id=...
 4. do not claim a file exists until verified;
 5. return the next action.
 
-For `media_type="video"`, a text-only response can mean the generic MCP call
-stayed in chat mode. Inspect the retained chat, then use the native
-`https://gemini.google.com/videos` mode if the user authorized browser work.
-Do not repeat the generic prompt as if it had entered Omni generation.
+Web video/music default to the native browser workflow. A text-only response is
+not a verified media Artifact. Keep the original operation and observed CID;
+do not replay it through another browser or the SDK after a timeout. Read the
+exact original RID/candidate and completion evidence, save and verify local
+files, then use the existing protection release and canonical cleanup/read-back.
+Unknown reply identity stays protected; guest history gaps are not deletion proof.
+
+Legacy primary/compact native `background=false` also waits through one protected operation. After timeout, preserve the returned operation handle and partial/wait_elapsed state; unknown or save-failed results do not authorize cleanup or a new generation. Verified completion keeps compatible local artifacts, an explicit filename or opaque default, and the `generated_media/` default directory. SDK/API synchronous behavior remains unchanged.
+
+Recheck the captured account and credentials after awaited native read-back, before accepting reply metadata or artifacts. If they changed, refuse new RID/RCID metadata and keep at most the previously observed CID under its original owner; do not release protection or clean based on that response. A native video reference must also remain attached with the same verified preview token before Send; missing or changed evidence stops submission rather than dropping the image.
 
 ## Accepted but Unverified Mutation
 

@@ -1,14 +1,21 @@
 # Gemini Web Tool Surface Reference
 
-`gemini-mcp-function` exposes the 17-tool function catalog; `gemini-mcp-account` exposes the 17-tool explicit account catalog. Use `gemini_ask` for chat and current-web questions; `gemini_search` remains on the five-tool assist compatibility surface. Use the connected server's tool list and annotations as the source of truth. The following compatibility safety map also describes tools available only in explicit legacy profiles; it is not the default catalog. `gemini_cleanup` is restricted to MCP-owned ledger entries and never matches titles. Cookie, Doctor and local Prompts stay outside both business catalogs.
+The two six-tool catalogs are separate MCP entries. The connected server's tool list and annotations are authoritative.
 
-On the account surface, `gemini_history` defaults to compact metadata with pagination; text reads are explicit and bounded. `gemini_manage_chat` is an idempotent, non-destructive metadata mutation for rename/pin/unpin on one exact chat ID. It reads no conversation text and requires fresh read-back before reporting completion; `mutation_sent=true, changed=null` is unverified. `gemini_delete_chat` remains destructive and separate. `gemini_notebooks` defaults to Notebook source-picker metadata; `source="gemini"` is the same integrated product's project view for chat listing and moves. A move target must be freshly resolved in that view, without guessing ID conversion.
+| Entry | Tools |
+|---|---|
+| `gemini-mcp-function` | `gemini_ask`, `gemini_run_task`, `gemini_research`, `gemini_create_media`, `gemini_get_operation_status`, `gemini_get_operation_result` |
+| `gemini-mcp-account` | `gemini_history`, `gemini_manage_chat`, `gemini_delete_chat`, `gemini_notebooks`, `gemini_manage_notebook`, `gemini_tasks` |
+
+Select `GEMINI_TOOLS=function-full` or `GEMINI_TOOLS=account-full` on `gemini-mcp-server` for the corresponding prior 17-tool catalog. The safety map also describes tools exposed by these and other compatibility profiles. `gemini_cleanup` is restricted to MCP-owned ledger entries.
+
+On the account surface, `gemini_history` defaults to compact metadata with pagination. Text reads are explicit and bounded. `gemini_manage_chat` renames, pins, unpins or moves one exact chat and verifies the change with fresh read-back. `mutation_sent=true, changed=null` is unverified. `gemini_delete_chat` remains destructive and separate. `gemini_notebooks` defaults to source-picker metadata. For a move, resolve the exact `notebook_id` in the `source="gemini"` project view and call `gemini_manage_chat(action="move_to_notebook", ...)`.
 
 Function `gemini_ask(notebook_ids=...)` starts background ordinary Chat; `gemini_run_task` explicitly starts Task. Both preserve an operation handle and save a verified full-answer Artifact before owned-chat cleanup. The assist compatibility server retains its five-tool catalog and does not expose Notebook attachment arguments.
 
-Account `gemini_preferences` manages saved browser/action preferences using returned handles and optional revisions. Writes have independent read-back; their verification scope is `stored_preference`, with `behavior_verified=false`. `permission_preference` is the saved value; `effective_permission` remains unknown. Native cards may still appear. Its annotation is mutating, non-destructive and non-idempotent.
+In `account-full`, `gemini_preferences` manages saved browser/action preferences using returned handles and optional revisions. Writes have independent read-back with verification scope `stored_preference` and `behavior_verified=false`. The saved value is `permission_preference`. Native cards may still appear. Its annotation is mutating, non-destructive and non-idempotent.
 
-`gemini_skills` manages native Gemini Skills. List metadata first and read one exact instruction body only with explicit intent. `gemini_manage_notebook` manages exact Notebooks and plaintext, URL or UTF-8 `.txt` sources. Check the exact source ID for indexed state and verify source QA separately. Notebook deletion includes its conversations. Both are account-only destructive unions.
+`account-full` provides `gemini_skills` for native Gemini Skills. List metadata first and read one exact instruction body only with explicit intent. `gemini_manage_notebook` manages exact Notebooks and plaintext, URL or UTF-8 `.txt` sources. Check the exact source ID for indexed state and verify source QA separately. Notebook deletion includes its conversations.
 
 ## Annotation legend
 
@@ -24,14 +31,15 @@ Account `gemini_preferences` manages saved browser/action preferences using retu
 |---|---|---|
 | `gemini_reset_session` | core | Clear one MCP/Gemini session and its configured remote-chat lifecycle; never changes agent memory or agent instructions |
 | `gemini_run_task` | tasks | Send user-requested Task and explicit Notebook context; connected-app requests may mutate data (`sends_user_requested_task_and_explicit_notebook_context`) |
-| `gemini_tasks` | account | Task metadata, bounded progress, schedules, and exact rename/pin/unpin/delete with read-back. Destructive union |
-| `gemini_task_browser` | account | Verified screenshot, conditional frame read or explicit one-shot input. Destructive union |
-| `gemini_cleanup` | account | Clean MCP-owned ledger entries under the requested scope |
+| `gemini_get_operation_result` | function | Recover the verified result and complete owned-chat cleanup when applicable |
+| `gemini_tasks` | `account-full` | Task metadata, bounded progress, schedules, and exact rename/pin/unpin/delete with read-back |
+| `gemini_task_browser` | `account-full` | Verified screenshot, conditional frame read or explicit one-shot input |
+| `gemini_cleanup` | `account-full` | Clean MCP-owned ledger entries under the requested scope |
 | `gemini_cleanup_test_artifacts` | explicit legacy history | Find and optionally delete test chats/scheduled actions by marker |
 | `gemini_delete_chat` | history | Request remote chat deletion and report read-back evidence |
 | `gemini_delete_scheduled_action` | account | Delete a scheduled action by id |
 | `gemini_manage_gems` | gems | List/create/update/delete Gems; use an explicit account request for mutation |
-| `gemini_skills` | account | Native Skills metadata, explicit instruction reads and verified create/update/enable/delete |
+| `gemini_skills` | `account-full` | Native Skills metadata, explicit instruction reads and verified create/update/enable/delete |
 | `gemini_manage_notebook` | account | Native Notebook and source management; Notebook deletion includes conversations |
 
 ### Reads private chat text (require explicit user intent)
@@ -87,7 +95,7 @@ Account `gemini_preferences` manages saved browser/action preferences using retu
 | `gemini_create_scheduled_action` | account | `creates_private_scheduled_action` (mutates) |
 | `gemini_get_tool_mode_status` | account | `reads_mode_status_only` |
 
-`gemini_tasks` list/get read metadata only and do not return full answer text; delete is not a cancellation API. Task schedules are distinct from Chat scheduled actions and are not managed by the scheduled-action tools. Notebook metadata and sources are not MCP-owned temporary chats.
+Default `gemini_tasks` only exposes list, get and bounded progress. `account-full` adds deletion and manages Task schedules separately from Chat scheduled actions. Notebook metadata and sources are outside MCP-owned temporary-chat cleanup.
 
 ### Authentication and local state
 
