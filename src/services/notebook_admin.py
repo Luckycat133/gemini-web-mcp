@@ -7,7 +7,9 @@ import stat
 from typing import Any, Awaitable, Callable
 
 from ..client_manager import ClientAuthenticationRequired
-from ..domain import DomainErrorCode, DomainResult, OperationState
+from ..client_manager import ClientRateLimited
+from ..domain import DomainErrorCode, DomainResult
+from ..domain.results import classify_exception, OperationState
 from ..domain.notebook_admin import NotebookChange, NotebookFileSourceChange, NotebookRegisteredSourceChange, NotebookURLSourceChange
 from ..infrastructure.account_identity import current_account_key
 from ..infrastructure.notebook_admin import (
@@ -167,6 +169,10 @@ class NotebookAdminService:
             except ClientAuthenticationRequired:
                 return DomainResult.failure(DomainErrorCode.AUTH_REQUIRED, "Gemini authentication is required.",
                                             verification_status="authentication_required")
+            except ClientRateLimited:
+                return DomainResult.failure(DomainErrorCode.RATE_LIMITED,
+                                            "The upstream service temporarily limited requests.",
+                                            retryable=True, verification_status="rate_limited")
             current = self.deps.account_key_provider()
             if not current or (owner and owner != current):
                 raise ValueError
@@ -299,7 +305,17 @@ class NotebookAdminService:
                 return DomainResult.success(change, verification_status="independent_metadata_readback")
             return DomainResult.failure(DomainErrorCode.VERIFICATION_FAILED, "Notebook mutation could not be verified.",
                                         data=change, verification_status="mutation_unverified")
-        except Exception:
+        except ClientRateLimited:
+            safe_data = change_type(actual_id, actual_source, False, None) if sent and self.deps.account_key_provider() == owner else None
+            return DomainResult.failure(DomainErrorCode.RATE_LIMITED,
+                                        "The upstream service temporarily limited requests.",
+                                        data=safe_data, retryable=True, verification_status="rate_limited")
+        except Exception as error:
+            if classify_exception(error).error_code == "RATE_LIMITED":
+                safe_data = change_type(actual_id, actual_source, False, None) if sent and self.deps.account_key_provider() == owner else None
+                return DomainResult.failure(DomainErrorCode.RATE_LIMITED,
+                                            "The upstream service temporarily limited requests.",
+                                            data=safe_data, retryable=True, verification_status="rate_limited")
             safe_data = change_type(actual_id, actual_source, False, None) if sent and self.deps.account_key_provider() == owner else None
             return DomainResult.failure(DomainErrorCode.UPSTREAM_CHANGED, "Notebook operation could not be verified.",
                                         data=safe_data, verification_status="mutation_unverified" if sent else "read_unverified")

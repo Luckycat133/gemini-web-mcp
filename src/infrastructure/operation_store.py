@@ -1082,6 +1082,18 @@ class OperationStore:
                 (OMNI_VIDEO_API_BACKEND, account_key, OMNI_VIDEO_API_BACKEND, *_account_parameters(account_key)),
             ))
 
+    def has_active_worker(self, *, now: float | None = None) -> bool:
+        """Return True when any operation currently holds a live worker heartbeat."""
+        cutoff = (self.clock() if now is None else now) - 60
+        with self._connect(read_only=True) as db:
+            row = db.execute(
+                """SELECT 1 FROM operations
+                   WHERE worker_token IS NOT NULL AND heartbeat_at IS NOT NULL AND heartbeat_at >= ?
+                   LIMIT 1""",
+                (cutoff,),
+            ).fetchone()
+        return row is not None
+
     def recoverable_media(self, *, limit: int = 20) -> tuple[OperationRecord, ...]:
         self.reap_stale_workers()
         api_owner = omni_video_owner(omni_video_api_key())

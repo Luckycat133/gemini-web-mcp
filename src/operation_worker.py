@@ -7,6 +7,7 @@ from asyncio import current_task
 import json
 import logging
 import os
+import random
 import sys
 import time
 from typing import Any
@@ -255,6 +256,10 @@ async def run_worker(payload: dict[str, Any], *, store: OperationStore | None = 
                 break
             if record.error_code == "RATE_LIMITED":
                 delay = max(poll_seconds, rate_limit_backoff)
+                if poll_seconds >= 1.0:
+                    jitter = random.uniform(5.0, 25.0)
+                    if delay + jitter < remaining:
+                        delay += jitter
                 rate_limit_backoff = min(2 * rate_limit_backoff, _MEDIA_RATE_LIMIT_MAX_BACKOFF_SECONDS)
             else:
                 rate_limit_backoff = _MEDIA_RATE_LIMIT_BACKOFF_SECONDS

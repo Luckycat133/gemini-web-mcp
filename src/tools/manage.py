@@ -11,6 +11,7 @@ from collections.abc import Coroutine
 from typing import Any, Callable, Literal, Optional, TypeVar, cast
 import logging
 
+from ..client_manager import ClientAuthenticationRequired, ClientRateLimited
 from ..client_wrapper import (
     get_gemini_client,
     initialize_client,
@@ -103,6 +104,15 @@ from .manifest_data import WEB_FEATURE_PROBES
 _F = TypeVar("_F", bound=Callable[..., Any])
 
 logger = logging.getLogger(__name__)
+
+
+async def _ensure_manage_client(operation: str) -> Optional[list[TextContent]]:
+    """Initialize the client for manage tools, turning auth/rate-limit bounds into structured errors."""
+    try:
+        await initialize_client()
+    except (ClientAuthenticationRequired, ClientRateLimited) as error:
+        return exception_text(error, logger=logger, operation=operation)
+    return None
 
 
 ResponseFormat = Literal["markdown", "json"]
@@ -825,6 +835,8 @@ def _conditional_tool_decorator(mcp: MCPServer, enabled_tool_names: set[str]):
                     original = current_account_key()
                     try:
                         await initialize_client()
+                    except ClientRateLimited as e:
+                        return exception_text(e, logger=logger, operation=tool_name)
                     except PermissionError:
                         result = DomainResult.failure(DomainErrorCode.AUTH_REQUIRED, "Gemini authentication is required.")
                         return domain_text(result, "Gemini authentication is required.")
@@ -872,7 +884,8 @@ def _register_cleanup_tools(mcp: MCPServer, enabled_tool_names: set[str]) -> Non
         scan_turns=true 会读取最近聊天正文，仅在需要清理正文 marker 时使用。
         """
         client = get_gemini_client()
-        await initialize_client()
+        if (init_err := await _ensure_manage_client("gemini_cleanup_test_artifacts")) is not None:
+            return init_err
         payload = await _cleanup_test_artifacts_payload(
             client,
             markers=markers,
@@ -896,7 +909,8 @@ def _register_history_scan_tools(mcp: MCPServer, enabled_tool_names: set[str], t
         response_format: ResponseFormat = "markdown",
     ) -> list[TextContent]:
         """列出 Gemini 历史对话记录元数据，支持分页。"""
-        await initialize_client()
+        if (init_err := await _ensure_manage_client("gemini_list_chats")) is not None:
+            return init_err
         client = bind_account_read_client(get_gemini_client())
 
         try:
@@ -957,7 +971,8 @@ def _register_history_scan_tools(mcp: MCPServer, enabled_tool_names: set[str], t
         只读：合并前端已观测的 ListConversations 过滤器、原生 notebook 对话列表，
         以及 Remy goals 中携带的 conversationId 引用。不读取 turn 正文，不删除或移动聊天。
         """
-        await initialize_client()
+        if (init_err := await _ensure_manage_client("gemini_scan_chat_history_sources")) is not None:
+            return init_err
         client = bind_account_read_client(get_gemini_client())
         if not hasattr(client, "_batch_execute"):
             return [TextContent(type="text", text="❌ 当前客户端不支持 Gemini Web RPC 深度扫描。")]
@@ -1042,7 +1057,8 @@ def _register_history_read_tools(mcp: MCPServer, enabled_tool_names: set[str], t
         max_chars_per_turn: int = 4000,
     ) -> list[TextContent]:
         """读取指定 Gemini 历史对话内容。会返回私人聊天文本，请只在用户需要时调用。"""
-        await initialize_client()
+        if (init_err := await _ensure_manage_client("gemini_read_chat")) is not None:
+            return init_err
         client = bind_account_read_client(get_gemini_client())
 
         try:
@@ -1088,7 +1104,8 @@ def _register_history_read_tools(mcp: MCPServer, enabled_tool_names: set[str], t
 
         默认只搜索标题/ID；只有 scan_turns=true 时才读取聊天正文进行内容匹配。
         """
-        await initialize_client()
+        if (init_err := await _ensure_manage_client("gemini_search_chats")) is not None:
+            return init_err
         client = bind_account_read_client(get_gemini_client())
 
         needle = (query or "").strip()
@@ -1174,7 +1191,8 @@ def _register_history_read_tools(mcp: MCPServer, enabled_tool_names: set[str], t
         include_metadata: bool = True,
     ) -> list[TextContent]:
         """导出指定 Gemini Web 历史对话为 Markdown 或 JSON。会返回私人聊天文本。"""
-        await initialize_client()
+        if (init_err := await _ensure_manage_client("gemini_export_chat")) is not None:
+            return init_err
         client = bind_account_read_client(get_gemini_client())
 
         try:
@@ -1299,7 +1317,8 @@ def _register_history_facade_tools(
         """删除指定 Gemini 历史对话。该操作会修改远端聊天记录。"""
         owner = current_account_key()
         client = get_gemini_client()
-        await initialize_client()
+        if (init_err := await _ensure_manage_client("gemini_delete_chat")) is not None:
+            return init_err
         current_owner = current_account_key()
         if not current_owner or (owner and current_owner != owner):
             return domain_text(DomainResult.failure(DomainErrorCode.AUTH_REQUIRED, "Gemini account changed or is unavailable."),
@@ -1350,7 +1369,8 @@ def _register_account_probe_tools(mcp: MCPServer, enabled_tool_names: set[str], 
     ) -> list[TextContent]:
         """检查当前 Gemini 账号可用能力和 Web RPC 状态。"""
         client = get_gemini_client()
-        await initialize_client()
+        if (init_err := await _ensure_manage_client("gemini_inspect_account")) is not None:
+            return init_err
 
         try:
             sanitized = await inspect_account_status_compat(client)
@@ -1391,7 +1411,8 @@ def _register_account_probe_tools(mcp: MCPServer, enabled_tool_names: set[str], 
         这个工具只返回 HTTP/RPC 状态和 reject code，不返回响应正文或账号内容。
         """
         client = get_gemini_client()
-        await initialize_client()
+        if (init_err := await _ensure_manage_client("gemini_probe_web_features")) is not None:
+            return init_err
 
         if not hasattr(client, "_batch_execute"):
             return [TextContent(type="text", text="❌ 当前客户端不支持底层 batch RPC 探测。")]
@@ -1585,7 +1606,8 @@ def _register_account_inventory_tools(mcp: MCPServer, enabled_tool_names: set[st
     ) -> list[TextContent]:
         """列出 Gemini Web “你的公开链接”页面返回的公开链接条目。"""
         client = get_gemini_client()
-        await initialize_client()
+        if (init_err := await _ensure_manage_client("gemini_list_public_links")) is not None:
+            return init_err
         if not hasattr(client, "_batch_execute"):
             return [TextContent(type="text", text="❌ 当前客户端不支持公开链接 RPC。")]
 
@@ -1630,7 +1652,8 @@ def _register_account_inventory_tools(mcp: MCPServer, enabled_tool_names: set[st
     ) -> list[TextContent]:
         """读取 Gemini Web 用量限额页面返回的限额/模型状态结构。"""
         client = get_gemini_client()
-        await initialize_client()
+        if (init_err := await _ensure_manage_client("gemini_get_usage_limits")) is not None:
+            return init_err
         if not hasattr(client, "_batch_execute"):
             return [TextContent(type="text", text="❌ 当前客户端不支持用量限额 RPC。")]
 
@@ -1695,7 +1718,8 @@ def _register_account_inventory_tools(mcp: MCPServer, enabled_tool_names: set[st
     ) -> list[TextContent]:
         """列出 Gemini Web Library 页面暴露的本地化能力/模板条目。"""
         client = get_gemini_client()
-        await initialize_client()
+        if (init_err := await _ensure_manage_client("gemini_list_library_capabilities")) is not None:
+            return init_err
         if not hasattr(client, "_batch_execute"):
             return [TextContent(type="text", text="❌ 当前客户端不支持 Library RPC。")]
 
@@ -1753,7 +1777,8 @@ def _register_notebook_tools(mcp: MCPServer, enabled_tool_names: set[str], tool_
         response_format: ResponseFormat = "markdown",
     ) -> list[TextContent]:
         """列出 Gemini Notebook 项目视图中的笔记本元数据。只读。"""
-        await initialize_client()
+        if (init_err := await _ensure_manage_client("gemini_list_notebooks")) is not None:
+            return init_err
         client = bind_account_read_client(get_gemini_client())
         if not hasattr(client, "_batch_execute"):
             return [TextContent(type="text", text="❌ 当前客户端不支持 Gemini Notebooks RPC。")]
@@ -1800,7 +1825,8 @@ def _register_notebook_tools(mcp: MCPServer, enabled_tool_names: set[str], tool_
         response_format: ResponseFormat = "markdown",
     ) -> list[TextContent]:
         """列出某个 Gemini 原生笔记本内的最近对话元数据。"""
-        await initialize_client()
+        if (init_err := await _ensure_manage_client("gemini_list_notebook_chats")) is not None:
+            return init_err
         client = bind_account_read_client(get_gemini_client())
         if not hasattr(client, "_batch_execute"):
             return [TextContent(type="text", text="❌ 当前客户端不支持 Gemini Notebooks RPC。")]
@@ -1931,7 +1957,8 @@ def _register_notebook_tools(mcp: MCPServer, enabled_tool_names: set[str], tool_
 
         owner = current_account_key()
         client = get_gemini_client()
-        await initialize_client()
+        if (init_err := await _ensure_manage_client("gemini_move_chat_to_notebook")) is not None:
+            return init_err
         current_owner = current_account_key()
         if not current_owner or (owner and current_owner != owner):
             return domain_text(DomainResult.failure(DomainErrorCode.AUTH_REQUIRED, "Gemini account changed or is unavailable."),
@@ -2015,7 +2042,8 @@ def _register_scheduled_tools(mcp: MCPServer, enabled_tool_names: set[str], tool
     ) -> list[TextContent]:
         """列出 Gemini Web 定时操作页面返回的定时任务条目。只读，不创建/修改/删除任务。"""
         client = get_gemini_client()
-        await initialize_client()
+        if (init_err := await _ensure_manage_client("gemini_list_scheduled_actions")) is not None:
+            return init_err
         if not hasattr(client, "_batch_execute"):
             return [TextContent(type="text", text="❌ 当前客户端不支持定时操作 RPC。")]
 
@@ -2074,7 +2102,8 @@ def _register_scheduled_tools(mcp: MCPServer, enabled_tool_names: set[str], tool
             return domain_text(DomainResult.failure(DomainErrorCode.INVALID_ARGUMENT, "action_id 不能为空。"), "❌ action_id 不能为空。")
 
         client = get_gemini_client()
-        await initialize_client()
+        if (init_err := await _ensure_manage_client("gemini_get_scheduled_action")) is not None:
+            return init_err
         if not hasattr(client, "_batch_execute"):
             return [TextContent(type="text", text="❌ 当前客户端不支持定时操作 RPC。")]
 
@@ -2145,7 +2174,8 @@ def _register_scheduled_tools(mcp: MCPServer, enabled_tool_names: set[str], tool
 
         owner = current_account_key()
         client = get_gemini_client()
-        await initialize_client()
+        if (init_err := await _ensure_manage_client("gemini_create_scheduled_action")) is not None:
+            return init_err
         current_owner = current_account_key()
         if not current_owner or (owner and current_owner != owner):
             return domain_text(DomainResult.failure(DomainErrorCode.AUTH_REQUIRED, "Gemini account changed or is unavailable."),
@@ -2222,7 +2252,8 @@ def _register_scheduled_tools(mcp: MCPServer, enabled_tool_names: set[str], tool
 
         owner = current_account_key()
         client = get_gemini_client()
-        await initialize_client()
+        if (init_err := await _ensure_manage_client("gemini_delete_scheduled_action")) is not None:
+            return init_err
         current_owner = current_account_key()
         if not current_owner or (owner and current_owner != owner):
             return domain_text(DomainResult.failure(DomainErrorCode.AUTH_REQUIRED, "Gemini account changed or is unavailable."),
@@ -2288,7 +2319,8 @@ def _register_tool_mode_tools(mcp: MCPServer, enabled_tool_names: set[str], tool
         部分语义尚未稳定命名，因此不会伪装成完整模式 CRUD。
         """
         client = get_gemini_client()
-        await initialize_client()
+        if (init_err := await _ensure_manage_client("gemini_get_tool_mode_status")) is not None:
+            return init_err
         if not hasattr(client, "_batch_execute"):
             return [TextContent(type="text", text="❌ 当前客户端不支持工具模式状态 RPC。")]
 
@@ -2422,7 +2454,8 @@ def _register_gem_tools(mcp: MCPServer, enabled_tool_names: set[str]) -> None:
         """
         owner = current_account_key()
         client = get_gemini_client()
-        await initialize_client()
+        if (init_err := await _ensure_manage_client("gemini_manage_gems")) is not None:
+            return init_err
         current_owner = current_account_key()
         if not current_owner or (owner and current_owner != owner):
             return domain_text(DomainResult.failure(DomainErrorCode.AUTH_REQUIRED, "Gemini account changed or is unavailable."),
@@ -2495,6 +2528,8 @@ def _register_gem_tools(mcp: MCPServer, enabled_tool_names: set[str]) -> None:
 
             return [TextContent(type="text", text="❌ 无效的 action。")]
 
+        except ClientRateLimited as e:
+            return exception_text(e, logger=logger, operation="gemini_manage_gems")
         except Exception as e:
             if current_account_key() != owner or isinstance(e, PermissionError):
                 return domain_text(DomainResult.failure(DomainErrorCode.AUTH_REQUIRED, "Gemini account changed or is unavailable."),

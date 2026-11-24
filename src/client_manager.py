@@ -4,6 +4,7 @@
 
 import asyncio
 import inspect
+import json
 import os
 import socket
 import tempfile
@@ -84,8 +85,95 @@ def get_extra_cookies() -> Dict[str, str]:
     return cookie_data.extra_cookies
 
 
+_VERIFIED_BROWSER_SESSION_TTL_SECONDS = 900.0
+_VERIFIED_BROWSER_SESSION_FILENAME = ".cli_browser_session.json"
+
+
+def _verified_browser_session_cache_path() -> Optional[Path]:
+    """Return shared verified-browser-session cache path when persistent cache dir is configured."""
+    if os.environ.get("PYTEST_CURRENT_TEST") or os.environ.get("GEMINI_WEB_CLI_NO_CONFIG") == "1":
+        return None
+    configured = os.environ.get("GEMINI_COOKIE_PATH", "").strip()
+    if not configured:
+        return None
+    cache_dir = Path(configured).expanduser()
+    if cache_dir.name.startswith("gemini-web-worker-cookies-"):
+        return None
+    return cache_dir / _VERIFIED_BROWSER_SESSION_FILENAME
+
+
+def _load_verified_browser_session_cache() -> Optional[tuple[Dict[str, str], str]]:
+    cache_path = _verified_browser_session_cache_path()
+    if cache_path is None or not cache_path.is_file():
+        return None
+    try:
+        payload = json.loads(cache_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    if not isinstance(payload, dict):
+        return None
+    verified_at = payload.get("verified_at")
+    cookies = payload.get("cookies")
+    source = payload.get("source")
+    if (
+        isinstance(verified_at, bool)
+        or not isinstance(verified_at, (int, float))
+        or time.time() - float(verified_at) >= _VERIFIED_BROWSER_SESSION_TTL_SECONDS
+        or not isinstance(cookies, dict)
+        or not isinstance(source, str)
+        or not source.strip()
+    ):
+        return None
+    normalized_cookies = {
+        k: v for k, v in cookies.items()
+        if isinstance(k, str) and isinstance(v, str) and v
+    }
+    if not normalized_cookies.get("__Secure-1PSID"):
+        return None
+    expected_profile = os.environ.get("GEMINI_BROWSER_COOKIE_PROFILE", "").strip()
+    if expected_profile:
+        cached_profile = payload.get("profile")
+        profile_matches = isinstance(cached_profile, str) and cached_profile.strip().casefold() == expected_profile.casefold()
+        source_matches = source.casefold().endswith(f":{expected_profile.casefold()}")
+        if not profile_matches and not source_matches:
+            return None
+    return normalized_cookies, source
+
+
+def _save_verified_browser_session_cache(cookies: Dict[str, str], source: str) -> None:
+    cache_path = _verified_browser_session_cache_path()
+    if cache_path is None or not source.startswith("browser_") or not cookies.get("__Secure-1PSID"):
+        return
+    try:
+        cache_path.parent.mkdir(parents=True, exist_ok=True)
+        payload = json.dumps(
+            {
+                "verified_at": time.time(),
+                "profile": os.environ.get("GEMINI_BROWSER_COOKIE_PROFILE", "").strip(),
+                "source": source,
+                "cookies": cookies,
+            },
+            ensure_ascii=False,
+        )
+        fd = os.open(cache_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(payload)
+    except OSError:
+        pass
+
+
+def invalidate_verified_browser_session_cache() -> None:
+    """Remove any cached verified browser session when cookies become unauthenticated."""
+    cache_path = _verified_browser_session_cache_path()
+    if cache_path is not None:
+        with suppress(OSError):
+            cache_path.unlink()
+
+
 def prepare_browser_cookie_cache(force: bool = False) -> None:
     """Avoid stale gemini_webapi cache when cookies were refreshed from a browser."""
+    if force:
+        invalidate_verified_browser_session_cache()
     if not COOKIE_MANAGER_AVAILABLE:
         return
     if not force:
@@ -206,8 +294,12 @@ class ClientManager:
         # Reuse the existing local browser-probe debounce, not a fabricated Retry-After.
         self._browser_retry_at = time.monotonic() + 30
 
+    def is_rate_limited(self) -> bool:
+        """Return True while the local browser-probe rate-limit cooldown is active."""
+        return self.browser_auth_reason == "BROWSER_COOKIE_RATE_LIMITED" and time.monotonic() < self._browser_retry_at
+
     def _check_rate_limit(self) -> None:
-        if self.browser_auth_reason == "BROWSER_COOKIE_RATE_LIMITED" and time.monotonic() < self._browser_retry_at:
+        if self.is_rate_limited():
             raise ClientRateLimited()
 
     def ensure_browser_cookie(self) -> None:
@@ -227,6 +319,23 @@ class ClientManager:
             if self.browser_auth_reason and time.monotonic() < self._browser_retry_at:
                 raise ClientAuthenticationRequired(auth_reason=self.browser_auth_reason)
             manager = get_cookie_manager()
+            cached = _load_verified_browser_session_cache()
+            if cached is not None:
+                cached_cookies, cached_source = cached
+                cached_psid = cached_cookies["__Secure-1PSID"]
+                cached_psidts = cached_cookies.get("__Secure-1PSIDTS", "")
+                if manager.update_cookie(
+                    cached_psid, cached_psidts, source=cached_source, extra_cookies=cached_cookies,
+                    notify=False, guard=lambda: not os.environ.get("GEMINI_PSID"),
+                ):
+                    os.environ["GEMINI_PSID"] = cached_psid
+                    if cached_psidts:
+                        os.environ["GEMINI_PSIDTS"] = cached_psidts
+                    else:
+                        os.environ.pop("GEMINI_PSIDTS", None)
+                    self.browser_auth_reason = None
+                    logger.info("Browser cookie loaded from verified session cache source=%s", cached_source)
+                    return
             try:
                 discovery = manager.discover_browser_cookies(**_configured_browser_profile())
             except Exception as error:
@@ -243,8 +352,9 @@ class ClientManager:
                 self._browser_retry_at = time.monotonic() + 30
                 raise ClientAuthenticationRequired(auth_reason=self.browser_auth_reason)
             psidts = discovery.cookies.get("__Secure-1PSIDTS", "")
+            resolved_source = discovery.source or "browser_chrome"
             if manager.update_cookie(
-                psid, psidts, source=discovery.source or "browser_chrome", extra_cookies=discovery.cookies,
+                psid, psidts, source=resolved_source, extra_cookies=discovery.cookies,
                 notify=False, guard=lambda: not os.environ.get("GEMINI_PSID"),
             ):
                 os.environ["GEMINI_PSID"] = psid
@@ -253,6 +363,7 @@ class ClientManager:
                 else:
                     os.environ.pop("GEMINI_PSIDTS", None)
                 self.browser_auth_reason = None
+                _save_verified_browser_session_cache(dict(discovery.cookies), resolved_source)
                 logger.info("Browser cookie loaded from a verified Gemini session source=%s", discovery.source)
             elif not os.environ.get("GEMINI_PSID"):
                 raise ClientAuthenticationRequired(auth_reason="BROWSER_COOKIE_AUTH_UNVERIFIED")
@@ -318,6 +429,7 @@ class ClientManager:
                 await self.reset_async()
                 os.environ.pop("GEMINI_PSID", None)
                 os.environ.pop("GEMINI_PSIDTS", None)
+                invalidate_verified_browser_session_cache()
                 prepare_browser_cookie_cache(force=True)
                 self.browser_auth_reason = None
                 self._browser_retry_at = 0.0

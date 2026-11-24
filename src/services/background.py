@@ -214,12 +214,12 @@ async def submit_media(request: dict[str, Any], *, operation: str,
             verification_status="credential_missing_before_dispatch",
         )
     if not omni_job and not current_account_key():
-        from ..client_manager import ClientAuthenticationRequired
+        from ..client_manager import ClientAuthenticationRequired, ClientRateLimited
         from ..client_wrapper import ensure_web_cookie
 
         try:
             await asyncio.to_thread(ensure_web_cookie)
-        except ClientAuthenticationRequired as error:
+        except (ClientAuthenticationRequired, ClientRateLimited) as error:
             return result_from_exception(error, logger=logger, operation=operation)
     store = OperationStore()
 
@@ -365,47 +365,69 @@ async def submit_research(request: Any) -> DomainResult[LongOperationData]:
                                     verification_status="operation_not_persisted")
 
 
-async def resume_media_worker(store: OperationStore, record: OperationRecord) -> DomainResult[LongOperationData]:
-    """Resume observation only; no saved prompt exists and generation cannot be replayed."""
+async def _resume_media_worker_step(store: OperationStore, record: OperationRecord) -> tuple[DomainResult[LongOperationData], bool]:
+    """Resume observation only; return (result, dispatched_worker)."""
     cleaned = reconcile_owned_media_cleanup(store, record)
     if cleaned:
         record = store.get(record.operation_id) or record
     if not operation_account_matches(record):
-        return DomainResult.failure(DomainErrorCode.CAPABILITY_UNAVAILABLE, "Operation account could not be verified.",
-                                    verification_status="account_mismatch_or_unbound")
+        return (DomainResult.failure(DomainErrorCode.CAPABILITY_UNAVAILABLE, "Operation account could not be verified.",
+                                     verification_status="account_mismatch_or_unbound"), False)
     web_cleanup_complete = (not uses_omni_video_api(record) and not record.cleanup_protected and not record.retain_chat
                             and record.cleanup_state in {"completed", "already_completed"})
     if cleaned or web_cleanup_complete or worker_active(record, now=store.clock()):
-        return _accepted(record)
+        return _accepted(record), False
     if uses_omni_video_api(record):
         if not record.upstream_operation_id or record.cleanup_state in {"retained", "completed", "already_completed"}:
-            return _accepted(record)
-        return await _dispatch(store, record, "omni_video_resume")
+            return _accepted(record), False
+        return (await _dispatch(store, record, "omni_video_resume")), True
     if not record.upstream_chat_id:
-        return _accepted(record)
+        return _accepted(record), False
     native_pending = (record.phase == "native_media_submitted" and record.media_type in {"music", "video"}
                       and record.upstream_response_id is None and record.upstream_candidate_id is None)
     if (record.state != "completed" and not native_pending
             and (record.upstream_response_id is None or record.upstream_candidate_id is None)):
         from dataclasses import replace
         result = _accepted(record)
-        return replace(result, warnings=(*result.warnings, DomainWarning(
+        return (replace(result, warnings=(*result.warnings, DomainWarning(
             code="generation_identity_incomplete", message="The original generation turn was not fully observed; it will not be repeated.",
-        )))
-    return await _dispatch(store, record, "media_resume")
+        ))), False)
+    return (await _dispatch(store, record, "media_resume")), True
+
+
+async def resume_media_worker(store: OperationStore, record: OperationRecord) -> DomainResult[LongOperationData]:
+    """Resume observation only; no saved prompt exists and generation cannot be replayed."""
+    result, _ = await _resume_media_worker_step(store, record)
+    return result
 
 
 async def maintain_background_operations() -> None:
-    """Restart only read-back/finalization workers; persisted prompts do not exist."""
+    """Restart at most one due read-back/finalization worker when not rate-limited."""
+    from ..client_wrapper import _client_manager
+
+    if getattr(_client_manager, "is_rate_limited", lambda: False)():
+        return
     store = OperationStore()
-    for record in store.recoverable_media():
-        await resume_media_worker(store, record)
-    for record in store.recoverable_web_workflows():
+    media_rows = store.recoverable_media()
+    workflow_rows = store.recoverable_web_workflows()
+    research_rows = store.recoverable_research()
+    now = store.clock()
+    if getattr(store, "has_active_worker", lambda **_kwargs: False)(now=now) or any(
+        worker_active(record, now=now) for record in (*media_rows, *workflow_rows, *research_rows)
+    ):
+        return
+    for record in media_rows:
+        _, dispatched = await _resume_media_worker_step(store, record)
+        if dispatched or worker_active(store.get(record.operation_id) or record, now=store.clock()):
+            return
+    for record in workflow_rows:
         if operation_account_matches(record) and not worker_active(record, now=store.clock()):
             await _dispatch(store, record, "task_resume")
-    for record in store.recoverable_research():
+            return
+    for record in research_rows:
         if operation_account_matches(record) and not worker_active(record, now=store.clock()):
             await _dispatch(store, record, "research_observe")
+            return
 
 
 def repair_operation_cleanup(store: OperationStore, get_observation: Any, schedule: Any) -> int:

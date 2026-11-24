@@ -14,9 +14,10 @@ import hashlib
 import json
 from typing import Any
 
-from ..client_manager import ClientAuthenticationRequired
+from ..client_manager import ClientAuthenticationRequired, ClientRateLimited
 from ..domain import DomainErrorCode, DomainResult
 from ..domain.preferences import PermissionRecord
+from ..domain.results import classify_exception
 from .deadlines import await_before_deadline
 
 STATE_ALWAYS_ALLOW = 1
@@ -218,10 +219,11 @@ class PreferencesService:
 
     @staticmethod
     def _failure(operation: str, message: str, *, code: DomainErrorCode = DomainErrorCode.VERIFICATION_FAILED,
-                 status: str = "read_error", mutation: bool = False, sent: bool | None = False) -> _Result:
+                 status: str = "read_error", retryable: bool = False,
+                 mutation: bool = False, sent: bool | None = False) -> _Result:
         data = {"changed": False if sent is False else None, "mutation_sent": sent, "verified": False,
                 **_SETTING_EVIDENCE} if mutation else None
-        return DomainResult.failure(code, message, verification_status=status, data=data,
+        return DomainResult.failure(code, message, retryable=retryable, verification_status=status, data=data,
                                     details={"service": "preferences", "operation": operation, **_SETTING_EVIDENCE})
 
     def _owner_failure(self, owner: str | None, operation: str, *, mutation: bool = False,
@@ -236,12 +238,22 @@ class PreferencesService:
         original = self._account_identity()
         failed = False
         auth_required = False
+        rate_limited = False
         try:
             await await_before_deadline(self._dependencies.client_initializer(), timeout=_CALLBACK_SECONDS)
         except ClientAuthenticationRequired:
             auth_required = True
-        except Exception:
-            failed = True
+        except ClientRateLimited:
+            rate_limited = True
+        except Exception as err:
+            if classify_exception(err).error_code == "RATE_LIMITED":
+                rate_limited = True
+            else:
+                failed = True
+        if rate_limited:
+            return self._failure(operation, "The upstream service temporarily limited requests.",
+                                 code=DomainErrorCode.RATE_LIMITED, status="rate_limited",
+                                 retryable=True, mutation=mutation)
         owner = self._account_identity()
         if owner is None or (original is not None and owner != original):
             return self._failure(operation, "Gemini account initialization was not verified.",
@@ -266,15 +278,25 @@ class PreferencesService:
             return failure
         records: Any = None
         failed = False
+        rate_limited = False
         try:
             request = (self._dependencies.read_permissions(client) if source == "stored"
                        else self._dependencies.read_catalog(client, "zh-CN"))
             records = await await_before_deadline(request, timeout=_CALLBACK_SECONDS)
-        except Exception:
-            failed = True
+        except ClientRateLimited:
+            rate_limited = True
+        except Exception as exc:
+            if classify_exception(exc).error_code == "RATE_LIMITED":
+                rate_limited = True
+            else:
+                failed = True
         failure = self._owner_failure(owner, operation, mutation=mutation, sent=sent)
         if failure is not None:
             return failure
+        if rate_limited:
+            return self._failure(operation, "The upstream service temporarily limited requests.",
+                                 code=DomainErrorCode.RATE_LIMITED, status="rate_limited",
+                                 retryable=True, mutation=mutation, sent=sent)
         if failed or not isinstance(records, tuple) or any(
                 not isinstance(record, PermissionRecord) or record.source != source for record in records):
             return self._failure(operation, "The preference metadata read was not verified.", mutation=mutation, sent=sent)
