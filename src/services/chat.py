@@ -212,29 +212,51 @@ class ChatService:
         if chat is not None:
             request_kwargs["chat"] = chat
         completed = False
+        retry_on_files_failure = bool(request.files)
+        started_monotonic = asyncio.get_running_loop().time()
         def late_response(done: Any) -> None:
             if not done.cancelled() and done.exception() is None:
                 observer.observe(done.result())
             observer.fallback(immediate=True, delete_after_seconds=request.delete_after_seconds)
         try:
-            with observe_cleanup_frames(observer.observe):
-                with client_timeout_scope(client, CHAT_GENERATION_TIMEOUT_SECONDS), model_policy_scope("query", allow_fallback=True, requested_alias=normalized_model):
-                    response = await await_before_deadline(
-                        client.generate_content(**request_kwargs), timeout=CHAT_GENERATION_TIMEOUT_SECONDS,
-                        on_late=late_response,
-                    )
-                observer.observe(response)
-                if self._dependencies.account_key_provider() == owner:
-                    scheduled = await self._finalize_one_shot(response, request, expected_account=owner)
-                else:
-                    scheduled = CleanupObservation(state=CleanupState.FAILED, upstream_chat_id=self._response_chat_id(response),
-                                                   source=request.cleanup_source)
-                if self._dependencies.account_key_provider() != owner:
-                    scheduled = CleanupObservation(state=CleanupState.FAILED, upstream_chat_id=self._response_chat_id(response),
-                                                   source=request.cleanup_source)
-                if self._dependencies.account_key_provider() == owner and isinstance(scheduled, CleanupObservation) and scheduled.state in {CleanupState.FAILED, CleanupState.INVALID_ID, CleanupState.NOT_APPLICABLE}:
-                    observer.failed.add(self._response_chat_id(response) or "")
-                completed = True
+            for attempt in range(2 if retry_on_files_failure else 1):
+                if attempt > 0:
+                    chat = factory(client) if callable(factory) else None
+                    if chat is not None:
+                        request_kwargs["chat"] = chat
+                    else:
+                        request_kwargs.pop("chat", None)
+                with observe_cleanup_frames(observer.observe):
+                    with client_timeout_scope(client, CHAT_GENERATION_TIMEOUT_SECONDS), model_policy_scope("query", allow_fallback=True, requested_alias=normalized_model):
+                        response = await await_before_deadline(
+                            client.generate_content(**request_kwargs), timeout=CHAT_GENERATION_TIMEOUT_SECONDS,
+                            on_late=late_response,
+                        )
+                    observer.observe(response)
+                    if (attempt == 0 and retry_on_files_failure
+                            and is_generation_failure_reply(getattr(response, "text", None))
+                            and not extract_response_artifacts(response)):
+                        elapsed = asyncio.get_running_loop().time() - started_monotonic
+                        if CHAT_GENERATION_TIMEOUT_SECONDS - elapsed >= 25:
+                            try:
+                                if self._dependencies.account_key_provider() == owner:
+                                    await self._finalize_one_shot(response, request, expected_account=owner)
+                            except Exception:
+                                pass
+                            await asyncio.sleep(1.5)
+                            continue
+                    break
+            if self._dependencies.account_key_provider() == owner:
+                scheduled = await self._finalize_one_shot(response, request, expected_account=owner)
+            else:
+                scheduled = CleanupObservation(state=CleanupState.FAILED, upstream_chat_id=self._response_chat_id(response),
+                                               source=request.cleanup_source)
+            if self._dependencies.account_key_provider() != owner:
+                scheduled = CleanupObservation(state=CleanupState.FAILED, upstream_chat_id=self._response_chat_id(response),
+                                               source=request.cleanup_source)
+            if self._dependencies.account_key_provider() == owner and isinstance(scheduled, CleanupObservation) and scheduled.state in {CleanupState.FAILED, CleanupState.INVALID_ID, CleanupState.NOT_APPLICABLE}:
+                observer.failed.add(self._response_chat_id(response) or "")
+            completed = True
         finally:
             if chat is not None:
                 observer.observe(chat)

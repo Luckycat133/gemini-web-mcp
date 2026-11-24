@@ -179,7 +179,10 @@ def _extract_domain_payload(result: CallToolResult) -> tuple[bool, Any, list[str
                 structured = candidate
                 break
     is_err = bool(getattr(result, "is_error", False))
+    combined = "\n\n".join(texts).strip()
     if structured is not None:
+        if "ok" not in structured and (is_err or combined.lstrip().startswith("❌")):
+            return False, None, texts, {"code": "TOOL_ERROR", "message": combined or "Tool call failed."}
         ok = bool(structured.get("ok", not is_err))
         if is_err:
             ok = False
@@ -196,7 +199,6 @@ def _extract_domain_payload(result: CallToolResult) -> tuple[bool, Any, list[str
         else:
             data = structured.get("data", structured if "ok" not in structured else None)
         return ok, data, texts, error
-    combined = "\n\n".join(texts).strip()
     if is_err or combined.lstrip().startswith("❌"):
         return False, None, texts, {"code": "TOOL_ERROR", "message": combined or "Tool call failed."}
     return True, None, texts, None

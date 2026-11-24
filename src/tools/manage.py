@@ -11,6 +11,7 @@ from collections.abc import Coroutine
 from typing import Any, Callable, Literal, Optional, TypeVar, cast
 import logging
 
+from gemini_webapi.exceptions import APIError
 from ..client_manager import ClientAuthenticationRequired, ClientRateLimited
 from ..client_wrapper import (
     get_gemini_client,
@@ -2535,6 +2536,23 @@ def _register_gem_tools(mcp: MCPServer, enabled_tool_names: set[str]) -> None:
                 return domain_text(DomainResult.failure(DomainErrorCode.AUTH_REQUIRED, "Gemini account changed or is unavailable."),
                                    "Gemini account changed or is unavailable.")
             logger.warning("Gem operation could not be verified: %s", type(e).__name__)
+            if action in {"create", "update"} and isinstance(e, APIError):
+                return domain_text(
+                    DomainResult.failure(
+                        DomainErrorCode.CAPABILITY_UNAVAILABLE,
+                        (
+                            "Custom Gem creation/editing has been migrated to Gemini Skills on this Gemini 4 account. "
+                            "Existing Gems remain usable via gem_id; create or edit custom instructions with "
+                            "gemini-web-cli skills create."
+                        ),
+                        suggested_action=(
+                            "Use gemini-web-cli skills create to create custom instructions, "
+                            "or gemini-web-cli gems list + gemini_ask(gem_id=...) for existing Gems."
+                        ),
+                    ),
+                    "❌ 当前 Gemini 4 账号已将新建/编辑 Gem 迁移至 Gemini Skills；"
+                    "已有 Gem 仍可通过 gem_id 调用，新建自定义指令请使用 gemini-web-cli skills create。",
+                )
             if isinstance(e, GemMutationNotVerified) or (type(e) is ValueError and str(e) in {
                 "Gem name must not be empty.", "Gem name must not be blank when provided.", "Gem ID must not be empty.",
             }):

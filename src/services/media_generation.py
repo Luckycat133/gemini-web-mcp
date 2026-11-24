@@ -68,6 +68,7 @@ def media_timeout(media_type: str, timeout_seconds: int | None = None) -> int:
 def video_options_error(
     *, media_type: str, model: str | None, thinking_level: str, duration_seconds: int | None,
     delete_after_seconds: int | None, background: bool = True, aspect_ratio: str | None = None,
+    image_path: str | None = None,
 ) -> str | None:
     if normalize_model_alias(model) == OMNI_VIDEO_MODEL:
         return "Paid Gemini API (gemini-omni-1.2-flash / GEMINI_API_KEY) is disabled; use Gemini Web."
@@ -83,6 +84,8 @@ def video_options_error(
         return None
     if duration_seconds is not None and (type(duration_seconds) is not int or duration_seconds not in (10, 15)):
         return "Gemini Web duration_seconds must be 10 or 15."
+    if image_path is not None and duration_seconds == 15:
+        return "Reference-image video generation only supports duration_seconds=10."
     if aspect_ratio is not None and aspect_ratio not in ("16:9", "9:16"):
         return "aspect_ratio for videos must be '16:9' or '9:16'."
     return None

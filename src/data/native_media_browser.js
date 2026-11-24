@@ -263,6 +263,7 @@ async ({action, kind, model, model_token, prompt, url, offset, size, option, dur
                 && (/^I don['’]t have a built-in audio generation tool available right now to render a playable sound file directly\b/i.test(value)
                     || /^I can['’]t generate or output an audio file directly right now(?: because|, as) the music generation tool isn['’]t available in this session\.(?:\s|$)/i.test(value)
                     || /^I cannot directly generate or output playable audio files here, as the music generation tool is currently unavailable\.(?:\s|$)/i.test(value)
+                    || /^No audio generation tool is currently active in this session, so I cannot render a playable audio track directly(?:[.,]|\s|$)/i.test(value)
                     || /^Since direct (?:audio|music) generation isn['’]t available right now\b/i.test(value)
                     || /^(?:由于)?(?:目前|当前)(?:系统)?(?:无法直接|暂时无法)(?:为你)?生成(?:并导出)?(?:音频|音乐)/u.test(value));
             const generationError = el.matches(responseSelector) && !quotedStart
@@ -277,7 +278,7 @@ async ({action, kind, model, model_token, prompt, url, offset, size, option, dur
                     )));
             if (!musicRefusal && !generationError && value.length > 450) return [];
             const quota = /^(?:I can create more (?:videos|music|songs|audio) as soon as your limit resets\b|You(?:'ve| have) reached (?:your|the) (?:video|music|audio) generation limit\b|(?:你|您)已达到(?:视频|音乐|音频)生成(?:次数)?上限|(?:视频|音乐|音频)生成(?:次数)?已达上限)/i.test(value);
-            const capacity = /^(?:I couldn['’]t do that because I['’]m getting a lot of requests right now\. Please try again later\.?|I['’]m sorry,\s*I['’]m experiencing unusually high traffic right now generating (?:videos|music|images) and am at full capacity\. Please try again later\.?|(?:现在|目前)的请求过多[，。,. ]*请稍后再试[。.]?)$/i.test(value);
+            const capacity = /^(?:I couldn['’]t do that because I['’]m getting a lot of requests right now\. Please try again later\.?(?:\s|$)|I['’]m sorry,\s*I['’]m experiencing unusually high traffic right now generating (?:videos|music|images) and am at full capacity\. Please try again later\.?(?:\s|$)|(?:现在|目前)的请求过多[，。,. ]*请稍后再试[。.]?(?:\s|$))/i.test(value);
             if (!musicRefusal && !generationError && !quota && !capacity) return [];
             if (!seen.ids.has(el)) seen.ids.set(el, ++seen.next);
             return [{id: seen.ids.get(el), code: musicRefusal ? "ARTIFACT_NOT_RETURNED"

@@ -13,7 +13,7 @@ from ..constants import OMNI_VIDEO_MODEL, normalize_model_alias
 from ..domain import DomainErrorCode, DomainResult
 from ..services.background import submit_media
 from ..services.media_generation import (
-    MusicDuration, MusicGenre, MusicVocals, music_option_arguments, music_options_error,
+    MusicDuration, MusicGenre, MusicVocals, music_option_arguments, music_options_error, video_options_error,
 )
 from ..services.operations import MAX_RESULT_WAIT_SECONDS
 from ..services.media_inputs import image_workflow_options_error
@@ -74,6 +74,13 @@ async def _submit(
     invalid = image_workflow_options_error(
         media_type=media_type, image_path=image_path, image_paths=image_paths,
         source_operation_id=source_operation_id, source_artifact_id=source_artifact_id,
+    )
+    if invalid:
+        return _invalid_media(invalid)
+    invalid = video_options_error(
+        media_type=media_type, model=model, thinking_level=thinking_level,
+        duration_seconds=duration_seconds, delete_after_seconds=delete_after_seconds,
+        background=True, aspect_ratio=aspect_ratio, image_path=image_path,
     )
     if invalid:
         return _invalid_media(invalid)

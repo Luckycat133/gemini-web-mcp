@@ -94,7 +94,7 @@ async ({action, model, model_token, prompt, thinking_level}) => {
                 const txt = stripSpeakerPrefix(norm(el.innerText));
                 if (txt.length <= 220 && (
                     /^我(?:只是)?一个(?:语言模型|文本\s*AI)/.test(txt)
-                    || /^我没法提供这方面的帮助/.test(txt)
+                    || /^我没法提供(?:这方面的)?帮助/.test(txt)
                     || /^请恕我爱莫能助/.test(txt)
                     || /^由于程序代码的局限/.test(txt)
                     || /^I(?:'m| am) (?:just )?a (?:language model|text-based AI)/i.test(txt)

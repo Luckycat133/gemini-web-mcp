@@ -171,7 +171,7 @@ async def submit_media(request: dict[str, Any], *, operation: str,
     invalid = video_options_error(
         media_type=media_type, model=model, thinking_level=thinking_level,
         duration_seconds=request.get("duration_seconds"), delete_after_seconds=request.get("delete_after_seconds"),
-        aspect_ratio=request.get("aspect_ratio"),
+        aspect_ratio=request.get("aspect_ratio"), image_path=request.get("image_path"),
     )
     if invalid:
         return DomainResult.failure(DomainErrorCode.INVALID_ARGUMENT, invalid)

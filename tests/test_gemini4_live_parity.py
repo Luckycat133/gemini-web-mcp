@@ -241,3 +241,104 @@ def test_operation_read_result_formats_specific_media_failure_messages():
     assert "quota or capacity limit" in _operation_read_result(quota).error.message
     assert "without a media file" in _operation_read_result(refusal).error.message
     assert "error card" in _operation_read_result(err_card).error.message
+
+
+def test_cli_extract_domain_payload_marks_fastmcp_wrapped_cross_failed():
+    raw_res = SimpleNamespace(
+        content=[SimpleNamespace(type="text", text="❌ 当前 Gemini 4 账号已迁移")],
+        is_error=False,
+        meta={},
+        structured_content={"result": [{"type": "text", "text": "❌ 当前 Gemini 4 账号已迁移"}]},
+    )
+    ok, data, texts, error = _extract_domain_payload(raw_res)
+    assert ok is False
+    assert data is None
+    assert texts == ["❌ 当前 Gemini 4 账号已迁移"]
+    assert error["code"] == "TOOL_ERROR"
+
+
+def test_video_options_error_rejects_15s_with_reference_image():
+    from src.services.media_generation import video_options_error
+
+    err = video_options_error(
+        media_type="video",
+        model="flash",
+        thinking_level="standard",
+        duration_seconds=15,
+        delete_after_seconds=None,
+        aspect_ratio="16:9",
+        image_path="/tmp/example.jpg",
+    )
+    assert err == "Reference-image video generation only supports duration_seconds=10."
+    assert video_options_error(
+        media_type="video",
+        model="flash",
+        thinking_level="standard",
+        duration_seconds=10,
+        delete_after_seconds=None,
+        aspect_ratio="16:9",
+        image_path="/tmp/example.jpg",
+    ) is None
+
+
+def test_music_and_research_refusal_matchers_cover_gemini4_variants():
+    assert constants.is_music_tool_unavailable_reply(
+        "No audio generation tool is currently active in this session, so I cannot render a playable audio track directly, "
+        "though here is a complete composition sketch and tablature."
+    ) is True
+    assert constants.is_research_refusal_reply(
+        "我没法提供帮助。我只是一个语言模型，无法处理和理解这个问题。"
+    ) is True
+    assert constants.is_research_refusal_reply(
+        "I cannot assist with that as I am only a language model."
+    ) is True
+
+
+def test_operation_store_reject_research_turn_requires_exact_identity(tmp_path):
+    from src.infrastructure.operation_store import OperationStore
+
+    store = OperationStore(tmp_path / "ops.db")
+    import os
+    old = os.environ.get("GEMINI_PSID")
+    os.environ["GEMINI_PSID"] = "psid-synthetic"
+    try:
+        from src.infrastructure.account_identity import current_account_key
+
+        acct = current_account_key()
+        assert acct is not None
+        op_id = "op_" + "1" * 32
+        store.create_or_get(op_id, "gemini_research")
+        store.attach_late_chat(op_id, "c_1234567890abcdef")
+        store.update(op_id, state="partial", phase="plan_outcome_unverified", upstream_chat_id="c_1234567890abcdef")
+        assert store.reject_research_turn(
+            op_id,
+            account_key=acct,
+            chat_id="c_1234567890abcdef",
+            response_id="r_1234",
+            candidate_id="rc_1234",
+        ) is False
+        assert store.bind_research_turn(
+            op_id,
+            account_key=acct,
+            chat_id="c_1234567890abcdef",
+            response_id="r_1234",
+            candidate_id="rc_1234",
+        ) is True
+        assert store.reject_research_turn(
+            op_id,
+            account_key=acct,
+            chat_id="c_1234567890abcdef",
+            response_id="r_1234",
+            candidate_id="rc_1234",
+        ) is True
+        saved = store.get(op_id)
+        assert saved is not None
+        assert saved.state == "failed"
+        assert saved.phase == "plan_rejected"
+        assert saved.error_code == "UPSTREAM_REJECTED"
+        assert saved.cleanup_protected is False
+    finally:
+        if old is None:
+            os.environ.pop("GEMINI_PSID", None)
+        else:
+            os.environ["GEMINI_PSID"] = old

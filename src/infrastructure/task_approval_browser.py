@@ -116,7 +116,9 @@ class _DevToolsPipe:
             return result
 
 
-def _spawn_chrome(executable: str, profile: str, command_read: int, response_write: int) -> int:
+def _spawn_chrome(
+    executable: str, profile: str, command_read: int, response_write: int, *, stealth: bool = False,
+) -> int:
     import fcntl
 
     # Move the source FDs above both fixed destination FDs before dup2. This
@@ -132,9 +134,13 @@ def _spawn_chrome(executable: str, profile: str, command_read: int, response_wri
                 (os.POSIX_SPAWN_DUP2, pipe_read, 3),
                 (os.POSIX_SPAWN_DUP2, pipe_write, 4),
             )
-            args = [executable, "--headless", "--remote-debugging-pipe", f"--user-data-dir={profile}",
+            headless_flag = "--headless=new" if stealth else "--headless"
+            args = [executable, headless_flag, "--remote-debugging-pipe", f"--user-data-dir={profile}",
                     "--no-first-run", "--no-default-browser-check", "--disable-background-networking",
-                    "--disable-component-update", "--disable-sync", "--disable-breakpad", "about:blank"]
+                    "--disable-component-update", "--disable-sync", "--disable-breakpad"]
+            if stealth:
+                args.append("--disable-blink-features=AutomationControlled")
+            args.append("about:blank")
             env = {name: value for name, value in os.environ.items() if name in _BROWSER_ENV}
             return os.posix_spawn(executable, args, env, file_actions=actions, setpgroup=0)
         finally:
@@ -157,7 +163,7 @@ async def _stop_chrome(pid: int) -> None:
 
 
 @asynccontextmanager
-async def _open_browser(executable: str) -> AsyncIterator[_DevToolsPipe]:
+async def _open_browser(executable: str, *, stealth: bool = False) -> AsyncIterator[_DevToolsPipe]:
     with tempfile.TemporaryDirectory(prefix="gemini-task-approval-") as profile:
         command_read, command_write = os.pipe()
         response_read, response_write = os.pipe()
@@ -166,7 +172,11 @@ async def _open_browser(executable: str) -> AsyncIterator[_DevToolsPipe]:
         read_transport: asyncio.ReadTransport | None = None
         try:
             try:
-                pid = _spawn_chrome(executable, profile, command_read, response_write)
+                pid = (
+                    _spawn_chrome(executable, profile, command_read, response_write, stealth=stealth)
+                    if stealth
+                    else _spawn_chrome(executable, profile, command_read, response_write)
+                )
             finally:
                 os.close(command_read)
                 os.close(response_write)

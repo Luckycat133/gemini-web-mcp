@@ -68,7 +68,7 @@ Native video accepts one validated local `image_path` (only `duration_seconds=10
 
 For music, use `gemini_create_media(kind="music", music_duration="short"|"standard", music_vocals="instrumental"|"vocals"|"auto", music_genre="auto"|"pop"|"hip_hop"|"rock"|"kpop"|"latin"|"electronic"|"rnb"|"country"|"afrobeats"|"reggae"|"jazz_blues"|"classical"|"folk"|"lofi"|"acoustic"|"cinematic"|"ambient", prompt=...)`. Leave unspecified options as `None` to preserve actual webpage defaults; never guess defaults from prompt style or menu order. All music entrypoints expose these optional controls, and explicit SDK transport rejects them before submission.
 
-For workspace and account operations without adding MCP tools, use the companion JSON CLI `~/.local/bin/gemini-web-cli` (`doctor --validate-browser`, `models`, `quotas`, `notebooks`, `gems`, `skills`, `scheduled`, `tasks`, `history`, `chats`, `preferences`, `public-links`, `library`, `cleanup`).
+For workspace and account operations without adding MCP tools, use the companion JSON CLI `~/.local/bin/gemini-web-cli` (`doctor --validate-browser`, `models`, `quotas`, `notebooks`, `gems`, `skills`, `scheduled`, `tasks`, `history`, `chats`, `preferences`, `public-links`, `library`, `cleanup`). On migrated Gemini 4 accounts where `/gems/create` redirects to Skills, create/edit custom instructions via `gemini-web-cli skills create|update` while keeping existing Gems usable via `gemini-web-cli gems list` + `gemini_ask(gem_id=...)`.
 
 ## Choose Chat or Task
 

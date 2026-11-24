@@ -21,7 +21,7 @@ _COMPOSER_URL = "https://gemini.google.com/app"
 _CDP_TIMEOUT = 12
 _NAVIGATION_TIMEOUT = 60
 _UI_TIMEOUT = 45
-_TOOLS_MENU_OPEN_TIMEOUT = 4.0
+_TOOLS_MENU_OPEN_TIMEOUT = 8.0
 _MODEL_MENU_OPEN_TIMEOUT = 2.0
 _POLL_INTERVAL = 0.4
 _CHAT_PATH = re.compile(r"/app/([a-f0-9]{16})")
@@ -174,6 +174,17 @@ class _ResearchComposer:
         target = await self.call("Target.createTarget", {"url": "about:blank", "browserContextId": self.browser_context})
         attached = await self.call("Target.attachToTarget", {"targetId": target["targetId"], "flatten": True})
         self.session = attached["sessionId"]
+        try:
+            version = await self.call("Browser.getVersion")
+            ua = str(version.get("userAgent") or "")
+            if "HeadlessChrome/" in ua:
+                await self.call(
+                    "Emulation.setUserAgentOverride",
+                    {"userAgent": ua.replace("HeadlessChrome/", "Chrome/"), "platform": "MacIntel"},
+                    page=True,
+                )
+        except Exception:
+            pass
         await self.call(
             "Emulation.setDeviceMetricsOverride",
             {"width": 1280, "height": 900, "deviceScaleFactor": 1, "mobile": False},
@@ -206,19 +217,30 @@ class _ResearchComposer:
                 try:
                     async with asyncio.timeout(_TOOLS_MENU_OPEN_TIMEOUT):
                         hovered_more = False
+                        clicked_more = False
                         while True:
                             if point := await self.evaluate("research_tool"):
                                 await self.click(point)
                                 await self.wait("tool_selected", timeout=5.0)
                                 return
-                            if not hovered_more and (more_point := await self.evaluate("more")):
-                                await self.hover(more_point)
-                                hovered_more = True
+                            if more_point := await self.evaluate("more"):
+                                if not hovered_more:
+                                    await self.hover(more_point)
+                                    hovered_more = True
+                                    await asyncio.sleep(0.5)
+                                    continue
+                                if not clicked_more:
+                                    await self.click(more_point)
+                                    clicked_more = True
+                                    await asyncio.sleep(0.5)
+                                    continue
                             await asyncio.sleep(_POLL_INTERVAL)
                 except TimeoutError:
                     if not attempt and await self.evaluate("composer_menu_closed") is True:
                         continue
-                    if point := await self.evaluate("research_tool"):
+                    if more_point := await self.evaluate("more"):
+                        await self.click(more_point)
+                    if point := await self.wait("research_tool", timeout=6.0):
                         await self.click(point)
                         await self.wait("tool_selected", timeout=5.0)
                         return
@@ -268,13 +290,14 @@ async def run_native_research_browser(
     if not query.strip() or not math.isfinite(timeout) or timeout <= 0:
         return NativeResearchObservation(error_code="INVALID_ARGUMENT")
     submitted = False
+    confirm_clicked = False
     observed_cid: str | None = None
     observed_title: str | None = None
     try:
         if account_matches() is not True:
             raise TaskApprovalBrowserUnavailable("The Deep Research account could not be verified.")
         script = files("src").joinpath("data/native_research_browser.js").read_text(encoding="utf-8")
-        async with asyncio.timeout(timeout), _open_browser(_chrome_executable()) as pipe:
+        async with asyncio.timeout(timeout), _open_browser(_chrome_executable(), stealth=True) as pipe:
             composer = _ResearchComposer(pipe, script, model_label.strip(), level, account_matches)
             await composer.navigate(cookies)
             await composer.select_deep_research_tool()
@@ -288,8 +311,11 @@ async def run_native_research_browser(
             submitted = True
             await composer.click(send_point)
 
-            confirm_clicked = False
+            plan_wait_started = asyncio.get_running_loop().time()
+            plan_wait_limit = min(float(timeout), 60.0)
             while True:
+                if not confirm_clicked and asyncio.get_running_loop().time() - plan_wait_started > plan_wait_limit:
+                    raise TimeoutError
                 path = _gemini_path(await composer.url())
                 match = _CHAT_PATH.fullmatch(path or "")
                 if match:

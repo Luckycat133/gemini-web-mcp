@@ -205,7 +205,7 @@
     "function": [
       {
         "annotations_sha256": "99300d9e2937ba92c763822593cb3ba8ec634d1813f3ab37fad3d6d0432268f9",
-        "input_schema_sha256": "c81a207c1a9113e8dfb2746908f565e5f3919a325e9175ec2898faea1439ed36",
+        "input_schema_sha256": "4eced35b51066efc720cc45a603cdac6fb60b32525e8b139d741f59eae9e0ca6",
         "name": "gemini_ask",
         "output_schema_sha256": "416fee238f792f6f27540900ad7c315c5100645ff92de1f72a4254e26400bf9c"
       },

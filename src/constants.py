@@ -42,11 +42,13 @@ _GEMINI_GENERATION_FAILURE_REPLIES = frozenset({
 })
 _MUSIC_TOOL_UNAVAILABLE = re.compile(
     r"\A(?:I can['’]t generate or output an audio file directly right now(?: because|, as) "
-    r"the music generation tool isn['’]t available in this session|"
+    r"the music generation tool isn['’]t available in this session\.(?:\s|$)|"
     r"I cannot directly generate or output playable audio files here, as "
-    r"the music generation tool is currently unavailable|"
+    r"the music generation tool is currently unavailable\.(?:\s|$)|"
     r"I can['’]t generate the audio track right now because "
-    r"the music generation tool isn['’]t available to run in this turn)\.(?:\s|$)", re.IGNORECASE,
+    r"the music generation tool isn['’]t available to run in this turn\.(?:\s|$)|"
+    r"No audio generation tool is currently active in this session, so I cannot render a playable audio track directly(?:[.,]|\s|$))",
+    re.IGNORECASE,
 )
 _MUSIC_SCORE_FALLBACK = re.compile(
     r"\A(?:I can['’]t generate an audio track directly right now, but here is an original,|"
@@ -61,6 +63,7 @@ _MUSIC_CHINESE_SCORE_FALLBACK = re.compile(
 _RESEARCH_REFUSAL_REPLIES = frozenset({
     "我是一个语言模型，这超出了我的设计用途。",
     "我没法提供这方面的帮助，因为我只是一个语言模型。",
+    "我没法提供帮助。我只是一个语言模型，无法处理和理解这个问题。",
     "我是一个语言模型，在这方面帮不上忙。",
     "我是一个文本 AI，在这方面爱莫能助。",
     "请恕我爱莫能助，我只是一个语言模型，不能理解或回复你的这个问题。",
@@ -68,6 +71,14 @@ _RESEARCH_REFUSAL_REPLIES = frozenset({
     "I'm just a language model, so I can't help you with that.",
     "I cannot assist with that as I am only a language model.",
 })
+_RESEARCH_REFUSAL_PATTERN = re.compile(
+    r"\A(?:我(?:只是)?一个(?:语言模型|文本\s*AI)|"
+    r"我没法提供(?:这方面的)?帮助|"
+    r"请恕我爱莫能助|"
+    r"I(?:'m| am) (?:just )?a (?:language model|text-based AI)|"
+    r"I (?:can['’]t|cannot) assist with that)\b",
+    re.IGNORECASE,
+)
 _IMAGE_TOOL_UNAVAILABLE = re.compile(
     r"\A(?:I don['’]t have an (?:active )?image[- ]generation tool available in this (?:session|interface)|"
     r"I don['’]t have access to an image[- ]generation tool in this (?:session|interface)|"
@@ -178,7 +189,11 @@ def is_research_refusal_reply(text: object) -> bool:
     if not isinstance(text, str):
         return False
     normalized = " ".join(text.split())
-    return is_generation_failure_reply(normalized) or normalized in _RESEARCH_REFUSAL_REPLIES
+    return (
+        is_generation_failure_reply(normalized)
+        or normalized in _RESEARCH_REFUSAL_REPLIES
+        or (len(normalized) <= 120 and bool(_RESEARCH_REFUSAL_PATTERN.match(normalized)))
+    )
 
 
 class ModelConfig(TypedDict):

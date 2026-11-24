@@ -599,7 +599,10 @@ def native_research_enabled(client: Any) -> bool:
 
 
 def _native_research_model_label(client: Any, requested_model: str, research_model: Any) -> str:
-    target = requested_model or "flash"
+    target = (requested_model or "flash").strip().lower()
+    if target in {"flash", "fast", "thinking", "auto"}:
+        # Leave Gemini Web's active Deep Research default selector untouched unless explicitly overridden.
+        return ""
     if isinstance(research_model, str) and not is_default_deep_research_transport(research_model):
         name = research_model
         display = ""
@@ -607,8 +610,6 @@ def _native_research_model_label(client: Any, requested_model: str, research_mod
         name = str(getattr(research_model, "model_name", "") or target)
         display = str(getattr(research_model, "display_name", "") or "")
     family = gemini_4_model_family(name) or gemini_4_model_family(target)
-    if not family and target.strip().lower() in {"flash", "fast"}:
-        family = "hydrogen"
     if family:
         return f"4 {family.title()}"
     if display:

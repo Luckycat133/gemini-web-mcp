@@ -50,6 +50,10 @@ _VIDEO_QUOTA_REJECTION = "I can create more videos as soon as your limit resets.
 _VIDEO_CAPACITY_REJECTION = (
     "I couldn't do that because I'm getting a lot of requests right now. Please try again later."
 )
+_VIDEO_CAPACITY_REJECTIONS = frozenset({
+    _VIDEO_CAPACITY_REJECTION,
+    "I'm sorry, I'm experiencing unusually high traffic right now generating videos and am at full capacity. Please try again later.",
+})
 _IMAGE_CHAT_REFUSAL = "我是一个语言模型，这超出了我的设计用途。"
 _VIDEO_REFUSAL = "请恕我爱莫能助，我只是一个语言模型，不能理解或回复你的这个问题。"
 _MUSIC_ERROR_NOTICE = "生成这段钢琴和弦乐纯音乐时出现了一些问题。你要不要现在再重新尝试一次？"
@@ -301,7 +305,7 @@ async def _save_response(
         return
     image_failure = getattr(response, "text", None)
     video_capacity = (record.media_type == "video" and isinstance(image_failure, str)
-                      and " ".join(image_failure.split()) == _VIDEO_CAPACITY_REJECTION)
+                      and " ".join(image_failure.split()) in _VIDEO_CAPACITY_REJECTIONS)
     if ((generation_failure
             or (record.media_type == "image" and image_failure == _IMAGE_CHAT_REFUSAL) or video_capacity)
             and not any(getattr(response, name, None) for name in ("images", "videos", "media"))):
@@ -329,7 +333,7 @@ async def _save_response(
         readback_text = turn.get("text") if turn else None
         same_failure = (readback_text == image_failure or (
             video_capacity and isinstance(readback_text, str)
-            and " ".join(readback_text.split()) == _VIDEO_CAPACITY_REJECTION
+            and " ".join(readback_text.split()) in _VIDEO_CAPACITY_REJECTIONS
         ))
         if (verified_failure or (turn and turn.get("completed") is True and same_failure
                 and (turn.get("chat_id"), turn.get("rid"), turn.get("rcid")) == (cid, rid, rcid))):
