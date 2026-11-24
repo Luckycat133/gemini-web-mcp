@@ -17,9 +17,8 @@ Load only the Skill whose trigger matches the current task. A Skill may be reuse
 | `architecture-patterns` | Opt-in boundaries for MCP and external-service architecture |
 | `python-packaging` | Python package metadata, builds, and distribution checks |
 | `python-pypi-package-builder` | End-to-end PyPI packaging, PEP 440/SemVer versioning, and OIDC Trusted Publishing |
-| `directory-submissions` | MCP Registry (`server.json`), Glama (`glama.json`), Gemini/Cursor/Claude plugin manifests, `skills.sh`, and directory submissions |
-| `clawhub` | ClawHub skill publishing, syncing, verification, and discovery workflows |
 | `github-release` | GitHub Releases, SemVer tagging, and Keep a Changelog release workflows |
+| `distribution-publisher` (Claude Agent) | Dedicated agent (`~/.claude/agents/distribution-publisher.md`) for MCP/Skill registries, ClawHub, `skills.sh`, GEO/`llms.txt`, and launch copy |
 
 ## Maintenance rules
 
