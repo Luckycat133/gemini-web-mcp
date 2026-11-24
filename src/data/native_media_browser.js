@@ -260,10 +260,9 @@ async ({action, kind, model, model_token, prompt, url, offset, size, option, dur
                 return true;
             })();
             const musicRefusal = kind === "music" && el.matches(responseSelector) && !quotedStart
-                && (/^I don['’]t have a built-in (?:audio|music) generation tool available right now to (?:render a playable sound file|output an audio file) directly(?:[.,]|\s|$)/i.test(value)
-                    || /^I can['’]t generate or output an audio file directly right now(?: because|, as) the music generation tool isn['’]t available in this session\.(?:\s|$)/i.test(value)
-                    || /^I cannot directly generate or output playable audio files here, as the music generation tool is currently unavailable\.(?:\s|$)/i.test(value)
-                    || /^No audio generation tool is currently active in this session, so I cannot render a playable audio track directly(?:[.,]|\s|$)/i.test(value)
+                && (/^I don['’]t have (?:a built-in |an active )?(?:audio|music)[ -]generation tool(?: available(?: right now| in this session)?)?(?: to (?:render|output|generate) (?:an? |playable )?(?:audio|sound|music) (?:file|track) directly)?(?:[.,]|\s|$)/i.test(value)
+                    || /^I (?:can['’]t|cannot) (?:directly )?(?:generate|render|output|create)(?: or (?:output|render|stream))? (?:an? |the )?(?:playable )?(?:audio|music|sound) (?:files?|tracks?)(?: directly)?(?: here| right now)?(?:, as| because) the (?:music|audio)[ -]generation tool (?:is(?: currently)? unavailable|isn['’]t available(?: in this session| to run in this turn)?)\.(?:\s|$)/i.test(value)
+                    || /^No (?:audio|music)[ -]generation tool is (?:currently )?(?:active|available)(?: in this session)?(?:, so I (?:can['’]t|cannot) (?:render|generate|output) (?:a )?(?:playable )?(?:audio|music) (?:track|file) directly)?(?:[.,]|\s|$)/i.test(value)
                     || /^Since direct (?:audio|music) generation isn['’]t available right now\b/i.test(value)
                     || /^(?:由于)?(?:目前|当前)(?:系统)?(?:无法直接|暂时无法)(?:为你)?生成(?:并导出)?(?:音频|音乐)/u.test(value));
             const generationError = el.matches(responseSelector) && !quotedStart

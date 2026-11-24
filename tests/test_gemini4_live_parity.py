@@ -438,6 +438,12 @@ def test_builtin_music_tool_unavailable_and_research_show_thinking_prefix():
     assert constants.is_music_tool_unavailable_reply(
         "I don't have a built-in music generation tool available right now to output an audio file directly, so here is a warm, gentle fingerpicking arrangement."
     ) is True
+    assert constants.is_music_tool_unavailable_reply(
+        "I cannot generate audio files directly right now, as the music generation tool is unavailable. However, here is an original fingerstyle arrangement."
+    ) is True
+    assert constants.is_generation_failure_reply(
+        "I'm sorry, I'm experiencing unusually high traffic right now generating videos and am at full capacity. Please try again later."
+    ) is False
     assert constants.is_research_refusal_reply("我是一个文本 AI，在这方面爱莫能助。") is True
 
     node = shutil.which("node")

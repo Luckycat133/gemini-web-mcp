@@ -36,20 +36,20 @@ _GEMINI_GENERATION_FAILURE_REPLIES = frozenset({
     GEMINI_GENERIC_FAILURE_REPLY,
     "I encountered an error doing what you asked. Could you try again?",
     "Sorry, something went wrong. Please try your request again.",
-    "I'm sorry, I'm experiencing unusually high traffic right now generating videos and am at full capacity. Please try again later.",
     "我只是一个文本 AI，在这方面没法帮到你。",
     "由于程序代码的局限，我无法提供这方面的帮助。",
 })
 _MUSIC_TOOL_UNAVAILABLE = re.compile(
-    r"\A(?:I can['’]t generate or output an audio file directly right now(?: because|, as) "
-    r"the music generation tool isn['’]t available in this session\.(?:\s|$)|"
-    r"I cannot directly generate or output playable audio files here, as "
-    r"the music generation tool is currently unavailable\.(?:\s|$)|"
-    r"I can['’]t generate the audio track right now because "
-    r"the music generation tool isn['’]t available to run in this turn\.(?:\s|$)|"
-    r"I don['’]t have a built-in music generation tool available right now to "
-    r"output an audio file directly(?:[.,]|\s|$)|"
-    r"No audio generation tool is currently active in this session, so I cannot render a playable audio track directly(?:[.,]|\s|$))",
+    r"\A(?:I (?:can['’]t|cannot) (?:directly )?(?:generate|render|output|create)"
+    r"(?: or (?:output|render|stream))? (?:an? |the )?(?:playable )?(?:audio|music|sound) "
+    r"(?:files?|tracks?)(?: directly)?(?: here| right now)?(?:, as| because) "
+    r"the (?:music|audio)[ -]generation tool (?:is(?: currently)? unavailable|"
+    r"isn['’]t available(?: in this session| to run in this turn)?)\.(?:\s|$)|"
+    r"I don['’]t have (?:a built-in |an active )?music[ -]generation tool"
+    r"(?: available(?: right now| in this session)?)?"
+    r"(?: to (?:render|output|generate) (?:an? |playable )?(?:audio|sound|music) (?:file|track) directly)?(?:[.,]|\s|$)|"
+    r"No (?:audio|music)[ -]generation tool is (?:currently )?(?:active|available)(?: in this session)?"
+    r"(?:, so I (?:can['’]t|cannot) (?:render|generate|output) (?:a )?(?:playable )?(?:audio|music) (?:track|file) directly)?(?:[.,]|\s|$))",
     re.IGNORECASE,
 )
 _MUSIC_SCORE_FALLBACK = re.compile(
