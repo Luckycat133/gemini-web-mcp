@@ -291,6 +291,7 @@ async def run_native_research_browser(
         return NativeResearchObservation(error_code="INVALID_ARGUMENT")
     submitted = False
     confirm_clicked = False
+    confirm_clicked_at: float | None = None
     observed_cid: str | None = None
     observed_title: str | None = None
     try:
@@ -346,17 +347,22 @@ async def run_native_research_browser(
                             )
                         await composer.click(confirm_btn)
                         confirm_clicked = True
+                        confirm_clicked_at = asyncio.get_running_loop().time()
                         await asyncio.sleep(_POLL_INTERVAL)
                         continue
-                    if confirm_clicked and (not status.get("confirm_present") or status.get("progress")):
-                        return NativeResearchObservation(
-                            state="started",
-                            chat_id=observed_cid,
-                            title=observed_title,
-                            submitted=True,
-                            confirmed=True,
-                        )
-                    if status.get("progress") and observed_cid:
+                    if confirm_clicked and confirm_clicked_at is not None:
+                        since_confirm = asyncio.get_running_loop().time() - confirm_clicked_at
+                        if (status.get("progress") and since_confirm >= 5.0) or (
+                            not status.get("confirm_present") and since_confirm >= 8.0
+                        ):
+                            return NativeResearchObservation(
+                                state="started",
+                                chat_id=observed_cid,
+                                title=observed_title,
+                                submitted=True,
+                                confirmed=True,
+                            )
+                    if not confirm_clicked and status.get("progress") and observed_cid:
                         return NativeResearchObservation(
                             state="started",
                             chat_id=observed_cid,

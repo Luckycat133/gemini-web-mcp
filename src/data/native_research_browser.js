@@ -76,7 +76,7 @@ async ({action, model, model_token, prompt, thinking_level}) => {
         if (el.closest(userQuerySelector)) return false;
         return /^(开始研究|Start research|Start)$/i.test(name(el));
     });
-    const stripSpeakerPrefix = value => value.replace(/^(?:Gemini\s*说|Gemini\s+said)\s+/i, "").trim();
+    const stripSpeakerPrefix = value => value.replace(/^(?:(?:Gemini\s*说|Gemini\s+said)\s+)?(?:(?:显示思路|Show\s+thinking)\s+)?/i, "").trim();
 
     if (action === "status") {
         const confirms = confirmButtons();
@@ -93,7 +93,7 @@ async ({action, model, model_token, prompt, thinking_level}) => {
                 if (!visible(el) || el.closest(userQuerySelector)) continue;
                 const txt = stripSpeakerPrefix(norm(el.innerText));
                 if (txt.length <= 220 && (
-                    /^我(?:只是)?一个(?:语言模型|文本\s*AI)/.test(txt)
+                    /^我(?:只?是)?一个(?:语言模型|文本\s*AI)/.test(txt)
                     || /^我没法提供(?:这方面的)?帮助/.test(txt)
                     || /^请恕我爱莫能助/.test(txt)
                     || /^由于程序代码的局限/.test(txt)

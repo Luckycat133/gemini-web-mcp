@@ -428,3 +428,44 @@ fn({action: 'status', kind: 'video'}).then(r => console.log(JSON.stringify(r)));
     completed = subprocess.run([node, "-e", program, str(script)], check=True, capture_output=True, text=True, timeout=5)
     signals = json.loads(completed.stdout)["signals"]
     assert [s["code"] for s in signals] == ["UPSTREAM_REJECTED", "UPSTREAM_REJECTED"]
+
+
+def test_builtin_music_tool_unavailable_and_research_show_thinking_prefix():
+    import shutil
+    import subprocess
+    from pathlib import Path
+
+    assert constants.is_music_tool_unavailable_reply(
+        "I don't have a built-in music generation tool available right now to output an audio file directly, so here is a warm, gentle fingerpicking arrangement."
+    ) is True
+    assert constants.is_research_refusal_reply("我是一个文本 AI，在这方面爱莫能助。") is True
+
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("Node is required for native_research_browser.js contract")
+    script = Path(__file__).parents[1] / "src/data/native_research_browser.js"
+    program = """
+const fs = require('fs');
+const fn = eval('(' + fs.readFileSync(process.argv[1], 'utf8') + ')');
+const mk = (text) => ({
+    innerText: text,
+    closest: () => null,
+    getClientRects: () => [{width: 100, height: 40, left: 0, top: 0}],
+    getBoundingClientRect: () => ({width: 100, height: 40, left: 0, top: 0}),
+    matches: () => false,
+    querySelectorAll: () => [],
+    getAttribute: () => null,
+});
+globalThis.location = {origin: 'https://gemini.google.com', pathname: '/app/0123456789abcdef'};
+globalThis.getComputedStyle = () => ({display: 'block', visibility: 'visible', opacity: '1'});
+globalThis.document = {
+    querySelectorAll: (sel) => sel.includes('model-response') ? [mk("显示思路 我是一个文本 AI，在这方面爱莫能助。")] : [],
+    querySelector: () => null,
+};
+globalThis.window = {};
+globalThis.window.top = globalThis.window;
+fn({action: 'status', model: '', prompt: 'test', thinking_level: 'low'}).then(r => console.log(JSON.stringify(r)));
+"""
+    completed = subprocess.run([node, "-e", program, str(script)], check=True, capture_output=True, text=True, timeout=5)
+    parsed = json.loads(completed.stdout)
+    assert parsed["refusal"] == "我是一个文本 AI，在这方面爱莫能助。"

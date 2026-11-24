@@ -260,7 +260,7 @@ async ({action, kind, model, model_token, prompt, url, offset, size, option, dur
                 return true;
             })();
             const musicRefusal = kind === "music" && el.matches(responseSelector) && !quotedStart
-                && (/^I don['’]t have a built-in audio generation tool available right now to render a playable sound file directly\b/i.test(value)
+                && (/^I don['’]t have a built-in (?:audio|music) generation tool available right now to (?:render a playable sound file|output an audio file) directly(?:[.,]|\s|$)/i.test(value)
                     || /^I can['’]t generate or output an audio file directly right now(?: because|, as) the music generation tool isn['’]t available in this session\.(?:\s|$)/i.test(value)
                     || /^I cannot directly generate or output playable audio files here, as the music generation tool is currently unavailable\.(?:\s|$)/i.test(value)
                     || /^No audio generation tool is currently active in this session, so I cannot render a playable audio track directly(?:[.,]|\s|$)/i.test(value)

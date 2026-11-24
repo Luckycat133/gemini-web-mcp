@@ -645,7 +645,9 @@ async def _run_native_research_start(
     from ..infrastructure.native_research_browser import run_native_research_browser
 
     expected_account = current_account_key()
-    cookies = dict(get_extra_cookies())
+    raw_client_cookies = getattr(client, "cookies", None)
+    client_cookie_map = dict(raw_client_cookies.items()) if raw_client_cookies is not None and hasattr(raw_client_cookies, "items") else {}
+    cookies = {**dict(get_extra_cookies()), **client_cookie_map}
     model_label = _native_research_model_label(client, requested_model, research_model)
     observed_cid: str | None = None
     checkpointed_cid: str | None = None

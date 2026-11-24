@@ -47,6 +47,8 @@ _MUSIC_TOOL_UNAVAILABLE = re.compile(
     r"the music generation tool is currently unavailable\.(?:\s|$)|"
     r"I can['’]t generate the audio track right now because "
     r"the music generation tool isn['’]t available to run in this turn\.(?:\s|$)|"
+    r"I don['’]t have a built-in music generation tool available right now to "
+    r"output an audio file directly(?:[.,]|\s|$)|"
     r"No audio generation tool is currently active in this session, so I cannot render a playable audio track directly(?:[.,]|\s|$))",
     re.IGNORECASE,
 )
