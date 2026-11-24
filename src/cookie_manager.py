@@ -16,12 +16,36 @@ from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterator, Optional, Tuple
+from urllib.parse import urlsplit
+
+from curl_cffi.requests import Cookies
 
 from .sdk_auth_logging import suppress_sdk_auth_logs
 
 logger = logging.getLogger(__name__)
 _BROWSER_COOKIE_ACCESS_LOCK = threading.Lock()
 _SUPPORTED_BROWSERS = ("chrome", "chrome-beta", "edge", "brave", "firefox", "opera")
+_GOOGLE_ACCOUNTS_HOST = "accounts.google.com"
+_GOOGLE_ACCOUNTS_COOKIE = "LSID"
+_GOOGLE_CHALLENGE_COOKIE = "GOOGLE_ABUSE_EXEMPTION"
+_GEMINI_HOST = "gemini.google.com"
+_GEMINI_SESSION_COOKIE = "OSID"
+_GEMINI_HOST_COOKIES = {_GEMINI_SESSION_COOKIE, "COMPASS", "_ga", "_ga_BF8Q35BMLM", "_ga_WC57KJ50ZZ", "_gcl_au"}
+
+
+def gemini_cookie_jar(cookies: dict[str, str]) -> dict[str, str] | Cookies:
+    """Keep Google's sign-in handoff cookies restricted to the Accounts host."""
+    if not any(name in cookies for name in (_GOOGLE_ACCOUNTS_COOKIE, _GEMINI_SESSION_COOKIE, _GOOGLE_CHALLENGE_COOKIE)):
+        return cookies
+    jar = Cookies()
+    for name, value in cookies.items():
+        domain = ".google.com"
+        if name == _GOOGLE_ACCOUNTS_COOKIE:
+            domain = _GOOGLE_ACCOUNTS_HOST
+        elif name in _GEMINI_HOST_COOKIES:
+            domain = _GEMINI_HOST
+        jar.set(name, value, domain=domain, secure=True)
+    return jar
 
 
 class _BrowserCookieAccessTimeout(BaseException):
@@ -193,6 +217,7 @@ class CookieManager:
             "SAPISID",
             "NID",
             "AEC",
+            _GOOGLE_CHALLENGE_COOKIE,
             "COMPASS",
             "GCL_AW_P",
             "SEARCH_SAMESITE",
@@ -200,6 +225,8 @@ class CookieManager:
             "_ga_BF8Q35BMLM",
             "_ga_WC57KJ50ZZ",
             "_gcl_au",
+            _GOOGLE_ACCOUNTS_COOKIE,
+            _GEMINI_SESSION_COOKIE,
         }
 
     @staticmethod
@@ -267,6 +294,8 @@ class CookieManager:
             sources = [(f"browser_{attempt_browser}" + (f":{name}" if name != "auto" else ""), jar)
                        for name, jar in candidates if name != "auto" or jar not in named]
             result = CookieManager._validate_browser_candidates(sources)
+            if result.reason == "BROWSER_COOKIE_RATE_LIMITED":
+                return result
             if result.cookies:
                 return result
             if result.reason:
@@ -363,14 +392,34 @@ class CookieManager:
     @staticmethod
     def _read_cookie_jar(cookie_jar, cookie_names: set[str]) -> Dict[str, str]:
         cookies: Dict[str, str] = {}
+        gemini_host_cookies: set[str] = set()
         now = time.time()
         for cookie in cookie_jar:
             if cookie.name not in cookie_names or not cookie.value:
                 continue
-            if cookie.domain != "google.com" and not cookie.domain.endswith(".google.com"):
+            domain = cookie.domain.lstrip(".").lower()
+            if getattr(cookie, "path", "/") != "/":
+                continue
+            if cookie.name == _GOOGLE_ACCOUNTS_COOKIE:
+                if cookie.domain.lower() != _GOOGLE_ACCOUNTS_HOST:
+                    continue
+            elif cookie.name == _GEMINI_SESSION_COOKIE:
+                if cookie.domain.lower() != _GEMINI_HOST:
+                    continue
+            elif cookie.name == _GOOGLE_CHALLENGE_COOKIE:
+                # Only the observed parent-domain cookie can retain this scope.
+                if cookie.domain.lower() != ".google.com":
+                    continue
+            elif domain not in {"google.com", _GEMINI_HOST}:
                 continue
             expires = getattr(cookie, "expires", None)
             if isinstance(expires, (int, float)) and expires <= now:
+                continue
+            # Other Google products use the same names, including COMPASS.
+            # Never widen sibling domains or path-scoped cookies into Gemini's jar.
+            if domain == _GEMINI_HOST:
+                gemini_host_cookies.add(cookie.name)
+            elif cookie.name in gemini_host_cookies:
                 continue
             cookies[cookie.name] = cookie.value
         return cookies
@@ -529,7 +578,9 @@ class CookieManager:
                             profile_cookies = {
                                 row[0]: row[1]
                                 for row in cur
-                                if row[0] in cookie_names and row[1]
+                                if row[0] in cookie_names
+                                and row[0] not in {_GOOGLE_ACCOUNTS_COOKIE, _GEMINI_SESSION_COOKIE}
+                                and row[1]
                             }
                         finally:
                             conn.close()
@@ -616,7 +667,7 @@ class CookieManager:
     @staticmethod
     def _make_browser_cookie_probe_client(cookies: dict[str, str]) -> Any:
         from gemini_webapi import GeminiClient
-        from gemini_webapi.constants import AccountStatus
+        from gemini_webapi.constants import AccountStatus, Endpoint
         from gemini_webapi.utils.get_access_token import (
             AsyncSession, CurlFollow, CurlHttpVersion, _extract_payload, _send_request,
         )
@@ -624,6 +675,8 @@ class CookieManager:
         from .client_manager import get_configured_proxy
 
         class BrowserCookieProbeClient(GeminiClient):
+            verified_browser_cookies: dict[str, str] | None = None
+
             async def init(self, *, timeout: float = 15, **_options: Any) -> None:
                 # Reuse the SDK's exact-jar transport and frontend parser.
                 # Its general bootstrap prefers a persistent cache and can
@@ -633,6 +686,11 @@ class CookieManager:
                                            allow_redirects=CurlFollow.SAFE, http_version=CurlHttpVersion.NONE,
                                            timeout=timeout)
                 response = await _send_request(self.client, candidate, verbose=False)
+                landing = urlsplit(response.url)
+                if landing.scheme != "https" or landing.hostname != urlsplit(Endpoint.INIT).hostname:
+                    if landing.scheme == "https" and landing.hostname == _GOOGLE_ACCOUNTS_HOST:
+                        self.account_status = AccountStatus.UNAUTHENTICATED
+                    return
                 frontend = _extract_payload(response)
                 if not frontend:
                     return
@@ -645,6 +703,12 @@ class CookieManager:
                 # positive probe also needs the model catalog from that RPC.
                 if getattr(self, "account_status", None) == AccountStatus.AVAILABLE and not self.list_models():
                     setattr(self, "account_status", None)
+                if self.account_status == AccountStatus.AVAILABLE:
+                    verified = CookieManager._read_cookie_jar(self.cookies.jar, CookieManager._google_cookie_names())
+                    if verified.get("__Secure-1PSID") != cookies.get("__Secure-1PSID"):
+                        self.account_status = AccountStatus.UNAUTHENTICATED
+                    else:
+                        self.verified_browser_cookies = verified
 
             async def _batch_execute(self, *args: Any, **kwargs: Any) -> Any:
                 kwargs.update(current_retry=0, close_on_error=False)
@@ -657,7 +721,7 @@ class CookieManager:
 
         client = BrowserCookieProbeClient(cookies.get("__Secure-1PSID"), cookies.get("__Secure-1PSIDTS", ""),
                                           proxy=get_configured_proxy())
-        client.cookies = cookies
+        client.cookies = gemini_cookie_jar(cookies)
         client.account_status = None  # The SDK starts with a synthetic AVAILABLE default.
         return client
 
@@ -676,34 +740,54 @@ class CookieManager:
     async def _verify_cookie_candidates(candidates: list[tuple[str, dict[str, str]]]) -> BrowserCookieDiscovery:
         from gemini_webapi.exceptions import AuthError
 
+        from .domain.results import DomainErrorCode, classify_exception
+
         reasons: set[str] = set()
         for source, cookies in candidates:
-            client = None
-            try:
-                client = CookieManager._make_browser_cookie_probe_client(cookies)
-                suppress_sdk_auth_logs()
-                await asyncio.wait_for(client.init(timeout=15, auto_close=False, auto_refresh=False, verbose=False), 15)
-                reason = CookieManager._browser_auth_reason(client)
-                if not reason:
-                    return BrowserCookieDiscovery(cookies=cookies, source=source)
-                reasons.add(reason)
-            except AuthError:
-                reasons.add("BROWSER_COOKIE_AUTH_REJECTED")
-            except Exception as e:
-                reasons.add("BROWSER_COOKIE_AUTH_UNVERIFIED")
-                logger.debug("Browser Cookie verification failed error_type=%s", type(e).__name__)
-            finally:
-                if client is not None:
-                    try:
-                        await client.close()
-                    except Exception as close_err:
-                        logger.debug("关闭验证用 client 失败 error_type=%s", type(close_err).__name__)
+            deadline = time.monotonic() + 30
+            for attempt in range(2):
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    reasons.add("BROWSER_COOKIE_AUTH_UNVERIFIED")
+                    break
+                client = None
+                retry_network_probe = False
+                try:
+                    client = CookieManager._make_browser_cookie_probe_client(cookies)
+                    suppress_sdk_auth_logs()
+                    await asyncio.wait_for(client.init(
+                        timeout=remaining, auto_close=False, auto_refresh=False, verbose=False,
+                    ), remaining)
+                    reason = CookieManager._browser_auth_reason(client)
+                    if not reason:
+                        verified = getattr(client, "verified_browser_cookies", None) or cookies
+                        return BrowserCookieDiscovery(cookies=verified, source=source)
+                    reasons.add(reason)
+                except Exception as e:
+                    classified = classify_exception(e)
+                    if classified.error_code == DomainErrorCode.RATE_LIMITED.value:
+                        return BrowserCookieDiscovery(reason="BROWSER_COOKIE_RATE_LIMITED")
+                    reasons.add("BROWSER_COOKIE_AUTH_REJECTED" if isinstance(e, AuthError)
+                                else "BROWSER_COOKIE_AUTH_UNVERIFIED")
+                    retry_network_probe = (not isinstance(e, AuthError) and attempt == 0
+                                           and classified.error_code == DomainErrorCode.NETWORK_ERROR.value)
+                finally:
+                    if client is not None:
+                        try:
+                            await client.close()
+                        except Exception as close_err:
+                            logger.debug("关闭验证用 client 失败 error_type=%s", type(close_err).__name__)
+                # Only a failed read-only network probe is repeated, with a fresh
+                # client and whatever remains of this candidate's original budget.
+                if not retry_network_probe:
+                    break
         reason = ("BROWSER_COOKIE_AUTH_REJECTED" if reasons == {"BROWSER_COOKIE_AUTH_REJECTED"}
                   else "BROWSER_COOKIE_AUTH_UNVERIFIED")
         return BrowserCookieDiscovery(reason=reason)
 
     @staticmethod
     async def _validate_cookie_candidate_profiles_async(candidates: list[tuple[str, Dict[str, str]]]) -> list[dict[str, object]]:
+        from .domain.results import classify_exception
         try:
             import gemini_webapi  # noqa: F401 - keep this diagnostic usable without the SDK
         except Exception as e:
@@ -720,7 +804,7 @@ class CookieManager:
             try:
                 client = CookieManager._make_browser_cookie_probe_client(cookies)
                 suppress_sdk_auth_logs()
-                await asyncio.wait_for(client.init(timeout=15, auto_close=False, auto_refresh=False, verbose=False), 15)
+                await asyncio.wait_for(client.init(timeout=30, auto_close=False, auto_refresh=False, verbose=False), 30)
                 status = getattr(client, "account_status", None)
                 info["account_status"] = str(status)
                 reason = CookieManager._browser_auth_reason(client)
@@ -734,6 +818,8 @@ class CookieManager:
             except Exception as e:
                 info["validation_error"] = "Cookie validation failed."
                 info["error_type"] = type(e).__name__
+                if classify_exception(e).error_code == "RATE_LIMITED":
+                    info["error_code"] = "BROWSER_COOKIE_RATE_LIMITED"
             finally:
                 if client is not None:
                     try:
@@ -741,6 +827,8 @@ class CookieManager:
                     except Exception as close_err:
                         logger.debug("关闭 profile 验证 client 失败 error_type=%s", type(close_err).__name__)
             profiles.append(info)
+            if info.get("error_code") == "BROWSER_COOKIE_RATE_LIMITED":
+                break
         return profiles
 
     @staticmethod
@@ -766,6 +854,9 @@ class CookieManager:
             parsed = parse_contract_body(contract, bodies[0] if bodies else [])
             return len(parsed.value) if isinstance(parsed.value, list) else 0
         except Exception as e:
+            from .domain.results import classify_exception
+            if classify_exception(e).error_code == "RATE_LIMITED":
+                raise
             logger.debug("Chrome profile 定时操作 registry 探测失败 error_type=%s", type(e).__name__)
         finally:
             if previous_language:

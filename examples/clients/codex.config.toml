@@ -1,4 +1,5 @@
 # Copy this table into ~/.codex/config.toml or a trusted project's .codex/config.toml.
+# Copy codex.account.config.toml separately when conversation management is needed.
 # Export GEMINI_PSID (and optionally GEMINI_PSIDTS/GEMINI_PSIDCC) in the Codex host environment.
 [mcp_servers.gemini]
 command = "uvx"

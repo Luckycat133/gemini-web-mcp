@@ -5,6 +5,8 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+from scripts.release_metadata import load_release_metadata
+
 
 ROOT = Path(__file__).resolve().parents[1]
 PUBLIC_SKILL = ROOT / ".agents" / "skills" / "gemini-web-mcp-development"
@@ -31,7 +33,10 @@ def _all_text(root: Path) -> str:
 
 def test_development_skill_has_one_complete_public_source() -> None:
     assert _files(PUBLIC_SKILL) == EXPECTED_FILES
-    assert not (ROOT / ".codex" / "skills" / "gemini-web-mcp-development" / "SKILL.md").exists()
+    compatibility_path = ROOT / ".codex" / "skills" / "gemini-web-mcp-development"
+    if compatibility_path.exists():
+        assert compatibility_path.is_symlink()
+        assert compatibility_path.resolve() == PUBLIC_SKILL.resolve()
 
 
 def test_development_skill_frontmatter_and_progressive_disclosure() -> None:
@@ -48,7 +53,7 @@ def test_development_skill_frontmatter_and_progressive_disclosure() -> None:
     assert re.search(r"^description: .+Use for .+$", frontmatter, re.MULTILINE)
     assert "two focused business tool surfaces" in frontmatter
     assert "scope: development" in frontmatter
-    assert 'version: "0.2.1"' in frontmatter
+    assert f'version: "{load_release_metadata(ROOT).version}"' in frontmatter
     assert len(lines) < 500
 
     reference_links = re.findall(r"\]\((references/[^)]+)\)", body)
@@ -160,4 +165,4 @@ def test_development_skill_names_maintained_validation_and_agent_use_paths() -> 
 
     assert "REVIEWED_SHA=replace-with-reviewed-40-character-commit" in testing
     assert "<reviewed-sha>" not in testing
-    assert "v0.2.1" in testing or "0.2.1" in testing
+    assert "Read the active version from `pyproject.toml`" in testing

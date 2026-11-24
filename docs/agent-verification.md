@@ -6,8 +6,9 @@ Read for protocol, tool, artifact, account, packaging or release changes. Docume
 
 - `python -m venv .venv && . .venv/bin/activate`: create and enter a local virtual environment.
 - `pip install -e ".[all,dev]"`: install the package with optional browser/image support and maintained development gates.
-- `gemini-mcp-function`: run the default 17-tool function surface locally; `gemini-mcp-server` with no `GEMINI_TOOLS` selects the same surface.
-- `gemini-mcp-account`: run the separate 17-tool account surface for explicitly requested account work.
+- `gemini-mcp-function` runs the default six-tool function surface. `gemini-mcp-server` with no `GEMINI_TOOLS` selects the same catalog.
+- `gemini-mcp-account` runs the independent six-tool surface for explicitly requested account work.
+- Set `GEMINI_TOOLS=function-full` or `GEMINI_TOOLS=account-full` on `gemini-mcp-server` to verify either prior 17-tool catalog.
 - `GEMINI_TOOLS=core python -m src.server` or `GEMINI_TOOLS=all python -m src.server`: exercise explicitly selected legacy compatibility profiles.
 - `gemini-mcp-onboarding`: start the installed stdio server and call an auth-free text tool; live chat/image subcommands require `--allow-live-account`.
 - `python -m ruff check src tests scripts && python -m mypy src scripts`: run the maintained static correctness gates.
@@ -24,7 +25,7 @@ Write pytest tests as `tests/test_*.py`, with test names that describe the behav
 
 ## Notebook and Task verification
 
-Keep ordinary Notebook chat (`gemini_ask` with `notebook_ids`, `execution_mode=chat`) separate from `gemini_run_task` (`execution_mode=task`). Validate the function/account catalogs, union destructive annotations, default Notebook source view, bounded Task metadata and legacy project-view chat moves. Do not turn an unrecognized state or an account switch into success.
+Keep ordinary Notebook Chat (`gemini_ask` with `notebook_ids`, `execution_mode=chat`) separate from `gemini_run_task` (`execution_mode=task`). Verify both six-tool default catalogs and both explicit full catalogs. Check annotations for read-only status, result recovery with owned cleanup, exact deletion, and default read-only Task metadata. Verify the source-picker view and fresh exact project targets for chat moves. Report an account switch or unrecognized state as unverified.
 
 For authorized local tests, use a synthetic Notebook whose source contains a marker absent from the query. Verify source retrieval independently, submitter disconnect, the original operation handle, exact completed reply identity, a full verified local answer artifact, automatic save/cleanup before the caller requests the result, and post-restart local result access. A Task answer needs both its same-chat completed or failed terminal goal and the exact completed candidate; failed answers remain failed after caching; ordinary Notebook Chat must not create a Task goal. Cover crash recovery between answer completion and file save. Status reads must not regenerate or read full chat text. Do not mark user Notebook content mutations verified from response prose; independently read back the exact resource metadata or source content. Task schedules, rich steps, app confirmations and ProcessSession experiments require separate evidence; Chat scheduled-action checks do not cover them.
 

@@ -10,9 +10,10 @@ import tempfile
 import threading
 import logging
 import time
-from contextlib import suppress
+from collections.abc import Iterator
+from contextlib import contextmanager, suppress
 from pathlib import Path
-from typing import Optional, Any, Dict
+from typing import Optional, Any, Dict, TypedDict
 from urllib.parse import urlparse
 
 from .sdk_auth_logging import suppress_sdk_auth_logs
@@ -20,13 +21,14 @@ from .sdk_auth_logging import suppress_sdk_auth_logs
 logger = logging.getLogger(__name__)
 
 try:
-    from .cookie_manager import get_cookie_manager
+    from .cookie_manager import gemini_cookie_jar, get_cookie_manager
     COOKIE_MANAGER_AVAILABLE = True
 except ImportError:
     COOKIE_MANAGER_AVAILABLE = False
     logger.warning("cookie_manager 模块不可用")
 
 from .constants import DEFAULT_CHAT_RETENTION_SECONDS  # noqa: E402  (follows optional try/except import)
+from .domain.results import classify_exception  # noqa: E402
 
 
 def validate_config() -> None:
@@ -110,6 +112,27 @@ def prepare_browser_cookie_cache(force: bool = False) -> None:
     os.environ["GEMINI_COOKIE_PATH"] = str(cache_dir)
 
 
+@contextmanager
+def isolated_worker_cookie_cache() -> Iterator[Path]:
+    """Own a Web worker's SDK cache until its clients have been closed.
+
+    Use only at the detached process entrypoint: GEMINI_COOKIE_PATH is
+    process-wide. Never clear or reuse the submitting process's cache.
+    """
+    previous = os.environ.get("GEMINI_COOKIE_PATH")
+    with tempfile.TemporaryDirectory(prefix="gemini-web-worker-cookies-") as directory:
+        cache_dir = Path(directory)
+        cache_dir.chmod(0o700)
+        try:
+            os.environ["GEMINI_COOKIE_PATH"] = str(cache_dir)
+            yield cache_dir
+        finally:
+            if previous is None:
+                os.environ.pop("GEMINI_COOKIE_PATH", None)
+            else:
+                os.environ["GEMINI_COOKIE_PATH"] = previous
+
+
 class ClientInitializationResetError(RuntimeError):
     """Raised when a reset supersedes an in-flight client initialization."""
 
@@ -126,8 +149,26 @@ class ClientAuthenticationRequired(PermissionError):
         self.browser_auth_reason = browser_auth_reason
 
 
+class ClientRateLimited(RuntimeError):
+    """A temporary upstream limit is not a failed account credential."""
+
+    code = "RATE_LIMITED"
+
+    def __init__(self) -> None:
+        super().__init__("Gemini temporarily limited requests; wait before retrying.")
+
+
 def browser_cookie_auto_load_enabled() -> bool:
     return os.environ.get("GEMINI_BROWSER_AUTO_LOAD", "true").lower() == "true"
+
+
+class _ConfiguredBrowserProfile(TypedDict, total=False):
+    profile: str
+
+
+def _configured_browser_profile() -> _ConfiguredBrowserProfile:
+    profile = os.environ.get("GEMINI_BROWSER_COOKIE_PROFILE", "").strip()
+    return {"profile": profile} if profile else {}
 
 
 def _explicitly_unauthenticated(client: Any) -> bool:
@@ -150,8 +191,18 @@ class ClientManager:
         self._browser_retry_at = 0.0
         self.browser_auth_reason: str | None = None
 
+    def _remember_rate_limit(self) -> None:
+        self.browser_auth_reason = "BROWSER_COOKIE_RATE_LIMITED"
+        # Reuse the existing local browser-probe debounce, not a fabricated Retry-After.
+        self._browser_retry_at = time.monotonic() + 30
+
+    def _check_rate_limit(self) -> None:
+        if self.browser_auth_reason == "BROWSER_COOKIE_RATE_LIMITED" and time.monotonic() < self._browser_retry_at:
+            raise ClientRateLimited()
+
     def ensure_browser_cookie(self) -> None:
         """Bind a verified browser session when no credential is configured."""
+        self._check_rate_limit()
         if os.environ.get("GEMINI_PSID"):
             return
         if not browser_cookie_auto_load_enabled():
@@ -160,12 +211,22 @@ class ClientManager:
             raise ClientAuthenticationRequired(auth_reason="BROWSER_COOKIE_DEPENDENCY_MISSING")
 
         with self._browser_auth_lock:
+            self._check_rate_limit()
             if os.environ.get("GEMINI_PSID"):
                 return
             if self.browser_auth_reason and time.monotonic() < self._browser_retry_at:
                 raise ClientAuthenticationRequired(auth_reason=self.browser_auth_reason)
             manager = get_cookie_manager()
-            discovery = manager.discover_browser_cookies()
+            try:
+                discovery = manager.discover_browser_cookies(**_configured_browser_profile())
+            except Exception as error:
+                if classify_exception(error).error_code == "RATE_LIMITED":
+                    self._remember_rate_limit()
+                    raise ClientRateLimited() from None
+                raise
+            if discovery.reason == "BROWSER_COOKIE_RATE_LIMITED":
+                self._remember_rate_limit()
+                raise ClientRateLimited()
             psid = discovery.cookies.get("__Secure-1PSID")
             if not psid:
                 self.browser_auth_reason = discovery.reason or "BROWSER_COOKIE_NOT_FOUND"
@@ -188,6 +249,7 @@ class ClientManager:
 
     def get_client(self) -> Any:
         """获取或初始化 GeminiClient 实例"""
+        self._check_rate_limit()
         if self._client is None and not os.environ.get("GEMINI_PSID"):
             self.ensure_browser_cookie()
         with self._lock:
@@ -233,14 +295,30 @@ class ClientManager:
             logger.info("正在调用 client.init()...")
             from gemini_webapi.exceptions import AuthError
 
+            raw_auto_refresh = os.environ.get("GEMINI_AUTO_REFRESH")
+            if raw_auto_refresh is None:
+                cookie_source = ""
+                if COOKIE_MANAGER_AVAILABLE:
+                    try:
+                        cookie_info = get_cookie_manager().get_cookie()
+                        cookie_source = str(getattr(cookie_info, "source", "") or "")
+                    except Exception:
+                        cookie_source = ""
+                using_browser_session = cookie_source.startswith(("browser_", "browser_worker"))
+                auto_refresh_enabled = not using_browser_session
+            else:
+                auto_refresh_enabled = raw_auto_refresh.lower() == "true"
+
             init_options = dict(timeout=30, verbose=False, auto_close=False,
-                                auto_refresh=os.environ.get("GEMINI_AUTO_REFRESH", "true").lower() == "true")
+                                auto_refresh=auto_refresh_enabled)
             auth_reason = None
             try:
                 await client.init(**init_options)
                 if _explicitly_unauthenticated(client):
                     auth_reason = "GEMINI_SESSION_REJECTED"
-            except AuthError:
+            except AuthError as error:
+                if classify_exception(error).error_code == "RATE_LIMITED":
+                    raise
                 auth_reason = "GEMINI_SESSION_UNVERIFIED"
             if auth_reason:
                 await self._restore_browser_authentication(client, generation, init_options, auth_reason=auth_reason)
@@ -249,6 +327,9 @@ class ClientManager:
                     raise ClientInitializationResetError("client reset during initialization")
                 self._initialized = True
                 self._client_loop = asyncio.get_running_loop()
+            if self.browser_auth_reason == "BROWSER_COOKIE_RATE_LIMITED":
+                self.browser_auth_reason = None
+                self._browser_retry_at = 0
             logger.info("✅ GeminiClient 初始化完成！")
             return client
         except ClientAuthenticationRequired:
@@ -257,6 +338,13 @@ class ClientManager:
             if current:
                 with suppress(Exception):
                     await client.close()
+            raise
+        except Exception as error:
+            if classify_exception(error).error_code == "RATE_LIMITED":
+                self._remember_rate_limit()
+                with suppress(Exception):
+                    await client.close()
+                raise ClientRateLimited() from None
             raise
         except asyncio.CancelledError:
             with self._lock:
@@ -284,13 +372,20 @@ class ClientManager:
             raise ClientAuthenticationRequired(auth_reason=auth_reason)
         try:
             discovery = await asyncio.wait_for(
-                asyncio.to_thread(manager.discover_browser_cookies, expected_psid=old_psid), timeout=60,
+                asyncio.to_thread(
+                    manager.discover_browser_cookies, expected_psid=old_psid, **_configured_browser_profile(),
+                ),
+                timeout=60,
             )
-        except Exception:
+        except Exception as error:
+            if classify_exception(error).error_code == "RATE_LIMITED":
+                raise ClientRateLimited() from None
             self.browser_auth_reason = "BROWSER_COOKIE_AUTH_UNVERIFIED"
             raise ClientAuthenticationRequired(
                 auth_reason=auth_reason, browser_auth_reason=self.browser_auth_reason,
             ) from None
+        if discovery.reason == "BROWSER_COOKIE_RATE_LIMITED":
+            raise ClientRateLimited()
         cookies = discovery.cookies
         psid = cookies.get("__Secure-1PSID")
         if psid != old_psid or os.environ.get("GEMINI_PSID", "") != old_psid:
@@ -309,11 +404,13 @@ class ClientManager:
                     or os.environ.get("GEMINI_PSID", "") != old_psid):
                 raise ClientInitializationResetError("client reset during initialization")
         client._cookies.clear()
-        client.cookies = cookies
+        client.cookies = gemini_cookie_jar(cookies)
         prepare_browser_cookie_cache(force=True)
         try:
             await client.init(**options)
-        except AuthError:
+        except AuthError as error:
+            if classify_exception(error).error_code == "RATE_LIMITED":
+                raise
             raise ClientAuthenticationRequired(auth_reason="GEMINI_SESSION_UNVERIFIED") from None
         if _explicitly_unauthenticated(client):
             await client.close()
@@ -346,7 +443,7 @@ class ClientManager:
         extra_cookies = get_extra_cookies()
         if extra_cookies:
             prepare_browser_cookie_cache()
-            self._client.cookies = extra_cookies
+            self._client.cookies = gemini_cookie_jar(extra_cookies)
             logger.info(f"已加载 {len(extra_cookies)} 个完整认证 Cookie")
 
     def reset(self) -> None:

@@ -77,7 +77,7 @@ mcp dev src/server.py
 
 - 测试文件放 `tests/test_*.py`，名字描述被测行为
 - 工具面变更要同时断言**工具注册**和 **MCP annotations**（`readOnlyHint` / `destructiveHint` / `openWorldHint` 等）
-- 用户可见能力或安全元数据变更时，同步更新 [evaluations/gemini_web_mcp_contract.xml](../evaluations/gemini_web_mcp_contract.xml)（当前 17 个只读 QA）
+- 用户可见能力或安全元数据变更时，同步更新 MCP 合同评估。[合同评估](../evaluations/gemini_web_mcp_contract.xml)
 - `scripts/run_contract_checklist.py` 是快速、可诊断的架构契约门禁；它不替代 Python 3.11/3.12 上的全量测试
 - 交付前必跑：
 
@@ -159,7 +159,7 @@ annotations 定义在 [src/tools/annotations.py](../src/tools/annotations.py)。
 - [`.agents/skills/gemini-web-mcp/SKILL.md`](../.agents/skills/gemini-web-mcp/SKILL.md) —— 公开可安装 skill
 - [`.agents/skills/gemini-web-mcp-development/SKILL.md`](../.agents/skills/gemini-web-mcp-development/SKILL.md) —— 仓库开发 skill
 - [docs/tools.md](./tools.md) —— 工具手册
-- [docs/changelog.md](./changelog.md) —— 在 `## [Unreleased]` 的 Added/Changed/Removed/Fixed 分类追加条目
+- [docs/changelog.md](./changelog.md) —— 把用户可感知的变更追加到 `## [Unreleased]`，写清影响及迁移方法。按 Added、Changed、Deprecated、Removed、Fixed 或 Security 归类，完整提交历史通过版本对比链接查阅
 - [docs/development-status.md](./development-status.md) —— 当已实现、部分完成或 owner 决策边界变化时同步更新
 
 Skill 遵循 [agentskills.io](https://agentskills.io) 规范：`references/` 目录（复数）、description 含"何时使用"、`compatibility` 字段、SKILL.md < 500 行渐进式披露。
@@ -171,13 +171,15 @@ Skill 遵循 [agentskills.io](https://agentskills.io) 规范：`references/` 目
 发布流程（仅维护者）：
 
 1. 同时更新 `pyproject.toml` 的 `project.version`、运行时 Skill 与开发 Skill frontmatter；运行时 banner 从已安装包元数据读取
-2. 将 `docs/changelog.md` 的待发布内容归档到 `## [X.Y.Z] - YYYY-MM-DD`，保留空的 `## [Unreleased]`
+2. 将 `docs/changelog.md` 的待发布内容归档到 `## [X.Y.Z] - YYYY-MM-DD`，使用实际发布日期，更新版本对比链接，留出新的 `## [Unreleased]`
 3. 更新 README、客户端示例和 Launch Kit；固定 release URL 若存在必须匹配版本，公开 `uvx` 示例必须保留规范 Git 源，然后运行 `python scripts/check_version_consistency.py`
 4. 运行 `python scripts/package_release.py --tag vX.Y.Z`，校验 tag、两个 Skill、changelog、wheel 元数据和所有资产名
 5. PR 合并后执行 `git tag -a vX.Y.Z -m "vX.Y.Z"` 并推送
 6. `.github/workflows/release.yml` 会重新执行静态检查、全量离线测试、skill 校验、profile/协议 smoke 和 clean-wheel 安装；只有下载后的资产再次通过 tag/名称/wheel 元数据校验，才创建 GitHub Release
 
-遵循 [SemVer](https://semver.org/)：破坏性工具面变更升 major，新工具/功能升 minor，bug 修复升 patch。
+当前开发阶段沿用 `0.x` 版本线。新增能力或调整工具契约时递增次版本号，并说明迁移影响。兼容性修复使用补丁版本。日常 PR 将变更记入 `Unreleased`，集中到发布准备时定版。[SemVer](https://semver.org/) · [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
+
+每次迭代围绕一个可独立验收的用户工作流或共享能力。独立功能分配下一个次版本，围绕既有能力的修复使用补丁号。重建开发历史时标明编号来源和提交边界，并在[原版本记录](version-history.md)保留发布证据。
 
 ---
 

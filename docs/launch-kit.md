@@ -20,7 +20,7 @@ Install in an isolated environment, start the real MCP stdio server, and call an
 uvx --from git+https://github.com/Luckycat133/gemini-web-mcp@codex/gemini-tools-polish-20261101 gemini-mcp-onboarding
 ```
 
-Replace the branch after `@` with a reviewed commit SHA for an immutable install. The command checks `profile=function`, `enabled_tools=17` and `text_tool=gemini_ask` without forwarding Gemini Cookies or calling Gemini. See [source integration notes](source-update-integration.md) for the differences from the published 0.2.2 release.
+Replace the branch after `@` with a reviewed commit SHA for an immutable install. The command checks `profile=function`, `enabled_tools=6` and `text_tool=gemini_ask` without forwarding Gemini Cookies or calling Gemini. Use a separate `gemini-mcp-account` entry for conversation and account management. [Source integration notes](source-update-integration.md)
 
 Install the runtime skill for agents that operate the server:
 
@@ -28,7 +28,7 @@ Install the runtime skill for agents that operate the server:
 clawhub install gemini-web-mcp
 ```
 
-This development branch keeps the Python package and public Skills at `0.2.1`. Check the ClawHub listing for the version it actually distributes. To install the development branch's copy:
+The Python package and Skills on this branch use `0.20.8`. Check the ClawHub listing for the version it distributes. To install the development branch's copy:
 
 ```bash
 npx --yes skills@1.5.21 add \
@@ -59,7 +59,7 @@ gemini-mcp-function
 
 ## Product summary
 
-Gemini Web MCP is an agent-first MCP Python SDK v2 gateway and paired skill set. The development branch exposes two entrypoints: `gemini-mcp-function` for Chat, Task, media and research, and `gemini-mcp-account` for explicit management of chats, Notebooks, native Skills, preferences and schedules. Each offers 17 tools.
+Gemini Web MCP is an MCP Python SDK v2 gateway and paired skill set. Its two six-tool entries can be enabled independently. `gemini-mcp-function` serves Chat, Task, media, Research and operation recovery. `gemini-mcp-account` serves existing conversations, Notebooks and Task metadata. The explicit `function-full` and `account-full` profiles preserve the prior tool catalogs.
 
 The runtime skill and development skill are deliberately separate. Shared history services keep primary and compact typed results aligned, destructive results distinguish accepted requests from positive read-back evidence, and media results preserve requested, effective, and observed backend fields while treating a deliverable as local only after file/MIME/size metadata verification.
 

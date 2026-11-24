@@ -78,6 +78,7 @@ from ..services.notebooks import (
     NotebookChatReadError,
     fetch_native_notebooks as fetch_native_notebooks_service,
     fetch_notebook_chats as fetch_notebook_chats_service,
+    find_notebook as _find_notebook,
     move_chat_to_notebook as move_chat_to_notebook_service,
     move_chat_to_notebook_payload as registered_move_chat_payload,
     native_notebooks_payload as registered_notebooks_payload,
@@ -195,7 +196,7 @@ CONVERSATION_HISTORY_FILTERS: tuple[dict[str, Any], ...] = (
 
 def _json_response(payload: Any) -> list[TextContent]:
     """Serialize payload as a single JSON TextContent (for response_format='json')."""
-    return [TextContent(type="text", text=json.dumps(payload, ensure_ascii=False, indent=2))]
+    return [TextContent(type="text", text=json.dumps(payload, ensure_ascii=False, separators=(",", ":")))]
 
 
 
@@ -684,62 +685,12 @@ async def _fetch_notebook_chats(
     return await fetch_notebook_chats_service(client, notebook_id, limit, offset)
 
 
-def _find_notebook(
-    notebooks: list[dict[str, Any]],
-    notebook_id: str = "",
-    notebook_title: str = "",
-) -> dict[str, Any] | None:
-    clean_id = notebook_id.strip()
-    clean_title = notebook_title.strip()
-    if clean_id:
-        return next((item for item in notebooks if item.get("id") == clean_id), None)
-    if clean_title:
-        exact = [item for item in notebooks if item.get("title") == clean_title]
-        if len(exact) == 1:
-            return exact[0]
-        folded = clean_title.casefold()
-        matches = [item for item in notebooks if str(item.get("title", "")).casefold() == folded]
-        if len(matches) == 1:
-            return matches[0]
-    return None
-
-
-
-
-
 def _conversation_metadata_payload(
     pinned: bool,
     page_size: int,
     next_page_token: str | None = None,
 ) -> str:
     return _conversation_history_payload([pinned, None, True], page_size, next_page_token)
-
-
-async def _fetch_conversation_metadata_bucket(
-    client,
-    pinned: bool,
-    target_count: int,
-) -> tuple[list[dict[str, Any]], dict[str, Any]]:
-    source_name = "ui_pinned" if pinned else "ui_recent"
-    source = await _fetch_conversation_metadata_source(
-        client,
-        source_name,
-        [pinned, None, True],
-        max_items=target_count,
-        page_size=min(max(target_count, 10), 100),
-        max_pages=100,
-    )
-    diagnostic = dict(source["diagnostic"])
-    diagnostic.update(
-        {
-            "pinned": pinned,
-            "has_remote_more": bool(diagnostic.get("next_page_token_present")),
-        }
-    )
-    return source["items"], {
-        "pinned": pinned,
-        **diagnostic,
-    }
 
 
 async def _fetch_recent_conversation_metadata(

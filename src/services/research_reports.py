@@ -10,7 +10,7 @@ from typing import Any
 from urllib.parse import urlsplit
 
 from ..domain import DomainErrorCode, DomainResult, DomainWarning, OperationState
-from ..infrastructure.account_identity import current_account_key, operation_account_matches
+from ..infrastructure.account_identity import account_matches, current_account_key, operation_account_matches
 from ..infrastructure.operation_store import RETENTION_SECONDS, OperationStore
 from .research_result_storage import RESEARCH_OPERATIONS, ResearchResultUnavailable, load_research_result
 
@@ -25,7 +25,7 @@ class ResearchReportSource:
     operation_id: str | None = None
 
     def account_matches(self) -> bool:
-        return self.account_key == current_account_key()
+        return account_matches(self.account_key, current_account_key())
 
 
 def _saved_output(text: str) -> Any:
@@ -90,11 +90,11 @@ async def resolve_research_report(
     try:
         await client_initializer()
         owner = current_account_key()
-        if not owner or (previous_owner is not None and owner != previous_owner):
+        if not owner or (previous_owner is not None and not account_matches(previous_owner, owner)):
             return None, DomainResult.failure(DomainErrorCode.CAPABILITY_UNAVAILABLE,
                 "Report account could not be verified.", verification_status="account_mismatch_or_unbound")
         output = await fetch_report(client_provider(), chat_id)
-        if owner != current_account_key():
+        if not account_matches(owner, current_account_key()):
             return None, DomainResult.failure(DomainErrorCode.CAPABILITY_UNAVAILABLE,
                 "Report account changed while reading.", verification_status="account_mismatch_or_unbound")
         if output:

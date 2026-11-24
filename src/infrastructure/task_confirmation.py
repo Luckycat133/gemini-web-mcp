@@ -12,6 +12,49 @@ from typing import Any
 
 _MAX_CHOICES = 20
 _MAX_BUTTONS = 50
+_BROWSER_PERMISSION_TITLES = frozenset({"browser", "browser permission", "浏览器", "浏览器权限", "瀏覽器", "瀏覽器權限"})
+_BROWSER_ALLOW_ONCE = frozenset({"allow", "allow once", "允许", "允许一次", "允許", "允許一次"})
+_BROWSER_ALWAYS_ALLOW = frozenset({"always allow", "始终允许", "一律允許"})
+_BROWSER_DENY = frozenset({"deny", "do not allow", "don't allow", "不允许", "拒绝", "不允許", "拒絕"})
+
+
+def _permission_label(value: str) -> str:
+    return " ".join(value.casefold().replace("’", "'").split())
+
+
+def one_time_browser_option(turn: dict[str, Any]) -> dict[str, str] | None:
+    """Select the native one-step browser grant in a verified confirmation card."""
+    card = turn.get("input_card")
+    options = turn.get("input_options")
+    if (not isinstance(card, dict) or card.get("unsupported") or card.get("browser_permission_card") is not True
+            or not isinstance(options, list) or len(options) not in (2, 3)):
+        return None
+    replies = card.get("replies")
+    if not isinstance(replies, list) or len(replies) != len(options):
+        return None
+    if any(not isinstance(option, dict) or not all(isinstance(option.get(key), str) and option[key].strip()
+               for key in ("label", "prompt", "input_option_id")) for option in options):
+        return None
+    if card.get("requires_option_id") is True:
+        choice_id = "vm"
+    elif card.get("requires_option_id") is False and len(options) == 3:
+        # Gemini's general browser-use card follows the saved browser mode.
+        # Its separate persistent/once/deny actions occupy slots 6/7/8.
+        choice_id = None
+    else:
+        return None
+    labels_by_slot = ((6, _BROWSER_ALWAYS_ALLOW), (7, _BROWSER_ALLOW_ONCE), (8, _BROWSER_DENY))[-len(options):]
+    if any(
+        not isinstance(reply, dict) or reply.get("action_choice_id") != choice_id
+        or reply.get("subagent_conversation_id") is not None or reply.get("action_path") != [slot, 0]
+        or reply.get("input_option_id") != option["input_option_id"] or reply.get("prompt") != option["prompt"]
+        or _permission_label(option["label"]) not in labels
+        for option, reply, (slot, labels) in zip(options, replies, labels_by_slot, strict=True)
+    ):
+        return None
+    if any(len({option[key] for option in options}) != len(options) for key in ("input_option_id", "prompt")):
+        return None
+    return {"input_option_id": options[-2]["input_option_id"], "prompt": options[-2]["prompt"]}
 
 
 def _field(value: list[Any], index: int) -> Any:
@@ -24,6 +67,15 @@ def _text(value: Any, maximum: int) -> bool:
 
 def _present(value: Any) -> bool:
     return value is not None and value != "" and value != []
+
+
+def native_confirmation_card(candidate: list[Any]) -> list[Any] | None:
+    details = _field(candidate, 12)
+    cards = _field(details, 34) if isinstance(details, list) else None
+    entry = _field(cards, 0) if isinstance(cards, list) else None
+    group = _field(entry, 1) if isinstance(entry, list) else None
+    card = group.get("154") if isinstance(group, dict) else None
+    return card if isinstance(card, list) else None
 
 
 def _query_button(button: Any) -> tuple[str, str] | None:
@@ -58,6 +110,9 @@ def parse_confirmation_replies(card: list[Any], *, chat_id: str, response_id: st
     replies: list[dict[str, Any]] = []
     choices = _field(card, 13)
     context: dict[str, Any] = {"requires_option_id": bool(choices), "replies": replies}
+    title = _field(card, 1)
+    if isinstance(title, str) and _permission_label(title) in _BROWSER_PERMISSION_TITLES:
+        context["browser_permission_card"] = True
     result = {"input_options": public, "input_card": context}
     try:
         if _present(_field(card, 14)):

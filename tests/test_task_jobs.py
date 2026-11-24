@@ -12,10 +12,12 @@ import pytest
 
 from src.domain import CleanupObservation, CleanupState, DomainErrorCode, OperationState
 from src.infrastructure.operation_store import OperationStore
+from src.infrastructure.task_confirmation import parse_confirmation_replies
 from src.remote_chat_cleanup_manager import extract_remote_chat_id
 import src.client_wrapper as wrapper
 import src.services.task_jobs as task_jobs
 from src.services.cleanup_scope import observe_upstream_identity
+from src.services.task_inputs import input_handle
 
 
 @pytest.fixture(autouse=True)
@@ -23,6 +25,7 @@ def _synthetic_account(monkeypatch):
     monkeypatch.setenv("GEMINI_PSID", "synthetic-offline-test-account")
     monkeypatch.setenv("GEMINI_BROWSER_AUTO_LOAD", "false")
     monkeypatch.setenv("GEMINI_AUTO_REFRESH", "false")
+    monkeypatch.delenv("GEMINI_TASK_AUTO_APPROVE", raising=False)
     monkeypatch.setattr(task_jobs, "refresh_task_schedule_guard", AsyncMock(return_value=[]))
     monkeypatch.setattr(task_jobs, "fetch_task_file_cards", AsyncMock(return_value=()))
 
@@ -972,7 +975,8 @@ def test_confirmation_card_cannot_be_saved_as_final_task_answer_or_cleaned(store
         assert result.data.input_url == "https://gemini.google.com/app/one"
 
 
-def test_task_input_status_is_metadata_only_and_worker_does_not_approve(store, monkeypatch):
+def test_task_input_status_is_metadata_only_even_with_auto_approval_enabled(store, monkeypatch):
+    monkeypatch.setenv("GEMINI_TASK_AUTO_APPROVE", "true")
     record = _read_record(store, state="partial")
     store.update(record.operation_id, state="partial", phase="task_input_required")
     record = store.get(record.operation_id)
@@ -984,6 +988,95 @@ def test_task_input_status_is_metadata_only_and_worker_does_not_approve(store, m
     assert result.ok and result.data.input_required
     assert result.data.input_prompt is None and not client.read_calls and not client.calls
     assert store.get(record.operation_id).cleanup_protected
+
+
+def _permission_turn(*, label="允许一次", choice_id="vm", rid="r_one", rcid="rc_id"):
+    allow = [label, [None, None, None, "synthetic-allow"]]
+    deny = ["不允许", [None, None, None, "synthetic-deny"]]
+    always = ["始终允许", [None, None, None, "synthetic-always-allow"]]
+    card = [None, "浏览器", "Public fixture", None, None, None, [always] if choice_id is None else None,
+            [allow], [deny], 1, None, None, None, [[choice_id, "Remote browser"]] if choice_id is not None else None]
+    return {"chat_id": "c_one", "rid": rid, "rcid": rcid, "input_required": True,
+            **parse_confirmation_replies(card, chat_id="c_one", response_id=rid, candidate_id=rcid)}
+
+
+@pytest.mark.parametrize("choice_id", [None, "vm"])
+def test_background_observer_replies_once_to_each_new_browser_permission_card(store, monkeypatch, choice_id):
+    from src.operation_worker import run_worker
+
+    monkeypatch.setenv("GEMINI_TASK_AUTO_APPROVE", "true")
+    record = _make_record(store, retain_chat=True)
+    client = TaskClient(raise_on_generate=True)
+    _install_execute_doubles(monkeypatch, client)
+    # A later poll, without any result/status call, finds the first card.
+    monkeypatch.setattr(task_jobs, "fetch_task_metadata", AsyncMock(side_effect=[_metadata(2), _metadata(5), _metadata(5)]))
+    read_turn = AsyncMock(side_effect=[_permission_turn(choice_id=choice_id),
+                                      _permission_turn(label="Allow", rid="r_next", rcid="rc_next")])
+    monkeypatch.setattr(task_jobs, "fetch_workflow_turn", read_turn)
+    monkeypatch.setattr(wrapper, "init_startup_infrastructure", lambda: None)
+    monkeypatch.setattr(wrapper, "_drain_due_cleanup", AsyncMock())
+    monkeypatch.setattr(wrapper, "_client_manager", SimpleNamespace(reset_async=AsyncMock()))
+    dispatched = []
+    monkeypatch.setattr("src.services.background._launch_detached_worker", lambda payload, _: dispatched.append(payload) or 12345)
+
+    asyncio.run(run_worker({"kind": "task_resume", "operation_id": record.operation_id, "worker_token": "worker"},
+                           store=store, poll_seconds=0, observation_seconds=1))
+    first, = dispatched
+    assert first["kind"] == "task_input" and first["operation_id"] == record.operation_id
+    assert first["request"]["chat_context"] == ["c_one", "r_one", "rc_id"]
+    assert first["request"].get("task_action_choice_id") == choice_id
+    assert first["request"]["prompt"] == "synthetic-allow"
+    assert store.task_input_dispatched(record.operation_id, input_handle(record))
+    saved = store.get(record.operation_id)
+    assert saved.verification_status == "automatic_input_dispatched" and saved.retain_chat and saved.cleanup_protected
+    assert saved.worker_token == first["worker_token"] and store.checkpoint_media(
+        record.operation_id, worker_token=saved.worker_token, chat_id="c_one", response_id="r_next", candidate_id="rc_next",
+    )
+    asyncio.run(task_jobs.recover_task_job(record, store=store, worker_token="worker"))
+    assert dispatched == [first]
+    asyncio.run(task_jobs.recover_task_job(store.get(record.operation_id), store=store, worker_token=saved.worker_token))
+    assert len(dispatched) == 2
+    assert dispatched[1]["request"]["chat_context"] == ["c_one", "r_next", "rc_next"]
+    assert read_turn.await_count == 2 and not client.calls
+
+
+@pytest.mark.parametrize("reason", ["disabled", "persistent", "local", "clarification", "setup", "different_turn",
+                                   "changed_account", "wrong_action_path", "shared_reply", "missing_deny", "thread_scope"])
+def test_background_keeps_unsupported_or_unverified_cards_waiting(store, monkeypatch, reason):
+    if reason != "disabled":
+        monkeypatch.setenv("GEMINI_TASK_AUTO_APPROVE", "true")
+    record = _make_record(store)
+    _install_execute_doubles(monkeypatch, TaskClient(raise_on_generate=True), _metadata(5))
+    label = {"persistent": "Always allow", "thread_scope": "允许在此对话中使用"}.get(reason, "允许一次")
+    turn = _permission_turn(label=label,
+                            choice_id="local_chrome:synthetic-device" if reason == "local" else "vm",
+                            rid="r_other" if reason == "different_turn" else "r_one")
+    if reason == "clarification":
+        turn.pop("input_card")
+    if reason == "setup":
+        turn["setup_card_present"] = True
+    if reason == "wrong_action_path":
+        turn["input_card"]["replies"][0]["action_path"] = [6, 0]
+    if reason == "shared_reply":
+        turn["input_options"][1]["prompt"] = turn["input_options"][0]["prompt"]
+    if reason == "missing_deny":
+        turn["input_options"].pop()
+
+    async def read_card(*args):
+        if reason == "changed_account":
+            monkeypatch.setenv("GEMINI_PSID", "synthetic-different-account")
+        return turn
+
+    monkeypatch.setattr(task_jobs, "fetch_workflow_turn", read_card)
+    dispatched = []
+    monkeypatch.setattr("src.services.background._launch_detached_worker", lambda payload, _: dispatched.append(payload) or 12345)
+    asyncio.run(task_jobs.recover_task_job(record, store=store, worker_token="worker"))
+    monkeypatch.setenv("GEMINI_PSID", "synthetic-offline-test-account")
+    saved = store.get(record.operation_id)
+    assert not dispatched and not store.task_input_dispatched(record.operation_id, input_handle(record))
+    assert saved.worker_token == "worker" and saved.cleanup_protected
+    if reason != "changed_account":
+        assert saved.phase == "task_input_required"
 
 
 @pytest.mark.parametrize('choice_id', [None, 'vm'])

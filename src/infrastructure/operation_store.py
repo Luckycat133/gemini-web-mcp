@@ -12,8 +12,8 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 
-from .account_identity import current_account_key, omni_video_api_key, omni_video_owner
-from ..constants import OMNI_VIDEO_API_BACKEND
+from .account_identity import account_key_scope, account_matches, current_account_key, omni_video_api_key, omni_video_owner
+from ..constants import NATIVE_MEDIA_BROWSER_BACKEND, OMNI_VIDEO_API_BACKEND
 from ..domain.artifacts import Artifact
 
 RETENTION_SECONDS = 7 * 24 * 60 * 60
@@ -32,8 +32,17 @@ _MEDIA_COLUMNS = {
 }
 _V5_COLUMNS = _V4_COLUMNS | _MEDIA_COLUMNS
 _COLUMNS = _V5_COLUMNS | {"account_key", "account_binding_pending"}
-_TABLES = {"operations", "task_schedule_guards", "operation_artifacts", "task_file_manifests", "task_inputs"}
+_TABLES = {
+    "operations", "task_schedule_guards", "operation_artifacts", "task_file_manifests", "task_inputs",
+    "operation_image_sources", "web_task_approval_claims", "web_task_delete_claims",
+}
 _MEDIA_TERMINAL = {"completed", "failed", "unavailable", "cancelled"}
+
+
+def _account_parameters(account: str | None) -> tuple[str | None, str | None]:
+    """Bind a fixed-size SQL IN clause without weakening a missing scope."""
+    keys = account_key_scope(account)
+    return (keys[0], keys[-1]) if keys else (None, None)
 
 
 @dataclass(frozen=True)
@@ -67,6 +76,8 @@ class OperationRecord:
     artifact_state: str | None = None
     account_key: str | None = None
     account_binding_pending: bool = False
+    source_operation_id: str | None = None
+    source_artifact_id: str | None = None
 
 
 def _record_from_row(row: sqlite3.Row) -> OperationRecord:
@@ -99,17 +110,18 @@ class OperationStore:
         fd = os.open(self.path, os.O_CREAT | os.O_RDWR, 0o600)
         os.fchmod(fd, 0o600)
         os.close(fd)
-        connection = sqlite3.connect(self.path, timeout=10)
+        connection = sqlite3.connect(self.path, timeout=30.0)
         connection.row_factory = sqlite3.Row
+        connection.execute("PRAGMA busy_timeout = 30000")
         try:
             if read_only:
                 connection.execute("BEGIN")
                 if not self._read_schema_ready(connection):
                     # Release the read snapshot before requesting the migration lock.
                     connection.rollback()
-                    self._initialize_schema(connection)
+                    self._initialize_schema(connection, read_only=True)
             else:
-                self._initialize_schema(connection)
+                self._initialize_schema(connection, read_only=False)
             with connection:
                 yield connection
         finally:
@@ -124,14 +136,21 @@ class OperationStore:
             return False
         tables = {row[0] for row in connection.execute("SELECT name FROM sqlite_master WHERE type='table'")}
         if not _TABLES.issubset(tables):
-            # Version 6 databases created by older builds can lack auxiliary tables.
+            # Repair missing auxiliary tables before serving a read.
             return False
         if {row[1] for row in connection.execute("PRAGMA table_info(operations)")} != _COLUMNS:
             raise RuntimeError("operation database schema is incompatible")
         return True
 
     @staticmethod
-    def _initialize_schema(connection: sqlite3.Connection) -> None:
+    def _initialize_schema(connection: sqlite3.Connection, *, read_only: bool = False) -> None:
+        if not read_only:
+            try:
+                connection.execute("PRAGMA journal_mode = WAL")
+                connection.execute("PRAGMA synchronous = NORMAL")
+            except sqlite3.OperationalError:
+                # :memory: or read-only filesystems cannot switch journal mode.
+                pass
         connection.execute("BEGIN IMMEDIATE")
         version = connection.execute("PRAGMA user_version").fetchone()[0]
         if version > SCHEMA_VERSION:
@@ -201,6 +220,29 @@ class OperationStore:
                 created_at REAL NOT NULL, PRIMARY KEY (operation_id,input_id)
             )"""
         )
+        connection.execute(
+            """CREATE TABLE IF NOT EXISTS web_task_approval_claims (
+                account_key TEXT NOT NULL, chat_id TEXT NOT NULL, response_id TEXT NOT NULL,
+                candidate_id TEXT NOT NULL, state TEXT NOT NULL,
+                PRIMARY KEY (account_key,chat_id,response_id,candidate_id)
+            )"""
+        )
+        connection.execute(
+            """CREATE TABLE IF NOT EXISTS web_task_delete_claims (
+                account_key TEXT NOT NULL, chat_id TEXT NOT NULL, title_digest TEXT NOT NULL,
+                PRIMARY KEY (account_key,chat_id,title_digest)
+            )"""
+        )
+        connection.execute(
+            """CREATE TABLE IF NOT EXISTS operation_image_sources (
+                operation_id TEXT PRIMARY KEY, source_operation_id TEXT NOT NULL, source_artifact_id TEXT NOT NULL
+            )"""
+        )
+        # Older v6 writers can expire a child operation too.
+        connection.execute(
+            """CREATE TRIGGER IF NOT EXISTS operation_image_sources_delete AFTER DELETE ON operations
+                BEGIN DELETE FROM operation_image_sources WHERE operation_id=OLD.operation_id; END"""
+        )
 
     def create(self, operation_id: str, operation: str, *, retain_chat: bool = False,
                delete_after_seconds: int | None = None, requested_model: str | None = None,
@@ -225,11 +267,15 @@ class OperationStore:
                       delete_after_seconds: int | None = None, requested_model: str | None = None,
                       thinking_level: str | None = None, media_type: str | None = None,
                       output_dir: str | None = None, filename: str | None = None,
-                      request_model: str | None = None, effective_backend: str | None = None) -> tuple[OperationRecord, bool]:
+                      request_model: str | None = None, effective_backend: str | None = None,
+                      source_operation_id: str | None = None,
+                      source_artifact_id: str | None = None) -> tuple[OperationRecord, bool]:
         """Atomically claim a caller handle; never replace an existing claim."""
         now = self.clock()
         account = (omni_video_owner(omni_video_api_key()) if effective_backend == OMNI_VIDEO_API_BACKEND
                    else current_account_key())
+        if (source_operation_id is None) != (source_artifact_id is None):
+            raise ValueError("image lineage requires both source operation and artifact IDs")
         with self._connect() as db:
             db.execute("DELETE FROM operations WHERE created_at <= ? AND cleanup_protected=0 AND operation_id <> ?", (
                 now - RETENTION_SECONDS, operation_id,
@@ -245,19 +291,41 @@ class OperationStore:
                  int(retain_chat), delete_after_seconds, "not_scheduled", 1, requested_model, thinking_level,
                  media_type, output_dir, filename, request_model, effective_backend, account, int(account is None)),
             )
-            row = db.execute("SELECT * FROM operations WHERE operation_id=?", (operation_id,)).fetchone()
+            created = cursor.rowcount == 1
+            if created and source_operation_id is not None:
+                saved = db.execute(
+                    """INSERT INTO operation_image_sources
+                       SELECT ?, parent.operation_id, image.artifact_id
+                       FROM operations AS parent JOIN operation_artifacts AS image USING (operation_id)
+                       WHERE parent.operation_id=? AND parent.account_key IN (?,?) AND parent.media_type='image'
+                         AND parent.state='completed' AND image.artifact_id=? AND image.kind='image'""",
+                    (operation_id, source_operation_id, *_account_parameters(account), source_artifact_id),
+                )
+                if saved.rowcount != 1:
+                    raise PermissionError("source image operation is unavailable")
+            row = self._select_operation(db, operation_id)
             assert row is not None
-            return _record_from_row(row), cursor.rowcount == 1
+            return _record_from_row(row), created
+
+    @staticmethod
+    def _select_operation(db: sqlite3.Connection, operation_id: str) -> sqlite3.Row | None:
+        row: sqlite3.Row | None = db.execute(
+            """SELECT operations.*, source_operation_id, source_artifact_id
+               FROM operations LEFT JOIN operation_image_sources USING (operation_id)
+               WHERE operation_id=?""",
+            (operation_id,),
+        ).fetchone()
+        return row
 
     def get(self, operation_id: str) -> OperationRecord | None:
         with self._connect(read_only=True) as db:
-            row = db.execute("SELECT * FROM operations WHERE operation_id = ?", (operation_id,)).fetchone()
+            row = self._select_operation(db, operation_id)
         return _record_from_row(row) if row is not None else None
 
     def task_input_dispatched(self, operation_id: str, input_id: str) -> bool:
         with self._connect(read_only=True) as db:
-            return db.execute("SELECT 1 FROM task_inputs WHERE operation_id=? AND input_id=? AND account_key=?",
-                              (operation_id, input_id, current_account_key())).fetchone() is not None
+            return db.execute("SELECT 1 FROM task_inputs WHERE operation_id=? AND input_id=? AND account_key IN (?,?)",
+                              (operation_id, input_id, *_account_parameters(current_account_key()))).fetchone() is not None
 
     def has_task_input(self, operation_id: str) -> bool:
         """Whether this account has consumed any exact card on this operation."""
@@ -265,12 +333,99 @@ class OperationStore:
         if not account:
             return False
         with self._connect(read_only=True) as db:
-            return db.execute("SELECT 1 FROM task_inputs WHERE operation_id=? AND account_key=? LIMIT 1",
-                              (operation_id, account)).fetchone() is not None
+            return db.execute("SELECT 1 FROM task_inputs WHERE operation_id=? AND account_key IN (?,?) LIMIT 1",
+                              (operation_id, *_account_parameters(account))).fetchone() is not None
+
+    def has_web_task_delete_claim(self, account: str, chat_id: str, title_digest: str) -> bool:
+        with self._connect(read_only=True) as db:
+            return db.execute("SELECT 1 FROM web_task_delete_claims WHERE account_key IN (?,?) AND chat_id=? AND title_digest=?",
+                              (*_account_parameters(account), chat_id, title_digest)).fetchone() is not None
+
+    def claim_web_task_approval(self, account: str, chat_id: str, response_id: str, candidate_id: str,
+                                *, title_digest: str | None = None) -> bool:
+        """Claim the card and any one-use deletion rule without taking cleanup ownership."""
+        owner = current_account_key()
+        if not owner or not account_matches(account, owner):
+            return False
+        scope = _account_parameters(owner)
+        with self._connect() as db:
+            if not account_matches(owner, current_account_key()):
+                return False
+            owned = db.execute("""SELECT operation_id FROM operations WHERE account_key IN (?,?) AND upstream_chat_id=?
+                                  AND operation='gemini_run_task' LIMIT 1""", (*scope, chat_id)).fetchone()
+            if title_digest is None and owned is not None:
+                return False
+            if title_digest is not None:
+                if db.execute("SELECT 1 FROM web_task_delete_claims WHERE account_key IN (?,?) AND chat_id=? AND title_digest=?",
+                              (*scope, chat_id, title_digest)).fetchone():
+                    return False
+                if db.execute("""SELECT 1 FROM task_inputs AS input JOIN operations AS op USING (operation_id)
+                                 WHERE input.account_key IN (?,?) AND op.upstream_chat_id=? AND input.previous_response_id=?
+                                   AND input.previous_candidate_id=? LIMIT 1""",
+                              (*scope, chat_id, response_id, candidate_id)).fetchone():
+                    return False
+            if db.execute("""SELECT 1 FROM web_task_approval_claims WHERE account_key IN (?,?) AND chat_id=?
+                             AND response_id=? AND candidate_id=?""", (*scope, chat_id, response_id, candidate_id)).fetchone():
+                return False
+            if db.execute("INSERT OR IGNORE INTO web_task_approval_claims VALUES (?,?,?,?,'claimed')",
+                          (owner, chat_id, response_id, candidate_id)).rowcount != 1:
+                return False
+            if title_digest is not None:
+                db.execute("INSERT INTO web_task_delete_claims VALUES (?,?,?)", (owner, chat_id, title_digest))
+            if not account_matches(owner, current_account_key()):
+                raise PermissionError("Approval claim account changed")
+            return True
+
+    def release_unmatched_web_task_delete(self, account: str, chat_id: str, response_id: str, candidate_id: str,
+                                          *, title_digest: str) -> None:
+        """Return the rule only when the browser reports positively that it did not click."""
+        owner = current_account_key()
+        if not owner or not account_matches(account, owner):
+            return
+        scope = _account_parameters(owner)
+        with self._connect() as db:
+            if not account_matches(owner, current_account_key()):
+                return
+            claims = db.execute("""SELECT account_key,state FROM web_task_approval_claims
+                WHERE account_key IN (?,?) AND chat_id=? AND response_id=? AND candidate_id=?""",
+                (*scope, chat_id, response_id, candidate_id)).fetchall()
+            rules = db.execute("""SELECT account_key FROM web_task_delete_claims
+                WHERE account_key IN (?,?) AND chat_id=? AND title_digest=?""",
+                (*scope, chat_id, title_digest)).fetchall()
+            if (len(claims) != 1 or claims[0]["state"] != "claimed" or len(rules) > 1
+                    or (rules and rules[0]["account_key"] != claims[0]["account_key"])):
+                return
+            stored_owner = claims[0]["account_key"]
+            if db.execute("""DELETE FROM web_task_approval_claims WHERE account_key=? AND chat_id=? AND response_id=?
+                             AND candidate_id=? AND state='claimed'""", (stored_owner, chat_id, response_id, candidate_id)).rowcount:
+                db.execute("DELETE FROM web_task_delete_claims WHERE account_key=? AND chat_id=? AND title_digest=?",
+                           (stored_owner, chat_id, title_digest))
+            if not account_matches(owner, current_account_key()):
+                raise PermissionError("Approval release account changed")
+
+    def finish_web_task_approval(self, account: str, chat_id: str, response_id: str, candidate_id: str,
+                                 *, continuation_verified: bool) -> None:
+        owner = current_account_key()
+        if not owner or not account_matches(account, owner):
+            return
+        state = "continuation_observed" if continuation_verified else "dispatch_unverified"
+        with self._connect() as db:
+            if not account_matches(owner, current_account_key()):
+                return
+            claims = db.execute("""SELECT account_key,state FROM web_task_approval_claims
+                WHERE account_key IN (?,?) AND chat_id=? AND response_id=? AND candidate_id=?""",
+                (*_account_parameters(owner), chat_id, response_id, candidate_id)).fetchall()
+            if len(claims) != 1 or claims[0]["state"] != "claimed":
+                return
+            db.execute("""UPDATE web_task_approval_claims SET state=? WHERE account_key=? AND chat_id=?
+                          AND response_id=? AND candidate_id=? AND state='claimed'""",
+                       (state, claims[0]["account_key"], chat_id, response_id, candidate_id))
+            if not account_matches(owner, current_account_key()):
+                raise PermissionError("Approval finish account changed")
 
     def begin_task_input(self, operation_id: str, input_id: str, *, response_id: str,
-                         candidate_id: str, worker_token: str) -> bool:
-        """Claim one explicit reply to one observed card; never store or replay its prompt."""
+                         candidate_id: str, worker_token: str, expected_worker_token: str | None = None) -> bool:
+        """Claim one reply to an observed card; workers also prove current ownership."""
         account = current_account_key()
         if not account or not all((input_id, response_id, candidate_id, worker_token)):
             return False
@@ -279,18 +434,25 @@ class OperationStore:
                           (operation_id, input_id)).fetchone():
                 return False
             row = db.execute("SELECT * FROM operations WHERE operation_id=?", (operation_id,)).fetchone()
-            if (row is None or row["account_key"] != account or row["operation"] != "gemini_run_task"
+            if (row is None or not account_matches(row["account_key"], account) or row["operation"] != "gemini_run_task"
                     or not row["cleanup_protected"] or row["upstream_response_id"] != response_id
                     or row["upstream_candidate_id"] != candidate_id or not row["upstream_chat_id"]
+                    or (expected_worker_token is not None and row["worker_token"] != expected_worker_token)
                     or row["state"] in {"completed", "failed", "unavailable", "cancelled"}
                     or db.execute("SELECT 1 FROM operation_artifacts WHERE operation_id=?", (operation_id,)).fetchone()):
                 return False
+            if db.execute("""SELECT 1 FROM web_task_approval_claims WHERE account_key IN (?,?) AND chat_id=?
+                             AND response_id=? AND candidate_id=?""",
+                          (*_account_parameters(account), row["upstream_chat_id"], response_id, candidate_id)).fetchone():
+                return False
             db.execute("INSERT INTO task_inputs VALUES (?,?,?,?,?,?)",
-                       (operation_id, input_id, account, response_id, candidate_id, self.clock()))
+                       (operation_id, input_id, row["account_key"], response_id, candidate_id, self.clock()))
             db.execute("""UPDATE operations SET state='queued',phase='task_input_dispatched',
                           upstream_response_id=NULL,upstream_candidate_id=NULL,worker_token=?,worker_pid=NULL,
-                          heartbeat_at=?,updated_at=?,verification_status='explicit_input_dispatched',error_code=NULL
-                          WHERE operation_id=?""", (worker_token, self.clock(), self.clock(), operation_id))
+                          heartbeat_at=?,updated_at=?,verification_status=?,error_code=NULL WHERE operation_id=?""",
+                       (worker_token, self.clock(), self.clock(),
+                        "automatic_input_dispatched" if expected_worker_token is not None else "explicit_input_dispatched",
+                        operation_id))
             return True
 
     def bind_pending_account(self, operation_id: str, *, worker_token: str, account_key: str) -> bool:
@@ -332,9 +494,9 @@ class OperationStore:
         """Distinguish a known Task from Notebook-backed Chat in cleanup."""
         with self._connect() as db:
             return db.execute(
-                """SELECT 1 FROM operations WHERE account_key=? AND upstream_chat_id=?
+                """SELECT 1 FROM operations WHERE account_key IN (?,?) AND upstream_chat_id=?
                    AND operation='gemini_run_task' LIMIT 1""",
-                (account_key, chat_id),
+                (*_account_parameters(account_key), chat_id),
             ).fetchone() is not None
 
     def attach_late_chat(self, operation_id: str, chat_id: str) -> bool:
@@ -384,12 +546,12 @@ class OperationStore:
                      THEN 'start_outcome_unverified' ELSE verification_status END,
                    phase=CASE WHEN phase IN ('created','chat_observed')
                      THEN 'plan_outcome_unverified' ELSE phase END, updated_at=?
-                   WHERE operation_id=? AND account_key=? AND media_type IS NULL AND cleanup_protected=1
+                   WHERE operation_id=? AND account_key IN (?,?) AND media_type IS NULL AND cleanup_protected=1
                      AND cleanup_state NOT IN ('completed','already_completed')
                      AND (upstream_chat_id IS NULL OR upstream_chat_id=?)
                      AND (? IS NULL OR upstream_response_id IS NULL OR upstream_response_id=?)
                      AND (? IS NULL OR upstream_candidate_id IS NULL OR upstream_candidate_id=?)""",
-                (chat_id, response_id, candidate_id, self.clock(), operation_id, account_key, chat_id,
+                (chat_id, response_id, candidate_id, self.clock(), operation_id, *_account_parameters(account_key), chat_id,
                  response_id, response_id, candidate_id, candidate_id),
             ).rowcount == 1
 
@@ -401,11 +563,12 @@ class OperationStore:
         with self._connect() as db:
             return db.execute(
                 """UPDATE operations SET upstream_response_id=?, upstream_candidate_id=?, updated_at=?
-                   WHERE operation_id=? AND account_key=? AND upstream_chat_id=? AND cleanup_protected=1
+                   WHERE operation_id=? AND account_key IN (?,?) AND upstream_chat_id=? AND cleanup_protected=1
                      AND phase IN ('created','chat_observed','plan_created','plan_outcome_unverified')
                      AND (upstream_response_id IS NULL OR upstream_response_id=?)
                      AND (upstream_candidate_id IS NULL OR upstream_candidate_id=?)""",
-                (response_id, candidate_id, self.clock(), operation_id, account_key, chat_id, response_id, candidate_id),
+                (response_id, candidate_id, self.clock(), operation_id, *_account_parameters(account_key), chat_id,
+                 response_id, candidate_id),
             ).rowcount == 1
 
     def reject_research_turn(self, operation_id: str, *, account_key: str, chat_id: str,
@@ -417,9 +580,9 @@ class OperationStore:
             return db.execute(
                 """UPDATE operations SET state='failed',phase='plan_rejected',cleanup_protected=0,
                    error_code='UPSTREAM_REJECTED',verification_status='research_rejection_observed',updated_at=?
-                   WHERE operation_id=? AND account_key=? AND upstream_chat_id=? AND upstream_response_id=?
+                   WHERE operation_id=? AND account_key IN (?,?) AND upstream_chat_id=? AND upstream_response_id=?
                      AND upstream_candidate_id=? AND phase='plan_outcome_unverified' AND cleanup_protected=1""",
-                (self.clock(), operation_id, account_key, chat_id, response_id, candidate_id),
+                (self.clock(), operation_id, *_account_parameters(account_key), chat_id, response_id, candidate_id),
             ).rowcount == 1
 
     def claim_research_confirmation(self, operation_id: str, *, expected_phase: str) -> bool:
@@ -454,6 +617,41 @@ class OperationStore:
             )
             if cursor.rowcount != 1:
                 raise LookupError("operation not found")
+
+    def reconcile_media_cleanup(self, expected: OperationRecord) -> bool:
+        """Apply verified cleanup to one unchanged Web media snapshot."""
+        with self._connect() as db:
+            row = db.execute(
+                """SELECT state, phase, verification_status, error_code, cleanup_state, worker_pid, heartbeat_at,
+                          EXISTS(SELECT 1 FROM operation_artifacts a WHERE a.operation_id=operations.operation_id)
+                              AS has_local_artifact
+                   FROM operations WHERE operation_id=? AND account_key=? AND upstream_chat_id=?
+                     AND media_type=? AND effective_backend IS NOT ? AND retain_chat=0 AND cleanup_protected=0
+                     AND worker_token IS ? AND updated_at=?""",
+                (expected.operation_id, expected.account_key, expected.upstream_chat_id, expected.media_type,
+                 OMNI_VIDEO_API_BACKEND, expected.worker_token, expected.updated_at),
+            ).fetchone()
+            if row is None or not account_matches(expected.account_key, current_account_key()):
+                return False
+            state, phase = row["state"], row["phase"]
+            verification, error = row["verification_status"], row["error_code"]
+            if state not in {"completed", "failed", "unavailable", "cancelled"}:
+                if phase == "media_rejected" and error in {
+                    "UPSTREAM_LIMIT_EXCEEDED", "ARTIFACT_NOT_RETURNED", "UPSTREAM_REJECTED",
+                }:
+                    state = "failed"
+                elif not row["has_local_artifact"]:
+                    state, phase = "unavailable", "remote_media_already_cleaned"
+                    verification, error = phase, "CAPABILITY_UNAVAILABLE"
+            if (expected.worker_token is None and row["worker_pid"] is None and row["heartbeat_at"] is None
+                    and row["cleanup_state"] == "completed" and state == row["state"]):
+                return True
+            return db.execute(
+                """UPDATE operations SET cleanup_state='completed',worker_token=NULL,worker_pid=NULL,
+                          heartbeat_at=NULL,updated_at=?,state=?,phase=?,verification_status=?,error_code=?
+                   WHERE operation_id=?""",
+                (self.clock(), state, phase, verification, error, expected.operation_id),
+            ).rowcount == 1
 
     def update(
         self, operation_id: str, *, state: str, phase: str,
@@ -555,6 +753,24 @@ class OperationStore:
                    WHERE operation_id=? AND worker_token=?""", (operation_id, worker_token),
             )
 
+    def reap_stale_workers(self, *, stale_after_seconds: float = 60.0) -> int:
+        """Clear expired worker leases on non-terminal rows so dead operations can be reclaimed.
+
+        Only heartbeats older than ``stale_after_seconds`` (or missing heartbeats on
+        leased rows) are reaped; actively heartbeating workers are left untouched, so
+        cross-host and mock PIDs behave deterministically.
+        """
+        cutoff = self.clock() - stale_after_seconds
+        with self._connect() as db:
+            cursor = db.execute(
+                """UPDATE operations SET worker_token=NULL, worker_pid=NULL, heartbeat_at=NULL
+                   WHERE state IN ('queued', 'running', 'partial')
+                     AND worker_token IS NOT NULL
+                     AND (heartbeat_at IS NULL OR heartbeat_at < ?)""",
+                (cutoff,),
+            )
+            return cursor.rowcount
+
     def begin_omni_video(self, operation_id: str, *, worker_token: str) -> bool:
         """Durably claim the one paid submission before sending it."""
         with self._connect() as db:
@@ -592,8 +808,14 @@ class OperationStore:
             ).rowcount == 1
 
     def checkpoint_media(self, operation_id: str, *, worker_token: str, chat_id: str,
-                         response_id: str | None = None, candidate_id: str | None = None) -> bool:
-        """Protect the first observed identity; never silently switch generation turns."""
+                         response_id: str | None = None, candidate_id: str | None = None,
+                         selected_model: str | None = None, native_submission: bool = False) -> bool:
+        """Protect one turn and save its dispatched selector when observed.
+
+        ``selected_model`` comes from client selection metadata, independently
+        of the caller's ``requested_model``. Missing metadata on later identity
+        frames keeps the saved selector intact, including for Task workflows.
+        """
         if not chat_id:
             raise ValueError("chat ID must not be blank")
         with self._connect() as db:
@@ -604,13 +826,18 @@ class OperationStore:
                                  ("upstream_candidate_id", candidate_id)):
                 if value and row[field] and row[field] != value:
                     raise ValueError("media response identity conflicts with saved operation")
+            native_submitted = native_submission or row["phase"] == "native_media_submitted"
+            phase = "native_media_submitted" if native_submitted and not (response_id or row["upstream_response_id"]) else "generation_observed"
             db.execute(
                 """UPDATE operations SET upstream_chat_id=?,
                    upstream_response_id=COALESCE(upstream_response_id, ?),
                    upstream_candidate_id=COALESCE(upstream_candidate_id, ?),
-                   state='running', phase='generation_observed', verification_status='upstream_identity_observed',
+                   request_model=COALESCE(?, request_model),
+                   effective_backend=CASE WHEN ? THEN ? ELSE effective_backend END,
+                   state='running', phase=?, verification_status='upstream_identity_observed',
                    updated_at=? WHERE operation_id=? AND worker_token=?""",
-                (chat_id, response_id, candidate_id, self.clock(), operation_id, worker_token),
+                (chat_id, response_id, candidate_id, selected_model, native_submission, NATIVE_MEDIA_BROWSER_BACKEND,
+                 phase, self.clock(), operation_id, worker_token),
             )
             return True
 
@@ -661,7 +888,7 @@ class OperationStore:
         if (expected.operation not in {"gemini_research", "gemini_deep_research"}
                 or not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", expected.operation_id)
                 or not expected.upstream_chat_id or not expected.account_key
-                or expected.account_key != current_account_key()):
+                or not account_matches(expected.account_key, current_account_key())):
             raise ValueError("Research report ownership could not be verified")
         root = self.path.resolve().parent / "artifacts"
         directory = root / expected.operation_id
@@ -686,7 +913,7 @@ class OperationStore:
         with self._connect() as db:
             row = db.execute("SELECT * FROM operations WHERE operation_id=?", (expected.operation_id,)).fetchone()
             identity_fields = ("operation", "account_key", "upstream_chat_id", "upstream_response_id", "upstream_candidate_id")
-            if (row is None or current_account_key() != expected.account_key
+            if (row is None or not account_matches(expected.account_key, current_account_key())
                     or any(row[key] != getattr(expected, key) for key in identity_fields)
                     or row["state"] in {"failed", "unavailable", "cancelled"}):
                 raise ValueError("Research report identity changed")
@@ -715,7 +942,7 @@ class OperationStore:
         with self._connect() as db:
             record = db.execute("SELECT * FROM operations WHERE operation_id=?", (operation_id,)).fetchone()
             if (record is None or record["operation"] not in {"gemini_run_task", "gemini_notebook_chat"}
-                    or record["account_key"] != current_account_key() or not record["cleanup_protected"]):
+                    or not account_matches(record["account_key"], current_account_key()) or not record["cleanup_protected"]):
                 raise ValueError("Task result ownership could not be verified")
             previous = db.execute("SELECT sha256 FROM operation_artifacts WHERE operation_id=? AND kind='report'", (operation_id,)).fetchone()
             if previous is not None and previous["sha256"] != digest:
@@ -750,7 +977,7 @@ class OperationStore:
         with self._connect() as db:
             record = db.execute('SELECT * FROM operations WHERE operation_id=?', (operation_id,)).fetchone()
             if (record is None or record['operation'] != 'gemini_run_task' or not record['cleanup_protected']
-                    or not current_account_key() or record['account_key'] != current_account_key()
+                    or not account_matches(record['account_key'], current_account_key())
                     or record['upstream_response_id'] != response_id or record['upstream_candidate_id'] != candidate_id
                     or not db.execute("SELECT 1 FROM operation_artifacts WHERE operation_id=? AND kind='report'",
                                       (operation_id,)).fetchone()):
@@ -763,9 +990,9 @@ class OperationStore:
     def task_files_committed(self, operation_id: str) -> bool:
         with self._connect(read_only=True) as db:
             row = db.execute('''SELECT m.file_count FROM task_file_manifests m JOIN operations o USING(operation_id)
-                WHERE m.operation_id=? AND m.account_key=? AND m.account_key=o.account_key
+                WHERE m.operation_id=? AND m.account_key IN (?,?) AND m.account_key=o.account_key
                   AND m.response_id=o.upstream_response_id AND m.candidate_id=o.upstream_candidate_id''',
-                             (operation_id, current_account_key())).fetchone()
+                             (operation_id, *_account_parameters(current_account_key()))).fetchone()
             if row is None:
                 return False
             count = db.execute("SELECT count(*) FROM operation_artifacts WHERE operation_id=? AND kind='file'",
@@ -779,7 +1006,7 @@ class OperationStore:
         with self._connect() as db:
             return db.execute(
                 """UPDATE operations SET state=?,phase=?,verification_status='task_artifact_verified',
-                   artifact_state='local',error_code=?,updated_at=? WHERE operation_id=? AND account_key=?
+                   artifact_state='local',error_code=?,updated_at=? WHERE operation_id=? AND account_key IN (?,?)
                    AND operation IN ('gemini_run_task','gemini_notebook_chat')
                    AND EXISTS (SELECT 1 FROM operation_artifacts WHERE operation_id=? AND kind='report')
                    AND (operation='gemini_notebook_chat' OR EXISTS (
@@ -790,7 +1017,7 @@ class OperationStore:
                                             WHERE a.operation_id=operations.operation_id AND a.kind='file')))""",
                 (terminal_state, 'task_failure_saved' if terminal_state == 'failed' else 'task_result_saved',
                  'UPSTREAM_REJECTED' if terminal_state == 'failed' else None, self.clock(), operation_id,
-                 current_account_key(), operation_id),
+                 *_account_parameters(current_account_key()), operation_id),
             ).rowcount == 1
 
     def release_task_result_cleanup(self, operation_id: str, *, terminal_state: str = "completed") -> bool:
@@ -801,7 +1028,7 @@ class OperationStore:
             return db.execute(
                 """UPDATE operations SET state=?,phase=?,
                    verification_status='task_artifact_verified',cleanup_protected=0,updated_at=?,error_code=?
-                   WHERE operation_id=? AND operation IN ('gemini_run_task','gemini_notebook_chat') AND account_key=?
+                   WHERE operation_id=? AND operation IN ('gemini_run_task','gemini_notebook_chat') AND account_key IN (?,?)
                    AND EXISTS (SELECT 1 FROM operation_artifacts WHERE operation_id=? AND kind='report')
                    AND (operation='gemini_notebook_chat' OR EXISTS (
                         SELECT 1 FROM task_file_manifests m WHERE m.operation_id=operations.operation_id
@@ -811,7 +1038,7 @@ class OperationStore:
                                             WHERE a.operation_id=operations.operation_id AND a.kind='file')))""",
                 (terminal_state, "task_failure_saved" if terminal_state == "failed" else "task_answer_saved",
                  self.clock(), "UPSTREAM_REJECTED" if terminal_state == "failed" else None,
-                 operation_id, current_account_key(), operation_id),
+                 operation_id, *_account_parameters(current_account_key()), operation_id),
             ).rowcount == 1
 
     def release_media_cleanup(self, operation_id: str, *, worker_token: str) -> bool:
@@ -849,21 +1076,27 @@ class OperationStore:
             return ()
         with self._connect() as db:
             return tuple(_record_from_row(row) for row in db.execute(
-                """SELECT * FROM operations WHERE account_key=? AND upstream_chat_id IS NOT NULL
-                   AND cleanup_state NOT IN ('completed','already_completed')""", (account_key,),
+                """SELECT * FROM operations WHERE upstream_chat_id IS NOT NULL
+                   AND ((effective_backend=? AND account_key=?) OR (effective_backend IS NOT ? AND account_key IN (?,?)))
+                   AND cleanup_state NOT IN ('completed','already_completed')""",
+                (OMNI_VIDEO_API_BACKEND, account_key, OMNI_VIDEO_API_BACKEND, *_account_parameters(account_key)),
             ))
 
     def recoverable_media(self, *, limit: int = 20) -> tuple[OperationRecord, ...]:
+        self.reap_stale_workers()
         api_owner = omni_video_owner(omni_video_api_key())
         web_owner = current_account_key()
         with self._connect() as db:
             return tuple(_record_from_row(row) for row in db.execute(
                 """SELECT * FROM operations WHERE media_type IS NOT NULL
-                   AND ((effective_backend=? AND account_key=?) OR (effective_backend IS NOT ? AND account_key=?))
+                   AND ((effective_backend=? AND account_key=?) OR (effective_backend IS NOT ? AND account_key IN (?,?)))
                    AND (worker_token IS NULL OR heartbeat_at IS NULL OR heartbeat_at < ?)
                    AND updated_at <= ?
                    AND ((state NOT IN ('completed','failed','unavailable','cancelled') AND upstream_chat_id IS NOT NULL
-                         AND upstream_response_id IS NOT NULL AND upstream_candidate_id IS NOT NULL)
+                         AND (cleanup_state NOT IN ('completed','already_completed') OR cleanup_protected=1 OR retain_chat=1)
+                         AND ((upstream_response_id IS NOT NULL AND upstream_candidate_id IS NOT NULL)
+                              OR (phase='native_media_submitted' AND media_type IN ('music','video')
+                                  AND upstream_response_id IS NULL AND upstream_candidate_id IS NULL)))
                      OR (effective_backend=? AND upstream_operation_id IS NOT NULL
                          AND (state NOT IN ('completed','failed','unavailable','cancelled')
                               OR (state='failed' AND phase='omni_rejected' AND (retain_chat=0 OR cleanup_protected=1)
@@ -871,24 +1104,26 @@ class OperationStore:
                      OR (state='completed' AND (retain_chat=0 OR (effective_backend=? AND cleanup_protected=1))
                          AND cleanup_state NOT IN ('completed','already_completed')))
                    ORDER BY updated_at LIMIT ?""",
-                (OMNI_VIDEO_API_BACKEND, api_owner, OMNI_VIDEO_API_BACKEND, web_owner,
+                (OMNI_VIDEO_API_BACKEND, api_owner, OMNI_VIDEO_API_BACKEND, *_account_parameters(web_owner),
                  self.clock() - 60, self.clock() - 60, OMNI_VIDEO_API_BACKEND, OMNI_VIDEO_API_BACKEND, limit),
             ))
 
     def recoverable_web_workflows(self, *, limit: int = 20) -> tuple[OperationRecord, ...]:
         """Resume exact reply observation or result cleanup; prompts are never replayed."""
+        scope = _account_parameters(current_account_key())
         with self._connect() as db:
             return tuple(_record_from_row(row) for row in db.execute(
                 """SELECT * FROM operations WHERE operation IN ('gemini_run_task','gemini_notebook_chat')
+                   AND account_key IN (?,?)
                    AND (worker_token IS NULL OR heartbeat_at IS NULL OR heartbeat_at < ?)
                    AND updated_at <= ? AND upstream_chat_id IS NOT NULL
                    AND upstream_response_id IS NOT NULL
                    AND state NOT IN ('unavailable','cancelled')
                    AND (state != 'failed' OR phase IN ('task_failed','task_failure_saved'))
                    AND NOT EXISTS (SELECT 1 FROM task_schedule_guards AS g
-                                   WHERE g.account_key=operations.account_key AND g.chat_id=operations.upstream_chat_id)
+                                   WHERE g.account_key IN (?,?) AND g.chat_id=operations.upstream_chat_id)
                    AND (cleanup_protected=1 OR (retain_chat=0 AND cleanup_state NOT IN ('completed','already_completed')))
-                   ORDER BY updated_at LIMIT ?""", (self.clock() - 60, self.clock() - 60, limit),
+                   ORDER BY updated_at LIMIT ?""", (*scope, self.clock() - 60, self.clock() - 60, *scope, limit),
             ))
 
     def recoverable_research(self, *, limit: int = 20) -> tuple[OperationRecord, ...]:
@@ -899,33 +1134,34 @@ class OperationStore:
         with self._connect() as db:
             return tuple(_record_from_row(row) for row in db.execute(
                 """SELECT * FROM operations WHERE operation IN ('gemini_research','gemini_deep_research')
-                   AND account_key=? AND upstream_chat_id IS NOT NULL
+                   AND account_key IN (?,?) AND upstream_chat_id IS NOT NULL
                    AND (worker_token IS NULL OR heartbeat_at IS NULL OR heartbeat_at < ?)
                    AND updated_at <= ? AND state NOT IN ('failed','unavailable','cancelled')
                    AND cleanup_state NOT IN ('completed','already_completed')
                    AND (cleanup_protected=1 OR (state='completed' AND retain_chat=0
                         AND verification_status='research_artifact_verified'))
                    AND NOT (state='completed' AND retain_chat=1 AND verification_status='research_artifact_verified')
-                   ORDER BY updated_at LIMIT ?""", (account, self.clock() - 60, self.clock() - 60, limit),
+                   ORDER BY updated_at LIMIT ?""", (*_account_parameters(account), self.clock() - 60, self.clock() - 60, limit),
             ))
 
     def disposable_task_records(self, chat_id: str) -> tuple[OperationRecord, ...]:
         """Only MCP-owned Tasks whose verified answer already permits cleanup."""
         with self._connect() as db:
             return tuple(_record_from_row(row) for row in db.execute(
-                """SELECT * FROM operations WHERE upstream_chat_id=? AND account_key=?
+                """SELECT * FROM operations WHERE upstream_chat_id=? AND account_key IN (?,?)
                    AND operation='gemini_run_task' AND retain_chat=0 AND cleanup_protected=0
                    AND verification_status='task_artifact_verified'
                    AND cleanup_state NOT IN ('completed','already_completed')""",
-                (chat_id, current_account_key())))
+                (chat_id, *_account_parameters(current_account_key()))))
 
     def observe_task_deletion(self, chat_id: str) -> int:
         """Reconcile exact verified Task absence without removing saved answer files."""
         owner = current_account_key()
         if not owner:
             raise ValueError('Task deletion reconciliation requires an account.')
+        scope = _account_parameters(owner)
         with self._connect() as db:
-            db.execute('DELETE FROM task_schedule_guards WHERE account_key=? AND chat_id=?', (owner, chat_id))
+            db.execute('DELETE FROM task_schedule_guards WHERE account_key IN (?,?) AND chat_id=?', (*scope, chat_id))
             return db.execute(
                 """UPDATE operations SET cleanup_state='completed',cleanup_protected=0,worker_token=NULL,
                    worker_pid=NULL,heartbeat_at=NULL,updated_at=?,
@@ -935,8 +1171,8 @@ class OperationStore:
                               THEN phase ELSE 'task_deleted' END,
                    error_code=CASE WHEN EXISTS(SELECT 1 FROM operation_artifacts a WHERE a.operation_id=operations.operation_id)
                               THEN error_code ELSE 'CAPABILITY_UNAVAILABLE' END
-                   WHERE operation='gemini_run_task' AND account_key=? AND upstream_chat_id=?""",
-                (self.clock(), owner, chat_id),
+                   WHERE operation='gemini_run_task' AND account_key IN (?,?) AND upstream_chat_id=?""",
+                (self.clock(), *scope, chat_id),
             ).rowcount
 
     def finish_worker(self, operation_id: str, *, worker_token: str, state: str, phase: str,

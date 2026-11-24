@@ -9,11 +9,15 @@ embedding private RPC ids or payload shapes.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from copy import deepcopy
 import base64
 import json
 import re
 from types import MappingProxyType
-from typing import Any, Callable, Literal, Mapping
+from typing import TYPE_CHECKING, Any, Callable, Literal, Mapping
+
+if TYPE_CHECKING:
+    from .rpc_parsers import RPCParseResult
 
 
 RPCMode = Literal["read", "mutation"]
@@ -91,6 +95,46 @@ async def execute_graphql_read(client: Any, contract_key: str) -> Any:
     contract = GRAPHQL_READ_CONTRACTS[contract_key]
     return await client.client.get(contract.endpoint, params={"query_signature": contract.query_signature},
                                    headers={"Accept": "application/json"})
+
+
+async def read_completed_empty_media_turn(
+    client: Any, chat_id: str, rid: str, rcid: str, text: str,
+) -> RPCParseResult:
+    """Reuse the registered exact workflow read, requiring positive empty-media evidence."""
+    from .rpc_parsers import RPCParseResult, parse_completed_empty_media_turn, parse_rpc_envelope
+
+    contract = get_contract("web_workflow.turn")
+    response = await execute_contract(client, contract.key, chat_id=chat_id, limit=100)
+    if getattr(response, "status_code", None) != 200:
+        return RPCParseResult("rejected", reject_code=getattr(response, "status_code", None))
+    envelope = parse_rpc_envelope(getattr(response, "text", ""), contract.rpc_id)
+    if not envelope.parsed:
+        return RPCParseResult("changed_shape")
+    if envelope.reject_code is not None:
+        return RPCParseResult("rejected", reject_code=envelope.reject_code)
+    if len(envelope.bodies) != 1:
+        return RPCParseResult("empty" if not envelope.bodies else "changed_shape")
+    return parse_completed_empty_media_turn(envelope.bodies[0], chat_id=chat_id, rid=rid, rcid=rcid, text=text)
+
+
+async def read_completed_music_failure_turn(
+    client: Any, chat_id: str, rid: str, rcid: str, text: str,
+) -> RPCParseResult:
+    """Independently read an exact known NoTool reply with the observed music error card."""
+    from .rpc_parsers import RPCParseResult, parse_completed_music_failure_turn, parse_rpc_envelope
+
+    contract = get_contract("web_workflow.turn")
+    response = await execute_contract(client, contract.key, chat_id=chat_id, limit=100)
+    if getattr(response, "status_code", None) != 200:
+        return RPCParseResult("rejected", reject_code=getattr(response, "status_code", None))
+    envelope = parse_rpc_envelope(getattr(response, "text", ""), contract.rpc_id)
+    if not envelope.parsed:
+        return RPCParseResult("changed_shape")
+    if envelope.reject_code is not None:
+        return RPCParseResult("rejected", reject_code=envelope.reject_code)
+    if len(envelope.bodies) != 1:
+        return RPCParseResult("empty" if not envelope.bodies else "changed_shape")
+    return parse_completed_music_failure_turn(envelope.bodies[0], chat_id=chat_id, rid=rid, rcid=rcid, text=text)
 
 
 class WebWorkflowTransportChanged(RuntimeError):
@@ -209,13 +253,139 @@ class VideoTransportChanged(RuntimeError):
     code = "UPSTREAM_CHANGED"
 
 
-def apply_video_generation_transport(inner_request: Any) -> None:
+def apply_image_generation_transport(inner_request: Any) -> None:
+    """Select the image tool in the legacy Web generation request."""
+    # Current official Gemini Web composer FEATURE_MODE_IMAGE_GENERATION=14
+    # feeds Oxe(query, featureMode), which writes protobuf field50 (index49).
+    # Rechecked against BardChatUi.en.c3ZkJFn_XPs.2018.O on 2026-11-21.
+    if (not isinstance(inner_request, list) or len(inner_request) <= 49
+            or not isinstance(inner_request[0], list) or len(inner_request[0]) < 7
+            or inner_request[49] not in (None, 14)):
+        raise WebWorkflowTransportChanged("Image generation request shape changed.")
+    inner_request[49] = 14
+
+
+def apply_music_generation_transport(inner_request: Any) -> None:
+    """Select the current official Web Create music composer feature."""
+    # 2026-11-21 official BardChatUi.en.c3ZkJFn_XPs.2018.O frontend:
+    # Create music.featureMode=21 -> Oxe(query, a.Ke) -> og(query,50,21).
+    if (not isinstance(inner_request, list) or len(inner_request) <= 49
+            or not isinstance(inner_request[0], list) or len(inner_request[0]) < 7
+            or inner_request[49] not in (None, 21)):
+        raise WebWorkflowTransportChanged("Music generation request shape changed.")
+    inner_request[49] = 21
+
+
+_MUSIC_DURATION_OPTIONS = {23: 1, 24: 2, 25: 3, 42: 4, 43: 5}
+_MUSIC_VOCAL_OPTIONS = {26: 1, 27: 2, 69: 3}
+_MUSIC_GENRE_OPTIONS = {option_id: option_id - 27 for option_id in range(28, 41)}
+
+
+def apply_music_companion_options(inner_request: Any, option_ids: tuple[int, ...]) -> None:
+    """Encode the same confirmed choices in selection metadata and music input.
+
+    Official c3ZkJFn_XPs.2018.O ``qve`` maps EIb.HGa to Gte fields1/2/3;
+    ``ewe`` embeds it in eI.field3 -> GL.field7; ``mwe`` writes lwe.field10.
+    This is query[0][9][6][2], independently of EIb at query.field56.
+    Option41 means custom genre and deliberately has no fixed genre enum.
+    Validate a copy completely before changing either part of the request.
+    """
+    if (not isinstance(inner_request, list) or len(inner_request) <= 55
+            or inner_request[49] != 21 or not isinstance(inner_request[0], list)
+            or len(inner_request[0]) < 7 or not isinstance(option_ids, tuple) or not option_ids):
+        raise WebWorkflowTransportChanged("Music companion request shape changed.")
+    if (any(type(value) is not int for value in option_ids)
+            or len(set(option_ids)) != len(option_ids)):
+        raise WebWorkflowTransportChanged("Music companion choices are invalid.")
+    parameters: list[int | None] = [None, None, None]
+    chosen_categories: set[int] = set()
+    value: int | None
+    for option_id in option_ids:
+        if option_id in _MUSIC_DURATION_OPTIONS:
+            category, value = 0, _MUSIC_DURATION_OPTIONS[option_id]
+        elif option_id in _MUSIC_VOCAL_OPTIONS:
+            category, value = 1, _MUSIC_VOCAL_OPTIONS[option_id]
+        elif option_id in _MUSIC_GENRE_OPTIONS or option_id == 41:
+            category, value = 2, _MUSIC_GENRE_OPTIONS.get(option_id)
+        else:
+            raise WebWorkflowTransportChanged("Music companion option is not in the observed transport contract.")
+        if category in chosen_categories:
+            raise WebWorkflowTransportChanged("Music companion choices conflict.")
+        chosen_categories.add(category)
+        parameters[category] = value
+    while parameters and parameters[-1] is None:
+        parameters.pop()
+    if not parameters:
+        raise WebWorkflowTransportChanged("Music companion choices contain no observed native parameters.")
+    selection = [list(option_ids)]
+    if inner_request[55] not in (None, [], selection):
+        raise WebWorkflowTransportChanged("Music companion selection metadata conflicts with the request.")
+    content = deepcopy(inner_request[0])
+    content.extend([None] * max(0, 10 - len(content)))
+    context = content[9]
+    if context is None:
+        context = []
+    if not isinstance(context, list):
+        raise WebWorkflowTransportChanged("Music content context shape changed.")
+    context.extend([None] * max(0, 7 - len(context)))
+    media = context[6]
+    if media is None:
+        media = []
+    if not isinstance(media, list):
+        raise WebWorkflowTransportChanged("Music content options shape changed.")
+    media.extend([None] * max(0, 3 - len(media)))
+    if any(value not in (None, []) for value in media[:2]):
+        raise WebWorkflowTransportChanged("Music content conflicts with another media type.")
+    existing = media[2]
+    if existing not in (None, []):
+        if not isinstance(existing, list):
+            raise WebWorkflowTransportChanged("Music native parameter shape changed.")
+        comparable = existing.copy()
+        while comparable and comparable[-1] is None:
+            comparable.pop()
+        if comparable != parameters:
+            raise WebWorkflowTransportChanged("Music native parameters conflict with the selected choices.")
+    media[2] = parameters
+    context[6] = media
+    content[9] = context
+    inner_request[0] = content
+    inner_request[55] = selection
+
+
+VIDEO_DURATION_CODES: dict[int, int] = {
+    10: 1,
+    15: 2,
+}
+
+VIDEO_ASPECT_RATIO_CODES: dict[str, int] = {
+    "16:9": 1,
+    "9:16": 2,
+}
+
+# Official BardChatUi.en.c3ZkJFn_XPs.2018.O (2026-11-21):
+# hve[67]=2; ive() writes the selected format to gvd protobuf field5.
+VIDEO_FORMAT_CODES: dict[int, int] = {67: 2}
+
+
+def apply_video_generation_transport(
+    inner_request: Any,
+    *,
+    duration_seconds: int | None = None,
+    aspect_ratio: str | None = None,
+    format_code: int | None = None,
+) -> None:
     """Apply observed video fields only to a validated SDK nonce/context request.
 
     The SDK's existing research-mode request builder supplies nonce and context;
     these are transport scaffolding only, not a request to start Deep Research.
     Reject changed shapes rather than issuing an unverified plain-chat request.
     """
+    if duration_seconds is not None and (isinstance(duration_seconds, bool) or duration_seconds not in VIDEO_DURATION_CODES):
+        raise ValueError("duration_seconds must be 10 or 15")
+    if aspect_ratio is not None and (not isinstance(aspect_ratio, str) or aspect_ratio.strip() not in VIDEO_ASPECT_RATIO_CODES):
+        raise ValueError("aspect_ratio must be '16:9' or '9:16'")
+    if format_code is not None and (type(format_code) is not int or format_code != VIDEO_FORMAT_CODES[67]):
+        raise ValueError("format_code must be the observed video format code 2")
     if not isinstance(inner_request, list) or len(inner_request) <= 55:
         raise VideoTransportChanged("Video generation transport request shape changed")
     content = inner_request[0]
@@ -234,7 +404,12 @@ def apply_video_generation_transport(inner_request: Any) -> None:
     inner_request[VIDEO_GENERATION_TRANSPORT.mode_index] = VIDEO_GENERATION_TRANSPORT.mode_value
     inner_request[54] = []
     inner_request[55] = [[1]]
-    content[VIDEO_GENERATION_TRANSPORT.content_options_index] = [None] * 6 + [[[None, None, None, 1]]]
+    duration_code = VIDEO_DURATION_CODES[duration_seconds] if duration_seconds is not None else None
+    aspect_code = VIDEO_ASPECT_RATIO_CODES[aspect_ratio.strip()] if aspect_ratio is not None else 1
+    video_options = [None, None, duration_code, aspect_code]
+    if format_code is not None:
+        video_options.append(format_code)
+    content[VIDEO_GENERATION_TRANSPORT.content_options_index] = [None] * 6 + [[video_options]]
 
 
 def _compact(value: Any) -> str:

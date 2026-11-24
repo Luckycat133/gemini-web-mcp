@@ -5,11 +5,11 @@
   </qa_pair>
   <qa_pair>
     <question>Does a JPEG thumbnail alone prove that a video generation request produced a video?</question>
-    <answer>No. A verified video artifact is required; the thumbnail is a separate preview. The function surface defaults video to Flash, while an explicit model choice is preserved.</answer>
+    <answer>No. A verified video artifact is required; the thumbnail is a separate preview. The function surface defaults video to discovered Hydrogen, while an explicit available model choice is preserved. A chat selector or static backend label does not prove a particular media generator version.</answer>
   </qa_pair>
   <qa_pair>
-    <question>What evidence makes a generated or edited image a verified local artifact?</question>
-    <answer>Require the downloaded image container to match its signature and pass pixel decoding before returning a verified artifact. Keep an unresolved background image conversation protected if decoding fails.</answer>
+    <question>How should an agent combine two distinguishable synthetic image references, reconnect to retrieve the generated image, and then edit only its background?</question>
+    <answer>Use gemini_create_media(kind="image") with both local image_paths in prompt order. After reconnecting, use gemini_get_operation_status and gemini_get_operation_result with the original handle and confirm recovery sent no duplicate generation. Require the downloaded image container to match its signature and pass pixel decoding. Submit kind="edit_image" with source_operation_id and the selected source_artifact_id, then verify the new handle links to the parent operation and image. Keep unresolved image conversations protected if decoding fails. During live acceptance, inspect the decoded images to confirm both references contributed and the edit changed only the background.</answer>
   </qa_pair>
   <qa_pair>
     <question>How should a complete Gemini generation failure notice affect Chat or grounded search?</question>
@@ -17,7 +17,7 @@
   </qa_pair>
   <qa_pair>
     <question>How can a caller explicitly request the latest Omni video model and a 15-second video?</question>
-    <answer>Configure GEMINI_API_KEY for a billed Gemini API project, then call gemini_generate_video with model="gemini-omni-1.2-flash" and duration_seconds=15. Poll the returned operation_id and use the verified MP4 from gemini_get_operation_result. The default video call uses the signed-in Gemini App.</answer>
+    <answer>The default gemini_create_media video call uses the signed-in Gemini App with discovered Hydrogen, accepts duration_seconds=10 or 15 and aspect_ratio=16:9 or 9:16, and waits up to 120 seconds on the original operation by default. To select an exact independent API model ID, configure GEMINI_API_KEY for a billed project and explicitly pass model="gemini-omni-1.2-flash"; that API accepts 3–15 seconds. Recover the verified MP4 using the same operation_id and gemini_get_operation_result(wait_seconds=30), without re-submission. Chat selectors and route labels do not prove exact Web generator versions.</answer>
   </qa_pair>
   <qa_pair>
     <question>May a timed-out Gemini Omni API video start be repeated automatically, or deleted before saving its MP4?</question>
@@ -25,7 +25,7 @@
   </qa_pair>
   <qa_pair>
     <question>When Flash and Flash-Lite both appear in the runtime registry, may Flash be selected by a fuzzy match to Flash-Lite?</question>
-    <answer>No. Select the matching Flash model family from the runtime registry.</answer>
+    <answer>No. The Flash compatibility default prefers the exact discovered Hydrogen family. Select legacy Flash only when appropriate to the current registry, never by a fuzzy match to Flash-Lite. Explicit current selectors remain exact and unavailable legacy models are refused.</answer>
   </qa_pair>
   <qa_pair>
     <question>When may research status be reported as running while no report is available?</question>
@@ -73,11 +73,11 @@
   </qa_pair>
   <qa_pair>
     <question>Which business entrypoints serve ordinary Gemini functionality and explicit account management?</question>
-    <answer>Use gemini-mcp-function for the 17-tool function surface and gemini-mcp-account for the 17-tool account surface; explicit legacy profiles retain their meaning.</answer>
+    <answer>Load gemini-mcp-function for the six generation and operation tools, or gemini-mcp-account for the six conversation management tools. Use function-full or account-full with gemini-mcp-server for the former catalogs.</answer>
   </qa_pair>
   <qa_pair>
     <question>Which default tool handles ordinary questions, current-web questions and natural-language requests to connected apps?</question>
-    <answer>Use gemini_ask with Flash by default, state the goal and app directly in the prompt, and do not add web or tool enable switches; inspect observed sources and grounding state. gemini_search remains a compatibility assist tool.</answer>
+    <answer>Use gemini_ask with Flash by default as a compatibility alias preferring discovered Hydrogen, state the goal and app directly in the prompt, and do not add web or tool enable switches; inspect observed sources and grounding state. gemini_search remains a compatibility assist tool.</answer>
   </qa_pair>
   <qa_pair>
     <question>Does a connected-app menu or a completed text answer prove that an external app action or Gemini Task completed?</question>
@@ -168,7 +168,7 @@
     <answer>gemini_list_library_capabilities</answer>
   </qa_pair>
   <qa_pair>
-    <question>Inspect the account tool manifest. Which non-destructive mutation tool moves an existing Gemini Web chat into a native Gemini Web Notebook? Answer with the exact tool name.</question>
+    <question>In the legacy history-organize profile, which non-destructive mutation tool moves an existing Gemini Web chat into a native Gemini Web Notebook? Answer with the exact tool name.</question>
     <answer>gemini_move_chat_to_notebook</answer>
   </qa_pair>
   <qa_pair>
@@ -177,7 +177,7 @@
   </qa_pair>
   <qa_pair>
     <question>Which model should an agent normally use for search and multimodal tasks, and when is Argon appropriate?</question>
-    <answer>Default to Flash for search and multimodal work; all models can understand images and reason. Argon is a writing and creative-work preference and an option for especially difficult reasoning. Community reports are task-specific anecdotes, not a universal ranking, and music does not always require Pro or Argon.</answer>
+    <answer>Default to Flash as a Chat compatibility alias preferring discovered Hydrogen; omitted media model selects discovered Hydrogen. Current Neon and Carbon selections must match the account registry and verified plan. Neon is allowed for Pro/Ultra Chat and Task; a stale Argon whitelist must not block it. An unavailable explicit Argon is refused rather than mapped to Neon. The historical Argon writing and creative-work preference and community reports are task-specific anecdotes, not a universal ranking, and music does not always require Pro or Argon.</answer>
   </qa_pair>
   <qa_pair>
     <question>May a caller choose Flash-Lite merely for speed or after an advanced-thinking, media, authentication or network failure?</question>
@@ -209,7 +209,7 @@
   </qa_pair>
   <qa_pair>
     <question>What distinguishes a Notebook chat, Gemini Task and Chat scheduled action?</question>
-    <answer>Notebook chat stays in ordinary Chat mode with Notebook sources; gemini_run_task selects Task execution and goal-status recovery. Existing Chat scheduled actions are not Task schedules. Explicit confirmation cards, bounded progress, time schedules and limited browser input are supported; exclusive handoff, automatic permission approval, Task pause/resume, event schedules remain unavailable; persistent browser/action preferences use gemini_preferences.</answer>
+    <answer>Notebook chat stays in ordinary Chat mode with Notebook sources. gemini_run_task selects Task execution, formerly Spark, and goal-status recovery. Chat scheduled actions and Task schedules use separate tools. Task supports confirmation cards, bounded progress, time schedules and limited browser input. Exclusive handoff, Task pause/resume and event schedules remain unavailable. Background one-time browser approval can cover MCP-owned Tasks and, with a separate startup opt-in, existing native Web Tasks. Use gemini_preferences for persistent browser and action preferences.</answer>
   </qa_pair>
   <qa_pair>
     <question>When may the worker automatically delete a completed Notebook chat or Task?</question>
@@ -221,19 +221,19 @@
   </qa_pair>
   <qa_pair>
     <question>Does gemini_tasks list or get read private conversation answers, and what proves deletion?</question>
-    <answer>List and get return bounded goal metadata without conversation answers. A list with entries lacking supported conversation IDs returns the usable tasks and their unaddressable count with partial verification. Delete dispatches once and independently reads back exact absence. The combined tool is marked destructive because delete is exposed.</answer>
+    <answer>The focused gemini_tasks exposes read-only list, get and progress. A list with unsupported conversation IDs includes their count with partial verification. The account-full version includes exact Task deletion and is marked destructive. Deletion is verified by an independent exact read.</answer>
   </qa_pair>
   <qa_pair>
     <question>How should an agent answer a Gemini Task confirmation card without replaying it or deleting the unfinished conversation?</question>
-    <answer>Read input_required and the result's input_id, use existing user authorization or obtain missing authorization for the actual change, then call gemini_run_task with the original operation_id, that input_id, the selected input_option_id and exact authorized prompt from input_options. The option binds the original card and native choice; consumed old cards wait for continuation instead of asking again. The same input token dispatches once, preserves original model and retention, and never automatically approves. A completed card is not a final answer artifact.</answer>
+    <answer>For manual confirmation, read input_required and the result's input_id, confirm the user's authorization, then call gemini_run_task with the original operation_id, that input_id, the selected input_option_id and exact prompt. The option binds the original card and native choice. A consumed card waits for continuation. With GEMINI_TASK_AUTO_APPROVE=true, the background worker can send one approved reply to a verified native browser permission card with a matching allow/deny pair and a one-time grant on an MCP-owned Task. The default is off. Other confirmations, including login, OAuth and persistent permissions, still require manual action. Status calls are read-only and MCP operation output uses 🚩 for approval-related status. The same card dispatches once, preserving the original model and retention. A completed card is not a final answer artifact.</answer>
   </qa_pair>
   <qa_pair>
     <question>How should Task schedules be managed and verified?</question>
-    <answer>Use gemini_tasks schedule actions for once, daily, weekly, hourly, monthly or yearly schedules, separate from Chat scheduled actions; nested Task schedule objects use timezone, not the Chat tool's timezone_name or an invented cron field. Preserve time windows and nanosecond timestamps, and require independent read-back rather than claiming a sent mutation succeeded.</answer>
+    <answer>Use gemini_tasks in account-full for once, daily, weekly, hourly, monthly or yearly Task schedules, separate from Chat scheduled actions. Task schedule objects use timezone. Preserve time windows and nanosecond timestamps, and verify mutations by independent read-back.</answer>
   </qa_pair>
   <qa_pair>
     <question>How can an agent rename or pin an existing native Task?</question>
-    <answer>Use gemini_tasks with the exact Task chat_id and action rename, pin or unpin. Pass title for rename. Require independent read-back of the selected field. An already matching value returns a no-op with no mutation dispatch.</answer>
+    <answer>Use gemini_tasks in account-full with the exact Task chat_id and action rename, pin or unpin. Pass title for rename. Require independent read-back of the selected field. An already matching value returns a no-op with no mutation dispatch.</answer>
   </qa_pair>
   <qa_pair>
     <question>Can automatic cleanup delete a Task thread with an associated schedule?</question>
@@ -245,7 +245,7 @@
   </qa_pair>
   <qa_pair>
     <question>What is required before explicit Task browser input?</question>
-    <answer>Use gemini_task_browser with exact screenshot response and candidate IDs, the frame hash and a unique action ID, and require Task state 3 or 5 to remain unchanged before dispatch. Never replay a consumed ID or automatically approve permissions or login.</answer>
+    <answer>Use gemini_task_browser with exact screenshot response and candidate IDs, the frame hash and a unique action ID, and require Task state 3 or 5 to remain unchanged before dispatch. Never replay a consumed ID. Approval cards are handled separately from browser input, and login requires manual action.</answer>
   </qa_pair>
   <qa_pair>
     <question>How can a client observe a Task browser without repeatedly receiving the same image?</question>
@@ -257,7 +257,7 @@
   </qa_pair>
   <qa_pair>
     <question>How should Task progress be inspected without changing the original operation recovery?</question>
-    <answer>Use gemini_tasks progress for the exact response and candidate or the explicitly requested latest Task; report bounded activity labels, tool names and counts with unknown step status, and do not substitute another turn for the original operation answer.</answer>
+    <answer>Use gemini_tasks progress for the exact response and candidate or the explicitly requested latest Task. Report bounded activity labels, tool names and counts with unknown step status. For a pending card on the latest turn, report pending_approval and its native Task link. A matching Google Tasks deletion rule with both auto-approval switches enabled reports browser_approval_configured. An unauthorized or unrecognized deletion card reports native_review_required. Keep the original operation answer tied to its own turn.</answer>
   </qa_pair>
   <qa_pair>
     <question>Does a complex Notebook comparison or a direct supported Keep write require Gemini Task?</question>
@@ -273,11 +273,11 @@
   </qa_pair>
   <qa_pair>
     <question>Which models and thinking settings may a caller select for Task?</question>
-    <answer>Default to Flash or explicitly choose Argon. Task rejects Pro, Lite and unrecognized or conflicting discovered families before generation without silently changing model or mode; Chat Pro remains available. Use thinking_level low, medium or high; request body and model header use the verified 1/4/2 mapping. standard/extended remain low/high aliases and Lite thinking is locked.</answer>
+    <answer>The Flash compatibility default prefers discovered Hydrogen. Task may select Hydrogen, Neon or Carbon according to the verified account plan and exact current registry; Neon is allowed for Pro/Ultra and Carbon requires Ultra. Legacy Flash/Argon remain compatibility families only when discovered. Task rejects Auto, Pro, Lite and unrecognized or conflicting discovered families without silently changing model or mode. Use thinking_level low, medium or high; request body and model header use the verified 1/4/2 mapping. standard/extended remain low/high aliases and Lite thinking is locked.</answer>
   </qa_pair>
   <qa_pair>
     <question>Are native remote-browser preferences and always-allow permissions per-call MCP switches?</question>
-    <answer>No. Browser choice and ask/allow preferences are saved account settings managed by gemini_preferences, not per-call flags. Do not invent browser_mode or auto_approve. Read-back verifies stored_preference only: permission_preference is saved, effective_permission remains unknown and behavior_verified=false. A real Task can still return a native confirmation; follow the exact authorized card flow.</answer>
+    <answer>Use gemini_preferences for saved account browser and ask/allow settings. GEMINI_TASK_AUTO_APPROVE=true enables supported one-time browser permissions on MCP-owned Tasks. Together with GEMINI_TASK_WEB_APPROVALS=true, it also enables bounded background checks of latest pending cards on existing native Web Tasks in the verified account. Browser permission replies use the default Flash compatibility route, preferring discovered Hydrogen and the original conversation is retained. For Google Tasks deletions, GEMINI_TASK_GOOGLE_TASKS_DELETE_RULES defaults to an empty rule list. An exact Task ID and item title must match a supported native single-item card before isolated Chrome clicks Allow, at most once per account, Task and title. Read-back of an account setting verifies stored_preference only, with saved permission_preference, unknown effective_permission and behavior_verified=false.</answer>
   </qa_pair>
   <qa_pair>
     <question>Does a recurring morning digest automatically require Task or expose native event triggers?</question>
@@ -338,5 +338,33 @@
   <qa_pair>
     <question>Can an App connection setup card be approved by fabricating a Task text-confirmation option?</question>
     <answer>No. Report needs_attention and setup_required and resolve connection or rejection in the original native Task. Text replies cannot complete OAuth. Previously observed setup metadata is not a fresh card or Task-completion proof.</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>How do Web video and music generation use the current native composer?</question>
+    <answer>Default to the authenticated native browser composer, fill the prompt before choosing and reopening the exact discovered model, verify current media options and send once. GEMINI_WEB_MEDIA_TRANSPORT=sdk is an explicit compatibility route, never a retry after uncertain native submission. Keep the original operation handle and observe only its own conversation. A playable native MP4 with independently verified audio can be a music artifact; do not label its container MP3.</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>How should an agent request short instrumental music without inventing webpage defaults?</question>
+    <answer>When the user explicitly requests short instrumental music, pass kind="music", music_duration="short" and music_vocals="instrumental" to gemini_create_media. Music duration also accepts standard, and vocals accepts vocals or auto. Leave unspecified options as None to preserve the webpage's actual defaults; do not infer a default from prompt wording or the first menu item. Verify explicit native selections before one send. Explicit SDK transport rejects these options before dispatch rather than silently ignoring them. A native Neon browser control with Short and Instrumental succeeded, but that does not by itself verify the new MCP options or every model combination.</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>Does seeing a signed-in Gemini page prove native generation authentication works?</question>
+    <answer>No. Preserve the observed JavaScript-readable flags for SAPISID, APISID, SID and the two secure PAPISID cookies while keeping PSID and other protected cookies HttpOnly and preserving domain scopes. Verify an actual saved artifact and authenticated read-back. A generic text answer, an optimistic conversation URL or an unsaved guest reply is not a generated media artifact.</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>Can a legacy NOT_FOUND reply alone prove a native media conversation was cleaned?</question>
+    <answer>No. Preserve protection while the original conversation, request or candidate identity remains unknown. Bind the actual generation to its exact reply, save and verify its local artifacts, then use the existing account-bound canonical deletion and independent exact read-back. Active-list disappearance, empty turns and mutation acknowledgements cannot prove deletion.</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>May background=false native music or video clean its conversation after an inline timeout or failed local save?</question>
+    <answer>No. Primary gemini_generate_media and compact create use one protected operation for native background=false and wait on its original handle within the timeout. A wait timeout returns that handle with partial/wait_elapsed; unknown outcomes and failed saves retain protection without cleanup or generation replay. Quoted or example refusal wording cannot authorize rejection or cleanup; a later unrelated quote must not hide an independently verified unquoted refusal. Verified completion returns local artifacts, preserves an explicit filename and defaults to generated_media with an opaque filename rather than putting the prompt in the ledger. Existing SDK/API synchronous behavior remains unchanged.</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>May native video send before its single image_path reference attachment is verified?</question>
+    <answer>No. Native Web video accepts one validated local image_path. Verify the uploaded reference preview and keep its exact token bound to the authenticated composer, then recheck the same token with the model, media mode and format before one Send. Missing, changed or unknown attachment evidence refuses submission; do not ignore the reference or replay generation. image_paths remains an image-generation/editing control. A DOM upload or a probe stopped before Send does not establish successful live video generation.</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>May native read-back persist new reply metadata if the account changes while awaiting the read?</question>
+    <answer>No. Recheck the captured account and credentials after the awaited read and before observation, checkpointing or artifact use. Refuse newly read response metadata after account drift. Preserve at most the previously observed CID under its original owner; do not persist the new RID/RCID, release protection, clean the conversation or resend generation based on that response.</answer>
   </qa_pair>
 </evaluation>

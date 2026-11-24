@@ -1,0 +1,20 @@
+{
+  "observed": "2026-11-21",
+  "source_url": "https://gemini.gstatic.com/_/mss/boq-gemini-web-uiserver/_/js/k=boq-gemini-web-uiserver.BardChatUi.en.c3ZkJFn_XPs.2018.O/ck=boq-gemini-web-uiserver.BardChatUi.jnZiUKRctiY.L.W.O/am=hG8EQIl9ANb5--B2_yQ60IAEFAE5QRC6AAAAAABC/d=1/exm=_b/excm=_b/ed=1/wt=2/ujg=1/rs=AKrAJMpoF6ezyB_Fh6YPJOPfuyQFQGbdig/ee=EmZ2Bf:zr1jrb;NJ1rfe:yGfSdd;Pjplud:PoEs9b;QGR0gd:Mlhmy;ScI3Yc:e7Hzgb;USPTDe:samWqd;UYRIEb:HzTAQc;Uvc8o:VDovNc;YIZmRd:A1yn5d;cEt90b:ws9Tlc;dIoSBb:SpsfSb;dowIGb:ebZ3mb;eBAeSb:zbML3c;iFQyKf:vfuNJf;lOO0Vd:OTA3Ae;oGtAuc:sOXFj;qQEoOc:KUM7Z;qddgKe:xQtZb;wR5FRb:siKnQd;yxTchf:KUM7Z/dti=1/m=vLefie?wli=BardChatUi.4T0bvJC-D_s.mediaIntentWasm.O%3A%3B",
+  "source_sha256": "a0163b536cca874e2a7e7f03290fa9c003a28b7189587995271da1f0c03a89db",
+  "request_type": "assistant.lamda.StreamGenerateRequest (frontend _.yy)",
+  "feature_mode_proto_field": 50,
+  "feature_mode_array_index": 49,
+  "feature_modes": {
+    "image": 14,
+    "video": 11,
+    "music": 21
+  },
+  "field_setter": "_.Oxe=function(a,b){return _.og(a,50,b)}",
+  "builder_dispatch": "typeof a.Ke===\"number\"&&_.Oxe(ob,a.Ke)",
+  "native_tool_mapping": {
+    "14": "image_generation",
+    "11": "video_generation",
+    "21": "music_generation"
+  }
+}

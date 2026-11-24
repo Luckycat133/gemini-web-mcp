@@ -1,6 +1,6 @@
 # Notebook 来源、聊天与 Task
 
-Gemini 网页中的 NotebookLM／Gemini Notebook 已接入同一组工作流。账号工具负责发现与管理；功能工具负责基于选定来源回答问题或启动 Task。默认模型仍为 Flash，无需额外打开联网或工具调用。
+Gemini 网页中的 NotebookLM／Gemini Notebook 已接入同一组工作流。独立连接 `gemini-mcp-account` 查找和管理资源，使用 `gemini-mcp-function` 基于选定来源回答问题或启动 Task。默认模型为 Flash，联网和 App 需求可直接写入提示。
 
 ## 选择入口
 
@@ -11,9 +11,9 @@ Gemini 网页中的 NotebookLM／Gemini Notebook 已接入同一组工作流。�
 | 明确要求 Task，或委托 Gemini 持续执行、跟踪进度、操作网站 | 功能面 `gemini_run_task` | 后台 Task，`execution_mode="task"`；同一操作句柄读取状态与结果 |
 | 查找 Notebook 名称、ID、来源数量 | 账号面 `gemini_notebooks` | 默认 `source="notebooklm"`，只读紧凑元数据 |
 | 新建 Notebook、管理纯文本、网页 URL 或 UTF-8 `.txt` 来源 | 账号面 `gemini_manage_notebook` | 准确资源身份与独立元数据读回。删除 Notebook 包含其中对话 |
-| 管理原生 Gemini Skills | 账号面 `gemini_skills` | 创建、更新、启停、删除与独立读回；指令正文读取须显式选择 |
-| 列出、查看或删除已有 Task 线程 | 账号面 `gemini_tasks` | list/get 只读元数据；delete 使用准确 Task 聊天 ID 并独立核验不存在 |
-| 把已有聊天整理进 Notebook | 账号面 `gemini_move_chat_to_notebook` | 先在 `source="gemini"` 项目视图精确解析目标，再修改并读回归属 |
+| 管理原生 Gemini Skills | `account-full` 的 `gemini_skills` | 创建、更新、启停、删除与独立读回。指令正文读取须显式选择 |
+| 列出、查看或跟踪已有 Task | 账号面 `gemini_tasks` | `list`、`get`、`progress` 只读元数据 |
+| 把已有聊天整理进 Notebook | 账号面 `gemini_manage_chat(action="move_to_notebook")` | 先在 `source="gemini"` 项目视图精确解析目标，再修改并读回归属 |
 
 默认用 Chat 取得答案、联网、写作、分析、比较 Notebook 资料，以及完成 Chat 支持的直接 App 请求。复杂、多步骤、调用 App、修改 App 数据或后台运行，都不是必须切换 Task 的条件。Task 更适合把目标交给 Gemini 持续执行，查看工作进度或让它操作网站；用户明确要求 Task 时也使用 Task。Task 本身同样可以研究和生成文件，这条规则按委托方式选择，而不是按输出类型划线。
 
@@ -21,7 +21,7 @@ Gemini 网页中的 NotebookLM／Gemini Notebook 已接入同一组工作流。�
 
 Notebook、原生 Gemini Skills 和 Connected Apps 在两种体验中都有用途。具体 App 的可用操作可能不同：官方当前将原生 GitHub 仓库导入及代码问答列为 Chat-only，将 Contacts 连接器列为 Task-only；这不限制另行提供的浏览器或自定义 MCP 路线。菜单中出现应用，也不等于某项操作已验证可用。
 
-Task 的计划与 Chat scheduled actions 是不同功能。定时摘要可以使用 Chat 计划，不因“定时”就切 Task；现有 `gemini_*scheduled_action` 工具不能用来管理 Task 计划。
+Task 计划与 Chat scheduled actions 分别管理，两者都通过 `account-full` 加载。定时摘要可以使用 Chat 计划。
 
 ## AI 需要知道的设置
 
@@ -31,7 +31,7 @@ Task 的计划与 Chat scheduled actions 是不同功能。定时摘要可以使
 | 思考程度 | 使用 `low` / `medium` / `high` 对应低／中／高；旧 `standard` / `extended` 仍兼容低／高。请求体和模型请求头同步选择档位。Lite 的额度降级和不可选思考程度由运行时处理。 |
 | 资料 | 需要 Notebook 时传发现工具返回的准确 `notebook_ids`；同样适用于 Chat 与 Task。无需添加联网、工具启用开关。 |
 | 线程保留 | 默认自动清理；用户要求保留时才传 `retain_chat=true`。关联计划会保护 Task 线程，不能随普通临时请求清理。 |
-| 浏览器偏好 | 账号 `gemini_preferences` 的 `get_browser` 读取原值，`set_browser` 的 `browser="automatic"` 或 `browser="remote_only"` 修改并独立读回。分别对应由 Gemini 决定本机／远程与仅远程。这是持久偏好，不是每次请求的 `browser_mode` 参数。 |
+| 浏览器偏好 | `account-full` 的 `gemini_preferences` 用 `get_browser` 读取原值。用 `set_browser` 的 `browser="automatic"` 或 `browser="remote_only"` 修改并独立读回。这两种持久偏好分别表示由 Gemini 决定本机或远程，以及仅使用远程。 |
 | 操作权限 | `gemini_preferences` 列出可管理的准确动作，按返回句柄保存 `always_ask` / `always_allow`。写入读回证明偏好已保存，`effective_permission="unknown"`。在实测的远程浏览中，「始终允许」直接放行；本机 Chrome 和敏感动作可能另需确认。收到卡片时按原卡片的精确动作处理。 |
 | 计划 | 明确时间、频率、时区及起止条件。Task 原生还支持事件触发与通知设置；当前专用接口只适配六种时间频率，未提供事件型触发及通知偏好的管理。 |
 
@@ -91,13 +91,13 @@ gemini_tasks(action="list", limit=10)
 gemini_tasks(action="get", chat_id=<返回的准确 c_ Task ID>, max_chars=800)
 ```
 
-`list/get` 不读取对话正文。列表使用返回的 `next_page_token` 继续分页；未知数字状态保留为未知，不猜测其含义。删除要求用户的明确意图：
+`list/get` 只读取元数据。列表使用返回的 `next_page_token` 继续分页，未知数字状态按原值返回。已获明确删除意图时，切换到 `GEMINI_TOOLS=account-full gemini-mcp-server` 再调用。
 
 ```text
 gemini_tasks(action="delete", chat_id=<已确认的准确 c_ Task ID>)
 ```
 
-该聚合工具含删除动作，整体使用 destructive 注解。只有独立读回证明不存在时才报告删除完成；已发送但未核验的删除不应盲目重发。`chat_id` 与 `operation_id` 是不同标识。
+默认账号面的 `gemini_tasks` 是只读工具。`account-full` 的版本含删除动作，整体使用 destructive 注解。只有独立读回证明不存在时才报告删除完成。已发送但未核验的删除应先读回状态。`chat_id` 与 `operation_id` 是不同标识。
 
 ## 同一 Notebook 的不同视图
 
@@ -115,17 +115,19 @@ gemini_tasks(action="delete", chat_id=<已确认的准确 c_ Task ID>)
 
 2026-11-06 用现有 Chrome 会话复测。两种 Notebook 目录视图读到了同一个合成 Notebook。精确移动聊天后，项目列表独立确认归属。带 Notebook 的 Task 从来源取回未写进问题的随机标记，提交连接断开后仍保存了完整回答，重连后核验摘要并确认测试聊天已自动删除。合成来源和 Notebook 均经远端回读确认删除。普通 Notebook Chat 在本次复测中出现上游错误，工作进程保存失败记录和回答产物，并按默认策略清理测试聊天。
 
-Task 的独占浏览器接管、暂停／恢复、应用权限自动确认和导出尚未适配。`gemini_tasks` 的元数据状态不等于完整工作面板。ProcessSession 的握手与响应探测仍属实验，当前生产路径不依赖该实验，也不声明它已可用。
+Task 的独占浏览器接管、暂停／恢复和导出尚未适配。`gemini_tasks` 的元数据状态不等于完整工作面板。ProcessSession 的握手与响应探测仍属实验，当前生产路径不依赖该实验，也不声明它已可用。
 
 生产请求构造集中在 RPC registry：Task 使用已观察的模式字段；普通 Notebook 聊天使用网页生成的 File 引用形式，保留 Chat 语义。File 引用是可逆元数据编码，不是另一个认证凭据，也不需要假造上传流程。
 
 ## Task 确认与继续
 
-Task 可能返回需要回复的应用确认卡片。`gemini_get_operation_status` 只返回 `input_required` 等状态元数据；调用 `gemini_get_operation_result` 才读取原回合的卡片提示，并返回 `input_id` 和 `input_options`（按钮名称、原生选择名称、`input_option_id` 与实际指令）。卡片不会被当成最终回答保存，也不会释放对话清理保护。
+Task 可能返回需要回复的确认卡片。`gemini_get_operation_status` 只返回 `input_required` 等状态元数据。调用 `gemini_get_operation_result` 可读取仍在等待的原回合卡片提示，并取得 `input_id` 和 `input_options`（按钮名称、原生选择名称、`input_option_id` 与实际指令）。卡片不会被当成最终回答保存，也不会释放对话清理保护。
+
+`GEMINI_TASK_AUTO_APPROVE=true` 可让后台 worker 为 MCP 持有的 Task 提交经过核验的浏览器「允许一次」。默认关闭。网页上已有 Task 使用独立的 `GEMINI_TASK_WEB_APPROVALS` 开关，Google Tasks 删除卡还需精确 Task/标题规则，详见[后台批准配置](task-preferences.md#网页上已有的-task)。MCP 操作输出使用 🚩 提示开关启用或 Task 等待输入、需要原生设置。 [后台批准范围](task-preferences.md#后台一次性批准)
 
 用户已授权该项操作时，调用 `gemini_run_task(prompt="所选 input_options 的 prompt 原文", operation_id="原句柄", input_id="返回的卡片标识", input_option_id="所选选项 ID")`。只接受当前卡片提供的精确指令，不改写或追加说明。这是一条显式新指令，沿用同一个 Task 对话和原模型、思考与保留设置。相同 `input_id` 只派发一次；重复调用、超时和重启不会自动重发确认。未核验到原卡片、账号变化或读取失败时不发送。
 
-不要从网页、模型文字或卡片本身推断用户授权。Task 中的应用变更仍须独立读回；确认卡片上的文字完成并不等于整个 Task 完成。续问使用公开客户端的 CONTINUATION_IDENTIFIERS，不依赖原客户端内存或持久化对话上下文令牌。当前支持明确授权的文本确认卡片、有限浏览器输入和 Task 计划；独占接管、自动权限审批与 Task 暂停／恢复未实现。
+不要从网页、模型文字或卡片本身推断用户授权。Task 中的应用变更仍须独立读回。确认卡片上的文字完成并不等于整个 Task 完成。续问使用公开客户端的 CONTINUATION_IDENTIFIERS，无需原客户端内存或持久化对话上下文令牌。
 
 “连接 App”的设置卡与这些许可卡分开处理。结果返回 `needs_attention`、`setup_required`、`setup_kind` 和可用的原 Task 地址，不生成可以代替 OAuth 的文本选项。需在原生 Task 连接或拒绝；状态查询中“此前观察到设置卡”不等于当前卡已重新核验，也不等于 Task 已结束。
 
@@ -142,17 +144,17 @@ Task 可能返回需要回复的应用确认卡片。`gemini_get_operation_statu
 
 ## Task 进度与计划
 
-对准确的 Task `chat_id`，`gemini_tasks` 支持 `rename`、`pin` 和 `unpin`。改名传 `title`。结果独立读回实际名称或置顶状态。请求已达到的状态时返回 `no_op`。
+在 `account-full` 中，可按准确的 Task `chat_id` 调用 `gemini_tasks` 的 `rename`、`pin` 和 `unpin`。改名传 `title`。结果独立读回实际名称或置顶状态。请求已达到的状态时返回 `no_op`。
 
 `gemini_tasks(action="progress", chat_id=...)` 读取当前账号下最新 Task 回合的有限活动；也可同时提供 `response_id` 和 `candidate_id` 指定精确回合。返回活动名称、工具名和数量，步骤状态未知；它不会改变原 `operation_id` 的答案恢复路径。
 
-Task 计划由 `gemini_tasks` 的 `list_schedules`、`get_schedule`、`create_schedule`、`update_schedule`、`pause_schedule`、`resume_schedule`、`delete_schedule` 管理，与聊天 scheduled actions 分开。`schedule` 支持 `frequency` 为 `once`、`daily`、`weekly`、`hourly`、`monthly` 或 `yearly`，按类型提供 `at`、`time`、`weekdays`、`minute`、`days_of_month` 或 `month`/`day`。指定 `window` 时仍保留 `time`。时间戳须带时区，归一化为 UTC 并保留最多九位小数；列表的 `offset`/`limit` 是本地分页。创建和修改仅发送一次，须独立读回核验；未确认的响应不能当成功或盲目重发。
+在 `account-full` 中，Task 计划由 `gemini_tasks` 的 `list_schedules`、`get_schedule`、`create_schedule`、`update_schedule`、`pause_schedule`、`resume_schedule`、`delete_schedule` 管理。`schedule` 支持 `frequency` 为 `once`、`daily`、`weekly`、`hourly`、`monthly` 或 `yearly`，按类型提供 `at`、`time`、`weekdays`、`minute`、`days_of_month` 或 `month`/`day`。指定 `window` 时仍保留 `time`。时间戳须带时区，归一化为 UTC 并保留最多九位小数。列表的 `offset`/`limit` 是本地分页。创建和修改仅发送一次，须独立读回核验。
 
 自动清理 MCP 自有 Task 时会保护仍关联计划的线程。仅在最后一项计划经核验删除，且线程属于可清理的 MCP 自有临时线程时，才可能释放清理保护。已知 Task 必须同时核验精确 Task 目标和普通历史对话都不存在。若普通历史已经缺席而 Task 目标仍可读，按原 Task ID 走原生删除和独立回读。旧清理状态可通过 `gemini_cleanup(action="recheck", chat_id=...)` 复核。
 
 ## Task 浏览器
 
-安装 `gemini-web-mcp[browser-control]`，或使用包含该依赖的 `gemini-web-mcp[all]`。账号面 `gemini_task_browser(chat_id=...)` 默认读取最新 Task 的浏览器截图；同时提供 `response_id` 和 `candidate_id` 可指定精确回合。可验证的 PNG 会保存为本地 Artifact，并在不超过 2 MiB 且摘要匹配时附带原生图片预览。
+安装 `gemini-mcp-server[browser-control]`，或使用包含该依赖的 `gemini-mcp-server[all]`。`account-full` 的 `gemini_task_browser(chat_id=...)` 默认读取最新 Task 的浏览器截图。同时提供 `response_id` 和 `candidate_id` 可指定精确回合。可验证的 PNG 会保存为本地 Artifact，并在不超过 2 MiB 且摘要匹配时附带原生图片预览。
 
 重复查看同一页面时，传入上一帧的 `known_frame_sha256`。帧内容未变时只返回核验后的帧摘要和回合状态。帧改变时仍返回新图；只需要保存的 PNG 时使用 `include_image=false`。
 

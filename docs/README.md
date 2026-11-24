@@ -1,6 +1,6 @@
 # Gemini MCP Server 文档中心
 
-本目录说明当前源码的工具、安装与验证合同；已发布版本和分支差异以 Changelog 为准。
+本目录说明当前源码的工具、安装与验证合同。开发迭代见 [Changelog](changelog.md)，原始发行记录见[版本档案](version-history.md)，请求和状态库迁移见[集成说明](source-update-integration.md)。
 
 ---
 
@@ -19,6 +19,12 @@
 ### 使用指南
 - [工具使用手册](./tools.md) - 所有 MCP 工具详细说明（含媒体生成、Deep Research、会话管理）
 - [模型选择指南](./models.md) - 选择合适的模型
+- [逐模型真实测试（11-21）](./live-model-matrix-2026-11-21.md) - default 账号的 19 个历史组合及逐项验收结果
+- [同包 19 项测试结果（11-22）](./live-model-matrix-2026-11-22.md) - 严格 12 通过、1 链路未验证、6 错误，附脱敏报告；后续源码交付包另验
+- [7c 候选包独立补测（11-22）](./live-model-followup-2026-11-22.md) - Neon 真保存产物链、Carbon 参考视频／音乐及其余拒绝、超时、待读回，按 round／attempt 独立记录
+- [原生媒体提示与入口诊断（11-22）](./live-media-diagnosis-2026-11-22.md) - 分开保留源码对照、各安装版实际文件、拒绝及最终60fe读回证据
+- [0.20.6媒体验收（11-22）](./live-media-0.20.6-2026-11-22.md) - 无hook候选Hydrogen文件、最终安装门禁与App重载边界
+- [0.20.7拒绝收口验收（11-22）](./live-media-0.20.7-2026-11-22.md) - 新中文拒绝的严格识别、原句柄恢复及App真实路由边界
 - [网页版功能实测矩阵](./web-feature-coverage.md) - 当前实现、真实证据与尚未覆盖能力
 - [Notebook、Chat 与 Task](./notebook-task-workflows.md) - 模式选择、确认、后台恢复与附件
 - [原生 Skills 与 Notebook 管理](./native-account-resources.md) - 准确资源 ID、分页与读回
@@ -44,9 +50,10 @@
 - [常见问题 FAQ](./faq.md)
 - [故障排除](./troubleshooting.md)
 - [实机测试清单](./manual-testing.md) - 哪些内容需要真实账号验证
-- [逐工具质量记录](./tool-quality.md) - 34 个业务工具的检查和证据边界
+- [逐工具质量记录](./tool-quality.md) - 原 34 工具兼容目录的历史检查和证据边界
 - [源码集成说明](./source-update-integration.md) - 当前分支与已发布 0.2.2 的合同差异
-- [Changelog](./changelog.md)
+- [Changelog](./changelog.md) - 按提交重建的功能和补丁迭代
+- [原版本与发行记录](./version-history.md) - 原始服务器编号、Git 标签及 ClawHub Skill 版本
 - [贡献指南](./contributing.md)
 
 ---

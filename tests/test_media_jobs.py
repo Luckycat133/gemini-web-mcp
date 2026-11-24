@@ -2,6 +2,8 @@
 
 import asyncio
 import base64
+from contextlib import contextmanager, nullcontext
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -124,6 +126,70 @@ def test_expired_web_auth_fails_before_video_generation(monkeypatch, tmp_path):
     assert saved.state == "failed" and saved.error_code == "AUTH_REQUIRED"
     assert not saved.cleanup_protected and saved.upstream_chat_id is None
     generate.assert_not_awaited()
+
+
+@pytest.mark.parametrize(("media_type", "client_supports_native", "options", "prompt", "expected", "native"), [
+    pytest.param("video", True, {}, "  Rotate a paper cube.\n", "  Rotate a paper cube.\n", True,
+                 id="native-video-raw"),
+    pytest.param("music", True, {}, "  Play a soft piano phrase.\n", "  Play a soft piano phrase.\n", True,
+                 id="native-music-raw"),
+    pytest.param("video", True, {"web_media_transport": "native"},
+                 "Generate a video using Gemini's video generation capability. Prompt: A literal phrase.",
+                 "Generate a video using Gemini's video generation capability. Prompt: A literal phrase.", True,
+                 id="native-preserves-literal-sdk-prefix"),
+    pytest.param("video", True, {"web_media_transport": "sdk"}, "  Rotate a paper cube.\n",
+                 "Generate a video using Gemini's video generation capability. Prompt: Rotate a paper cube.", False,
+                 id="explicit-sdk-keeps-video-prefix"),
+    pytest.param("music", False, {}, "  Play a soft piano phrase.\n",
+                 "Create music/audio using Gemini's music generation capability. Prompt: Play a soft piano phrase.",
+                 False, id="legacy-client-keeps-music-prefix"),
+    pytest.param("image", True, {}, "  Draw a paper cube.\n", "Generate an image. Prompt: Draw a paper cube.", False,
+                 id="image-keeps-prefix"),
+    pytest.param("image", True, {"edit": True}, "  Add a blue shadow.\n", "Edit this image:   Add a blue shadow.\n",
+                 False, id="image-edit-keeps-prefix"),
+])
+def test_worker_prompt_is_unchanged_only_on_native_media_route(
+    monkeypatch, tmp_path, media_type, client_supports_native, options, prompt, expected, native,
+):
+    from src import client_wrapper
+    from src.infrastructure.operation_store import OperationStore
+    from src.services import native_media_generation
+
+    class LegacyClient:
+        def video_generation_scope(self):
+            return nullcontext()
+
+    class PolicyClient(LegacyClient):
+        def _resolve_policy_model(self, model):
+            raise AssertionError("The native browser adapter is mocked.")
+
+    monkeypatch.delenv("GEMINI_WEB_MEDIA_TRANSPORT", raising=False)
+    store = OperationStore(tmp_path / "operations.sqlite")
+    store.create_or_get("job", "gemini_create_media")
+    assert store.claim_worker("job", "worker")
+    client = PolicyClient() if client_supports_native else LegacyClient()
+    client.generate_content = AsyncMock(return_value=SimpleNamespace())
+    generate_native = AsyncMock(return_value=SimpleNamespace())
+    monkeypatch.setattr(client_wrapper, "get_gemini_client", lambda: client)
+    monkeypatch.setattr(client_wrapper, "initialize_client", AsyncMock())
+    monkeypatch.setattr(native_media_generation, "generate_native_media_response", generate_native)
+    save = AsyncMock()
+    monkeypatch.setattr(media_jobs, "_save_response", save)
+
+    asyncio.run(media_jobs.execute_media_job(
+        {"prompt": prompt, "media_type": media_type, "output_dir": str(tmp_path), **options},
+        operation_id="job", store=store, worker_token="worker",
+    ))
+
+    if native:
+        generate_native.assert_awaited_once()
+        assert generate_native.await_args.kwargs["arguments"]["prompt"] == expected
+        client.generate_content.assert_not_awaited()
+    else:
+        client.generate_content.assert_awaited_once()
+        assert client.generate_content.await_args.kwargs["prompt"] == expected
+        generate_native.assert_not_awaited()
+    save.assert_awaited_once()
 
 
 def test_stream_checkpoints_cid_then_full_identity_before_cleanup():
@@ -274,8 +340,6 @@ _SYNTHETIC_PNG = base64.b64decode(
 
 
 def _image_response(png=_SYNTHETIC_PNG):
-    from pathlib import Path
-
     class Image:
         url = "https://example.invalid/private-signed-image"
         title = "generated response title"
@@ -290,6 +354,193 @@ def _image_response(png=_SYNTHETIC_PNG):
     candidate = SimpleNamespace(rcid="rc_one", generated_images=[Image()], generated_videos=[], generated_media=[])
     return SimpleNamespace(metadata=["c_one", "r_one"], rcid="rc_one", candidates=[candidate], chosen=0,
                            images=[candidate.generated_images[0]], videos=[], media=[])
+
+
+def test_ordered_references_and_saved_image_edit_keep_lineage_across_recovery(monkeypatch, tmp_path):
+    from PIL import Image
+
+    import src.client_wrapper as wrapper
+    from src.domain import CleanupObservation, CleanupState
+    from src.infrastructure.operation_store import OperationStore
+    from src.services import background
+    from src.services.operations import OperationService
+
+    monkeypatch.setenv("GEMINI_OPERATION_DB_PATH", str(tmp_path / "operations.sqlite"))
+    store = OperationStore()
+    first, second = tmp_path / "foreground.png", tmp_path / "background.png"
+    Image.new("RGB", (2, 1), "red").save(first)
+    Image.new("RGB", (2, 1), "blue").save(second)
+    parent_response = _image_response()
+    child_response = _image_response(second.read_bytes())
+    child_response.metadata = ["c_two", "r_two"]
+    child_response.images[0].url = "https://example.invalid/child-image"
+    queued = SimpleNamespace(metadata=child_response.metadata, rcid=child_response.rcid,
+                             text="", queued=True, images=[], videos=[], media=[])
+    uploads = []
+
+    async def stream(**arguments):
+        paths = [Path(path) for path in arguments["files"]]
+        uploads.append((arguments["prompt"], paths, [path.read_bytes() for path in paths]))
+        yield parent_response if len(uploads) == 1 else queued
+
+    history = SimpleNamespace(turns=[SimpleNamespace(role="model", model_output=child_response)])
+    client = SimpleNamespace(generate_content_stream=stream, read_chat=AsyncMock(return_value=history))
+    monkeypatch.setattr(wrapper, "get_gemini_client", lambda: client)
+    monkeypatch.setattr(wrapper, "initialize_client", AsyncMock())
+    monkeypatch.setattr(wrapper, "schedule_remote_chat_cleanup_from_response", lambda *a, **k:
+                        CleanupObservation(state=CleanupState.PENDING))
+    finalize = AsyncMock(return_value=CleanupObservation(state=CleanupState.COMPLETED))
+    monkeypatch.setattr(wrapper, "finalize_remote_chat_cleanup_from_response", finalize)
+    launched = []
+    monkeypatch.setattr(background, "_launch_detached_worker", lambda payload, _: launched.append(payload) or 123)
+
+    async def finish_started_worker():
+        envelope = launched[-1]
+        handle, token = envelope["operation_id"], envelope["worker_token"]
+        await media_jobs.execute_media_job(envelope["request"], operation_id=handle, store=store, worker_token=token)
+        store.retire_worker(handle, token)
+
+    async def run():
+        started = await background.submit_media(
+            {"media_type": "image", "prompt": "Combine foreground and background.",
+             "image_paths": [str(first), str(second)]},
+            operation="gemini_generate_image",
+        )
+        assert started.ok and started.data and started.data.operation_id
+        parent_id = started.data.operation_id
+        await finish_started_worker()
+        assert uploads[0][1] == [first, second]
+        assert uploads[0][2] == [first.read_bytes(), second.read_bytes()]
+        reconnect = OperationService(OperationStore(), lambda: client, AsyncMock())
+        parent = (await reconnect.get_result(parent_id)).data
+        assert parent and parent.state.value == "completed" and parent.cleanup.state == CleanupState.COMPLETED
+        assert len(parent.artifacts) == 1
+        source = parent.artifacts[0]
+        assert "image_pixels_decoded" in source.verification.methods
+
+        request = {"media_type": "image", "prompt": "Update the foreground from the additional reference.",
+                   "source_operation_id": parent_id, "image_paths": [str(first)]}
+        child_id = "op_" + "c" * 32
+        child = await background.submit_media(request, operation="gemini_edit_image", operation_id=child_id)
+        assert child.ok and child.data and child.data.source_artifact_id == source.id
+        assert child.data.source_operation_id == parent_id and child.data.operation_id == child_id
+        assert "source_operation_id" not in launched[-1]["request"]
+        await finish_started_worker()
+        assert uploads[1][0] == (
+            "Edit the first attached image using the other images as references: "
+            "Update the foreground from the additional reference."
+        )
+        assert uploads[1][2] == [_SYNTHETIC_PNG, first.read_bytes()]
+        assert uploads[1][1][1] == first and not uploads[1][1][0].exists()
+        assert Path(source.local_path).read_bytes() == _SYNTHETIC_PNG
+
+        pending = store.get(child_id)
+        assert pending.state == "queued" and pending.cleanup_protected and pending.upstream_chat_id == "c_two"
+        assert store.claim_worker(child_id, "new-worker")
+        await media_jobs.recover_media_job(pending, store=OperationStore(), worker_token="new-worker")
+        result = (await reconnect.get_result(child_id)).data
+        assert result and result.state.value == "completed"
+        assert result.source_operation_id == parent_id and result.source_artifact_id == source.id
+        assert len(result.artifacts) == 1 and result.artifacts[0].id != source.id
+        assert "image_pixels_decoded" in result.artifacts[0].verification.methods
+        assert result.artifacts[0].observed_backend is None
+        assert (await reconnect.get_status(child_id)).data.source_artifact_id == source.id
+        client.read_chat.assert_awaited_once_with("c_two", limit=10)
+        assert finalize.await_count == 2
+
+        Path(source.local_path).unlink()
+        replay = await background.submit_media(request, operation="gemini_edit_image", operation_id=child_id)
+        assert replay.ok and replay.data.operation_id == child_id
+        assert len(launched) == 2 and len(uploads) == 2
+        assert str(first).encode() not in store.path.read_bytes()
+        assert request["prompt"].encode() not in store.path.read_bytes()
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("invalid_source", [
+    "other_account", "changed", "missing", "wrong_id", "ambiguous", "expired", "corrupt_saved_bytes",
+])
+def test_edit_rejects_unavailable_source_before_worker_dispatch(monkeypatch, tmp_path, invalid_source):
+    from src.services import background
+
+    store, parent_id, destination = _real_store_setup(tmp_path)
+    monkeypatch.setenv("GEMINI_OPERATION_DB_PATH", str(store.path))
+    output = Path(destination)
+    output.mkdir()
+    source = output / "source.png"
+    source.write_bytes(_SYNTHETIC_PNG if invalid_source != "corrupt_saved_bytes" else b"not an image")
+    arts = [Artifact(id="saved", kind=ArtifactKind.IMAGE, state=ArtifactState.LOCAL,
+                     mime_type="image/png", local_path=str(source))]
+    if invalid_source == "ambiguous":
+        second = output / "second.png"
+        second.write_bytes(_SYNTHETIC_PNG)
+        arts.append(Artifact(id="second", kind=ArtifactKind.IMAGE, state=ArtifactState.LOCAL,
+                             mime_type="image/png", local_path=str(second)))
+    assert store.save_media_artifacts(parent_id, tuple(arts), worker_token="first", artifact_state="local")
+    if invalid_source == "other_account":
+        monkeypatch.setenv("GEMINI_PSID", "other-synthetic-test-account")
+    if invalid_source == "changed":
+        source.write_bytes(b"\0" * len(_SYNTHETIC_PNG))
+    if invalid_source == "missing":
+        source.unlink()
+    if invalid_source == "expired":
+        import sqlite3
+        with sqlite3.connect(store.path) as db:
+            db.execute("UPDATE operations SET created_at=0, cleanup_protected=0")
+    launch = AsyncMock()
+    monkeypatch.setattr(background, "_dispatch", launch)
+    result = asyncio.run(background.submit_media(
+        {"media_type": "image", "prompt": "Edit the saved image.", "source_operation_id": parent_id,
+         "source_artifact_id": "unknown" if invalid_source == "wrong_id" else None},
+        operation="gemini_edit_image",
+    ))
+    assert not result.ok and result.meta.verification_status == "source_image_unavailable"
+    launch.assert_not_awaited()
+
+
+def test_worker_rejects_source_changed_after_acceptance(monkeypatch, tmp_path):
+    import src.client_wrapper as wrapper
+    from src.services import background
+
+    store, parent_id, destination = _real_store_setup(tmp_path)
+    monkeypatch.setenv("GEMINI_OPERATION_DB_PATH", str(store.path))
+    output = Path(destination)
+    output.mkdir()
+    source = output / "stable.png"
+    source.write_bytes(_SYNTHETIC_PNG)
+    unavailable_other_output = output / "other.png"
+    unavailable_other_output.write_bytes(_SYNTHETIC_PNG)
+    images = tuple(Artifact(id=path.stem, kind=ArtifactKind.IMAGE, state=ArtifactState.LOCAL,
+                            mime_type="image/png", local_path=str(path))
+                   for path in (source, unavailable_other_output))
+    assert store.save_media_artifacts(parent_id, images, worker_token="first", artifact_state="local")
+    unavailable_other_output.unlink()
+    dispatched = []
+    monkeypatch.setattr(background, "_launch_detached_worker", lambda payload, _: dispatched.append(payload) or 123)
+    generate = AsyncMock()
+    monkeypatch.setattr(media_jobs, "generate_media_response", generate)
+    monkeypatch.setattr(wrapper, "get_gemini_client", lambda: SimpleNamespace())
+    monkeypatch.setattr(wrapper, "initialize_client", AsyncMock())
+
+    async def run():
+        accepted = await background.submit_media(
+            {"media_type": "image", "prompt": "Edit selected image.", "source_operation_id": parent_id,
+             "source_artifact_id": source.stem},
+            operation="gemini_edit_image",
+        )
+        assert accepted.ok and accepted.data.source_artifact_id == source.stem
+        envelope = dispatched[0]
+        source.write_bytes(b"x" * len(_SYNTHETIC_PNG))
+        child_id = envelope["operation_id"]
+        await media_jobs.execute_media_job(envelope["request"], operation_id=child_id,
+                                           store=store, worker_token=envelope["worker_token"])
+        stopped = store.get(child_id)
+        assert stopped.state == "failed" and stopped.phase == "image_input_unavailable"
+        assert stopped.upstream_chat_id is None and not stopped.cleanup_protected
+        generate.assert_not_awaited()
+
+    asyncio.run(run())
 
 
 def test_execute_real_store_persists_local_then_default_cleanup(monkeypatch, tmp_path):
@@ -889,6 +1140,7 @@ def test_video_refusal_is_exact_and_requires_no_artifacts(monkeypatch):
 @pytest.mark.parametrize("failure_reply", [
     GEMINI_GENERIC_FAILURE_REPLY,
     "Sorry, something went wrong. Please try your request again.",
+    "我是一个语言模型，这超出了我的设计用途。",
 ])
 @pytest.mark.parametrize("completed, same_candidate, same_reply, has_media", [
     (True, True, True, False),
@@ -902,6 +1154,7 @@ def test_image_generic_failure_releases_cleanup_only_after_exact_readback(
 ):
     import src.client_wrapper as wrapper
     from src.domain import CleanupObservation, CleanupState
+    from src.infrastructure.rpc_parsers import RPCParseResult
 
     class RejectionStore(Store):
         def release_failed_media_cleanup(self, operation_id, **kwargs):
@@ -918,6 +1171,10 @@ def test_image_generic_failure_releases_cleanup_only_after_exact_readback(
         "completed": completed, "text": failure_reply if same_reply else other_failure_reply,
     })
     monkeypatch.setattr(media_jobs, "fetch_workflow_turn", read_turn)
+    strict_notice = AsyncMock(return_value=RPCParseResult(
+        "success" if completed and same_candidate and same_reply else "changed_shape",
+    ))
+    monkeypatch.setattr(media_jobs, "read_completed_empty_media_turn", strict_notice)
     response = SimpleNamespace(metadata=["c_one", "r_one"], rcid="rc_one", text=failure_reply,
                                images=[object()] if has_media else [], videos=[], media=[])
     store = RejectionStore()
@@ -933,8 +1190,13 @@ def test_image_generic_failure_releases_cleanup_only_after_exact_readback(
         finalize.assert_not_awaited()
     if has_media:
         read_turn.assert_not_awaited()
-    else:
+        strict_notice.assert_not_awaited()
+    elif failure_reply == media_jobs._IMAGE_CHAT_REFUSAL:
         assert read_turn.await_args.args == (None, "c_one", "r_one", "rc_one")
+        strict_notice.assert_not_awaited()
+    else:
+        read_turn.assert_not_awaited()
+        strict_notice.assert_awaited_once_with(None, "c_one", "r_one", "rc_one", failure_reply)
 
 
 def test_abc_music_refusal_requires_prefix_and_verified_empty_cards(monkeypatch):
@@ -1096,3 +1358,193 @@ def test_initial_media_initialization_deadline_does_not_start_generation_after_l
         assert store.get(handle) == record
 
     asyncio.run(run())
+
+
+def test_background_music_controls_survive_dispatch_and_worker_without_entering_generation_arguments(monkeypatch, tmp_path):
+    import src.client_wrapper as wrapper
+    from src.services import background
+
+    monkeypatch.setenv("GEMINI_OPERATION_DB_PATH", str(tmp_path / "music.sqlite"))
+    monkeypatch.delenv("GEMINI_WEB_MEDIA_TRANSPORT", raising=False)
+    captured = []
+    generated = []
+
+    async def launch(store, record, kind, request=None):
+        captured.append((store, record, request))
+        return background._accepted(record)
+
+    monkeypatch.setattr(background, "_dispatch", launch)
+    result = asyncio.run(background.submit_media({"media_type": "music", "prompt": "synthetic instrumental",
+        "model": "neon", "music_duration": "short", "music_vocals": "instrumental"}, operation="gemini_create_media"))
+    assert result.ok and len(captured) == 1
+    store, record, request = captured[0]
+    assert request["music_duration"] == "short" and request["music_vocals"] == "instrumental"
+    assert store.claim_worker(record.operation_id, "music-worker")
+    client = SimpleNamespace(timeout=30, watchdog_timeout=30)
+    monkeypatch.setattr(wrapper, "get_gemini_client", lambda: client)
+    monkeypatch.setattr(wrapper, "initialize_client", AsyncMock())
+
+    async def generate(client, **kwargs):
+        generated.append(kwargs)
+        return SimpleNamespace()
+
+    monkeypatch.setattr(media_jobs, "generate_media_response", generate)
+    save = AsyncMock()
+    monkeypatch.setattr(media_jobs, "_save_response", save)
+    asyncio.run(media_jobs.execute_media_job(request, operation_id=record.operation_id, store=store, worker_token="music-worker"))
+    assert len(generated) == 1
+    assert generated[0]["music_duration"] == "short" and generated[0]["music_vocals"] == "instrumental"
+    assert "music_duration" not in generated[0]["arguments"] and "music_vocals" not in generated[0]["arguments"]
+    save.assert_awaited_once()
+
+
+@pytest.mark.parametrize("media_type,options", [("music", {"music_duration": "unknown"}),
+    ("music", {"music_vocals": "unknown"}), ("video", {"music_duration": "short"}),
+    ("image", {"music_vocals": "auto"})])
+def test_background_invalid_music_controls_reject_before_worker_dispatch(monkeypatch, media_type, options):
+    from src.services import background
+
+    dispatch = AsyncMock()
+    monkeypatch.setattr(background, "_dispatch", dispatch)
+    result = asyncio.run(background.submit_media({"media_type": media_type, "prompt": "synthetic", **options},
+                                               operation="gemini_create_media"))
+    assert not result.ok and result.error.code.value == "INVALID_ARGUMENT"
+    dispatch.assert_not_awaited()
+
+
+def test_background_explicit_sdk_music_controls_reject_before_worker_dispatch(monkeypatch):
+    from src.services import background
+
+    monkeypatch.setenv("GEMINI_WEB_MEDIA_TRANSPORT", "sdk")
+    dispatch = AsyncMock()
+    monkeypatch.setattr(background, "_dispatch", dispatch)
+    result = asyncio.run(background.submit_media({"media_type": "music", "prompt": "synthetic",
+        "music_duration": "short", "music_vocals": "instrumental"}, operation="gemini_create_media"))
+    assert not result.ok and result.error.code.value == "CAPABILITY_UNAVAILABLE"
+    dispatch.assert_not_awaited()
+
+
+def test_worker_invalid_music_controls_reject_before_client_initialization(monkeypatch):
+    import src.client_wrapper as wrapper
+
+    initialized = AsyncMock()
+    monkeypatch.setattr(wrapper, "initialize_client", initialized)
+    store = Store()
+    asyncio.run(media_jobs.execute_media_job({"media_type": "video", "prompt": "synthetic", "music_vocals": "auto"},
+        operation_id="op_synthetic", store=store, worker_token="worker"))
+    assert store.events[0][1]["phase"] == "input_rejected"
+    initialized.assert_not_awaited()
+
+
+class _ReadRateLimited(RuntimeError):
+    code = 'RATE_LIMITED'
+
+
+@pytest.mark.parametrize('phase', ['initialize', 'legacy_history', 'scoped_history'])
+def test_media_recovery_preserves_rate_limit_and_never_resubmits(monkeypatch, phase):
+    import src.client_wrapper as wrapper
+
+    client = _prepare(monkeypatch, None)
+    limited = AsyncMock(side_effect=_ReadRateLimited('Synthetic upstream HTTP 429'))
+    if phase == 'initialize':
+        monkeypatch.setattr(wrapper, 'initialize_client', limited)
+    elif phase == 'legacy_history':
+        client.read_chat = limited
+    else:
+        client.read_chat_for_media = limited
+    generate = AsyncMock()
+    save = AsyncMock()
+    monkeypatch.setattr(media_jobs, 'generate_media_response', generate)
+    monkeypatch.setattr(media_jobs, '_save_generated_media', save)
+    store = Store()
+    asyncio.run(media_jobs.recover_media_job(_record(), store=store, worker_token='worker'))
+    assert len(store.events) == 1 and store.events[0][0] == 'finish'
+    data = store.events[0][1]
+    assert data['state'] == 'partial' and data['error_code'] == 'RATE_LIMITED'
+    assert data['phase'] == 'media_readback_rate_limited'
+    limited.assert_awaited_once()
+    if phase == 'scoped_history':
+        client.read_chat.assert_not_awaited()
+    generate.assert_not_awaited()
+    save.assert_not_awaited()
+
+
+@pytest.mark.parametrize('phase', ['video_notice', 'legacy_notice', 'music_cards', 'music_proof'])
+@pytest.mark.parametrize('ownership', ['same', 'account_changed', 'lease_lost'])
+def test_media_proof_throttling_keeps_identity_and_cleanup_guard(monkeypatch, phase, ownership):
+    record = _record()
+    record.media_type = 'video' if phase in {'video_notice', 'legacy_notice'} else 'music'
+    text = {'video_notice': 'I seem to be encountering an error.',
+            'legacy_notice': GEMINI_GENERIC_FAILURE_REPLY,
+            'music_cards': 'Synthetic music result',
+            'music_proof': "I can't generate or output an audio file directly right now, as the music generation tool isn't available in this session."}[phase]
+    response = SimpleNamespace(metadata=[record.upstream_chat_id, record.upstream_response_id],
+        rcid=record.upstream_candidate_id, text=text, images=[], videos=[], media=[])
+    store = Store()
+    active = [False]
+
+    @contextmanager
+    def read_scope():
+        assert not active[0]
+        active[0] = True
+        try:
+            yield
+        finally:
+            active[0] = False
+
+    async def blocked(*args, **kwargs):
+        assert active[0]
+        if ownership == 'account_changed':
+            monkeypatch.setenv('GEMINI_PSID', 'different-offline-owner')
+        elif ownership == 'lease_lost':
+            store.owner = False
+        raise _ReadRateLimited('Synthetic batch status code 429')
+
+    callback = AsyncMock(side_effect=blocked)
+    if phase == 'music_cards':
+        monkeypatch.setattr(media_jobs, 'fetch_music_media_from_chat', callback)
+    else:
+        monkeypatch.setattr(media_jobs, 'read_completed_empty_media_turn', callback)
+        if phase == 'music_proof':
+            monkeypatch.setattr(media_jobs, 'fetch_music_media_from_chat', AsyncMock(return_value=[]))
+    save = AsyncMock()
+    reject = AsyncMock()
+    monkeypatch.setattr(media_jobs, '_save_generated_media', save)
+    monkeypatch.setattr(media_jobs, '_finish_media_rejection', reject)
+    asyncio.run(media_jobs._save_response(SimpleNamespace(media_readback_scope=read_scope), response, record,
+                                         store=store, token='worker'))
+    callback.assert_awaited_once()
+    assert not active[0]
+    save.assert_not_awaited()
+    reject.assert_not_awaited()
+    assert record.upstream_chat_id == 'c_one' and record.upstream_response_id == 'r_one'
+    assert record.upstream_candidate_id == 'rc_one'
+    if ownership == 'same':
+        assert len(store.events) == 1 and store.events[0][0] == 'finish'
+        assert store.events[0][1]['error_code'] == 'RATE_LIMITED'
+        assert store.events[0][1]['state'] == 'partial'
+    else:
+        assert not store.events
+
+
+def test_rate_limited_native_cid_only_recovery_retains_provenance(monkeypatch, tmp_path):
+    from src.infrastructure.operation_store import OperationStore
+
+    client = _prepare(monkeypatch, None)
+    store = OperationStore(tmp_path / 'rate.sqlite')
+    store.create_or_get('op_rate', 'gemini_generate_video', media_type='video',
+                        request_model='gemini-neon', effective_backend='Gemini Web native browser')
+    assert store.claim_worker('op_rate', 'worker')
+    media_jobs._checkpoint(store, 'op_rate', 'worker', SimpleNamespace(
+        metadata=['c_0123456789abcdef'], rcid='', _mcp_native_media=True))
+    record = store.get('op_rate')
+    limited = AsyncMock(side_effect=_ReadRateLimited('Synthetic HTTP 429'))
+    monkeypatch.setattr(media_jobs, 'read_native_media_response', limited)
+    asyncio.run(media_jobs.recover_media_job(record, store=store, worker_token='worker'))
+    after = store.get('op_rate')
+    assert after.state == 'partial' and after.error_code == 'RATE_LIMITED'
+    assert after.phase == 'native_media_submitted' and after.cleanup_protected
+    assert after.upstream_chat_id == record.upstream_chat_id
+    assert after.upstream_response_id is None and after.upstream_candidate_id is None
+    limited.assert_awaited_once()
+    client.read_chat.assert_not_awaited()

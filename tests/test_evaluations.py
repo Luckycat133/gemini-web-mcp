@@ -14,7 +14,7 @@ def _qa_pairs():
 def test_gemini_web_mcp_contract_evaluation_shape():
     pairs = _qa_pairs()
 
-    assert len(pairs) == 85
+    assert len(pairs) == 92
     for pair in pairs:
         question = pair.findtext("question")
         answer = pair.findtext("answer")
@@ -57,15 +57,22 @@ def test_gemini_web_mcp_contract_answers_match_static_manifest():
 
     assert account_tools["gemini_manage_chat"]["read_only"] is False
     assert account_tools["gemini_manage_chat"]["destructive"] is False
-    assert account_tools["gemini_manage_chat"]["availability"] == ["gemini-mcp-account"]
+    assert account_tools["gemini_manage_chat"]["availability"] == ["gemini-mcp-account", "account-full"]
     assert account_tools["gemini_preferences"]["read_only"] is False
-    assert account_tools["gemini_preferences"]["availability"] == ["gemini-mcp-account"]
+    assert account_tools["gemini_preferences"]["availability"] == ["account-full"]
     assert pairs["gemini_preferences"]
     for name in ("gemini_skills", "gemini_manage_notebook"):
         assert account_tools[name]["read_only"] is False
         assert account_tools[name]["destructive"] is True
-        assert account_tools[name]["availability"] == ["gemini-mcp-account"]
         assert pairs[name]
+    assert account_tools["gemini_skills"]["availability"] == ["account-full"]
+    assert account_tools["gemini_manage_notebook"]["availability"] == ["gemini-mcp-account", "account-full"]
+    assert account_tools["gemini_tasks"]["profile_annotations"]["gemini-mcp-account"] == {
+        "read_only": True, "destructive": False,
+    }
+    assert tools["gemini_create_media"]["availability"] == ["gemini-mcp-function"]
+    assert tools["gemini_get_operation_status"]["read_only"] is True
+    assert tools["gemini_get_operation_result"]["destructive"] is True
 
     assert "gemini_get_tool_manifest" in tools
     assert pairs["gemini_get_tool_manifest"]

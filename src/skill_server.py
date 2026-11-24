@@ -74,9 +74,12 @@ from .services import (
 )
 from .services.music_recovery import fetch_music_media_from_chat, music_response_identity
 from .services.media_generation import (
-    MediaGenerationProgress, add_media_cleanup_evidence, compose_media_prompt, generate_media_response,
-    media_timeout, media_timeout_scope, video_options_error,
+    MediaGenerationProgress, MusicDuration, MusicVocals, add_media_cleanup_evidence, compose_media_prompt,
+    generate_media_response, media_timeout, media_timeout_scope, music_option_arguments, music_options_error,
+    video_options_error,
 )
+from .services.native_media_generation import native_media_enabled
+from .services.native_media_inline import submit_and_wait_native_media
 from .services.media_storage import (
     _MediaSaveOutcome, _save_generated_media, _valid_media_filename, reconcile_remote_media_types,
     classify_generated_media,
@@ -135,6 +138,7 @@ from .services.scheduled import (
     scheduled_daily_payload as _scheduled_daily_payload,
 )
 from .tools.utils import extract_remote_chat_id, validate_optional_image_path
+from .services.media_inputs import image_workflow_options_error
 
 logging.basicConfig(
     level=logging.WARNING,
@@ -1135,13 +1139,27 @@ async def create(
     background: bool = True,
     operation_id: Optional[str] = None,
     duration_seconds: Optional[int] = None,
+    aspect_ratio: Literal["16:9", "9:16"] | None = None,
+    image_paths: list[str] | None = None,
+    source_operation_id: str | None = None,
+    source_artifact_id: str | None = None,
+    music_duration: MusicDuration | None = None,
+    music_vocals: MusicVocals | None = None,
 ) -> list[TextContent]:
     """Generate image/video/music in the background by default.
 
     Use session(action="operation_status" or "operation_result", session_id=handle)
     to check the returned handle. Synchronous mode does not accept operation_id.
+    Synchronous Web video and music wait on the original job. Use the returned
+    handle to recover a result if no verified artifact is available yet.
+    Background images accept ordered image_paths and can edit a verified saved
+    image by source_operation_id and optional source_artifact_id. The saved
+    image is attached before any other references.
     For video, model="gemini-omni-1.2-flash" explicitly uses the paid Gemini API
     with GEMINI_API_KEY and background mode. This route accepts duration_seconds from 3 to 15.
+    Web video accepts duration_seconds=10 or 15 and aspect_ratio="16:9" or "9:16".
+    Web music accepts music_duration (short, standard) and music_vocals
+    (instrumental, vocals, auto).
     """
     if not background and operation_id is not None:
         return domain_text(_invalid_argument_result("operation_id requires background=true."),
@@ -1155,7 +1173,16 @@ async def create(
     media_type = _normalize_media_type(type)
     invalid = video_options_error(media_type=media_type, model=model, thinking_level=thinking_level,
                                   duration_seconds=duration_seconds, delete_after_seconds=delete_after_seconds,
-                                  background=background)
+                                  background=background, aspect_ratio=aspect_ratio)
+    if invalid:
+        return domain_text(_invalid_argument_result(invalid), invalid, use_result_data=True)
+    invalid = music_options_error(media_type=media_type, music_duration=music_duration, music_vocals=music_vocals)
+    if invalid:
+        return domain_text(_invalid_argument_result(invalid), invalid, use_result_data=True)
+    invalid = image_workflow_options_error(
+        media_type=media_type, image_path=image_path, image_paths=image_paths, background=background,
+        source_operation_id=source_operation_id, source_artifact_id=source_artifact_id,
+    )
     if invalid:
         return domain_text(_invalid_argument_result(invalid), invalid, use_result_data=True)
     request_model: str | None = None
@@ -1172,18 +1199,31 @@ async def create(
                 f"Error: {image_error}",
             )
 
+        request = {
+            "prompt": prompt, "media_type": media_type, "model": model, "thinking_level": thinking_level,
+            "image_path": safe_image_path, "output_dir": output_dir, "filename": filename,
+            "timeout_seconds": None, "retain_chat": retain_chat,
+            "delete_after_seconds": delete_after_seconds, "edit": False, "duration_seconds": duration_seconds,
+            "aspect_ratio": aspect_ratio,
+            "image_paths": image_paths, "source_operation_id": source_operation_id,
+            "source_artifact_id": source_artifact_id,
+            **music_option_arguments(music_duration, music_vocals),
+        }
         if background:
             from .services.background import submit_media
-            submission = await submit_media({
-                "prompt": prompt, "media_type": media_type, "model": model, "thinking_level": thinking_level,
-                "image_path": safe_image_path, "output_dir": output_dir, "filename": filename,
-                "timeout_seconds": None, "retain_chat": retain_chat,
-                "delete_after_seconds": delete_after_seconds, "edit": False, "duration_seconds": duration_seconds,
-            }, operation="create", operation_id=operation_id)
+            submission = await submit_media(request, operation="create", operation_id=operation_id)
             return domain_text(submission, "Media task submitted." if submission.ok else "Media task submission failed.",
                                use_result_data=True)
 
         client = get_gemini_client()
+        if native_media_enabled(client, media_type):
+            waited = await submit_and_wait_native_media(request, operation="create", timeout_seconds=media_timeout(media_type))
+            inline_data = waited.data
+            summary = (f"Media operation {inline_data.operation_id}: {inline_data.state.value}."
+                       if inline_data and inline_data.operation_id else "")
+            text = summary if waited.ok else f"{domain_failure_text(waited)}\n{summary}".rstrip()
+            content = domain_text(waited, text, use_result_data=True)
+            return append_artifact_block(content, getattr(inline_data, "artifacts", ()))
         await initialize_client()
         await cleanup_due_remote_chats(client)
 
@@ -1206,7 +1246,9 @@ async def create(
                 retain_chat=retain_chat, delete_after_seconds=delete_after_seconds,
                 source=f"skill_create:{media_type}",
                 media_type=media_type,
+                duration_seconds=duration_seconds, aspect_ratio=aspect_ratio,
                 progress=progress,
+                **music_option_arguments(music_duration, music_vocals),
             ), timeout=effective_timeout)
         input_artifacts = _skill_input_artifacts(
             safe_image_path,
@@ -1625,6 +1667,10 @@ async def session(
                                        finalize_remote_chat_cleanup)
             result = await (service.get_status(session_id) if action == "operation_status"
                             else service.get_result(session_id))
+            if result.data is not None and result.data.operation == "gemini_run_task":
+                from .tools.operations import _present
+
+                return _present(result, include_text=include_text)
             omitted = False
             if action == "operation_result" and not include_text:
                 result, omitted = omit_saved_preview(result)

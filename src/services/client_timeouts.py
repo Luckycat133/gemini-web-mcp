@@ -1,7 +1,7 @@
 """Coordinate temporary timeout budgets for shared SDK clients."""
 
 from collections.abc import Iterator
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass, field
 import threading
 from typing import Any
@@ -19,6 +19,14 @@ class _TimeoutLeases:
 
 _timeout_lock = threading.RLock()
 _timeout_leases: dict[int, _TimeoutLeases] = {}
+
+
+@contextmanager
+def client_readback_scope(client: Any) -> Iterator[None]:
+    """Use a client's request-local media read policy without changing legacy clients."""
+    factory = getattr(client, "media_readback_scope", None)
+    with factory() if callable(factory) else nullcontext():
+        yield
 
 
 def _refresh_timeout_baseline(state: _TimeoutLeases) -> None:

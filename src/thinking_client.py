@@ -11,27 +11,33 @@ from typing import Any, AsyncGenerator, Callable, Iterator
 import orjson
 from gemini_webapi import GeminiClient
 from gemini_webapi.client import ChatSession
-from gemini_webapi.constants import Endpoint, Model, MODEL_HEADER_KEY
+from gemini_webapi.constants import Endpoint, GRPC, Model, MODEL_HEADER_KEY
 from gemini_webapi.exceptions import UsageLimitExceededError, TimeoutError as SDKTimeoutError
 from gemini_webapi.types import AvailableModel, ModelOutput
 
 from .services.cleanup_scope import observe_upstream_identity
 
 from .constants import (
-    is_generation_failure_reply,
+    gemini_4_model_family, is_auto_model_name, is_generation_failure_reply,
     resolve_learning_mode_config,
     resolve_thinking_level_id,
     resolve_thinking_mode_id,
     supported_learning_modes,
 )
+from .domain.results import classify_exception
 from .infrastructure.rpc_contracts import (
-    VideoTransportChanged, WebWorkflowTransportChanged, apply_notebook_attachments,
+    VideoTransportChanged, WebWorkflowTransportChanged, apply_image_generation_transport,
+    apply_music_companion_options, apply_music_generation_transport, apply_notebook_attachments,
     apply_task_generation_transport, apply_video_generation_transport,
 )
 from .infrastructure.rpc_parsers import CandidateSourceEvidence, parse_candidate_attribution_sources
+from .infrastructure.media_companions import MediaCompanionCatalog, parse_media_companions
 from .infrastructure.account_identity import current_account_key
 from .infrastructure.model_policy_store import ModelPolicyStore
-from .services.model_policy import ModelPolicyError, ModelSelection, current_model_policy
+from .services.model_policy import (
+    ModelPolicyError, ModelSelection, account_model_tier, current_model_policy,
+    membership_restriction, model_policy_family,
+)
 
 
 @dataclass(frozen=True)
@@ -44,11 +50,23 @@ class WebRequestOptions:
     learning_mode_id: int | None = None
     learning_x9b_field: str | None = None
     learning_x9b_value: int | None = None
+    image_generation: bool = False
+    music_generation: bool = False
+    media_option_ids: tuple[int, ...] = ()
     video_generation: bool = False
+    video_duration_seconds: int | None = None
+    video_aspect_ratio: str | None = None
+    video_format_code: int | None = None
     task_generation: bool = False
     task_conversation_id: str | None = None
     task_action_choice_id: str | None = None
     notebooks: tuple[tuple[str, str], ...] = ()
+
+
+@dataclass
+class _MediaReadback:
+    active: bool = True
+    rate_limit: Exception | None = None
 
 
 _web_request: ContextVar[WebRequestOptions | None] = ContextVar(
@@ -56,6 +74,8 @@ _web_request: ContextVar[WebRequestOptions | None] = ContextVar(
     default=None,
 )
 _video_generation: ContextVar[bool] = ContextVar("gemini_video_generation", default=False)
+_video_duration_seconds: ContextVar[int | None] = ContextVar("gemini_video_duration_seconds", default=None)
+_video_aspect_ratio: ContextVar[str | None] = ContextVar("gemini_video_aspect_ratio", default=None)
 _task_generation: ContextVar[bool] = ContextVar("gemini_task_generation", default=False)
 _task_conversation: ContextVar[str | None] = ContextVar("gemini_task_conversation", default=None)
 _task_action_choice: ContextVar[str | None] = ContextVar("gemini_task_action_choice", default=None)
@@ -64,6 +84,8 @@ _candidate_evidence: ContextVar[dict[str, tuple[CandidateSourceEvidence, ...]] |
     "gemini_candidate_evidence", default=None
 )
 _strict_session_recovery: ContextVar[bool] = ContextVar("gemini_strict_session_recovery", default=False)
+_initializing_client: ContextVar[GeminiClient | None] = ContextVar("gemini_initializing_client", default=None)
+_media_readback: ContextVar[_MediaReadback | None] = ContextVar("gemini_media_readback", default=None)
 _mutation_dispatch_owner: ContextVar[tuple[str, Callable[[], str | None]] | None] = ContextVar(
     "gemini_mutation_dispatch_owner", default=None
 )
@@ -88,6 +110,20 @@ gem_mutation_scope = mutation_scope
 
 
 @contextmanager
+def _media_readback_scope() -> Iterator[None]:
+    """Let the media observer handle retries and surface rate limits hidden by SDK parsers."""
+    readback = _MediaReadback()
+    token = _media_readback.set(readback)
+    try:
+        yield
+        if readback.rate_limit is not None:
+            raise readback.rate_limit
+    finally:
+        readback.active = False
+        _media_readback.reset(token)
+
+
+@contextmanager
 def strict_session_recovery_scope() -> Iterator[None]:
     """Leave incomplete session streams to identity-bound application recovery."""
     token = _strict_session_recovery.set(True)
@@ -97,27 +133,18 @@ def strict_session_recovery_scope() -> Iterator[None]:
         _strict_session_recovery.reset(token)
 
 
+_FLASH_COMPAT_NAMES = frozenset({
+    "flash", "fast", "3.5 flash", "3.8 flash", "gemini-3-flash",
+    "gemini-3-flash-thinking", "thinking", "gemini-flash",
+})
+
+
 def _policy_family(model: AvailableModel) -> str:
-    labels = (model.model_name, model.display_name, *model.aliases)
-    if any(re.search(r"(?<![a-z0-9])flash[\s_-]*lite(?![a-z0-9])", label.lower()) for label in labels):
-        return "lite"
-    normalized = model.model_name.strip().lower().replace(" ", "-")
-    if re.fullmatch(r"(?:gemini-)?(?:\d+(?:\.\d+)?-)?flash", normalized):
-        return "flash"
-    return "other"
+    return model_policy_family(model)
 
 
 def _task_model_supported(model: AvailableModel) -> bool:
-    """Allow only an unambiguous Task family in discovered model metadata."""
-    if _policy_family(model) == "lite":
-        return False
-    families = set()
-    for label in (model.model_name, model.display_name, *model.aliases):
-        normalized = re.sub(r"[\s_-]+", "-", label.strip().lower())
-        match = re.fullmatch(r"(?:gemini-)?(?:\d+(?:\.\d+)?-)?(flash|argon|pro)", normalized)
-        if match:
-            families.add(match.group(1))
-    return families in ({"flash"}, {"argon"})
+    return model_policy_family(model) in {"flash", "argon", "neon", "carbon"}
 
 
 def _encode_learning_x9b(field_name: str, value: int) -> list[Any]:
@@ -159,7 +186,7 @@ def inject_web_request_options(
     f_req = request_data.get("f.req")
     if options.task_action_choice_id is not None and not options.task_generation:
         raise WebWorkflowTransportChanged("Task confirmation choice requires Task continuation.")
-    workflow = options.task_generation or bool(options.notebooks)
+    workflow = options.image_generation or options.music_generation or options.task_generation or bool(options.notebooks)
     if not isinstance(f_req, str):
         if workflow:
             raise WebWorkflowTransportChanged("Web workflow request is unavailable.")
@@ -205,6 +232,16 @@ def inject_web_request_options(
             raise VideoTransportChanged("Video generation transport request shape changed")
         return request_data
 
+    if options.music_generation:
+        if options.image_generation or options.video_generation or options.task_generation or options.learning_mode_id or options.notebooks:
+            raise WebWorkflowTransportChanged("Music generation requires an ordinary music request.")
+        apply_music_generation_transport(inner_request)
+
+    if options.image_generation:
+        if options.video_generation or options.task_generation or options.learning_mode_id or options.notebooks:
+            raise WebWorkflowTransportChanged("Image generation requires an ordinary image request.")
+        apply_image_generation_transport(inner_request)
+
     if (len(inner_request) >= 81 and not (workflow or options.video_generation or options.learning_mode_id)
             and type(inner_request[79]) is int and inner_request[79] > 0
             and type(inner_request[80]) is int and inner_request[80] == options.thinking_level_id):
@@ -231,7 +268,18 @@ def inject_web_request_options(
     if options.video_generation:
         if options.learning_mode_id:
             raise ValueError("Video generation cannot use a learning mode")
-        apply_video_generation_transport(inner_request)
+        apply_video_generation_transport(
+            inner_request, duration_seconds=options.video_duration_seconds, aspect_ratio=options.video_aspect_ratio,
+            **({"format_code": options.video_format_code} if options.video_format_code is not None else {}),
+        )
+
+    if options.media_option_ids:
+        if not (options.image_generation or options.music_generation or options.video_generation):
+            raise WebWorkflowTransportChanged("Media companion choices require a media composer.")
+        if options.music_generation:
+            apply_music_companion_options(inner_request, options.media_option_ids)
+        else:
+            inner_request[55] = [list(options.media_option_ids)]
 
     if options.task_generation:
         if options.video_generation or options.learning_mode_id:
@@ -259,18 +307,34 @@ class _ObservedChatSession(ChatSession):
 class ThinkingLevelGeminiClient(GeminiClient):
     """Gemini client that carries the current Web UI thinking-level selector."""
 
+    async def _init_rpc(self) -> None:
+        token = _initializing_client.set(self)
+        try:
+            await super()._init_rpc()
+        finally:
+            _initializing_client.reset(token)
+
     async def _batch_execute(self, *args: Any, **kwargs: Any) -> Any:
         scoped = _mutation_dispatch_owner.get()
         owner, provider = scoped if scoped else (None, current_account_key)
-        if owner:
-            if provider() != owner:
-                raise PermissionError("Gemini account changed or is unavailable.")
+        readback = _media_readback.get()
+        if readback is not None and not readback.active:
+            readback = None
+        if owner and provider() != owner:
+            raise PermissionError("Gemini account changed or is unavailable.")
+        if owner or readback is not None or _initializing_client.get() is self:
+            # Scoped mutations and media observers own retries. During init,
+            # the SDK could close and reenter init while holding the same lock.
             kwargs["current_retry"] = 0
+        if readback is not None:
+            kwargs["close_on_error"] = False
         try:
             result = await super()._batch_execute(*args, **kwargs)
-        except Exception:
+        except Exception as error:
             if owner and provider() != owner:
                 raise PermissionError("Gemini account changed or is unavailable.") from None
+            if readback is not None and readback.active and classify_exception(error).error_code == "RATE_LIMITED":
+                readback.rate_limit = error
             raise
         if owner and provider() != owner:
             raise PermissionError("Gemini account changed or is unavailable.")
@@ -291,6 +355,12 @@ class ThinkingLevelGeminiClient(GeminiClient):
             raise SDKTimeoutError("The session stream is incomplete; exact-turn recovery is required.")
         return await super().read_chat(cid, limit=limit)
 
+    media_readback_scope = staticmethod(_media_readback_scope)
+
+    async def read_chat_for_media(self, cid: str, limit: int = 10) -> Any:
+        with self.media_readback_scope():
+            return await self.read_chat(cid, limit=limit)
+
     async def _generate(self, *args: Any, **kwargs: Any) -> AsyncGenerator[ModelOutput, None]:
         # A failed stream can already have created a remote turn. Replaying it
         # inside the SDK retry decorator could start the generation twice.
@@ -304,7 +374,7 @@ class ThinkingLevelGeminiClient(GeminiClient):
         requested = kwargs.get("model")
         if requested is None or requested == Model.UNSPECIFIED:
             requested_name = "flash"
-            selected = self._resolve_policy_model("gemini-flash")
+            selected = self._resolve_policy_model("flash")
         elif isinstance(requested, str):
             requested_name = requested
             selected = self._resolve_policy_model(requested)
@@ -327,6 +397,9 @@ class ThinkingLevelGeminiClient(GeminiClient):
         store = ModelPolicyStore()
         request_started = store.clock()
         family = _policy_family(selected)
+        tier = account_model_tier(self)
+        if restriction := membership_restriction(tier, family, policy.purpose):
+            raise ModelPolicyError(restriction)
         if family == "lite" and policy.purpose in {"task", "notebook_chat"}:
             raise ModelPolicyError("Flash-Lite is unavailable for Task workflows.")
         if policy.purpose == "task" and not _task_model_supported(selected):
@@ -335,14 +408,27 @@ class ThinkingLevelGeminiClient(GeminiClient):
         reason = None
         if family == "lite" and not exhausted:
             raise ModelPolicyError("Flash-Lite model unavailable without verified Flash quota exhaustion.")
-        if family == "flash" and exhausted and policy.purpose == "query" and policy.allow_fallback:
+        options = _web_request.get()
+        plain_chat = (policy.purpose in {"query", "unspecified"} and not kwargs.get("deep_research")
+                      and not kwargs.get("req_file_data") and not _notebook_context.get()
+                      and not (options and (options.learning_mode_id or options.image_generation
+                                           or options.music_generation or options.video_generation)))
+        explicit_hydrogen = (requested_name.strip().lower() not in _FLASH_COMPAT_NAMES
+                             and any(gemini_4_model_family(label) == "hydrogen"
+                                     for label in (selected.model_name, selected.display_name)))
+        if (family == "flash" and exhausted and policy.purpose == "query" and policy.allow_fallback
+                and plain_chat and not explicit_hydrogen):
             selected = self._resolve_policy_model("gemini-flash-lite")
             if _policy_family(selected) != "lite":
                 raise ModelPolicyError("The requested fallback model is unavailable.")
             family, reason = "lite", "flash_quota_exhausted"
         kwargs["model"] = selected
         options = _web_request.get()
-        selectable = family != "lite"
+        if options and (options.image_generation or options.music_generation or options.video_generation):
+            media_choices = self._media_companion_options(options)
+            options = replace(options, media_option_ids=media_choices,
+                              video_format_code=2 if options.video_generation and 67 in media_choices else None)
+        selectable = family not in {"lite", "auto"}
         if not selectable:
             kwargs["extended_thinking"] = False
             if options is not None:
@@ -397,17 +483,6 @@ class ThinkingLevelGeminiClient(GeminiClient):
                    and model.model_id == selected.model_id]
         if len(matches) != 1 or not matches[0].is_available:
             raise ModelPolicyError("The requested model is unavailable in the discovered registry.")
-        if isinstance(value, str):
-            normalized = value.strip().lower()
-            known_families = {"flash", "fast", "3.5 flash", "3.8 flash", "gemini-3-flash",
-                              "gemini-3-flash-thinking", "thinking", "gemini-flash", "pro", "3.1 pro",
-                              "gemini-3-pro", "gemini-pro", "lite", "3.1 flash-lite", "3.5 flash-lite",
-                              "flash-lite", "gemini-flash-lite", "gemini-3-flash-lite",
-                              "argon", "4 argon", "gemini-argon", "gemini-4-argon"}
-            exact = {matches[0].model_name.lower(), matches[0].model_id.lower(),
-                     *(alias.lower() for alias in matches[0].aliases)}
-            if normalized not in known_families and normalized not in exact:
-                raise ModelPolicyError("The requested model is unavailable in the discovered registry.")
         return matches[0]
 
     def _resolve_model_by_name(self, name: str) -> AvailableModel:
@@ -419,22 +494,11 @@ class ThinkingLevelGeminiClient(GeminiClient):
         """
         normalized = name.strip().lower()
         families = {
-            "flash": "gemini-flash",
-            "fast": "gemini-flash",
-            "3.5 flash": "gemini-flash",
-            "3.8 flash": "gemini-flash",
-            "gemini-3-flash": "gemini-flash",
-            "gemini-3-flash-thinking": "gemini-flash",
-            "thinking": "gemini-flash",
-            "gemini-flash": "gemini-flash",
+            **dict.fromkeys(_FLASH_COMPAT_NAMES, "gemini-flash"),
             "pro": "gemini-pro",
             "3.1 pro": "gemini-pro",
             "gemini-3-pro": "gemini-pro",
             "gemini-pro": "gemini-pro",
-            "argon": "gemini-argon",
-            "4 argon": "gemini-argon",
-            "gemini-argon": "gemini-argon",
-            "gemini-4-argon": "gemini-argon",
             "lite": "gemini-flash-lite",
             "3.1 flash-lite": "gemini-flash-lite",
             "3.5 flash-lite": "gemini-flash-lite",
@@ -443,9 +507,31 @@ class ThinkingLevelGeminiClient(GeminiClient):
             "gemini-3-flash-lite": "gemini-flash-lite",
         }
         canonical = families.get(normalized)
-        if canonical is None:
-            return super()._resolve_model_by_name(name)
         models = list(getattr(self, "_model_registry", {}).values())
+        if canonical == "gemini-flash":
+            models = [model for model in models if model.is_available]
+            policy = current_model_policy()
+            media_default = policy.purpose == "media" and normalized in _FLASH_COMPAT_NAMES
+            if normalized in {"flash", "fast"} or policy.requested_alias == "flash" or media_default:
+                hydrogen = self._gemini_4_family_models(models, "hydrogen")
+                if hydrogen:
+                    return self._unique_discovered_model(hydrogen, "hydrogen")
+                if media_default and _video_generation.get():
+                    raise ModelPolicyError(
+                        "Hydrogen is required for Gemini Web video generation and is unavailable in the discovered registry."
+                    )
+        if canonical is None:
+            if is_auto_model_name(normalized):
+                return self._unique_discovered_model(
+                    [model for model in models if model.is_available and model_policy_family(model) == "auto"], name)
+            family = gemini_4_model_family(normalized)
+            if family:
+                return self._resolve_gemini_4_family(models, family)
+            exact_matches = [model for model in models if normalized in {
+                model.model_id.lower(), model.model_name.lower(), model.display_name.lower(),
+            }]
+            aliases = [model for model in models if normalized in {alias.lower() for alias in model.aliases}]
+            return self._unique_discovered_model(exact_matches or aliases, name)
         for exact in (normalized, canonical):
             matches = [model for model in models if model.model_name.lower() == exact]
             if len(matches) == 1:
@@ -462,7 +548,66 @@ class ThinkingLevelGeminiClient(GeminiClient):
             return alias_matches[0]
         if len(alias_matches) > 1:
             raise ValueError(f"Ambiguous discovered model: {name}")
+        if canonical == "gemini-flash":
+            return self._resolve_gemini_4_family(models, "hydrogen")
         raise ValueError(f"Requested model is not available in the discovered registry: {name}")
+
+    @staticmethod
+    def _unique_discovered_model(models: list[AvailableModel], name: str) -> AvailableModel:
+        if len(models) == 1:
+            return models[0]
+        if models:
+            raise ValueError(f"Ambiguous discovered model: {name}")
+        raise ValueError(f"Requested model is not available in the discovered registry: {name}")
+
+    @staticmethod
+    def _gemini_4_family_models(models: list[AvailableModel], family: str) -> list[AvailableModel]:
+        matches = []
+        for model in models:
+            names = {gemini_4_model_family(label) for label in (model.model_name, model.display_name)}
+            if names - {None} == {family} and model_policy_family(model) != "lite":
+                matches.append(model)
+        return matches
+
+    def _resolve_gemini_4_family(self, models: list[AvailableModel], family: str) -> AvailableModel:
+        return self._unique_discovered_model(self._gemini_4_family_models(models, family), family)
+
+    def _parse_rpc_results(self, response_text: str, target_id: str) -> Iterator[Any]:
+        for body in super()._parse_rpc_results(response_text, target_id):
+            if target_id == GRPC.GET_USER_STATUS:
+                parsed = parse_media_companions(body)
+                self._mcp_media_companions = parsed.value
+            yield body
+
+    def _media_companion_options(self, options: WebRequestOptions) -> tuple[int, ...]:
+        catalog = getattr(self, "_mcp_media_companions", None)
+        if not isinstance(catalog, MediaCompanionCatalog):
+            return ()
+        mode = 11 if options.video_generation else 14 if options.image_generation else 21
+        selected = list(catalog.default_option_ids(mode))
+        if mode == 11:
+            formats = [group for group in catalog.by_mode.get(mode, ()) if group.id == 21 and group.available]
+            if formats:
+                video_choices = [choice for group in formats for choice in group.options if choice.id == 67 and choice.available]
+                if len(video_choices) != 1:
+                    raise ModelPolicyError("Video format is unavailable in the current Web catalog.")
+                selected = [item for item in selected if item not in {choice.id for group in formats for choice in group.options}]
+                selected.append(video_choices[0].id)
+            for group_id, requested in ((11, options.video_duration_seconds), (12, options.video_aspect_ratio)):
+                if requested is None:
+                    continue
+                groups = [group for group in catalog.by_mode.get(mode, ()) if group.id == group_id and group.available]
+                if len(groups) != 1:
+                    raise ModelPolicyError("The requested video option is unavailable in the current Web catalog.")
+                group = groups[0]
+                matches = [choice for choice in group.options if choice.available and (
+                    re.search(rf"(?<![0-9]){requested}(?![0-9])", choice.title) if group_id == 11
+                    else str(requested) in choice.title)]
+                if len(matches) != 1:
+                    raise ModelPolicyError("The requested video option is unavailable in the current Web catalog.")
+                selected = [item for item in selected if item not in {choice.id for choice in group.options}]
+                selected.append(matches[0].id)
+        return tuple(dict.fromkeys(selected))
 
     def _parse_candidate(self, candidate_data: list[Any], cid: str, rid: str, rcid: str) -> Any:
         result = super()._parse_candidate(candidate_data, cid, rid, rcid)
@@ -552,7 +697,8 @@ class ThinkingLevelGeminiClient(GeminiClient):
             if _video_generation.get() and previous.learning_mode_id:
                 raise ValueError("Video generation cannot use a learning mode")
             if _video_generation.get():
-                return _web_request.set(replace(previous, video_generation=True))
+                return _web_request.set(replace(previous, video_generation=True,
+                    video_duration_seconds=_video_duration_seconds.get(), video_aspect_ratio=_video_aspect_ratio.get()))
             return _web_request.set(previous)
 
         level_id = resolve_thinking_level_id(thinking_level)
@@ -582,7 +728,11 @@ class ThinkingLevelGeminiClient(GeminiClient):
             learning_x9b_value=(
                 int(learning_config["x9b_value"]) if learning_config is not None else None  # type: ignore[call-overload]
             ),
+            image_generation=bool(previous and previous.image_generation),
+            music_generation=bool(previous and previous.music_generation),
             video_generation=_video_generation.get(),
+            video_duration_seconds=_video_duration_seconds.get(),
+            video_aspect_ratio=_video_aspect_ratio.get(),
             task_generation=_task_generation.get(),
             task_conversation_id=_task_conversation.get(),
             task_action_choice_id=_task_action_choice.get(),
@@ -592,6 +742,8 @@ class ThinkingLevelGeminiClient(GeminiClient):
             (
                 options.thinking_level_id,
                 options.learning_mode_id,
+                options.image_generation,
+                options.music_generation,
                 options.video_generation,
                 options.task_generation,
                 options.notebooks,
@@ -610,12 +762,35 @@ class ThinkingLevelGeminiClient(GeminiClient):
             _web_request.reset(token)
 
     @contextmanager
-    def video_generation_scope(self) -> Iterator[None]:
-        """Enable the observed video transport for this task only."""
-        token = _video_generation.set(True)
+    def image_generation_scope(self) -> Iterator[None]:
+        """Select the Web image tool for this request."""
+        token = _web_request.set(replace(_web_request.get() or WebRequestOptions(), image_generation=True))
         try:
             yield
         finally:
+            _web_request.reset(token)
+
+    @contextmanager
+    def music_generation_scope(self) -> Iterator[None]:
+        """Select the Web Create music tool independently of chat thinking."""
+        token = _web_request.set(replace(_web_request.get() or WebRequestOptions(), music_generation=True))
+        try:
+            yield
+        finally:
+            _web_request.reset(token)
+
+    @contextmanager
+    def video_generation_scope(self, *, duration_seconds: int | None = None,
+                               aspect_ratio: str | None = None) -> Iterator[None]:
+        """Select the observed Web video mode and optional composer choices."""
+        token = _video_generation.set(True)
+        duration_token = _video_duration_seconds.set(duration_seconds)
+        aspect_token = _video_aspect_ratio.set(aspect_ratio)
+        try:
+            yield
+        finally:
+            _video_aspect_ratio.reset(aspect_token)
+            _video_duration_seconds.reset(duration_token)
             _video_generation.reset(token)
 
     @contextmanager
@@ -680,7 +855,7 @@ class ThinkingLevelGeminiClient(GeminiClient):
         def stream_with_thinking(method: str, url: str, *args: Any, **kwargs: Any):
             request = _web_request.get()
             data = kwargs.get("data")
-            if (request and (request.task_generation or request.notebooks) and url == Endpoint.GENERATE
+            if (request and (request.image_generation or request.music_generation or request.task_generation or request.notebooks) and url == Endpoint.GENERATE
                     and not isinstance(data, dict)):
                 raise WebWorkflowTransportChanged("Web workflow request is unavailable.")
             if request and request.video_generation and url == Endpoint.GENERATE and not isinstance(data, dict):

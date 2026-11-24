@@ -39,17 +39,15 @@
 通过 MCP 保存图片、音乐和视频产物；视频专用模式已在授权本地测试中返回 MP4。账号和上游可用性仍可能变化。
 
 ### Q: 音乐生成选哪个模型？
-**A:** 网页帮助说明 Pro 模型可选完整曲目，还可设置时长等选项。
-当前 MCP 结果没有报告精确的 Lyria 版本；选择模型后，以实际产物与曲长为准。
+**A:** 省略媒体 `model` 时选择当前账号发现的 Hydrogen。聊天模型不等于音乐生成器版本，不能据 Pro／Neon 名称判断曲长或后端。上游没有明确版本时 `observed_backend` 留空，以实际音频和曲长为准。
 `extended` 思考等级不等于音乐版本。
 
 ### Q: 图像生成时 `pro` 为什么没有直接换模型？
-**A:** Flash 与 Pro 的首轮图像请求走 Nano Banana 2；Flash-Lite 使用 Nano Banana 2 Lite。
-`pro` 相关的图像增强属于网页生成后的 Pro redo，不是独立首轮模型。
+**A:** 显式可用的聊天模型选择会保留，旧 Pro 若已不在账号目录则直接拒绝。聊天 selector 不标识 Nano Banana 的精确版本；网页 Pro redo 是生成后的独立操作。当前官方图像页介绍 Nano Banana 2.1，但某次 MCP 生成必须以实际后端证据和图片为准。
 
 ### Q: 视频怎么生成？
-**A:** 调用 `gemini_generate_video`，默认使用 Gemini Apps「创建视频」模式。
-要锁定 Gemini Omni 1.2 Flash 和 3–15 秒时长，请使用显式 API 模型和付费项目的 `GEMINI_API_KEY`。
+**A:** 调用 `gemini_create_media(kind="video", prompt=...)`，默认使用 Gemini Apps「创建视频」模式。
+网页路径支持 10／15 秒和横／竖画幅。需要使用独立 API 模型 ID 及 3–15 秒参数时，明确选择 `gemini-omni-1.2-flash` 并配置付费项目的 `GEMINI_API_KEY`。普通网页调用不会自动切换 API。
 拿到任务句柄后，用原句柄取回已验证的 MP4。见[视频生成参数](tools.md#gemini_generate_video)。
 
 ---

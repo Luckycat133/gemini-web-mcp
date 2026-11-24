@@ -1,6 +1,6 @@
 [project]
 name = "gemini-mcp-server"
-version = "0.2.1"
+version = "0.20.8"
 description = "MCP server for Gemini Web API reverse engineering"
 requires-python = ">=3.11"
 readme = "README.md"
@@ -57,7 +57,7 @@ where = ["."]
 include = ["src*"]
 
 [tool.setuptools.package-data]
-src = ["data/*.json"]
+src = ["data/*.json", "data/*.js"]
 
 [tool.ruff]
 line-length = 120

@@ -11,7 +11,7 @@ from typing import Any, Callable, Literal, Mapping
 
 from ..domain.conversations import is_valid_remote_chat_id
 from .rpc_contracts import GRAPHQL_READ_CONTRACTS, GraphQLReadContract, RPCContract, get_contract
-from .task_confirmation import parse_confirmation_replies
+from .task_confirmation import native_confirmation_card, parse_confirmation_replies
 from .task_setup import parse_app_setup_card
 
 logger = logging.getLogger(__name__)
@@ -950,8 +950,7 @@ def parse_workflow_turn(body: Any, *, chat_id: str = "", rid: str = "", rcid: st
     # answer. This marker was observed on the native Remy confirmation card.
     input_required = complete and isinstance(text, str) and "googleusercontent.com/action_card_content/" in text
     confirmation: dict[str, Any] = {"input_options": []}
-    card_group = _nested(candidate, [12, 34, 0, 1])
-    card = card_group.get("154") if isinstance(card_group, dict) else None
+    card = native_confirmation_card(candidate) if isinstance(candidate, list) else None
     if isinstance(card, list):
         input_required = complete
         if complete:
@@ -970,6 +969,83 @@ def parse_workflow_turn(body: Any, *, chat_id: str = "", rid: str = "", rcid: st
                                              **confirmation,
                                              **setup,
                                              "input_prompt": text if input_required else None})
+
+
+def parse_completed_empty_media_turn(
+    body: Any, *, chat_id: str, rid: str, rcid: str, text: str, reject_code: int | None = None,
+) -> RPCParseResult:
+    """Prove one exact completed reply has only empty rich-content containers."""
+    return _parse_completed_media_turn(body, chat_id=chat_id, rid=rid, rcid=rcid, text=text, reject_code=reject_code)
+
+
+def parse_completed_music_failure_turn(
+    body: Any, *, chat_id: str, rid: str, rcid: str, text: str, reject_code: int | None = None,
+) -> RPCParseResult:
+    """Prove the observed technical music failure card accompanies known NoTool text."""
+    from ..constants import is_music_tool_unavailable_reply
+
+    if reject_code is not None:
+        return RPCParseResult("rejected", reject_code=reject_code)
+    if not is_music_tool_unavailable_reply(text):
+        return RPCParseResult("changed_shape")
+    return _parse_completed_media_turn(body, chat_id=chat_id, rid=rid, rcid=rcid, text=text, music_error_card=True)
+
+
+def _parse_completed_media_turn(
+    body: Any, *, chat_id: str, rid: str, rcid: str, text: str, reject_code: int | None = None,
+    music_error_card: bool = False,
+) -> RPCParseResult:
+    """Share exact completion/identity/URI guards without widening the empty-media proof."""
+    if reject_code is not None:
+        return RPCParseResult("rejected", reject_code=reject_code)
+    if (not is_valid_remote_chat_id(chat_id) or not rid or not rcid or not isinstance(text, str) or not text.strip()
+            or not isinstance(body, list) or not body or not isinstance(body[0], list)):
+        return RPCParseResult("changed_shape")
+    turns = []
+    for turn in body[0]:
+        if not isinstance(turn, list) or not turn or not isinstance(turn[0], list) or len(turn[0]) < 2:
+            return RPCParseResult("changed_shape")
+        if turn[0][1] == rid:
+            if turn[0][0] != chat_id:
+                return RPCParseResult("changed_shape")
+            turns.append(turn)
+    if not turns:
+        return RPCParseResult("empty")
+    if len(turns) != 1:
+        return RPCParseResult("changed_shape")
+    candidates = _nested(turns[0], [3, 0])
+    if not isinstance(candidates, list):
+        return RPCParseResult("changed_shape")
+    if any(not isinstance(candidate, list) or not candidate for candidate in candidates):
+        return RPCParseResult("changed_shape")
+    selected = [candidate for candidate in candidates if candidate[0] == rcid]
+    if not selected:
+        return RPCParseResult("empty")
+    if len(selected) != 1 or len(selected[0]) <= 12:
+        return RPCParseResult("changed_shape")
+    observed = parse_workflow_turn(body, chat_id=chat_id, rid=rid, rcid=rcid)
+    value = observed.value
+    if (not observed.ok or not isinstance(value, dict) or value.get("completed") is not True
+            or value.get("text") != text or type(_nested(selected[0], [8, 0])) is not int):
+        return RPCParseResult("changed_shape")
+
+    def empty_rich(item: Any) -> bool:
+        return item is None or isinstance(item, list) and all(empty_rich(child) for child in item)
+
+    def has_location(item: Any) -> bool:
+        if isinstance(item, str):
+            return any(prefix in item.lower() for prefix in ("https://", "http://", "blob:", "data:"))
+        if isinstance(item, (list, tuple)):
+            return any(has_location(child) for child in item)
+        if isinstance(item, dict):
+            return any(has_location(child) for child in item.values())
+        return False
+
+    rich_verified = (parse_music_chat_turn_evidence(body, rid=rid, rcid=rcid).status == "rejected"
+                     if music_error_card else empty_rich(selected[0][12]))
+    if not rich_verified or has_location(selected[0]):
+        return RPCParseResult("changed_shape")
+    return RPCParseResult("success", value=value)
 
 
 # Remy schedules: fields are one-based protobuf numbers stored as JSPB arrays.

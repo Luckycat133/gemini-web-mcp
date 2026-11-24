@@ -1,0 +1,24 @@
+{
+  "evidence_kind": "Synthetic identities/text around the observed exact music failure card; reuses web_workflow.turn.",
+  "arguments": {
+    "chat_id": "c_0123456789abcdef",
+    "rid": "r_fixture",
+    "rcid": "rc_fixture",
+    "text": "I can't generate an audio track directly right now, but here is an original, synthetic score."
+  },
+  "cases": [
+    {
+      "name": "success_exact_completed_known_no_tool_and_error_card",
+      "status": "success",
+      "body": [[[["c_0123456789abcdef", "r_fixture"], null, null, [[[
+        "rc_fixture",
+        ["I can't generate an audio track directly right now, but here is an original, synthetic score."],
+        null, null, null, null, null, null, [2], null, null, null,
+        [{"8": [], "73": [null, "Generating your track", null, 3]}]
+      ]]]]]]
+    },
+    {"name": "empty_turns", "status": "empty", "body": [[]]},
+    {"name": "rejected", "status": "rejected", "body": null, "reject_code": 5},
+    {"name": "changed_shape", "status": "changed_shape", "body": {"unexpected": []}}
+  ]
+}

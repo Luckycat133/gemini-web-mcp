@@ -10,7 +10,10 @@ import tomllib
 from pathlib import Path
 
 from scripts.run_contract_checklist import CONTRACT_TESTS
-from scripts.smoke_profiles import ACCOUNT_TOOLS, ASSIST_TOOLS, COMPACT_TOOLS, FUNCTION_TOOLS, PRIMARY_PROFILE_TOOLS
+from scripts.smoke_profiles import (
+    ACCOUNT_FULL_TOOLS, ACCOUNT_TOOLS, ASSIST_TOOLS, COMPACT_TOOLS,
+    FUNCTION_FULL_TOOLS, FUNCTION_TOOLS, PRIMARY_PROFILE_TOOLS,
+)
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 CI_WORKFLOW = PROJECT_ROOT / ".github" / "workflows" / "ci.yml"
@@ -65,9 +68,25 @@ def test_targeted_contract_checklist_covers_stable_architecture_boundaries() -> 
         "tests/test_research_worker_recovery.py",
         "tests/test_background_operations.py",
         "tests/test_media_jobs.py",
+        "tests/test_generic_media_failure.py",
+        "tests/test_chinese_media_failure_dom.py",
+        "tests/test_native_media_browser.py",
+        "tests/test_native_media_generation.py",
+        "tests/test_native_media_jobs.py",
+        "tests/test_completed_music_failure.py",
+        "tests/test_music_notation_reply.py",
+        "tests/test_native_media_inline.py",
+        "tests/test_web_music_options.py",
+        "tests/test_worker_cookie_cache.py",
+        "tests/test_media_worker_recovery.py",
+        "tests/test_worker_finalization.py",
+        "tests/test_media_cleanup_reconciliation.py",
         "tests/test_task_jobs.py",
         "tests/test_task_inputs.py",
         "tests/test_task_confirmation.py",
+        "tests/test_web_task_approvals.py",
+        "tests/test_task_approval_browser.py",
+        "tests/test_task_delete_browser_script.py",
         "tests/test_task_setup.py",
         "tests/test_task_files.py",
         "tests/test_managed_skills.py",
@@ -132,8 +151,12 @@ def test_representative_profile_snapshots_are_explicit_and_exhaustive() -> None:
 
     assert FUNCTION_TOOLS == catalogs.FUNCTION_TOOLS
     assert ACCOUNT_TOOLS == catalogs.ACCOUNT_TOOLS
-    assert len(FUNCTION_TOOLS) == 17 and len(ACCOUNT_TOOLS) == 17
+    assert len(FUNCTION_TOOLS) == len(ACCOUNT_TOOLS) == 6
     assert not FUNCTION_TOOLS & ACCOUNT_TOOLS
+    assert FUNCTION_FULL_TOOLS == catalogs.FUNCTION_FULL_TOOLS
+    assert ACCOUNT_FULL_TOOLS == catalogs.ACCOUNT_FULL_TOOLS
+    assert len(FUNCTION_FULL_TOOLS) == len(ACCOUNT_FULL_TOOLS) == 17
+    assert not FUNCTION_FULL_TOOLS & ACCOUNT_FULL_TOOLS
     assert set(PRIMARY_PROFILE_TOOLS) == {
         "core",
         "media",

@@ -38,6 +38,8 @@ class LongOperationData:
     poll_after_seconds: int = 5
     error_code: str | None = None
     execution_mode: str | None = None
+    source_operation_id: str | None = None
+    source_artifact_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -92,3 +94,5 @@ class OperationReadData:
     setup_app_name: str | None = None
     setup_url: str | None = None
     upstream_operation_id: str | None = None
+    source_operation_id: str | None = None
+    source_artifact_id: str | None = None

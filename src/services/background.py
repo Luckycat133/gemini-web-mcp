@@ -11,18 +11,31 @@ import re
 import subprocess
 import sys
 import threading
+import time
 import uuid
 from typing import Any
 
 from ..constants import OMNI_VIDEO_API_BACKEND, resolve_media_request, resolve_thinking_level_id
+from ..domain import CleanupState
 from ..domain.operations import LongOperationData, operation_failure_code
 from ..domain.results import DomainErrorCode, DomainResult, DomainWarning, OperationState, result_from_exception
 from ..infrastructure.account_identity import (
     current_account_key, omni_video_api_key, operation_account_matches, uses_omni_video_api,
 )
 from ..infrastructure.operation_store import OperationRecord, OperationStore, RETENTION_SECONDS
-from .media_generation import video_options_error
+from ..tools.utils import validate_image_paths
+from .media_cleanup import reconcile_owned_media_cleanup
+from .media_generation import music_options_error, video_options_error
+from .media_inputs import MediaSourceUnavailable, image_workflow_options_error, resolve_saved_image, verify_source_image
 from .media_storage import _valid_media_filename
+
+_MEDIA_RATE_LIMIT_BACKOFF_SECONDS = 5 * 60
+_MEDIA_RATE_LIMIT_MAX_BACKOFF_SECONDS = 30 * 60
+MEDIA_STALE_CLEANUP_RELEASE_SECONDS = 300
+
+# Bound concurrent detached worker spawns so a burst of submissions cannot
+# trigger a simultaneous subprocess/cookie spawn storm.
+_DISPATCH_SEMAPHORE = threading.BoundedSemaphore(2)
 
 logger = logging.getLogger(__name__)
 
@@ -31,8 +44,23 @@ def worker_active(record: OperationRecord, *, now: float) -> bool:
     return bool(record.worker_token and record.heartbeat_at is not None and now - record.heartbeat_at < 60)
 
 
-def _launch_detached_worker(payload: dict[str, Any], store: OperationStore) -> int:
+def _run_launch_detached_worker(payload: dict[str, Any], store: OperationStore) -> int:
+    """Acquire the dispatch semaphore then launch one detached worker.
+
+    The semaphore is thread-safe so it can be acquired inside the worker thread
+    without binding to a single asyncio event loop across pytest runs.
+    """
+    with _DISPATCH_SEMAPHORE:
+        return _launch_detached_worker(payload, store)
+
+
+def _launch_detached_worker(
+    payload: dict[str, Any], store: OperationStore
+) -> int:
     omni_job = payload["kind"] in {"omni_video", "omni_video_resume"}
+    # Each worker thread snapshots process-global os.environ itself; nothing is
+    # passed in from the dispatcher, so concurrent threads never race on the
+    # process environment (e.g. GEMINI_COOKIE_PATH).
     environment = os.environ.copy()
     if omni_job:
         for key in ("GEMINI_PSID", "GEMINI_PSIDTS", "GEMINI_PSIDCC"):
@@ -89,6 +117,7 @@ def _accepted(record: OperationRecord) -> DomainResult[LongOperationData]:
         error_code=record.error_code,
         execution_mode=("task" if record.operation == "gemini_run_task" else
                         "chat" if record.operation == "gemini_notebook_chat" else None),
+        source_operation_id=record.source_operation_id, source_artifact_id=record.source_artifact_id,
     )
     if data.state in {OperationState.FAILED, OperationState.UNAVAILABLE, OperationState.TIMED_OUT, OperationState.CANCELLED}:
         return DomainResult.failure(operation_failure_code(record.error_code), "The saved background operation did not complete.",
@@ -109,7 +138,7 @@ async def _dispatch(store: OperationStore, record: OperationRecord, kind: str,
     if not store.claim_worker(record.operation_id, token):
         return _accepted(store.get(record.operation_id) or record)
     try:
-        pid = await asyncio.to_thread(_launch_detached_worker, {
+        pid = await asyncio.to_thread(_run_launch_detached_worker, {
             "operation_id": record.operation_id, "worker_token": token, "kind": kind, "request": request or {},
         }, store)
         store.bind_worker(record.operation_id, token, pid)
@@ -142,10 +171,31 @@ async def submit_media(request: dict[str, Any], *, operation: str,
     invalid = video_options_error(
         media_type=media_type, model=model, thinking_level=thinking_level,
         duration_seconds=request.get("duration_seconds"), delete_after_seconds=request.get("delete_after_seconds"),
+        aspect_ratio=request.get("aspect_ratio"),
+    )
+    if invalid:
+        return DomainResult.failure(DomainErrorCode.INVALID_ARGUMENT, invalid)
+    invalid = music_options_error(media_type=media_type, music_duration=request.get("music_duration"),
+                                  music_vocals=request.get("music_vocals"))
+    if invalid:
+        return DomainResult.failure(DomainErrorCode.INVALID_ARGUMENT, invalid)
+    if ((request.get("music_duration") is not None or request.get("music_vocals") is not None)
+            and request.get("web_media_transport", os.environ.get("GEMINI_WEB_MEDIA_TRANSPORT")) == "sdk"):
+        return DomainResult.failure(DomainErrorCode.CAPABILITY_UNAVAILABLE,
+                                    "Explicit music options require the native Gemini Web composer.")
+    image_paths = request.get("image_paths")
+    source_operation_id = request.get("source_operation_id")
+    source_artifact_id = request.get("source_artifact_id")
+    invalid = image_workflow_options_error(
+        media_type=media_type, image_path=request.get("image_path"), image_paths=image_paths,
+        source_operation_id=source_operation_id, source_artifact_id=source_artifact_id,
     )
     if invalid:
         return DomainResult.failure(DomainErrorCode.INVALID_ARGUMENT, invalid)
     settings = resolve_media_request(model, media_type, thinking_level)
+    if settings["effective_alias"] == "flash-lite" and (source_operation_id or len(image_paths or ()) > 1):
+        return DomainResult.failure(DomainErrorCode.CAPABILITY_UNAVAILABLE,
+                                    "Use Flash for multiple image references or editing a previous result.")
     omni_job = settings["backend_label"] == OMNI_VIDEO_API_BACKEND
     if omni_job and not omni_video_api_key():
         return DomainResult.failure(
@@ -162,27 +212,57 @@ async def submit_media(request: dict[str, Any], *, operation: str,
         except ClientAuthenticationRequired as error:
             return result_from_exception(error, logger=logger, operation=operation)
     store = OperationStore()
+
+    def existing(record: OperationRecord) -> DomainResult[LongOperationData]:
+        if not operation_account_matches(record):
+            return DomainResult.failure(DomainErrorCode.CAPABILITY_UNAVAILABLE, "Operation account could not be verified.",
+                                        verification_status="account_mismatch_or_unbound")
+        if (record.operation != operation or record.media_type != media_type or uses_omni_video_api(record) != omni_job
+                or record.source_operation_id != source_operation_id
+                or (source_artifact_id is not None and record.source_artifact_id != source_artifact_id)):
+            return DomainResult.failure(DomainErrorCode.INVALID_ARGUMENT, "This handle belongs to a different operation.")
+        if store.clock() - record.created_at >= RETENTION_SECONDS and not record.cleanup_protected:
+            return DomainResult.failure(DomainErrorCode.INVALID_ARGUMENT, "The operation handle has expired.")
+        return _accepted(record)
+
     try:
+        if operation_id is not None and (source_operation_id is not None or image_paths is not None):
+            previous = store.get(handle)
+            if previous is not None:
+                return existing(previous)
+        valid, normalized_paths, message = validate_image_paths(image_paths)
+        if not valid:
+            return DomainResult.failure(DomainErrorCode.INVALID_ARGUMENT, message)
+        resolved_artifact_id = None
+        if source_operation_id is not None:
+            source = resolve_saved_image(store, source_operation_id, source_artifact_id)
+            await asyncio.to_thread(verify_source_image, source, Path(source["local_path"]))
+            resolved_artifact_id = source["artifact_id"]
         directory = str(Path(request.get("output_dir") or store.path.resolve().parent / "artifacts" / handle).expanduser().resolve())
         record, created = store.create_or_get(
             handle, operation, retain_chat=request.get("retain_chat", False),
             delete_after_seconds=request.get("delete_after_seconds"), requested_model=model, thinking_level=thinking_level,
             media_type=media_type, output_dir=directory, filename=filename,
             request_model=settings["request_model"], effective_backend=settings["backend_label"],
+            source_operation_id=source_operation_id, source_artifact_id=resolved_artifact_id,
         )
         if not created:
-            if not operation_account_matches(record):
-                return DomainResult.failure(DomainErrorCode.CAPABILITY_UNAVAILABLE, "Operation account could not be verified.",
-                                            verification_status="account_mismatch_or_unbound")
-            if record.operation != operation or record.media_type != media_type or uses_omni_video_api(record) != omni_job:
-                return DomainResult.failure(DomainErrorCode.INVALID_ARGUMENT, "This handle belongs to a different operation.")
-            if store.clock() - record.created_at >= RETENTION_SECONDS and not record.cleanup_protected:
-                return DomainResult.failure(DomainErrorCode.INVALID_ARGUMENT, "The operation handle has expired.")
-            return _accepted(record)
+            return existing(record)
         payload = {**request, "output_dir": directory, "filename": filename}
+        if normalized_paths:
+            payload["image_paths"] = normalized_paths
         if payload.get("image_path"):
             payload["image_path"] = str(Path(payload["image_path"]).expanduser().resolve())
+        # The worker resolves lineage from its account-bound record.
+        payload.pop("source_operation_id", None)
+        payload.pop("source_artifact_id", None)
         return await _dispatch(store, record, "omni_video" if omni_job else "media", payload)
+    except MediaSourceUnavailable as error:
+        return DomainResult.failure(DomainErrorCode.CAPABILITY_UNAVAILABLE, str(error),
+                                    verification_status="source_image_unavailable")
+    except PermissionError:
+        return DomainResult.failure(DomainErrorCode.CAPABILITY_UNAVAILABLE,
+                                    "The media operation or its source image is unavailable.")
     except Exception:
         return DomainResult.failure(DomainErrorCode.INTERNAL_ERROR, "Unable to persist the media operation; no retry was sent.",
                                     verification_status="operation_not_persisted")
@@ -277,18 +357,26 @@ async def submit_research(request: Any) -> DomainResult[LongOperationData]:
 
 async def resume_media_worker(store: OperationStore, record: OperationRecord) -> DomainResult[LongOperationData]:
     """Resume observation only; no saved prompt exists and generation cannot be replayed."""
+    cleaned = reconcile_owned_media_cleanup(store, record)
+    if cleaned:
+        record = store.get(record.operation_id) or record
     if not operation_account_matches(record):
         return DomainResult.failure(DomainErrorCode.CAPABILITY_UNAVAILABLE, "Operation account could not be verified.",
                                     verification_status="account_mismatch_or_unbound")
-    if record.cleanup_state in {"completed", "already_completed"} or worker_active(record, now=store.clock()):
+    web_cleanup_complete = (not uses_omni_video_api(record) and not record.cleanup_protected and not record.retain_chat
+                            and record.cleanup_state in {"completed", "already_completed"})
+    if cleaned or web_cleanup_complete or worker_active(record, now=store.clock()):
         return _accepted(record)
     if uses_omni_video_api(record):
-        if not record.upstream_operation_id or record.cleanup_state == "retained":
+        if not record.upstream_operation_id or record.cleanup_state in {"retained", "completed", "already_completed"}:
             return _accepted(record)
         return await _dispatch(store, record, "omni_video_resume")
     if not record.upstream_chat_id:
         return _accepted(record)
-    if record.state != "completed" and (record.upstream_response_id is None or record.upstream_candidate_id is None):
+    native_pending = (record.phase == "native_media_submitted" and record.media_type in {"music", "video"}
+                      and record.upstream_response_id is None and record.upstream_candidate_id is None)
+    if (record.state != "completed" and not native_pending
+            and (record.upstream_response_id is None or record.upstream_candidate_id is None)):
         from dataclasses import replace
         result = _accepted(record)
         return replace(result, warnings=(*result.warnings, DomainWarning(
@@ -311,28 +399,67 @@ async def maintain_background_operations() -> None:
 
 
 def repair_operation_cleanup(store: OperationStore, get_observation: Any, schedule: Any) -> int:
-    """Restore missing queue entries only for account-bound observed operations."""
+    """Restore missing queue entries only for account-bound observed operations.
+
+    Heals stuck cleanup rows that would otherwise leak forever: protected media
+    operations past the recovery TTL are released and re-scheduled for immediate
+    cleanup, and already-unprotected rows whose durable queue entry is still
+    pending (or missing) are made immediately drainable.
+    """
     account = current_account_key()
     if not account:
         return 0
     repaired = 0
+    now = time.time()
     for record in store.cleanup_repair_candidates(account):
         if not operation_account_matches(record) or not record.upstream_chat_id:
             continue
+        cid = record.upstream_chat_id
         try:
-            if get_observation(record.upstream_chat_id) is not None:
-                continue
-            delay = record.delete_after_seconds
-            if record.cleanup_protected and not record.retain_chat:
-                delay = max(1800, delay or 0)
-            observation = schedule(record.upstream_chat_id, retain_chat=record.retain_chat,
-                                   delete_after_seconds=delay, source=f"{record.operation}:reconciled")
-            from ..domain import CleanupObservation, CleanupState
-            if isinstance(observation, CleanupObservation) and observation.state in {
-                CleanupState.PENDING, CleanupState.RETAINED, CleanupState.COMPLETED, CleanupState.ALREADY_COMPLETED,
-            }:
-                repaired += 1
+            obs = get_observation(cid)
         except Exception:
             # Leave the operation protected and retry on the next maintenance pass.
             continue
+        # Protected media rows stuck past the recovery TTL are released so their
+        # chat can be cleaned up instead of leaking forever.
+        if (record.media_type
+                and not uses_omni_video_api(record)
+                and record.cleanup_protected
+                and not record.retain_chat
+                and not worker_active(record, now=now)):
+            stuck = (
+                (record.state in {"failed", "unavailable", "cancelled"}
+                 and record.error_code != "RATE_LIMITED")
+                or (record.state == "partial"
+                    and (record.phase == "media_identity_incomplete"
+                         or (now - record.updated_at) >= MEDIA_STALE_CLEANUP_RELEASE_SECONDS))
+                or (record.state == "running"
+                    and (now - max(record.updated_at, record.heartbeat_at or 0.0))
+                    >= MEDIA_STALE_CLEANUP_RELEASE_SECONDS)
+            )
+            if stuck:
+                store.release_cleanup(record.operation_id)
+                res = schedule(cid, retain_chat=False, delete_after_seconds=0, reschedule_pending=True,
+                               source=f"{record.operation}:repaired")
+                if res is not None and hasattr(res, "state"):
+                    store.update_cleanup(record.operation_id, res.state.value)
+                repaired += 1
+                continue
+        # Missing queue entry: restore it with the original delay logic for ALL
+        # records (including retained chats and running research ops). Protected
+        # media ops that are not stuck are left alone; they may still recover.
+        if obs is None and (not record.media_type or not record.cleanup_protected):
+            delay = max(1800, record.delete_after_seconds or 0) if record.cleanup_protected else record.delete_after_seconds
+            schedule(cid, retain_chat=record.retain_chat, delete_after_seconds=delay,
+                     reschedule_pending=True, source=f"{record.operation}:repaired")
+            repaired += 1
+            continue
+        # Already-unprotected rows: overdue or still-pending entries become
+        # immediately eligible for the due-cleanup drain.
+        if (not record.cleanup_protected
+                and obs.state == CleanupState.PENDING
+                and record.state in {"completed", "failed", "partial", "unavailable", "cancelled"}):
+            schedule(cid, retain_chat=False, delete_after_seconds=0, reschedule_pending=True,
+                     source=f"{record.operation}:repaired")
+            repaired += 1
     return repaired

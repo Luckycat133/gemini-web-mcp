@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING, Optional
 from ..constants import OMNI_VIDEO_MODEL
 from ..domain import Artifact, ArtifactKind, ArtifactState
 from .artifacts import (artifact_from_local_path, classify_artifact_state, detect_av_mime_type,
-                        detect_image_mime_type, probe_playable_av_tracks, response_image_items)
+                        detect_image_mime_type, probe_playable_av_tracks, response_image_items, reusable_artifact_uri)
 
 logger = logging.getLogger(__name__)
 OMNI_ARTIFACT_MODEL_VERIFIED = "omni_model_and_artifact_verified"
@@ -28,6 +28,59 @@ if TYPE_CHECKING:
 
 class _ImageVerificationError(ValueError):
     pass
+
+
+async def _fallback_save_media_on_403(
+    *,
+    media: object,
+    media_type: str,
+    destination: Path,
+    save_name: str,
+    error: Exception,
+) -> Optional[str]:
+    """Retry media download with Chrome's CookieJar when SDK save hits HTTP 403."""
+    if media_type not in {"image", "video"} or "403" not in str(error):
+        return None
+    url = getattr(media, "url", None)
+    if not isinstance(url, str) or not url.startswith("https://"):
+        return None
+    from urllib.parse import urlsplit
+    host = (urlsplit(url).hostname or "").lower()
+    if not (host == "googleusercontent.com" or host.endswith(".googleusercontent.com")
+            or host == "google.com" or host.endswith(".google.com")):
+        return None
+    try:
+        import browser_cookie3
+        from curl_cffi.requests import AsyncSession
+        from ..client_manager import browser_cookie_auto_load_enabled, get_configured_proxy
+        from ..cookie_manager import CookieManager
+    except Exception:
+        return None
+    if not browser_cookie_auto_load_enabled():
+        return None
+    profile = os.environ.get("GEMINI_BROWSER_COOKIE_PROFILE", "").strip() or "Default"
+    base_dir = CookieManager._chrome_base_path() if hasattr(CookieManager, "_chrome_base_path") else None
+    cookie_file = (base_dir / profile / "Cookies") if base_dir is not None else None
+    if cookie_file is None or not cookie_file.exists():
+        return None
+    try:
+        jar = browser_cookie3.chrome(cookie_file=str(cookie_file))
+    except Exception:
+        return None
+    target_path = destination / save_name
+    proxy = get_configured_proxy()
+    candidate_urls = [url if "=" in url.rsplit("/", 1)[-1] else f"{url}=s0", url] if media_type == "image" else [url]
+    async with AsyncSession(impersonate="chrome", cookies=jar, proxy=proxy, timeout=120) as session:
+        for candidate_url in candidate_urls:
+            try:
+                resp = await session.get(candidate_url)
+                if resp.status_code == 200 and resp.content:
+                    target_path.write_bytes(resp.content)
+                    logger.info("artifact fallback download succeeded path=%s bytes=%s", target_path, len(resp.content))
+                    return str(target_path)
+            except Exception:
+                continue
+    return None
 
 
 class ImageDecoderUnavailable(_ImageVerificationError):
@@ -69,6 +122,14 @@ def _mark_image_decoded(artifact: Artifact) -> Artifact:
     ))
 
 
+def verify_saved_media_file(path: Path, *, size_bytes: int, sha256: str) -> None:
+    if not path.is_file() or path.stat().st_size != size_bytes:
+        raise ValueError("saved artifact changed")
+    with path.open("rb") as stream:
+        if hashlib.file_digest(stream, "sha256").hexdigest() != sha256:
+            raise ValueError("saved artifact changed")
+
+
 def read_verified_media_artifacts(
     store: OperationStore, record: OperationRecord, *, include_duration: bool = False,
 ) -> tuple[Artifact, ...]:
@@ -76,11 +137,7 @@ def read_verified_media_artifacts(
     artifacts = []
     for item in store.get_media_artifacts(record.operation_id):
         path = Path(item["local_path"])
-        if not path.is_file() or path.stat().st_size != item["size_bytes"]:
-            raise ValueError("saved artifact changed")
-        with path.open("rb") as stream:
-            if hashlib.file_digest(stream, "sha256").hexdigest() != item["sha256"]:
-                raise ValueError("saved artifact changed")
+        verify_saved_media_file(path, size_bytes=item["size_bytes"], sha256=item["sha256"])
         kind = ArtifactKind(item["kind"])
         generated_image = record.media_type == "image" and kind == ArtifactKind.IMAGE
         artifact = artifact_from_local_path(
@@ -325,14 +382,25 @@ async def _save_generated_media(
                 raw_saved = await media.save(**save_kwargs)
                 completed_save = True
             except Exception as error:
-                logger.error(
-                    "artifact save failed media_type=%s index=%s error_type=%s",
-                    media_type,
-                    index,
-                    type(error).__name__,
+                fallback_saved = await _fallback_save_media_on_403(
+                    media=media,
+                    media_type=media_type,
+                    destination=destination,
+                    save_name=save_name,
+                    error=error,
                 )
-                failures.append(f"{type(error).__name__}:save")
-                continue
+                if fallback_saved is not None:
+                    raw_saved = fallback_saved
+                    completed_save = True
+                else:
+                    logger.error(
+                        "artifact save failed media_type=%s index=%s error_type=%s",
+                        media_type,
+                        index,
+                        type(error).__name__,
+                    )
+                    failures.append(f"{type(error).__name__}:save")
+                    continue
             finally:
                 try:
                     if not completed_save or reserved.lstat().st_size == 0:
@@ -394,6 +462,9 @@ async def _save_generated_media(
                     if not tracks:
                         failures.append(f"{kind}:content_signature")
                         continue
+                    if expected_kind == "audio" and "audio" not in tracks:
+                        failures.append(f"{kind}:audio_track_missing")
+                        continue
                     if expected_kind not in tracks:
                         failures.append(f"{kind}:track_missing")
                     if container == "audio/mpeg" and "audio" in tracks:
@@ -423,6 +494,7 @@ async def _save_generated_media(
                 else:
                     uri = (getattr(media, "mp3_url", None) if expected_kind == "audio" else
                            getattr(media, "url", None)) if expected_kind is not None else _saved_artifact_uri(media, artifact_kind)
+                uri = reusable_artifact_uri(uri)
                 generated_image = media_type == "image" and artifact_kind == ArtifactKind.IMAGE
                 try:
                     artifact = artifact_from_local_path(

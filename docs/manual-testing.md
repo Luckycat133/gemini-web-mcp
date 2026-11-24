@@ -41,6 +41,10 @@
 
 ---
 
+当前默认入口各有六个工具，先从功能面的 `gemini_ask`、`gemini_run_task`、`gemini_create_media` 和操作状态／结果验证正常路径，再按需检查 `function-full`、`account-full` 与旧 profile。下面的颗粒工具名称保留为兼容性回归项目。多参考图与源产物续编需覆盖上传顺序、实际合成画面、后续编辑的连续性以及原句柄恢复；代码离线通过不替代画面验收。[当前参数](api-reference.md#business-surfaces)
+
+2026-11-22 的定向本地媒体测试已获用户明确授权使用 `default` 账号，与标准专用账号 canary 分开记录。2026-11-21 的[19格矩阵](live-model-matrix-2026-11-21.md)保持 13 项通过的历史结果；新的 Hydrogen／Neon／Carbon 音乐与视频六格、最终 wheel 和共享入口验收另行记录，未完成前不填通过数。
+
 ## P0 — 核心路径（必跑）
 
 这些是项目的核心价值，任何一次都至少跑一遍。
@@ -99,11 +103,11 @@
 | # | 步骤 | 预期 |
 |---|---|---|
 | 4.1 | `gemini_generate_media(prompt="一只橘猫", media_type="image")` | 返回图片，文件落到 `generated_media/`，`Remote chat ID` 可解析 |
-| 4.2 | `media_type="image", model="flash-lite"` | 使用运行时 `Flash-Lite` 路线；返回可验证图片，按网页帮助标注 Nano Banana 2 Lite |
-| 4.3 | `media_type="image", model="pro"` | 首轮仍走 Nano Banana 2；Pro redo 是网页二次操作 |
+| 4.2 | `media_type="image", model="flash-lite"` 且无基础 Flash 额度耗尽证据 | 生成前拒绝，不能为了验证故意耗尽账号额度；静态标签不证明图片后端 |
+| 4.3 | 图片显式选择 `neon`；另选已从注册表消失的旧 `pro` | 可用 Neon selector 原样派发；不可用 Pro 生成前拒绝，不替换为 Flash／Hydrogen。Pro redo 是网页二次操作 |
 | 4.4 | `gemini_generate_media(..., media_type="video")` | 仅在结构化结果包含可验证视频 Artifact 时通过；2026-10-31 的专用视频模式已返回 MP4；JPEG 缩略图不能代替视频 |
-| 4.5 | `gemini_generate_music(prompt="轻快钢琴", model="flash")` | 返回可验证音频或封面视频文件；无上游版本证据时只报告 Lyria |
-| 4.6 | `gemini_generate_music(prompt="交响乐", model="pro")` | 返回可验证产物；不要从 `thinking_level` 推断 Lyria 版本或曲长 |
+| 4.5 | `gemini_generate_music(prompt="轻快钢琴", model="flash")` | 返回可验证音频或封面视频文件；无上游版本证据时 `observed_backend` 留空，不把 Lyria 标签当作实际版本 |
+| 4.6 | `gemini_generate_music(prompt="交响乐", model="neon")`，账号目录与套餐允许时 | 精确 Neon selector 派发并验证实际产物；旧 Pro 缺席时在派发前拒绝，不从 `thinking_level` 推断后端或曲长 |
 | 4.7 | `image_path="/abs/ref.jpg"` 作为参考图 | 不崩；如果上游不支持参考图，错误要明确 |
 | 4.8 | 用 MCP Inspector 查看一次成功图片/音乐结果的 `_meta.domain_result.data` | `state=remote` 或 `local`；`artifacts[].id/uri/kind` 完整，primary 与 compact 对同一 URI 的 ID 一致 |
 | 4.9 | 指定 `output_dir` 保存产物并检查对应 artifact | 文件真实存在且非零，`verification.status=verified`，MIME/bytes 与磁盘一致；图片有尺寸、音视频在 ffprobe 可用时有时长 |
@@ -111,16 +115,36 @@
 | 4.11 | 使用不可写输出目录测试一个仍返回远端 URI 的请求 | 远端 artifact 保留，结果为 `partial` 并带 `ARTIFACT_SAVE_PARTIAL`；不得宣称本地保存成功 |
 | 4.12 | 指定 `filename="image.png"`，上游实际返回 JPEG 字节 | 落盘后缀调整为 `.jpg`，结构化 `mime_type=image/jpeg`，与文件签名一致 |
 | 4.13 | 指定已有文件名或 `filename="../escape.png"` | 已有文件不被覆盖；路径型文件名在请求前返回 `INVALID_ARGUMENT` |
-| 4.14 | 媒体结果为 queued/empty 且含上游聊天 ID | queued 媒体默认暂缓清理；empty/失败不隐式保留，清理结果须如实报告 |
+| 4.14 | 媒体结果为 queued/empty 且含上游聊天 ID | 原句柄继续观察，不重复生成；原生媒体在身份、产物或独立清理证据不足时保留保护，失败不等于已清理 |
+| 4.15 | 默认原生路线分别选择 Hydrogen／Neon／Carbon，各运行一次音乐和视频 | 六个不同组合独立记录选择器、单次发送、CID、精确 RID／candidate、产物和清理；不以某一格成功替代全部格子 |
+| 4.16 | 原生浏览器注入 Cookie 后核查实际鉴权 | 对照 Chrome 元数据保留 JS 鉴权 Cookie 属性；PSID相等或页面打开不替代已登录历史与同 CID 读回。不要一律强制 HttpOnly |
+| 4.17 | 填写提示后再选择模型，检查视频格式与禁用项 | 发送前核验已选模型、媒体入口和选项；格式触发器可显示「格式，视频」，未选禁用项不影响已选值判断；无法核验则不发送 |
+| 4.18 | 原生音乐只有 MP4，或视频只有 JPEG 预览 | MP4须有实际音轨才可作音乐产物；不要求必有 MP3，也不将无音轨封面或 JPEG 当作完整媒体 |
+| 4.19 | 在只持久化 CID 后断开，再读原句柄 | 保持 `native_media_submitted` 与清理保护；仅恢复同对话的回复，不重发。completed 重启须重验已有文件后再清理 |
+| 4.20 | 检查原生回复、产物和清理证据链 | 精确 CID／RID／candidate 完成证据 → 保存并核验本地文件 → 释放操作保护 → 既有 canonical 精确删除／独立读回 |
+| 4.21 | 保存前缺少 RID／candidate、恢复时文件损坏、改为保留或失去 cleanup lease | 未知身份不释放保护；结果恢复须重验大小／哈希，账号、保留与 schedule／lease 规则继续生效，不把 guest 缺少历史当已删除 |
+| 4.22 | 新建连接读取共享 CLI，检查旧账本／去重／租约 | 以最终同一 wheel 验证源码一致性、工具目录和实际进程；旧 SHA／PBKDF绑定仅限同凭据，既有动作不能重复执行，不重建状态库 |
+| 4.23 | 用户明确要短纯音乐时传 `music_duration="short", music_vocals="instrumental"` | 发前读回选项匹配；`None`保留实际网页默认，不能按prompt或首项猜默认。`standard`、`vocals`／`auto`也逐项核验；仅音乐接受，显式SDK路线带选项预提交拒绝 |
+| 4.24 | 兼容主入口／compact 原生 `background=false` 分别模拟超时、未知、保存失败和完成 | 只提交一个受保护操作；超时返回原句柄与 partial／wait_elapsed，未知或保存失败不清理。完成兼容 local、显式文件名与 generated_media 默认目录；默认名称不含 prompt，账本无 prompt；SDK／API 同步合同不变 |
+| 4.25 | 原生视频传一张 `image_path`，在 Send 前改变、移除或无法识别上传附件 | 上传预览 token、账号／模型／模式／格式均核验后才单次发送；附件缺失、变化或未知时不发送、不忽略参考图。DOM 上传不等于参考视频成功，端到端实测另记 |
+| 4.26 | 原生 exact read 正在 await 时切换账号，再返回新 RID／candidate | 等待后先复核原账号／凭据再 observe／checkpoint；拒绝新回复身份与产物，最多保留原 CID，保持保护，不清理或重发 |
 
 **关键校验**：
-- 图片首轮按 Flash-Lite 与 Flash/Pro 分流；`observed_backend=null` 时，后端标签只是当前网页帮助支持的路由判断
-- 音乐只报告 Lyria 家族，直到响应提供实际版本证据
+- 图片默认选择发现的 Hydrogen，显式可用选择保留；`observed_backend=null` 时不能从路由标签断言 Nano Banana 版本
+- 音乐生成器只报告上游明确提供的家族／版本；带已验证音轨的 MP4 可作为音乐产物，不保证 MP3
 - 检查视频专用模式的实际视频 Artifact；仅有缩略图或文本时保留失败状态，避免重复发起生成
 - 文件实际落到磁盘，`generated_media/` 目录被 `.gitignore`
 - 远端 URI 只标记 `unverified`；只有本地文件存在且非零才标记 `verified`
 - `requested_model`、`request_model`、`effective_backend`、`observed_backend` 分开记录；没有观测证据时 `observed_backend=null`
 - 失败时返回**清晰的上游错误文本**，不能是空字符串（单元测试 `test_media_tool_returns_clear_upstream_failure` 验了形状，实机要验内容真实可读）
+
+2026-11-22 修复 HttpOnly 属性后，早前 Hydrogen／Carbon 原生音乐原句柄恢复保存了独立验证的 MP3／含音轨 MP4，并完成清理。Neon 默认设置一轮无音频，另有 Short＋Instrumental 浏览器播放器对照，不能据此声称 MCP 音乐全部通过。此前受保护的 Hydrogen 视频／Neon 音乐已由最终包按原句柄分别读回 `UPSTREAM_REJECTED`／`ARTIFACT_NOT_RETURNED`，清理均 completed；不计入新 cohort。原生媒体 Auto 对照不扩展 MCP 支持范围。此前 guest CID 未持久化不证明存储隔离，GraphQL 实验适配已移除。
+
+19 项 cohort 的 V5 wheel 为 `ba8e0ab20c1bf3b42d1dc5dcdbfed733e3126191952a3e1bdbd9291d25e0a041`，该轮共享 CLI 指向 `~/.local/share/gemini-web-mcp/releases/ba8e0ab20c1bf3b4`。构建快照验证了 142 个源码／data 文件逐字节一致、47 个安装 distributions 中 46 个固定依赖零差异；4,628 项离线／2,316 项合同、Ruff、Mypy（151 个源文件）、清洁 wheel 六入口、current／legacy 协议、updater 和 profile 检查通过。19 条本地观察已结束，严格为 12 通过、1 保存产物链未验证、6 调用错误。三个 Task 初始清理失败后均已自动重试 completed，并独立确认三个 Goal／对话已缺席，零次修改。Neon 本地控制图编辑不算保存产物续编；无身份音乐超时的上游结果保持未知。逐项结果见 [11-22 报告](live-model-matrix-2026-11-22.md)。
+
+后续[独立补测与最终交付](live-model-followup-2026-11-22.md)验证 Neon 真保存产物链、Carbon 单参考图同步视频／非静音音乐；最终 fcdf 将 Hydrogen 音乐原句柄分类为明确拒绝并完成清理，未重发生成。六个精确目标的只读 canonical 缺席检查均通过、零次修改；四个无身份视频保持保护，补测库 live worker 为 0。原八项、两个顺序独立尝试及同句柄读回按 round／attempt 分开，App 旧连接重载仍未验证。
+
+前轮 fcdf 一致性与 4,699 离线／2,522 合同等记录见[安装说明](source-update-integration.md)；后续候选与当前未决 High 修复见[新诊断](live-media-diagnosis-2026-11-22.md)。不能把历史门禁、源码 NoSend 或 App 旧连接问题当作最新安装版全部通过。
 
 ### 5. Deep Research（`gemini_deep_research`）
 

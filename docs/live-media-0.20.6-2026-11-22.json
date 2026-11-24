@@ -1,0 +1,143 @@
+{
+  "schema_version": 1,
+  "matrix_version": 1,
+  "generated_at": "2026-11-22T07:16:27.662461+00:00",
+  "repository_commit": "unknown",
+  "trigger": "manual",
+  "status": "degraded",
+  "terminal_state": "failed",
+  "dependencies": {
+    "python": {
+      "installed": "3.12.15",
+      "supported": ">=3.11"
+    },
+    "gemini-mcp-server": {
+      "installed": "0.20.6",
+      "supported": "0.20.6; candidate6eab/final64e8 separately attributed attempts"
+    },
+    "gemini-webapi": {
+      "installed": "2.1.1",
+      "supported": ">=2.1.1,<3"
+    },
+    "mcp": {
+      "installed": "2.3.0",
+      "supported": ">=2.0.0,<3"
+    },
+    "mcp-types": {
+      "installed": "2.3.0",
+      "supported": ">=2.0.0,<3"
+    }
+  },
+  "web": {
+    "locale": null,
+    "build_label": null
+  },
+  "summary": {
+    "total": 4,
+    "available": 3,
+    "empty": 0,
+    "unavailable": 1,
+    "drift": 0,
+    "failed": 0
+  },
+  "capabilities": [
+    {
+      "capability": "installed0206.candidate6eab.hydrogen.video.standard.attempt1",
+      "surface": "function",
+      "name": "gemini_create_media",
+      "rpc_id": "not_observed",
+      "source_path": "/src/surfaces/function.py",
+      "parser": "mcp_cohort_result",
+      "stability": "experimental",
+      "expected_dependency": "gemini-mcp-server==0.20.6; candidate6eab without hooks",
+      "compatibility": "compatible",
+      "capability_state": "available",
+      "outcome": "available",
+      "terminal_state": "completed",
+      "parser_stage": "complete",
+      "status_code": null,
+      "reject_code": null,
+      "response_parts": 0,
+      "body_count": 0,
+      "warning_count": 0,
+      "error_code": null,
+      "error_type": null
+    },
+    {
+      "capability": "installed0206.final64e8.hydrogen.video.standard.english.attempt1",
+      "surface": "function",
+      "name": "gemini_create_media",
+      "rpc_id": "not_observed",
+      "source_path": "/src/surfaces/function.py",
+      "parser": "mcp_cohort_result",
+      "stability": "experimental",
+      "expected_dependency": "gemini-mcp-server==0.20.6; final64e8 without hooks",
+      "compatibility": "unavailable",
+      "capability_state": "unavailable",
+      "outcome": "unavailable",
+      "terminal_state": "rejected",
+      "parser_stage": "complete",
+      "status_code": null,
+      "reject_code": null,
+      "response_parts": 0,
+      "body_count": 0,
+      "warning_count": 0,
+      "error_code": "UPSTREAM_REJECTED",
+      "error_type": null
+    },
+    {
+      "capability": "installed0206.final64e8.hydrogen.video.standard.chinese.attempt1",
+      "surface": "function",
+      "name": "gemini_create_media",
+      "rpc_id": "not_observed",
+      "source_path": "/src/surfaces/function.py",
+      "parser": "mcp_cohort_result",
+      "stability": "experimental",
+      "expected_dependency": "gemini-mcp-server==0.20.6; final64e8 without hooks",
+      "compatibility": "compatible",
+      "capability_state": "available",
+      "outcome": "available",
+      "terminal_state": "completed",
+      "parser_stage": "complete",
+      "status_code": null,
+      "reject_code": null,
+      "response_parts": 0,
+      "body_count": 0,
+      "warning_count": 0,
+      "error_code": null,
+      "error_type": null
+    },
+    {
+      "capability": "installed0206.final64e8.hydrogen.video.standard.import_side_effect.attempt1",
+      "surface": "function",
+      "name": "gemini_create_media",
+      "rpc_id": "not_observed",
+      "source_path": "/src/surfaces/function.py",
+      "parser": "mcp_cohort_result",
+      "stability": "experimental",
+      "expected_dependency": "gemini-mcp-server==0.20.6; final64e8 without hooks",
+      "compatibility": "compatible",
+      "capability_state": "available",
+      "outcome": "available",
+      "terminal_state": "completed",
+      "parser_stage": "complete",
+      "status_code": null,
+      "reject_code": null,
+      "response_parts": 0,
+      "body_count": 0,
+      "warning_count": 0,
+      "error_code": null,
+      "error_type": null
+    }
+  ],
+  "failure": {
+    "stage": "final_installed_cohort",
+    "error_code": "UPSTREAM_REJECTED",
+    "error_type": "ExactCompletedMediaRejection"
+  },
+  "privacy": {
+    "raw_responses_included": false,
+    "account_content_included": false,
+    "credentials_included": false
+  }
+}

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Awaitable, Callable
+from dataclasses import replace
 from typing import Any
 
 from ..domain.results import DomainErrorCode, DomainResult, OperationState
@@ -11,6 +12,7 @@ from ..domain.task_progress import TaskProgress
 from ..infrastructure.task_progress import MAX_ACTIVITIES as MAX_ACTIVITIES
 from ..infrastructure.task_progress import _id, parse_task_progress as parse_task_progress
 from .deadlines import await_before_deadline
+from .web_task_approvals import pending_web_task_card
 
 
 
@@ -41,13 +43,12 @@ class TaskProgressService:
 
     async def _read(self, chat_id: str, response_id: str | None,
                     candidate_id: str | None) -> DomainResult[TaskProgress]:
-        account = self.account_key()
-        if not _id(account):
-            return DomainResult.failure(DomainErrorCode.CAPABILITY_UNAVAILABLE, 'Task account could not be verified.')
+        previous_account = self.account_key()
         try:
             await await_before_deadline(self.initializer(), timeout=self.timeout_seconds)
-            if self.account_key() != account:
-                return DomainResult.failure(DomainErrorCode.CAPABILITY_UNAVAILABLE, 'Task account changed.')
+            account = self.account_key()
+            if not _id(account) or (previous_account is not None and account != previous_account):
+                return DomainResult.failure(DomainErrorCode.CAPABILITY_UNAVAILABLE, 'Task account could not be verified.')
             payload = await await_before_deadline(
                 self.read_exact(chat_id, response_id) if response_id else self.read_latest(chat_id),
                 timeout=self.timeout_seconds,
@@ -71,6 +72,10 @@ class TaskProgressService:
             progress = parse_task_progress(candidate, chat_id=chat_id, response_id=rid, candidate_id=cid)
         except ValueError:
             return DomainResult.failure(DomainErrorCode.UPSTREAM_CHANGED, 'Task progress shape changed.')
+        approval = pending_web_task_card(payload) if response_id is None else None
+        if approval is not None:
+            progress = (replace(progress, pending_approval=approval.summary) if progress is not None else
+                        TaskProgress(chat_id, rid, cid, (), "pending_approval_observed", pending_approval=approval.summary))
         if progress is None:
             return DomainResult.failure(DomainErrorCode.CAPABILITY_UNAVAILABLE, 'Task progress was not observed.',
                                         verification_status='task_progress_not_observed')

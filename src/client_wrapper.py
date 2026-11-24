@@ -34,6 +34,7 @@ from .domain import (
     is_valid_remote_chat_id,
 )
 from .remote_chat_cleanup_manager import RemoteChatCleanupManager
+from .infrastructure.account_identity import account_matches
 from .services.lifecycle import (
     ConversationLifecycleService,
     LifecycleResetAllData,
@@ -303,6 +304,8 @@ def schedule_remote_chat_cleanup_from_response(
     source: str = "",
 ) -> Optional[str]:
     """登记 response 产生的远端 chat，默认稍后自动删除。"""
+    if getattr(response, "_mcp_native_media", False) is True:
+        source += ":native_media_browser"
     observation = _lifecycle_service.schedule_cleanup_from_response(
         response,
         retain_chat=retain_chat,
@@ -375,7 +378,7 @@ async def finalize_remote_chat_cleanup(
             cid, retain_chat=False, delete_after_seconds=0, source=source, dispatch=False,
             reschedule_pending=True, _owner_account=owner,
         )
-        if _cleanup_manager._account_key_provider() != owner:
+        if not account_matches(owner, _cleanup_manager._account_key_provider()):
             return CleanupObservation(state=CleanupState.FAILED, upstream_chat_id=cid, source=source)
         if observation.state in {CleanupState.COMPLETED, CleanupState.ALREADY_COMPLETED, CleanupState.FAILED}:
             return observation
@@ -403,6 +406,8 @@ async def finalize_remote_chat_cleanup_from_response(
     """Finish a one-shot workflow only after its artifacts have been consumed."""
     from .remote_chat_cleanup_manager import extract_remote_chat_id
 
+    if getattr(response, "_mcp_native_media", False) is True:
+        source += ":native_media_browser"
     return await finalize_remote_chat_cleanup(
         extract_remote_chat_id(response), retain_chat=retain_chat, delete_after_seconds=delete_after_seconds,
         source=source, client=client, expected_account=expected_account,
@@ -423,12 +428,12 @@ async def delete_remote_chat_result(
     manager = _cleanup_manager
     if isinstance(manager, RemoteChatCleanupManager):
         expected_account = expected_account or manager._account()
-        if expected_account is not None and manager._account_key_provider() != expected_account:
+        if expected_account is not None and not account_matches(expected_account, manager._account_key_provider()):
             return CleanupObservation(state=CleanupState.FAILED, upstream_chat_id=cid)
     if client is None:
         await initialize_client()
         if (isinstance(manager, RemoteChatCleanupManager) and expected_account is not None
-                and manager._account_key_provider() != expected_account):
+                and not account_matches(expected_account, manager._account_key_provider())):
             return CleanupObservation(state=CleanupState.FAILED, upstream_chat_id=cid)
         client = get_gemini_client()
     return await _lifecycle_service.delete_chat_result(cid, client=client, expected_account=expected_account)
@@ -470,6 +475,8 @@ async def _drain_due_cleanup() -> None:
 @asynccontextmanager
 async def server_lifespan(_server: Any):
     """Resume durable cleanup while serving and finish active sessions on exit."""
+    from .services.web_task_approvals import watch_web_task_approvals, web_task_approvals_enabled
+
     async def maintain() -> None:
         while True:
             try:
@@ -485,10 +492,13 @@ async def server_lifespan(_server: Any):
             await asyncio.sleep(15)
 
     maintenance = asyncio.create_task(maintain())
+    approval_watch = asyncio.create_task(watch_web_task_approvals()) if web_task_approvals_enabled() else None
     try:
         yield {}
     finally:
         maintenance.cancel()
+        if approval_watch is not None:
+            approval_watch.cancel()
         # Stdio EOF normally cancels the serving scope; shield finalization so
         # a short-lived caller cannot discard its non-retained conversations.
         with anyio.CancelScope(shield=True):
@@ -496,6 +506,9 @@ async def server_lifespan(_server: Any):
             try:
                 with suppress(asyncio.CancelledError):
                     await _await_shutdown_step(maintenance, deadline)
+                if approval_watch is not None:
+                    with suppress(asyncio.CancelledError):
+                        await _await_shutdown_step(approval_watch, deadline)
                 if asyncio.get_running_loop().time() < deadline:
                     from .services.task_browser_sessions import close_task_browser_sessions
                     await _await_shutdown_step(close_task_browser_sessions(), deadline)

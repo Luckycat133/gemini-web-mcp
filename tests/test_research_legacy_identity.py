@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 from gemini_webapi import GeminiClient
+from gemini_webapi.constants import AccountStatus
 from gemini_webapi.exceptions import APIError
 from gemini_webapi.types import AvailableModel
 
@@ -53,6 +54,8 @@ def test_foreground_research_preserves_early_sdk_identity_on_rollback(monkeypatc
     monkeypatch.setattr(GeminiClient, "close", AsyncMock())
     monkeypatch.setattr(GeminiClient, "fetch_latest_chat_response", AsyncMock(return_value=None))
     client = ThinkingLevelGeminiClient()
+    client.account_status = AccountStatus.AVAILABLE
+    client._usage_info = {"tier": {"id": 2, "label": "PRO"}}
     model = AvailableModel(model_id="pro", model_name="gemini-pro", display_name="Pro", description="", capacity=1)
     client._model_registry = {"pro": model}
     client.client = transport = Transport()

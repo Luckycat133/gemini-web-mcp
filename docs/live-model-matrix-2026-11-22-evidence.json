@@ -1,0 +1,515 @@
+{
+  "schema_version": 1,
+  "report_kind": "mcp_installed_cohort_evidence",
+  "status": "degraded",
+  "cohort_wheel_sha256": "ba8e0ab20c1bf3b42d1dc5dcdbfed733e3126191952a3e1bdbd9291d25e0a041",
+  "product_version": "0.20.0",
+  "source_delivery_build": "pending_new_build",
+  "local_cohort_state": "finished_with_failures",
+  "all_upstream_terminal_states_verified": false,
+  "summary": {
+    "cases": 19,
+    "runner_passed": 13,
+    "runner_failed": 6,
+    "strict_passed": 12,
+    "strict_unverified": 1,
+    "strict_failed": 6
+  },
+  "schema_report_semantics": {
+    "terminal_state": "local probe/acceptance outcome; never a declaration that unknown remote generation is finished",
+    "rpc_id_not_observed": "explicit sentinel; raw RPC/HTTP telemetry was not collected by this MCP cohort",
+    "source_path": "public source-code entrypoint, not an observed HTTP request path",
+    "zero_http_counters": "not collected; not evidence that no remote request was sent",
+    "unavailable": "the saved-operation chain was not exercised in the Neon local-control case; does not establish model unavailability"
+  },
+  "task_cleanup_verification": {
+    "goals_already_absent": 3,
+    "canonical_chats_absent": 3,
+    "mutations_sent": 0,
+    "local_retry_records_completed": 3
+  },
+  "visual_verification": {
+    "images_inspected": 5,
+    "ordered_reference_outputs_verified": 2,
+    "saved_operation_edit_outputs_verified": 2,
+    "local_control_edit_outputs_verified": 1
+  },
+  "source_changes_after_cohort": {
+    "sync_native_protection_and_account_fence": "mock_tested_only",
+    "native_video_single_reference_input": "pre_send_upload_observed_end_to_end_pending",
+    "new_delivery_wheel": "pending",
+    "native_inline_wait": "protected_original_handle_contract_new_build_live_pending",
+    "account_after_await": "reject_new_reply_metadata_contract_mock_tested"
+  },
+  "cases": [
+    {
+      "model": "auto",
+      "workflow": "chat",
+      "runner_status": "passed",
+      "strict_acceptance": "passed",
+      "local_observation_state": "completed",
+      "seconds": 27.33,
+      "effective_model": "gemini-自动",
+      "answer_correct": true,
+      "artifact_verified": null,
+      "error_code": null,
+      "phase": null,
+      "submission_evidence": "completed_response_observed",
+      "upstream_terminal_state": "completed_reply_verified",
+      "cleanup": {
+        "runner_snapshot": "completed",
+        "current": "completed",
+        "evidence": "verified_absence"
+      },
+      "thinking_selectable": false,
+      "fallback_reason": null
+    },
+    {
+      "model": "hydrogen",
+      "workflow": "chat",
+      "runner_status": "passed",
+      "strict_acceptance": "passed",
+      "local_observation_state": "completed",
+      "seconds": 14.79,
+      "effective_model": "gemini-4-hydrogen",
+      "answer_correct": true,
+      "artifact_verified": null,
+      "error_code": null,
+      "phase": null,
+      "submission_evidence": "completed_response_observed",
+      "upstream_terminal_state": "completed_reply_verified",
+      "cleanup": {
+        "runner_snapshot": "completed",
+        "current": "completed",
+        "evidence": "verified_absence"
+      },
+      "thinking_selectable": true,
+      "fallback_reason": null
+    },
+    {
+      "model": "neon",
+      "workflow": "chat",
+      "runner_status": "passed",
+      "strict_acceptance": "passed",
+      "local_observation_state": "completed",
+      "seconds": 14.96,
+      "effective_model": "gemini-neon",
+      "answer_correct": true,
+      "artifact_verified": null,
+      "error_code": null,
+      "phase": null,
+      "submission_evidence": "completed_response_observed",
+      "upstream_terminal_state": "completed_reply_verified",
+      "cleanup": {
+        "runner_snapshot": "completed",
+        "current": "completed",
+        "evidence": "verified_absence"
+      },
+      "thinking_selectable": true,
+      "fallback_reason": null
+    },
+    {
+      "model": "carbon",
+      "workflow": "chat",
+      "runner_status": "passed",
+      "strict_acceptance": "passed",
+      "local_observation_state": "completed",
+      "seconds": 12.19,
+      "effective_model": "gemini-carbon",
+      "answer_correct": true,
+      "artifact_verified": null,
+      "error_code": null,
+      "phase": null,
+      "submission_evidence": "completed_response_observed",
+      "upstream_terminal_state": "completed_reply_verified",
+      "cleanup": {
+        "runner_snapshot": "completed",
+        "current": "completed",
+        "evidence": "verified_absence"
+      },
+      "thinking_selectable": true,
+      "fallback_reason": null
+    },
+    {
+      "model": "hydrogen",
+      "workflow": "task",
+      "runner_status": "passed",
+      "strict_acceptance": "passed",
+      "local_observation_state": "completed",
+      "seconds": 41.08,
+      "effective_model": "gemini-4-hydrogen",
+      "answer_correct": true,
+      "artifact_verified": true,
+      "error_code": null,
+      "phase": "task_answer_saved",
+      "submission_evidence": "completed_response_observed",
+      "upstream_terminal_state": "completed_reply_verified",
+      "cleanup": {
+        "runner_snapshot": "failed",
+        "current": "completed",
+        "evidence": "automatic_retry_and_independent_goal_and_chat_absence"
+      },
+      "saved_size_and_sha256_verified": true
+    },
+    {
+      "model": "neon",
+      "workflow": "task",
+      "runner_status": "passed",
+      "strict_acceptance": "passed",
+      "local_observation_state": "completed",
+      "seconds": 43.07,
+      "effective_model": "gemini-neon",
+      "answer_correct": true,
+      "artifact_verified": true,
+      "error_code": null,
+      "phase": "task_answer_saved",
+      "submission_evidence": "completed_response_observed",
+      "upstream_terminal_state": "completed_reply_verified",
+      "cleanup": {
+        "runner_snapshot": "failed",
+        "current": "completed",
+        "evidence": "automatic_retry_and_independent_goal_and_chat_absence"
+      },
+      "saved_size_and_sha256_verified": true
+    },
+    {
+      "model": "carbon",
+      "workflow": "task",
+      "runner_status": "passed",
+      "strict_acceptance": "passed",
+      "local_observation_state": "completed",
+      "seconds": 43.05,
+      "effective_model": "gemini-carbon",
+      "answer_correct": true,
+      "artifact_verified": true,
+      "error_code": null,
+      "phase": "task_answer_saved",
+      "submission_evidence": "completed_response_observed",
+      "upstream_terminal_state": "completed_reply_verified",
+      "cleanup": {
+        "runner_snapshot": "failed",
+        "current": "completed",
+        "evidence": "automatic_retry_and_independent_goal_and_chat_absence"
+      },
+      "saved_size_and_sha256_verified": true
+    },
+    {
+      "model": "neon",
+      "workflow": "image",
+      "runner_status": "failed",
+      "strict_acceptance": "failed",
+      "local_observation_state": "partial",
+      "seconds": 28.06,
+      "effective_model": null,
+      "answer_correct": null,
+      "artifact_verified": false,
+      "error_code": "NETWORK_ERROR",
+      "phase": "media_outcome_unverified",
+      "submission_evidence": "identity_not_observed",
+      "upstream_terminal_state": "unknown",
+      "cleanup": {
+        "runner_snapshot": "not_applicable",
+        "current": "unverified_no_identity",
+        "evidence": "no_attributable_remote_identity"
+      },
+      "ordered_reference_count": 2
+    },
+    {
+      "model": "hydrogen",
+      "workflow": "image",
+      "runner_status": "passed",
+      "strict_acceptance": "passed",
+      "local_observation_state": "completed",
+      "seconds": 76.1,
+      "effective_model": "gemini-4-hydrogen",
+      "answer_correct": null,
+      "artifact_verified": true,
+      "error_code": null,
+      "phase": "completed",
+      "submission_evidence": "completed_response_observed",
+      "upstream_terminal_state": "completed_reply_verified",
+      "cleanup": {
+        "runner_snapshot": "completed",
+        "current": "completed",
+        "evidence": "verified_absence"
+      },
+      "ordered_reference_count": 2,
+      "visual_verification": {
+        "visually_inspected": true,
+        "red_circle_left": true,
+        "blue_square_right": true,
+        "green_triangle_center": false
+      },
+      "saved_size_and_sha256_verified": true
+    },
+    {
+      "model": "neon",
+      "workflow": "edit_image",
+      "runner_status": "passed",
+      "strict_acceptance": "unverified",
+      "local_observation_state": "completed",
+      "seconds": 51.09,
+      "effective_model": "gemini-neon",
+      "answer_correct": null,
+      "artifact_verified": true,
+      "error_code": null,
+      "phase": "completed",
+      "submission_evidence": "completed_response_observed",
+      "upstream_terminal_state": "completed_reply_verified",
+      "cleanup": {
+        "runner_snapshot": "completed",
+        "current": "completed",
+        "evidence": "verified_absence"
+      },
+      "source_mode": "synthetic_local_control",
+      "saved_operation_chain_verified": false,
+      "visual_verification": {
+        "visually_inspected": true,
+        "red_circle_left": true,
+        "blue_square_right": true,
+        "green_triangle_center": true
+      },
+      "saved_size_and_sha256_verified": true
+    },
+    {
+      "model": "carbon",
+      "workflow": "image",
+      "runner_status": "passed",
+      "strict_acceptance": "passed",
+      "local_observation_state": "completed",
+      "seconds": 59.11,
+      "effective_model": "gemini-carbon",
+      "answer_correct": null,
+      "artifact_verified": true,
+      "error_code": null,
+      "phase": "completed",
+      "submission_evidence": "completed_response_observed",
+      "upstream_terminal_state": "completed_reply_verified",
+      "cleanup": {
+        "runner_snapshot": "completed",
+        "current": "completed",
+        "evidence": "verified_absence"
+      },
+      "ordered_reference_count": 2,
+      "visual_verification": {
+        "visually_inspected": true,
+        "red_circle_left": true,
+        "blue_square_right": true,
+        "green_triangle_center": false
+      },
+      "saved_size_and_sha256_verified": true
+    },
+    {
+      "model": "neon",
+      "workflow": "video",
+      "runner_status": "failed",
+      "strict_acceptance": "failed",
+      "local_observation_state": "partial",
+      "seconds": 10.03,
+      "effective_model": null,
+      "answer_correct": null,
+      "artifact_verified": false,
+      "error_code": "INTERNAL_ERROR",
+      "phase": "media_outcome_unverified",
+      "submission_evidence": "identity_not_observed",
+      "upstream_terminal_state": "unknown",
+      "cleanup": {
+        "runner_snapshot": "not_applicable",
+        "current": "unverified_no_identity",
+        "evidence": "no_attributable_remote_identity"
+      }
+    },
+    {
+      "model": "hydrogen",
+      "workflow": "edit_image",
+      "runner_status": "passed",
+      "strict_acceptance": "passed",
+      "local_observation_state": "completed",
+      "seconds": 47.11,
+      "effective_model": "gemini-4-hydrogen",
+      "answer_correct": null,
+      "artifact_verified": true,
+      "error_code": null,
+      "phase": "completed",
+      "submission_evidence": "completed_response_observed",
+      "upstream_terminal_state": "completed_reply_verified",
+      "cleanup": {
+        "runner_snapshot": "completed",
+        "current": "completed",
+        "evidence": "verified_absence"
+      },
+      "source_mode": "saved_operation",
+      "saved_operation_chain_verified": true,
+      "visual_verification": {
+        "visually_inspected": true,
+        "red_circle_left": true,
+        "blue_square_right": true,
+        "green_triangle_center": true
+      },
+      "saved_size_and_sha256_verified": true
+    },
+    {
+      "model": "carbon",
+      "workflow": "edit_image",
+      "runner_status": "passed",
+      "strict_acceptance": "passed",
+      "local_observation_state": "completed",
+      "seconds": 62.11,
+      "effective_model": "gemini-carbon",
+      "answer_correct": null,
+      "artifact_verified": true,
+      "error_code": null,
+      "phase": "completed",
+      "submission_evidence": "completed_response_observed",
+      "upstream_terminal_state": "completed_reply_verified",
+      "cleanup": {
+        "runner_snapshot": "completed",
+        "current": "completed",
+        "evidence": "verified_absence"
+      },
+      "source_mode": "saved_operation",
+      "saved_operation_chain_verified": true,
+      "visual_verification": {
+        "visually_inspected": true,
+        "red_circle_left": true,
+        "blue_square_right": true,
+        "green_triangle_center": true
+      },
+      "saved_size_and_sha256_verified": true
+    },
+    {
+      "model": "hydrogen",
+      "workflow": "video",
+      "runner_status": "failed",
+      "strict_acceptance": "failed",
+      "local_observation_state": "partial",
+      "seconds": 31.02,
+      "effective_model": null,
+      "answer_correct": null,
+      "artifact_verified": false,
+      "error_code": "TIMED_OUT",
+      "phase": "media_outcome_unverified",
+      "submission_evidence": "identity_not_observed",
+      "upstream_terminal_state": "unknown",
+      "cleanup": {
+        "runner_snapshot": "not_applicable",
+        "current": "unverified_no_identity",
+        "evidence": "no_attributable_remote_identity"
+      },
+      "historical_failure_stage_verified": false
+    },
+    {
+      "model": "carbon",
+      "workflow": "video",
+      "runner_status": "failed",
+      "strict_acceptance": "failed",
+      "local_observation_state": "partial",
+      "seconds": 16.05,
+      "effective_model": null,
+      "answer_correct": null,
+      "artifact_verified": false,
+      "error_code": "INTERNAL_ERROR",
+      "phase": "media_outcome_unverified",
+      "submission_evidence": "identity_not_observed",
+      "upstream_terminal_state": "unknown",
+      "cleanup": {
+        "runner_snapshot": "not_applicable",
+        "current": "unverified_no_identity",
+        "evidence": "no_attributable_remote_identity"
+      }
+    },
+    {
+      "model": "hydrogen",
+      "workflow": "music",
+      "runner_status": "passed",
+      "strict_acceptance": "passed",
+      "local_observation_state": "completed",
+      "seconds": 124.1,
+      "effective_model": "gemini-4-hydrogen",
+      "answer_correct": null,
+      "artifact_verified": true,
+      "error_code": null,
+      "phase": "completed",
+      "submission_evidence": "completed_response_observed",
+      "upstream_terminal_state": "completed_reply_verified",
+      "cleanup": {
+        "runner_snapshot": "completed",
+        "current": "completed",
+        "evidence": "verified_absence"
+      },
+      "requested_options": {
+        "music_duration": null,
+        "music_vocals": null
+      },
+      "audio_verification": {
+        "duration_seconds": 175.986875,
+        "non_silent_verified": true,
+        "mean_volume_db": -14.3,
+        "containers": [
+          "mp3",
+          "mp4"
+        ],
+        "mp4_audio_codec": "aac"
+      },
+      "saved_size_and_sha256_verified": true
+    },
+    {
+      "model": "carbon",
+      "workflow": "music",
+      "runner_status": "failed",
+      "strict_acceptance": "failed",
+      "local_observation_state": "failed",
+      "seconds": 64.04,
+      "effective_model": null,
+      "answer_correct": null,
+      "artifact_verified": false,
+      "error_code": "TIMED_OUT",
+      "phase": "native_media_model_selection_not_submitted",
+      "submission_evidence": "not_submitted",
+      "upstream_terminal_state": "not_submitted",
+      "cleanup": {
+        "runner_snapshot": "not_applicable",
+        "current": "not_applicable",
+        "evidence": "pre_submission_boundary"
+      },
+      "requested_options": {
+        "music_duration": null,
+        "music_vocals": null
+      }
+    },
+    {
+      "model": "neon",
+      "workflow": "music",
+      "runner_status": "failed",
+      "strict_acceptance": "failed",
+      "local_observation_state": "partial",
+      "seconds": 578.18,
+      "effective_model": null,
+      "answer_correct": null,
+      "artifact_verified": false,
+      "error_code": "TIMED_OUT",
+      "phase": "native_media_outcome_unverified",
+      "submission_evidence": "send_observed_without_identity",
+      "upstream_terminal_state": "unknown",
+      "cleanup": {
+        "runner_snapshot": "not_applicable",
+        "current": "unverified_no_identity",
+        "evidence": "no_attributable_remote_identity"
+      },
+      "requested_options": {
+        "music_duration": "short",
+        "music_vocals": "instrumental"
+      }
+    }
+  ],
+  "privacy": {
+    "raw_responses_included": false,
+    "account_content_included": false,
+    "credentials_included": false
+  },
+  "artifact_integrity": {
+    "files_checked": 11,
+    "size_and_sha256_verified": true,
+    "visual_and_audio_proofs_match_saved_artifacts": true
+  }
+}

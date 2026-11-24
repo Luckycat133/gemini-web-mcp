@@ -35,9 +35,9 @@ Google 的 [Connected Apps 使用说明](https://support.google.com/gemini/answe
 
 NotebookLM／Gemini Notebook 已有明确接入：账号 `gemini_notebooks` 默认从网页来源选择器返回紧凑元数据，功能面的 `gemini_ask(notebook_ids=[...])` 启动后台普通聊天，`execution_mode="chat"`。Notebook 附件不会将聊天转为 Task。`source="gemini"` 保留同一 Notebook 产品的项目视图及聊天整理；移动前必须在该视图精确解析目标，不能自行替换资源前缀。
 
-`gemini_run_task` 明确启动 `execution_mode="task"` 的后台工作，支持相同的 Notebook 来源选择。提交返回持久 `operation_id`，状态只读元数据；完整回答按原 CID/RID/候选定位，保存并校验本地产物后再清理自有线程。账号 `gemini_tasks` 提供 Task list/get 与显式删除。它们不会把 Task 的计划管理重定向给聊天 scheduled-action 工具。
+`gemini_run_task` 明确启动 `execution_mode="task"` 的后台工作，支持相同的 Notebook 来源选择。提交返回持久 `operation_id`，用只读状态工具查进度。完整回答按原 CID/RID/候选定位，保存并校验本地产物后再清理自有线程。默认账号 `gemini_tasks` 只读取 Task 列表、详情和进度，显式删除和计划管理使用 `account-full`。
 
-完整示例、模式选择与特殊设置见 [Notebook、聊天与 Task](notebook-task-workflows.md)。当前已实现有限进度、显式确认卡片、Task 时间计划和有限远程浏览器输入；运行中任意追加指示、独占接管、Task 暂停／恢复、自动权限审批、事件型计划和导出尚未适配；持久浏览器／动作权限偏好通过 `gemini_preferences` 管理。
+Task 时间计划、显式远程浏览器输入和持久偏好通过 `account-full` 使用。功能面支持原确认卡的精确续答。开启后台一次性批准后，MCP 可处理自己持有的 Task 的浏览器许可卡。网页已有 Task 使用单独开关，Google Tasks 删除卡要求精确的 Task/标题规则。应用连接继续使用原生流程。[后台批准配置](task-preferences.md)运行中任意追加指示、独占接管、Task 暂停／恢复、事件型计划和导出尚未适配。[Notebook、聊天与 Task](notebook-task-workflows.md)
 
 ### 协议来源与实验边界
 

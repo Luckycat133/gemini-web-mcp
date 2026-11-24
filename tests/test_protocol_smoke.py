@@ -152,6 +152,7 @@ def test_assist_handshake_rejects_non_invalid_argument_domain_failure(
 @pytest.mark.parametrize("tool,arguments,code", [
     ("gemini_ask", {"prompt": ""}, "INVALID_ARGUMENT"),
     ("gemini_cleanup", {"action": "list"}, "AUTH_REQUIRED"),
+    ("gemini_tasks", {"action": "get", "chat_id": ""}, "INVALID_ARGUMENT"),
 ])
 def test_function_and_account_smokes_assert_typed_auth_free_responses(monkeypatch, tmp_path, tool, arguments, code):
     calls = []

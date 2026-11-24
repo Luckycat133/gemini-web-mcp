@@ -12,7 +12,8 @@ from copy import deepcopy
 from typing import Any, TypeVar
 
 from mcp.server import MCPServer as SDKMCPServer
-from mcp_types import Icon, ImageContent, TextContent, Tool, ToolAnnotations
+from mcp.server.mcpserver.exceptions import ToolError
+from mcp_types import CallToolResult, Icon, ImageContent, InputRequiredResult, TextContent, Tool, ToolAnnotations
 
 
 _CallableT = TypeVar("_CallableT", bound=Callable[..., Any])
@@ -79,8 +80,29 @@ class MCPServer(SDKMCPServer):
     at the project-owned SDK boundary while still allowing explicit opt-out.
     """
 
+    def __init__(self, *args: Any, strict_arguments: bool = False, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self._strict_arguments = strict_arguments
+
     async def list_tools(self) -> list[Tool]:
-        return [_compact_content_output(tool) for tool in await super().list_tools()]
+        tools = [_compact_content_output(tool) for tool in await super().list_tools()]
+        if not self._strict_arguments:
+            return tools
+        return [
+            tool.model_copy(update={"input_schema": {**tool.input_schema, "additionalProperties": False}})
+            for tool in tools
+        ]
+
+    async def call_tool(
+        self, name: str, arguments: dict[str, Any], context: Any = None,
+    ) -> CallToolResult | InputRequiredResult:
+        if self._strict_arguments:
+            tool = next((item for item in await super().list_tools() if item.name == name), None)
+            # The high-level SDK can discard unknown keys before running the
+            # handler. Reject them before any job starts or account data changes.
+            if tool is not None and arguments.keys() - tool.input_schema.get("properties", {}).keys():
+                raise ToolError("Unknown tool arguments. Use the advertised input schema.")
+        return await super().call_tool(name, arguments, context)
 
     def tool(
         self,

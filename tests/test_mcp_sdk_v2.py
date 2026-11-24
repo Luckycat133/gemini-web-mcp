@@ -13,6 +13,7 @@ import jsonschema
 import pytest
 from mcp import Client
 from mcp.server import MCPServer as SDKMCPServer
+from mcp.server.mcpserver.exceptions import ToolError
 from pydantic import BaseModel, Field
 
 from scripts.snapshot_mcp_v2_contract import build_snapshot
@@ -55,6 +56,27 @@ def test_catalog_trims_sdk_content_labels_and_preserves_business_schema():
     jsonschema.validate(payload, after)
     with pytest.raises(jsonschema.ValidationError):
         jsonschema.validate({"result": [{"type": "image", "data": "missing MIME"}]}, after)
+
+
+def test_strict_arguments_refuse_unknown_keys_before_dispatch():
+    calls = []
+    server = MCPServer("Strict", strict_arguments=True)
+
+    @server.tool()
+    async def create(prompt: str) -> list[TextContent]:
+        calls.append(prompt)
+        return [TextContent(type="text", text="created")]
+
+    async def verify():
+        tool, = await server.list_tools()
+        assert tool.input_schema["additionalProperties"] is False
+        with pytest.raises(ToolError, match="^Unknown tool arguments"):
+            await server.call_tool("create", {"prompt": "fixture", "old_action": "result"})
+        assert calls == []
+        await server.call_tool("create", {"prompt": "fixture"})
+        assert calls == ["fixture"]
+
+    asyncio.run(verify())
 
 
 def _reload_server_full():

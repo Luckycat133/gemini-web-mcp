@@ -15,12 +15,17 @@ from typing import Any
 from mcp import Client, StdioServerParameters, stdio_client
 
 if __package__:
-    from .smoke_profiles import ACCOUNT_TOOLS, ASSIST_TOOLS, COMPACT_TOOLS, FUNCTION_TOOLS, PRIMARY_PROFILE_TOOLS
+    from .smoke_profiles import (
+        ACCOUNT_FULL_TOOLS, ACCOUNT_TOOLS, ASSIST_TOOLS, COMPACT_TOOLS,
+        FUNCTION_FULL_TOOLS, FUNCTION_TOOLS, PRIMARY_PROFILE_TOOLS,
+    )
 else:
     from smoke_profiles import (  # type: ignore[import-not-found,no-redef]
+        ACCOUNT_FULL_TOOLS,
         ACCOUNT_TOOLS,
         ASSIST_TOOLS,
         COMPACT_TOOLS,
+        FUNCTION_FULL_TOOLS,
         FUNCTION_TOOLS,
         PRIMARY_PROFILE_TOOLS,
     )
@@ -123,9 +128,20 @@ async def _handshake(
             elif "gemini_cleanup" in actual_tools:
                 representative_name = "gemini_cleanup"
                 representative_arguments = {"action": "list"}
+            elif "gemini_tasks" in actual_tools:
+                representative_name = "gemini_tasks"
+                representative_arguments = {"action": "get", "chat_id": ""}
             else:
                 raise RuntimeError(f"{command} exposes no auth-free static representative tool")
             representative = await client.call_tool(representative_name, representative_arguments)
+            if expected_tools in (FUNCTION_TOOLS, ACCOUNT_TOOLS):
+                if any(tool.input_schema.get("additionalProperties") is not False for tool in listed.tools):
+                    raise RuntimeError(f"{command} did not publish closed input schemas")
+                rejected = await client.call_tool(
+                    representative_name, {**representative_arguments, "unsupported_argument": True},
+                )
+                if not rejected.is_error:
+                    raise RuntimeError(f"{command} accepted an unsupported argument in {mode} mode")
             protocol_version = client.protocol_version
             server_name = client.server_info.name if client.server_info is not None else None
 
@@ -137,7 +153,7 @@ async def _handshake(
         )
     if not isinstance(representative.structured_content, dict):
         raise RuntimeError(f"{command} did not return MCP v2 structured content in {mode} mode")
-    if representative_name in {"create", "gemini_ask", "gemini_cleanup"}:
+    if representative_name in {"create", "gemini_ask", "gemini_cleanup", "gemini_tasks"}:
         domain = _structured_domain_result(representative.structured_content)
         error = domain.get("error") if domain else None
         expected_code = "AUTH_REQUIRED" if representative_name == "gemini_cleanup" else "INVALID_ARGUMENT"
@@ -248,13 +264,19 @@ async def _run(
                         mode=mode,
                     ),
                     await _handshake(
-                        function_command, profile="function", expected_tools=FUNCTION_TOOLS, cwd=cwd, mode=mode,
+                        function_command, profile="account-full", expected_tools=FUNCTION_TOOLS, cwd=cwd, mode=mode,
                     ),
                     await _handshake(
-                        account_command, profile="function", expected_tools=ACCOUNT_TOOLS, cwd=cwd, mode=mode,
+                        account_command, profile="function-full", expected_tools=ACCOUNT_TOOLS, cwd=cwd, mode=mode,
                     ),
                     await _handshake(
                         primary_command, profile=None, expected_tools=FUNCTION_TOOLS, cwd=cwd, mode=mode,
+                    ),
+                    await _handshake(
+                        primary_command, profile="function-full", expected_tools=FUNCTION_FULL_TOOLS, cwd=cwd, mode=mode,
+                    ),
+                    await _handshake(
+                        primary_command, profile="account-full", expected_tools=ACCOUNT_FULL_TOOLS, cwd=cwd, mode=mode,
                     ),
                 ]
             )

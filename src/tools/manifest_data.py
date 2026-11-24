@@ -184,7 +184,12 @@ TOOL_MANIFEST: list[dict[str, Any]] = [
     {
         "name": "gemini_generate_media",
         "group": "media",
-        "purpose": "Generate image, music or video and recover artifacts by operation handle. For video, explicitly select gemini-omni-1.2-flash to use the paid Gemini API with GEMINI_API_KEY and optional 3–15 second duration. This API route requires background mode.",
+        "purpose": (
+            "Generate image, music or video and recover artifacts by operation handle. Background images accept "
+            "ordered local references or a verified saved image from an earlier operation. For video, explicitly "
+            "select gemini-omni-1.2-flash to use the paid Gemini API with GEMINI_API_KEY and optional "
+            "3–15 second duration. This API route requires background mode."
+        ),
         "read_only": False,
         "destructive": False,
         "privacy": "sends_user_prompt_and_optional_reference_files",
@@ -229,10 +234,10 @@ TOOL_MANIFEST: list[dict[str, Any]] = [
     {
         "name": "gemini_get_operation_status",
         "group": "research",
-        "purpose": "Read the status of one saved research or media operation by its explicit handle, including after restart.",
+        "purpose": "Read bounded status for one saved operation by its exact handle, including after restart.",
         "read_only": True,
         "destructive": False,
-        "privacy": "reads_private_chat_text",
+        "privacy": "reads_operation_scoped_metadata",
         "pagination": False,
     },
     {
@@ -274,7 +279,7 @@ TOOL_MANIFEST: list[dict[str, Any]] = [
     {
         "name": "gemini_manage_chat",
         "group": "account",
-        "purpose": "Rename, pin or unpin one explicit chat ID on gemini-mcp-account, with fresh metadata read-back.",
+        "purpose": "Rename, pin or unpin one exact chat. The focused account surface also moves a chat to an exact Notebook project.",
         "read_only": False,
         "destructive": False,
         "privacy": "reads_and_updates_private_chat_metadata",
@@ -569,6 +574,63 @@ TOOL_MANIFEST: list[dict[str, Any]] = [
         "pagination": False,
     },
     {
+        "name": "gemini_ask", "group": "core",
+        "purpose": "Ask Gemini Chat about text, web sources, attachments or Notebook sources. Sessions are optional on the focused function surface.",
+        "read_only": False, "destructive": False,
+        "privacy": "sends_user_prompt_and_explicit_inputs", "pagination": False,
+    },
+    {
+        "name": "gemini_understand_image", "group": "files",
+        "purpose": "Analyze one explicit image on the broad function or assist surface.",
+        "read_only": False, "destructive": False,
+        "privacy": "sends_user_prompt_and_explicit_inputs", "pagination": False,
+    },
+    {
+        "name": "gemini_understand", "group": "files",
+        "purpose": "Analyze mixed explicit inputs on the broad function or assist surface.",
+        "read_only": False, "destructive": False,
+        "privacy": "sends_user_prompt_and_explicit_inputs", "pagination": False,
+    },
+    {
+        "name": "gemini_research", "group": "research",
+        "purpose": "Start Deep Research and obtain a durable operation handle for its verified report.",
+        "read_only": False, "destructive": True,
+        "privacy": "sends_user_prompt_and_cleans_unretained_chat", "pagination": False,
+    },
+    {
+        "name": "gemini_create_media", "group": "media",
+        "purpose": (
+            "Submit image generation, image editing, video or music and obtain one operation handle. "
+            "Images accept ordered local references or a verified saved image from an earlier operation."
+        ),
+        "read_only": False, "destructive": False,
+        "privacy": "sends_user_prompt_and_explicit_media_input", "pagination": False,
+    },
+    {
+        "name": "gemini_generate_image", "group": "media",
+        "purpose": "Submit image generation with ordered references or edit a verified image from an earlier operation.",
+        "read_only": False, "destructive": False,
+        "privacy": "sends_user_prompt_and_explicit_media_input", "pagination": False,
+    },
+    {
+        "name": "gemini_edit_image", "group": "media",
+        "purpose": "Submit an edit to an explicit image on the broad function surface.",
+        "read_only": False, "destructive": False,
+        "privacy": "sends_user_prompt_and_explicit_media_input", "pagination": False,
+    },
+    {
+        "name": "gemini_generate_video", "group": "media",
+        "purpose": "Submit video generation on the broad function surface.",
+        "read_only": False, "destructive": False,
+        "privacy": "sends_user_prompt_and_explicit_media_input", "pagination": False,
+    },
+    {
+        "name": "gemini_cleanup", "group": "account",
+        "purpose": "Inspect or retry cleanup of chats recorded in the current account's MCP ownership ledger.",
+        "read_only": False, "destructive": True,
+        "privacy": "reads_local_cleanup_metadata_and_deletes_mcp_owned_chats", "pagination": True,
+    },
+    {
         "name": "gemini_run_task", "group": "tasks",
         "purpose": "Start an asynchronous Gemini Task and return a persistent operation handle.",
         "read_only": False, "destructive": True,
@@ -578,6 +640,7 @@ TOOL_MANIFEST: list[dict[str, Any]] = [
         "name": "gemini_tasks", "group": "account",
         "purpose": "Read Task activity, rename, pin, unpin or delete an exact Task, and manage time schedules with independent read-back.",
         "read_only": False, "destructive": True,
+        "profile_annotations": {"gemini-mcp-account": {"read_only": True, "destructive": False}},
         "privacy": "reads_explicit_task_activity_and_manages_private_task_metadata_and_schedules", "pagination": True,
     },
     {

@@ -9,7 +9,7 @@ import sqlite3
 import time
 from typing import Any
 
-from .account_identity import current_account_key
+from .account_identity import account_key_scope, account_matches, canonical_account_key, current_account_key
 from .operation_store import default_operation_db_path
 
 _ACTION_ID = re.compile(r'[A-Za-z0-9_-]{20,128}\Z')
@@ -20,8 +20,18 @@ _STATES = frozenset({'claimed', 'dispatched', 'verified', 'outcome_unverified'})
 
 
 def _account(account_key: str) -> None:
-    if not isinstance(account_key, str) or not account_key or current_account_key() != account_key:
+    if not isinstance(account_key, str) or not account_matches(account_key, current_account_key()):
         raise ValueError('Account identity could not be verified')
+
+
+def _find_action(db: sqlite3.Connection, account_key: str, action_id: str) -> sqlite3.Row | None:
+    scope = account_key_scope(account_key)
+    placeholders = ','.join('?' for _ in scope)
+    rows = db.execute(f'SELECT * FROM browser_actions WHERE account_key IN ({placeholders}) AND action_id=?',
+                      (*scope, action_id)).fetchall()
+    if len(rows) > 1:
+        raise ValueError('Action ID has conflicting account scopes')
+    return rows[0] if rows else None
 
 
 def _action_id(value: str) -> None:
@@ -79,23 +89,25 @@ class BrowserActionStore:
         db = self._connect(account_key)
         try:
             _account(account_key)
-            row = db.execute('SELECT * FROM browser_actions WHERE account_key=? AND action_id=?',
-                             (account_key, action_id)).fetchone()
+            row = _find_action(db, account_key, action_id)
             if row is not None:
                 if (row['chat_id'], row['response_id'], row['action'], row['expected_frame_sha256'], row['candidate_id']) != (
                     chat_id, response_id, action, expected_frame_sha256, candidate_id
                 ):
                     raise ValueError('Action ID already belongs to different metadata')
+                _account(account_key)
                 db.commit()
                 return {**dict(row), 'new': False}
             _account(account_key)
+            owner = canonical_account_key(account_key) or account_key
             now = time.time()
             db.execute('INSERT INTO browser_actions VALUES (?,?,?,?,?,?,?,?,?,?,?)',
-                       (account_key, action_id, chat_id, response_id, action, expected_frame_sha256,
+                       (owner, action_id, chat_id, response_id, action, expected_frame_sha256,
                         'claimed', None, now, now, candidate_id))
             _account(account_key)
             row = db.execute('SELECT * FROM browser_actions WHERE account_key=? AND action_id=?',
-                             (account_key, action_id)).fetchone()
+                             (owner, action_id)).fetchone()
+            _account(account_key)
             db.commit()
             assert row is not None
             return {**dict(row), 'new': True}
@@ -117,8 +129,8 @@ class BrowserActionStore:
         db = self._connect(account_key)
         try:
             _account(account_key)
-            row = db.execute('SELECT state, artifact_id FROM browser_actions WHERE account_key=? AND action_id=?',
-                             (account_key, action_id)).fetchone()
+            row = _find_action(db, account_key, action_id)
+            _account(account_key)
             if row is None:
                 db.commit()
                 return False
@@ -137,7 +149,7 @@ class BrowserActionStore:
                 return False
             _account(account_key)
             db.execute('UPDATE browser_actions SET state=?, artifact_id=?, updated_at=? WHERE account_key=? AND action_id=?',
-                       (state, artifact_id, time.time(), account_key, action_id))
+                       (state, artifact_id, time.time(), row['account_key'], action_id))
             _account(account_key)
             db.commit()
             return True
@@ -153,8 +165,7 @@ class BrowserActionStore:
         db = self._connect(account_key)
         try:
             _account(account_key)
-            row = db.execute('SELECT * FROM browser_actions WHERE account_key=? AND action_id=?',
-                             (account_key, action_id)).fetchone()
+            row = _find_action(db, account_key, action_id)
             _account(account_key)
             db.commit()
             return dict(row) if row is not None else None

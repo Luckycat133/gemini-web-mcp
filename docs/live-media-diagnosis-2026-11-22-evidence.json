@@ -1,0 +1,1371 @@
+{
+  "schema_version": 1,
+  "report_kind": "instrumented_workspace_media_diagnosis",
+  "status": "completed_with_live_limitations",
+  "provenance": {
+    "execution_kind": "instrumented_workspace_source_diagnosis",
+    "interpreter_dependency_origin_prefix": "fcdf1138268623cc",
+    "workspace_pythonpath_override": true,
+    "private_sitecustomize_trace": true,
+    "installed_wheel_generation_proof": false,
+    "unhooked_delivery_validation": "67b and later installed cohorts recorded separately; 2663 explicit Neon Low files verified without overwriting prior failures"
+  },
+  "product_version": "0.20.0",
+  "snapshot": {
+    "recorded_cases": 8,
+    "saved_artifact_cases": 4,
+    "rejected_cases": 4,
+    "additional_neon_original_music": "pending_no_verified_artifact",
+    "historical_source_snapshot_only": true
+  },
+  "cases": [
+    {
+      "case_id": "diagnosis.hydrogen_video_wrapped_no_reference.attempt1",
+      "round": "instrumented_source_diagnosis",
+      "attempt": 1,
+      "source_record_ordinal": 1,
+      "model": "hydrogen",
+      "workflow": "video",
+      "prompt_policy": "sdk_capability_wrapper",
+      "reference_count": 0,
+      "seconds": 276.14,
+      "observed_tool_status": "failed",
+      "local_state": "failed",
+      "phase": "media_rejected",
+      "effective_model": "gemini-4-hydrogen",
+      "error_code": "UPSTREAM_REJECTED",
+      "verification_status": "upstream_media_error_card_observed",
+      "dispatch_identity_observed": true,
+      "saved_artifact_verified": false,
+      "cleanup_reported": "completed",
+      "independent_absence_verification": "not_collected_in_this_snapshot",
+      "installed_package_generation_proof": false,
+      "requested_options": {
+        "duration_seconds": 10,
+        "aspect_ratio": "16:9"
+      }
+    },
+    {
+      "case_id": "diagnosis.carbon_music_explicit_short_instrumental.attempt1",
+      "round": "instrumented_source_diagnosis",
+      "attempt": 1,
+      "source_record_ordinal": 2,
+      "model": "carbon",
+      "workflow": "music",
+      "prompt_policy": "shared_music_prompt",
+      "reference_count": 0,
+      "seconds": 206.15,
+      "observed_tool_status": "passed",
+      "local_state": "completed",
+      "phase": "completed",
+      "effective_model": "gemini-carbon",
+      "error_code": null,
+      "verification_status": "local_artifacts_verified",
+      "dispatch_identity_observed": true,
+      "saved_artifact_verified": true,
+      "cleanup_reported": "completed",
+      "independent_absence_verification": "not_collected_in_this_snapshot",
+      "installed_package_generation_proof": false,
+      "requested_options": {
+        "music_duration": "short",
+        "music_vocals": "instrumental"
+      },
+      "music_evidence": {
+        "mp3_duration_seconds": 61.048125,
+        "mp4_duration_seconds": 61.067333,
+        "mp4_width": 1024,
+        "mp4_height": 1024,
+        "audio_sample_rate_hz": 44100,
+        "audio_channels": 2,
+        "non_silent": true,
+        "mean_volume_db": -14.3,
+        "max_volume_db": 0.0,
+        "human_audition": false,
+        "size_and_sha256_verified": true
+      }
+    },
+    {
+      "case_id": "diagnosis.hydrogen_music_explicit_short_instrumental.attempt1",
+      "round": "instrumented_source_diagnosis",
+      "attempt": 1,
+      "source_record_ordinal": 3,
+      "model": "hydrogen",
+      "workflow": "music",
+      "prompt_policy": "shared_music_prompt",
+      "reference_count": 0,
+      "seconds": 130.09,
+      "observed_tool_status": "passed",
+      "local_state": "completed",
+      "phase": "completed",
+      "effective_model": "gemini-4-hydrogen",
+      "error_code": null,
+      "verification_status": "local_artifacts_verified",
+      "dispatch_identity_observed": true,
+      "saved_artifact_verified": true,
+      "cleanup_reported": "completed",
+      "independent_absence_verification": "not_collected_in_this_snapshot",
+      "installed_package_generation_proof": false,
+      "requested_options": {
+        "music_duration": "short",
+        "music_vocals": "instrumental"
+      },
+      "music_evidence": {
+        "mp3_duration_seconds": 62.093,
+        "mp4_duration_seconds": 62.100333,
+        "mp4_width": 1024,
+        "mp4_height": 1024,
+        "audio_sample_rate_hz": 44100,
+        "audio_channels": 2,
+        "non_silent": true,
+        "mean_volume_db": -14.3,
+        "max_volume_db": -0.0,
+        "human_audition": false,
+        "size_and_sha256_verified": true
+      }
+    },
+    {
+      "case_id": "diagnosis.hydrogen_video_wrapped_reference.attempt1",
+      "round": "instrumented_source_diagnosis",
+      "attempt": 1,
+      "source_record_ordinal": 4,
+      "model": "hydrogen",
+      "workflow": "video",
+      "prompt_policy": "sdk_capability_wrapper",
+      "reference_count": 1,
+      "seconds": 37.06,
+      "observed_tool_status": "failed",
+      "local_state": "failed",
+      "phase": "media_rejected",
+      "effective_model": "gemini-4-hydrogen",
+      "error_code": "UPSTREAM_REJECTED",
+      "verification_status": "upstream_media_error_card_observed",
+      "dispatch_identity_observed": true,
+      "saved_artifact_verified": false,
+      "cleanup_reported": "completed",
+      "independent_absence_verification": "not_collected_in_this_snapshot",
+      "installed_package_generation_proof": false,
+      "requested_options": {
+        "duration_seconds": 10,
+        "aspect_ratio": "16:9"
+      }
+    },
+    {
+      "case_id": "diagnosis.hydrogen_video_original_prompt.attempt1",
+      "round": "instrumented_source_diagnosis",
+      "attempt": 1,
+      "source_record_ordinal": 5,
+      "model": "hydrogen",
+      "workflow": "video",
+      "prompt_policy": "original_user_prompt",
+      "reference_count": 0,
+      "seconds": 99.11,
+      "observed_tool_status": "passed",
+      "local_state": "completed",
+      "phase": "completed",
+      "effective_model": "gemini-4-hydrogen",
+      "error_code": null,
+      "verification_status": "local_artifacts_verified",
+      "dispatch_identity_observed": true,
+      "saved_artifact_verified": true,
+      "cleanup_reported": "completed",
+      "independent_absence_verification": "not_collected_in_this_snapshot",
+      "installed_package_generation_proof": false,
+      "requested_options": {
+        "duration_seconds": 10,
+        "aspect_ratio": "16:9"
+      },
+      "video_evidence": {
+        "duration_seconds": 10.026667,
+        "width": 1280,
+        "height": 720,
+        "video_codec": "h264",
+        "audio_codec": "aac",
+        "saved_bytes": 2669448,
+        "size_and_sha256_verified": true,
+        "visual_qa": "blue_paper_cube_rotation_verified_at_4_and_8_seconds"
+      }
+    },
+    {
+      "case_id": "diagnosis.neon_video_original_prompt_15_portrait.attempt1",
+      "round": "instrumented_source_diagnosis",
+      "attempt": 1,
+      "source_record_ordinal": 6,
+      "model": "neon",
+      "workflow": "video",
+      "prompt_policy": "original_user_prompt",
+      "reference_count": 0,
+      "seconds": 33.02,
+      "observed_tool_status": "failed",
+      "local_state": "failed",
+      "phase": "media_rejected",
+      "effective_model": "gemini-neon",
+      "error_code": "UPSTREAM_REJECTED",
+      "verification_status": "upstream_media_error_card_observed",
+      "dispatch_identity_observed": true,
+      "saved_artifact_verified": false,
+      "cleanup_reported": "completed",
+      "independent_absence_verification": "not_collected_in_this_snapshot",
+      "installed_package_generation_proof": false,
+      "requested_options": {
+        "duration_seconds": 15,
+        "aspect_ratio": "9:16"
+      }
+    },
+    {
+      "case_id": "diagnosis.neon_music_wrapped_no_tool.attempt1",
+      "round": "instrumented_source_diagnosis",
+      "attempt": 1,
+      "source_record_ordinal": 7,
+      "model": "neon",
+      "workflow": "music",
+      "prompt_policy": "sdk_capability_wrapper",
+      "reference_count": 0,
+      "seconds": 254.06,
+      "observed_tool_status": "failed",
+      "local_state": "failed",
+      "phase": "media_rejected",
+      "effective_model": "gemini-neon",
+      "error_code": "ARTIFACT_NOT_RETURNED",
+      "verification_status": "model_media_refusal_observed",
+      "dispatch_identity_observed": true,
+      "saved_artifact_verified": false,
+      "cleanup_reported": "completed",
+      "independent_absence_verification": "not_collected_in_this_snapshot",
+      "installed_package_generation_proof": false,
+      "requested_options": {
+        "music_duration": "short",
+        "music_vocals": "instrumental"
+      }
+    },
+    {
+      "case_id": "diagnosis.neon_video_original_prompt_10_landscape.attempt1",
+      "round": "instrumented_source_diagnosis",
+      "attempt": 1,
+      "source_record_ordinal": 8,
+      "model": "neon",
+      "workflow": "video",
+      "prompt_policy": "original_user_prompt",
+      "reference_count": 0,
+      "seconds": 107.12,
+      "observed_tool_status": "passed",
+      "local_state": "completed",
+      "phase": "completed",
+      "effective_model": "gemini-neon",
+      "error_code": null,
+      "verification_status": "local_artifacts_verified",
+      "dispatch_identity_observed": true,
+      "saved_artifact_verified": true,
+      "cleanup_reported": "completed",
+      "independent_absence_verification": "not_collected_in_this_snapshot",
+      "installed_package_generation_proof": false,
+      "requested_options": {
+        "duration_seconds": 10,
+        "aspect_ratio": "16:9"
+      },
+      "video_evidence": {
+        "duration_seconds": 10.026667,
+        "width": 1280,
+        "height": 720,
+        "video_codec": "h264",
+        "audio_codec": "aac",
+        "saved_bytes": 2838896,
+        "size_and_sha256_verified": true,
+        "visual_qa": "frame_qa_pending"
+      }
+    }
+  ],
+  "pending_cases": [
+    {
+      "case_id": "diagnosis.neon_music_original_prompt.attempt1",
+      "round": "instrumented_source_diagnosis",
+      "attempt": 1,
+      "model": "neon",
+      "workflow": "music",
+      "prompt_policy": "original_user_prompt",
+      "requested_options": {
+        "music_duration": "short",
+        "music_vocals": "instrumental"
+      },
+      "status": "pending",
+      "verified_audio": false,
+      "ui_stop_control_observed": true,
+      "remote_terminal_state": "not_observed",
+      "installed_package_generation_proof": false,
+      "historical_snapshot_only": true,
+      "latest_resolution_event_id": "readbackca64.source_raw_score.attempt1"
+    }
+  ],
+  "wire_observations": {
+    "endpoint": "https://geminiweb-pa.clients6.google.com/v1/processSession",
+    "outer_form_field": "req0___data__",
+    "encoding": "base64_encoded_protobuf_in_form",
+    "observed_feature_mode_codes": {
+      "music": 21,
+      "video": 11
+    },
+    "hydrogen_music_context": {
+      "requested_duration": "short",
+      "requested_vocals": "instrumental",
+      "observed_duration_code": 4,
+      "observed_vocals_code": 1
+    },
+    "raw_payload_or_headers_exported": false,
+    "no_tool_text_proves_missing_music_mode": false
+  },
+  "terminal_proofs": {
+    "wrapped_video": {
+      "exact_completed_empty_refusal_verified": true,
+      "account_fence_verified": true,
+      "original_identity_preserved": true,
+      "owned_local_observer_retired": true,
+      "remote_generation_or_cancel_requests": 0
+    },
+    "wrapped_neon_music": {
+      "exact_completed_empty_refusal_verified": true,
+      "account_fence_verified": true,
+      "original_identity_preserved": true,
+      "owned_local_observer_retired": true,
+      "remote_generation_or_cancel_requests": 0
+    }
+  },
+  "saved_file_integrity": {
+    "files_checked": 10,
+    "all_sizes_and_sha256_match": true
+  },
+  "root_cause_status": {
+    "native_prompt_wrapper": "native original prompt delivered; earlier 67b/2663/b562 successes retain their generation identities",
+    "early_local_observer_stop": "delivered strict completed-empty gate; original-handle failures finalized without replay",
+    "new_neon_no_tool_phrase": "installed exact refusal recovery and cached readback observed",
+    "sdk_image_api_behavior": "preserve existing behavior",
+    "final_deliverable_build_and_tests": "60fe unified source/install; gates, six entrypoints, profiles and saved-result recovery passed; latest real H video explicitly upstream rejected"
+  },
+  "historical_reports_overwritten": false,
+  "privacy": {
+    "raw_responses_included": false,
+    "account_content_included": false,
+    "credentials_included": false
+  },
+  "installed_67b_cohort": {
+    "wheel_sha256": "67b1f735a3240a88c2a8fc612c20606204fa1bd46cc5405d1a987db7064f4f31",
+    "case_count": 4,
+    "passed": 3,
+    "high_pre_submission_failures": 1,
+    "cases": [
+      {
+        "case_id": "installed67b.hydrogen.video.attempt1",
+        "round": "unhooked_installed_67b",
+        "attempt": 1,
+        "model": "hydrogen",
+        "workflow": "video",
+        "status": "passed",
+        "seconds": 96.2,
+        "phase": "completed",
+        "error_code": null,
+        "dispatch_identity_observed": true,
+        "effective_model": "gemini-4-hydrogen",
+        "cleanup_reported": "completed",
+        "provenance": {
+          "runtime_prefix": "67b1f735a3240a88",
+          "workspace_pythonpath_override": false,
+          "diagnostic_hook_loaded": false,
+          "installed_generation_proof": true
+        },
+        "video_evidence": {
+          "video_duration_seconds": 10.0,
+          "container_duration_seconds": 10.026667,
+          "width": 1280,
+          "height": 720,
+          "fps": 24,
+          "video_codec": "h264",
+          "audio_codec": "aac",
+          "audio_sample_rate_hz": 48000,
+          "audio_channels": 2,
+          "full_decode_verified": true,
+          "sampled_visual_seconds": [
+            4,
+            8
+          ],
+          "paper_cube_rotation_verified_in_sampled_frames": true,
+          "frame_by_frame_visual_review_claimed": false
+        }
+      },
+      {
+        "case_id": "installed67b.neon.video.attempt1",
+        "round": "unhooked_installed_67b",
+        "attempt": 1,
+        "model": "neon",
+        "workflow": "video",
+        "status": "passed",
+        "seconds": 124.07,
+        "phase": "completed",
+        "error_code": null,
+        "dispatch_identity_observed": true,
+        "effective_model": "gemini-neon",
+        "cleanup_reported": "completed",
+        "provenance": {
+          "runtime_prefix": "67b1f735a3240a88",
+          "workspace_pythonpath_override": false,
+          "diagnostic_hook_loaded": false,
+          "installed_generation_proof": true
+        },
+        "video_evidence": {
+          "video_duration_seconds": 10.0,
+          "container_duration_seconds": 10.026667,
+          "width": 1280,
+          "height": 720,
+          "fps": 24,
+          "video_codec": "h264",
+          "audio_codec": "aac",
+          "audio_sample_rate_hz": 48000,
+          "audio_channels": 2,
+          "full_decode_verified": true,
+          "sampled_visual_seconds": [
+            4,
+            8
+          ],
+          "paper_cube_rotation_verified_in_sampled_frames": true,
+          "frame_by_frame_visual_review_claimed": false
+        }
+      },
+      {
+        "case_id": "installed67b.hydrogen.music.attempt1",
+        "round": "unhooked_installed_67b",
+        "attempt": 1,
+        "model": "hydrogen",
+        "workflow": "music",
+        "status": "passed",
+        "seconds": 88.14,
+        "phase": "completed",
+        "error_code": null,
+        "dispatch_identity_observed": true,
+        "effective_model": "gemini-4-hydrogen",
+        "cleanup_reported": "completed",
+        "provenance": {
+          "runtime_prefix": "67b1f735a3240a88",
+          "workspace_pythonpath_override": false,
+          "diagnostic_hook_loaded": false,
+          "installed_generation_proof": true
+        },
+        "music_evidence": {
+          "mp3_duration_seconds": 61.675042,
+          "mp4_duration_seconds": 61.700333,
+          "mp4_width": 1024,
+          "mp4_height": 1024,
+          "audio_sample_rate_hz": 44100,
+          "audio_channels": 2,
+          "mean_volume_db": -14.3,
+          "max_volume_db": 0.0,
+          "non_silent": true,
+          "human_audition": false,
+          "full_decode_verified": true
+        }
+      },
+      {
+        "case_id": "installed67b.neon.music.attempt1",
+        "round": "unhooked_installed_67b",
+        "attempt": 1,
+        "model": "neon",
+        "workflow": "music",
+        "status": "failed",
+        "seconds": 64.08,
+        "phase": "native_media_thinking_level_not_submitted",
+        "error_code": "CAPABILITY_UNAVAILABLE",
+        "dispatch_identity_observed": false,
+        "effective_model": null,
+        "cleanup_reported": "not_applicable",
+        "provenance": {
+          "runtime_prefix": "67b1f735a3240a88",
+          "workspace_pythonpath_override": false,
+          "diagnostic_hook_loaded": false,
+          "installed_generation_proof": false
+        },
+        "requested_thinking_level": "high",
+        "generation_submitted": false,
+        "historical_failure_not_overwritten": true
+      }
+    ],
+    "local_independent_qa": {
+      "saved_files_checked": 7,
+      "all_sizes_and_sha256_match": true,
+      "audio_video_files_full_decode_ok": 4,
+      "jpeg_files_decodable": 3,
+      "sampled_video_frames_seconds": [
+        4,
+        8
+      ],
+      "sampled_blue_paper_cube_rotation_verified": true,
+      "frame_by_frame_visual_review_claimed": false,
+      "additional_account_or_network_requests": 0
+    }
+  },
+  "source_cookie_bridge": {
+    "user_google_verification_completed": true,
+    "omitted_cookie_name": "GOOGLE_ABUSE_EXEMPTION",
+    "previous_cookie_allowlist_count": 26,
+    "forwarding_scope": {
+      "exact_domain": ".google.com",
+      "root_path_only": true,
+      "nonexpired_only": true,
+      "same_default_psid_owner_required": true
+    },
+    "cookie_values_exported": false,
+    "captcha_values_fabricated": false,
+    "automatic_captcha_solution_attempted": false,
+    "source_preflight": {
+      "checked_at_utc": "2026-11-22T02:47:03.231165+00:00",
+      "verified": true,
+      "same_default_owner": true,
+      "generation_requests": 0
+    }
+  },
+  "source_high_selector_no_send": {
+    "case_id": "source.neon.high.send_guard.attempt1",
+    "execution_kind": "instrumented_workspace_source_no_send",
+    "elapsed_seconds": 24.159,
+    "diagnostic_stopped_before_send": true,
+    "thinking_checked": true,
+    "model_checked": true,
+    "initial_editor_focused": true,
+    "diagnostic_refocus_triggered": false,
+    "additional_focus_retry_implemented": false,
+    "diagnostic_settle_enabled": false,
+    "production_settle_causality_proven": false,
+    "reported_abort_code": "CAPABILITY_UNAVAILABLE",
+    "interpretation": "expected diagnostic abort, not business capability failure",
+    "generation_requests": 0,
+    "observed_menu_radio_items": 7,
+    "menu_description_text_supported": true,
+    "previous_single_focus_timeout_retained_as_transient": true
+  },
+  "source_rate_limit_policy": {
+    "central_error_code": "RATE_LIMITED",
+    "http429_not_classified_as_auth_required": true,
+    "user_verification_not_repeatedly_requested": true,
+    "media_only_sdk_scope": true,
+    "swallowed_read_chat_429_exposed": true,
+    "sdk_batch_automatic_two_retries_disabled_in_media_scope": true,
+    "ordinary_sdk_retry_behaviors_preserved_outside_scope": true,
+    "normal_canonical_interval_seconds": 15,
+    "local_dom_observation_continues": true,
+    "recovery_backoff_seconds": [
+      300,
+      600,
+      1200,
+      1800
+    ],
+    "exact_identity_and_protection_preserved": true,
+    "no_generation_replay_or_remote_cancel": true,
+    "latest_typed429_followup_fix": {
+      "four_branches_stopped_treating_rate_limit_as_unknown": true,
+      "extra_immediate_read_removed": true,
+      "new_regressions_passed": 4,
+      "related_targeted_checks_passed": 225,
+      "pending_next_build": false,
+      "installed_candidate_prefix": "2663f859aa4d56f4"
+    }
+  },
+  "additional_original_handle_recoveries": [
+    {
+      "case_id": "source.neon.original_music.score_fallback",
+      "original_generation_identity_preserved": true,
+      "observed_fallback": "score_only_not_audio",
+      "bounded_prefix_classifier_source_fixed": true,
+      "new93_readback_seconds": 124.06,
+      "new93_readback_state": "partial",
+      "new93_verification_status": "READBACK_UNVERIFIED",
+      "terminal_classification_claimed": false,
+      "cleanup_success_claimed": false,
+      "independent_canonical_diagnostic": {
+        "completed": true,
+        "known_no_tool": true,
+        "technical_error_card_observed": true,
+        "strict_empty_proof": "changed_shape"
+      },
+      "next_source_fix": "exact completed known NoTool plus observed error-card proof; no generic changed-shape failure inference",
+      "latest_resolution_event_id": "readbackca64.source_raw_score.attempt1"
+    },
+    {
+      "case_id": "neon.standard_chinese.natural_request",
+      "original_generation_submitted": true,
+      "original_identity_preserved": true,
+      "source_or_installed_origin": "not_assigned_from_runtime_metadata_alone",
+      "new93_readback_state": "partial",
+      "new93_phase": "media_artifact_not_observed",
+      "terminal_classification_claimed": false,
+      "cleanup_success_claimed": false,
+      "new93_readback_seconds": 124.04,
+      "independent_canonical_diagnostic": {
+        "completed": true,
+        "complete_abc_score_not_audio": true,
+        "strict_completed_empty_proof": "success"
+      },
+      "next_source_fix": "ARTIFACT_NOT_RETURNED only for complete score fallback under exact completed-empty evidence",
+      "latest_resolution_event_id": "readbackca64.installed_natural.attempt1"
+    }
+  ],
+  "local_observer_retirement": {
+    "two_original_observers_and_owner_parent_retired_by_exact_identity": true,
+    "pid_or_argv_values_exported": false,
+    "remote_generation_or_cancel_requests": 0,
+    "original_identity_and_protection_preserved": true,
+    "stale67b_handle_owner_retired_before93_resume": true,
+    "latest93_reader_continues_original_handle": true
+  },
+  "app_scope_note": "Old App connection limitation is separate; it does not invalidate verified source preflight or unhooked installed67b artifacts, and user Google verification has already completed.",
+  "readback_observer_retirement": {
+    "exact_original_owner_verified": true,
+    "two_local_observers_retired_after_completed_canonical_read": true,
+    "original_identity_and_protection_preserved": true,
+    "remote_cancel_or_generation_requests": 0,
+    "cleanup_success_claimed": false
+  },
+  "installed_93_candidate": {
+    "wheel_sha256": "93f423a3e53b75d998a60c21a2609a41a9cb13f23a7fec5ccbbb7c99a443df6c",
+    "runtime_prefix": "93f423a3e53b75d9",
+    "product_version": "0.20.0",
+    "source_data_files": 143,
+    "byte_mismatches": 0,
+    "extra_wheel_or_installed_files": 0,
+    "installed_distributions": 47,
+    "pinned_dependencies_compared": 46,
+    "dependency_mismatches": 0,
+    "ruff": "passed",
+    "mypy_files": 152,
+    "offline_passed": 4840,
+    "retained_contract_passed": 2637,
+    "clean_wheel": "passed",
+    "profiles": "passed",
+    "new_unhooked_neon_high_music": {
+      "case_id": "installed93.neon.music.high.attempt1",
+      "seconds": 64.13,
+      "status": "failed",
+      "error_code": "CAPABILITY_UNAVAILABLE",
+      "phase": "native_media_thinking_level_not_submitted",
+      "generation_submitted": false,
+      "success_claimed": false
+    },
+    "subsequent_source_fix": "production menu stable-state barrier implemented; terminal score/error-card fixes under repair; next build pending",
+    "high_and_original_handle_recovery_unresolved": true,
+    "final_high_and_recoveries_passed": false
+  },
+  "original_handle_resolution_events": [
+    {
+      "event_id": "readbackca64.source_raw_score.attempt1",
+      "original_case_id": "source.neon.original_music.score_fallback",
+      "reader_build_prefix": "ca64fc6b3975fb06",
+      "seconds": 14.06,
+      "state": "failed",
+      "error_code": "UPSTREAM_REJECTED",
+      "cleanup_completed": true,
+      "new_generation_or_send": false,
+      "independent_absence_verified": true
+    },
+    {
+      "event_id": "readbackca64.installed_natural.attempt1",
+      "original_case_id": "neon.standard_chinese.natural_request",
+      "reader_build_prefix": "ca64fc6b3975fb06",
+      "seconds": 14.03,
+      "state": "failed",
+      "error_code": "ARTIFACT_NOT_RETURNED",
+      "verification_status": "completed_music_notation_without_artifact_observed",
+      "cleanup_completed": true,
+      "new_generation_or_send": false,
+      "independent_absence_verified": true
+    }
+  ],
+  "known_owned_absence_verification": {
+    "checked": 13,
+    "independently_absent": 13,
+    "not_verified_absent": 0,
+    "mutation_requests": 0,
+    "unknown_or_unowned_targets_claimed_absent": false,
+    "already_absent_counted_as_new_deletion": false
+  },
+  "remaining_work": {
+    "product_implementation_or_install_work_pending": false,
+    "live_limitations": [
+      "latest60fe Hydrogen video explicitly rejected upstream without file",
+      "prior menu failures, refusals and notation-only attempts remain individual recorded failures",
+      "all model and option combinations are not guaranteed successful"
+    ],
+    "app_existing_connection_reload_verified": false,
+    "new_product_version_assigned": false,
+    "historical_rounds_preserved": true
+  },
+  "installed_ca64_candidate": {
+    "wheel_sha256": "ca64fc6b3975fb06aba434a5444478e9ee074179e4fdf6f3193b32b2d3a6e7b3",
+    "runtime_prefix": "ca64fc6b3975fb06",
+    "product_version": "0.20.0",
+    "source_data_files": 143,
+    "byte_mismatches": 0,
+    "extra_wheel_or_installed_files": 0,
+    "installed_distributions": 47,
+    "pinned_dependencies_compared": 46,
+    "dependency_mismatches": 0,
+    "ruff": "passed",
+    "mypy_files": 152,
+    "offline_passed": 4922,
+    "contract_passed": 2719,
+    "installed_entrypoints": 6,
+    "profiles": "passed",
+    "new_unhooked_neon_high_music": {
+      "case_id": "installedca64.neon.music.high.attempt1",
+      "seconds": 66.11,
+      "status": "failed",
+      "error_code": "CAPABILITY_UNAVAILABLE",
+      "phase": "native_media_thinking_level_not_submitted",
+      "generation_submitted": false,
+      "success_claimed": false
+    },
+    "final_high_generation_verified": false,
+    "next_build_pending": true
+  },
+  "latest_source_menu_focus_policy": {
+    "installed_candidate_prefix": "2663f859aa4d56f4",
+    "closing_transition_continuously_checked": true,
+    "continue_only_on_exact_open_or_proven_closed": true,
+    "menu_max_total_clicks": 2,
+    "editor_refocus_max_retries": 1,
+    "refocus_requires_current_cookie_and_unique_empty_composer": true,
+    "js_atomic_unique_empty_precheck": true,
+    "old_nosend_success_not_settle_causality_proof": true,
+    "generation_replay_permitted": false
+  },
+  "latest_installed_no_send_probe": {
+    "case_id": "installed2663.instrumented.no_send.attempt1",
+    "code_origin": "installed2663",
+    "workspace_pythonpath_override": false,
+    "private_observation_hook": true,
+    "before_send_abort": true,
+    "elapsed_seconds": 28.275,
+    "all_presend_guards_verified": true,
+    "initial_focus_verified": true,
+    "refocus_used": false,
+    "screenshots_collected": false,
+    "local_diagnostic_cancel_after_guard_seconds": 2,
+    "artifact_or_hookfree_generation_proof": false
+  },
+  "independent_submit_observation_control": {
+    "case_id": "installed2663.instrumented.neon.guitar_control.attempt1",
+    "different_prompt_from_original_high": true,
+    "code_origin": "installed2663",
+    "private_observation_only_sitecustomize": true,
+    "workspace_pythonpath_override": false,
+    "real_submission_permitted": true,
+    "outcome_pending": false,
+    "retries_original_high_handle": false,
+    "hookfree_generation_proof": false,
+    "purpose": "inspect post-submit confirmations/login/modals/URI shape; not declared present",
+    "outcome_not_exported_for_acceptance": true
+  },
+  "source_fixes_delivered_b562": {
+    "installed_build_identity_not_assigned": false,
+    "verified_cleanup_reconciliation": {
+      "shared_service": "src/services/media_cleanup.py",
+      "entrypoints": [
+        "dispatch",
+        "worker",
+        "recover"
+      ],
+      "requires_positive_exact_owned_cleanup_evidence": true,
+      "original_snapshot_cas_required": true,
+      "excludes": [
+        "cleanup_protected",
+        "retain_chat",
+        "foreign_account",
+        "omni_api"
+      ],
+      "stale_observers_retired": 7,
+      "exact_pid_argv_sid_verified": true,
+      "original_operation_identity_and_history_preserved": true,
+      "no_artifact_pending_reconciled_as": "unavailable",
+      "remote_generation_requests": 0,
+      "remote_delete_requests": 0,
+      "remote_cancel_requests": 0,
+      "leases_released_locally": true
+    },
+    "exact_stale_menu_control": {
+      "diagnostic_no_send": true,
+      "exact_stale_at_seconds": 22.007,
+      "trusted_trigger_resets": 1,
+      "closed_readback_at_seconds": 22.071,
+      "all_presend_guards_verified_at_seconds": 23.555,
+      "escape_negative_control": true,
+      "escape_added": false,
+      "reset_for_unknown_modal_or_visible_panel": false,
+      "new_installed_artifact_acceptance": false,
+      "delivered_normal_opens_max": 2,
+      "delivered_stale_reset_max": 1,
+      "delivered_total_clicks_max": 3
+    },
+    "finite_chinese_notool_prefix": {
+      "requires_exact_completed_empty_proof": true,
+      "original_hydrogen_low_handle_recovery_pending": false
+    },
+    "build_gates_or_final_hash_claimed": true,
+    "installed_candidate_prefix": "b5625030a8bf48bf",
+    "tool_reselection_guard": {
+      "requires_positive_tool_unselected": true,
+      "retains_existing_open_tools_and_60s_wait": true,
+      "selected_chip_delayed_controls_reselected": false,
+      "unknown_dialog_or_disabled_reselected": false
+    }
+  },
+  "installed_2663_round": {
+    "wheel_sha256": "2663f859aa4d56f4e05985def66a76c5b69c1cb7d00a66711c7943a5f1a944e8",
+    "runtime_prefix": "2663f859aa4d56f4",
+    "product_version": "0.20.0",
+    "installed": true,
+    "current_pointer_confirmed": true,
+    "source_data_files": 143,
+    "installed_distributions": 47,
+    "pinned_dependencies_compared": 46,
+    "all_identity_comparisons_match": true,
+    "ruff": "passed",
+    "mypy_files": 152,
+    "offline_passed": 4935,
+    "offline_seconds": 79.02,
+    "contract_passed": 2732,
+    "contract_seconds": 46.0,
+    "clean_wheel_entrypoints": 6,
+    "profiles": "passed",
+    "source_browser_checks_passed": 63,
+    "typed429_targeted_checks_passed": 225,
+    "new_unhooked_neon_high_music": {
+      "case_id": "installed2663.neon.music.high.attempt1",
+      "seconds": 60.15,
+      "status": "failed",
+      "error_code": "TIMED_OUT",
+      "phase": "native_media_media_tool_not_submitted",
+      "verification_status": "not_dispatched",
+      "stage_detail": "tool_entry confirmation after clicking media_tool, not menu-location timeout",
+      "generation_submitted": false,
+      "success_claimed": false
+    },
+    "other_three_new_installed_cases": "recorded separately in initial_unhooked_four_cases; zero saved media in that attempt1 round",
+    "final_live_results_pending": true,
+    "initial_unhooked_four_cases": [
+      {
+        "case_id": "installed2663.neon.music.high.attempt1",
+        "model": "neon",
+        "workflow": "music",
+        "thinking": "high",
+        "seconds": 60.15,
+        "status": "failed",
+        "error_code": "TIMED_OUT",
+        "phase": "native_media_media_tool_not_submitted",
+        "verification_status": "not_dispatched",
+        "generation_submitted": false,
+        "stage_detail": "tool_entry confirmation after media_tool click"
+      },
+      {
+        "case_id": "installed2663.hydrogen.video.attempt1",
+        "model": "hydrogen",
+        "workflow": "video",
+        "seconds": 44.12,
+        "status": "failed",
+        "error_code": "UPSTREAM_REJECTED",
+        "phase": "media_rejected",
+        "verification_status": "upstream_media_error_card_observed",
+        "generation_submitted": true,
+        "exact_completed_reply": true,
+        "cleanup_reported": "completed"
+      },
+      {
+        "case_id": "installed2663.neon.video.attempt1",
+        "model": "neon",
+        "workflow": "video",
+        "seconds": 46.08,
+        "status": "failed",
+        "error_code": "UPSTREAM_REJECTED",
+        "phase": "media_rejected",
+        "verification_status": "upstream_media_error_card_observed",
+        "generation_submitted": true,
+        "exact_completed_reply": true,
+        "cleanup_reported": "completed"
+      },
+      {
+        "case_id": "installed2663.hydrogen.music.attempt1",
+        "model": "hydrogen",
+        "workflow": "music",
+        "seconds": 60.09,
+        "status": "failed",
+        "error_code": "TIMED_OUT",
+        "phase": "native_media_media_tool_not_submitted",
+        "verification_status": "not_dispatched",
+        "generation_submitted": false,
+        "stage_detail": "tool_entry confirmation after media_tool click"
+      }
+    ],
+    "neon_high_attempt2": {
+      "case_id": "installed2663.neon.music.high.attempt2",
+      "status": "failed",
+      "send_click_or_dispatch_inferred_from_created_phase": false,
+      "replayed_this_operation": false,
+      "remote_cancel_requested": false,
+      "safe_new_attempt_reason": "previous attempt1 explicitly not_dispatched",
+      "success_claimed": false,
+      "seconds": 318.12,
+      "dispatch_identity_observed": true,
+      "state": "failed",
+      "error_code": "ARTIFACT_NOT_RETURNED",
+      "verification_status": "completed_music_notation_without_artifact_observed",
+      "cleanup_reported": "completed",
+      "requested_thinking_level_db_verified": "high",
+      "exact_original_handle_attribution_verified": true,
+      "notation_not_audio": true,
+      "earlier_observation_snapshot": {
+        "last_reported_phase": "created",
+        "identity_observed": false,
+        "worker_heartbeat_fresh": true
+      }
+    },
+    "remaining_work": "next build: bounded stale-menu reset, verified cleanup reconciliation, Chinese NoTool same-handle recovery",
+    "explicit_low_neon_music": {
+      "case_id": "installed2663.neon.music.low.attempt1",
+      "round": "explicit_low_followup",
+      "attempt": 1,
+      "seconds": 248.17,
+      "status": "completed",
+      "actual_model": "gemini-neon",
+      "requested_thinking_level_db_verified": "low",
+      "same_prompt_and_music_options_as_high_attempt2": true,
+      "music_duration": "short",
+      "music_vocals": "instrumental",
+      "turn_identity_verified": true,
+      "local_artifact_verified": true,
+      "cleanup_reported": "completed",
+      "workspace_pythonpath_override": false,
+      "diagnostic_hook_loaded": false,
+      "saved_files": 3,
+      "mp3_duration_seconds": 65.149333,
+      "mp3_bytes": 1571302,
+      "mp4_duration_seconds": 65.167333,
+      "mp4_width": 1024,
+      "mp4_height": 1024,
+      "mp4_video_codec": "h264",
+      "audio_sample_rate_hz": 44100,
+      "audio_channels": 2,
+      "jpeg_width": 512,
+      "jpeg_height": 512,
+      "full_audio_video_decode_ok": true,
+      "non_silent_verified": true,
+      "mean_volume_db": -14.3,
+      "max_volume_db": 0.0,
+      "human_audition": false,
+      "independent_size_sha256_qa_passed": true,
+      "server_standard_default_changed": false,
+      "automatic_high_to_low_fallback": false,
+      "high_globally_unsupported_claimed": false
+    },
+    "explicit_low_remaining_cases": [
+      {
+        "case_id": "installed2663.hydrogen.video.low.attempt1",
+        "seconds": 68.11,
+        "state": "failed",
+        "error_code": "CAPABILITY_UNAVAILABLE",
+        "phase": "native_media_thinking_level_not_submitted",
+        "verification_status": "not_dispatched",
+        "generation_submitted": false
+      },
+      {
+        "case_id": "installed2663.neon.video.low.attempt1",
+        "seconds": 74.08,
+        "state": "failed",
+        "error_code": "TIMED_OUT",
+        "phase": "native_media_model_selection_not_submitted",
+        "verification_status": "not_dispatched",
+        "generation_submitted": false
+      },
+      {
+        "case_id": "installed2663.hydrogen.music.low.attempt1",
+        "seconds": 802.19,
+        "state": "pending",
+        "phase": "media_artifact_not_observed",
+        "verification_status": "wait_elapsed",
+        "independent_exact_read_completed": true,
+        "independent_strict_empty_proof_verified": true,
+        "known_finite_chinese_notool_observed": true,
+        "local_observer_owner_verified_retired": true,
+        "original_identity_and_protection_retained": true,
+        "new_generation_or_remote_cancel": false,
+        "final_reader_or_cleanup_complete_claimed": false
+      }
+    ]
+  },
+  "installed_b562_round": {
+    "runtime_prefix": "b5625030a8bf48bf",
+    "workspace_pythonpath_override": false,
+    "diagnostic_hook_loaded": false,
+    "generations": [
+      {
+        "case_id": "installedb562.hydrogen.video.low.attempt1",
+        "thinking_level": "low",
+        "seconds": 84.15,
+        "status": "failed",
+        "error_code": "CAPABILITY_UNAVAILABLE",
+        "phase": "native_media_thinking_level_not_submitted",
+        "verification_status": "not_dispatched",
+        "generation_submitted": false
+      },
+      {
+        "case_id": "installedb562.neon.video.low.attempt1",
+        "thinking_level": "low",
+        "seconds": 126.03,
+        "status": "failed",
+        "error_code": "UPSTREAM_REJECTED",
+        "phase": "media_rejected",
+        "verification_status": "upstream_media_error_card_observed",
+        "exact_completed_reply": true,
+        "cleanup_reported": "completed"
+      },
+      {
+        "case_id": "installedb562.neon.video.standard.attempt1",
+        "thinking_level": "standard",
+        "standard_preserves_web_default": true,
+        "seconds": 157.1,
+        "status": "completed",
+        "video_duration_seconds": 10.026667,
+        "video_width": 1280,
+        "video_height": 720,
+        "video_codec": "h264",
+        "audio_codec": "aac",
+        "saved_files": 2,
+        "local_artifact_verified": true,
+        "cleanup_reported": "completed",
+        "independent_local_qa": "passed",
+        "size_sha256_matches": true,
+        "full_video_decode_ok": true,
+        "video_fps": 24,
+        "video_stream_duration_seconds": 10.0,
+        "audio_sample_rate_hz": 48000,
+        "audio_channels": 2,
+        "jpeg_width": 512,
+        "jpeg_height": 288,
+        "sampled_frames_seconds": [
+          4,
+          8
+        ],
+        "sampled_frames_show_blue_paper_cube_rotation": true,
+        "frame_by_frame_visual_qa_claimed": false
+      },
+      {
+        "case_id": "installedb562.hydrogen.video.standard.attempt1",
+        "thinking_level": "standard",
+        "seconds": 235.1,
+        "status": "failed",
+        "error_code": "TIMED_OUT",
+        "phase": "native_media_media_tool_not_submitted",
+        "verification_status": "not_dispatched",
+        "generation_submitted": false,
+        "exact_original_handle_attribution_verified": true
+      }
+    ],
+    "hydrogen_standard_video": "exact original-handle attribution confirmed; failed before dispatch"
+  },
+  "b562_readback_events": [
+    {
+      "event": "initial_hookfree_saved_results",
+      "read_cases": 11,
+      "completed_file_cases": 4,
+      "legacy_cleaned_unavailable_cases": 7,
+      "all_identity_preserved": true,
+      "create_or_generate_tool_calls": 0,
+      "prior_generation_builds": [
+        "67b",
+        "2663"
+      ]
+    },
+    {
+      "event": "hydrogen_low_original_handle_initial_hookfree_recovery",
+      "generation_build": "2663",
+      "reader_build": "b562",
+      "seconds": 124.07,
+      "status": "partial",
+      "error_code": "READBACK_UNVERIFIED",
+      "protection_preserved": true,
+      "create_or_generate_tool_calls": 0
+    },
+    {
+      "event": "hydrogen_low_original_handle_observation_only_diagnosis",
+      "generation_build": "2663",
+      "reader_build": "b562",
+      "private_observation_only_trace": true,
+      "behavior_hook_loaded": false,
+      "hookfree_claimed": false,
+      "seconds": 14.07,
+      "status": "failed",
+      "error_code": "ARTIFACT_NOT_RETURNED",
+      "verification_status": "model_media_refusal_observed",
+      "music_cards_count": 0,
+      "strict_proof": "success",
+      "cleanup_reported": "completed",
+      "create_or_generate_tool_calls": 0
+    },
+    {
+      "event": "final_hookfree_saved_and_cached_results",
+      "read_cases": 13,
+      "completed_file_cases": 5,
+      "legacy_cleaned_unavailable_cases": 7,
+      "confirmed_refusal_cases": 1,
+      "all_identity_preserved": true,
+      "create_or_generate_tool_calls": 0,
+      "cached_hydrogen_original_handle_refusal_confirmed": true,
+      "old_file_build_identity_rewritten": false
+    }
+  ],
+  "delivery_b562": {
+    "wheel_sha256": "b5625030a8bf48bfe4e4dff98015f6afaef6809544f98be0f40b8ca758b310fa",
+    "runtime_prefix": "b5625030a8bf48bf",
+    "product_version": "0.20.0",
+    "installed": true,
+    "shared_current_confirmed": true,
+    "source_data_files": 144,
+    "source_data_mismatches": 0,
+    "extra_files": 0,
+    "installed_distributions": 47,
+    "pinned_dependencies": 46,
+    "dependency_mismatches": 0,
+    "ruff": "passed",
+    "mypy_files": 153,
+    "offline_passed": 4988,
+    "offline_seconds": 91.63,
+    "contract_passed": 2783,
+    "contract_seconds": 52.93,
+    "browser_checks_passed": 73,
+    "local_saved_result_readback": "verified independently attributed existing files and original identities",
+    "hydrogen_low_original_handle_recovery": "initial hook-free partial, then observation-only strict refusal, final hook-free cached refusal confirmed",
+    "new_hydrogen_neon_low_video_outcomes": "H thinking selection not_dispatched; N exact upstream rejection cleanup completed",
+    "new_generation_success_claimed": true,
+    "older_generation_build_identities_preserved": true,
+    "app_connection_reload_verified": false,
+    "new_generation_success_scope": "Neon standard video: independent hash/decode/sampled-frame QA passed"
+  },
+  "current_delivery": {
+    "runtime_prefix": "60fe2a5025546098",
+    "wheel_sha256": "60fe2a5025546098e0e4735ef9d3be1273b5107c2d9fcf206961072613859cc2",
+    "product_version": "0.20.0",
+    "installed": true,
+    "shared_current_confirmed": true,
+    "source_data_files": 144,
+    "source_data_mismatches": 0,
+    "extra_files": 0,
+    "installed_distributions": 47,
+    "pinned_dependencies": 46,
+    "dependency_mismatches": 0,
+    "ruff": "passed",
+    "mypy_files": 153,
+    "offline_passed": 5009,
+    "offline_seconds": 89.75,
+    "contract_passed": 2804,
+    "contract_seconds": 52.76,
+    "targeted_checks_passed": 274,
+    "targeted_second_ready_actual_ffmpeg_save_verified_for": [
+      "video",
+      "music"
+    ],
+    "six_entrypoint_and_profile_smokes": "passed",
+    "fresh_thirteen_result_readback": "passed; five completed-file cases, seven legacy unavailable and one refusal; identities preserved; zero create/generate",
+    "new_hydrogen_standard_video": "44.09s exact completed upstream technical rejection, cleanup completed, no artifact",
+    "app_connection_reload_verified": false,
+    "related_owned_worker_count": 0,
+    "source_install_unified": true,
+    "final_known_absence_checked": 21,
+    "final_known_absence_verified": 21,
+    "final_absence_mutation_requests": 0,
+    "final_active_owned_workers": 0,
+    "final_rechecked_source_data_files": 144,
+    "final_rechecked_extra_files": 0,
+    "final_rechecked_dependency_mismatches": 0,
+    "original0200_delivery_snapshot": true
+  },
+  "delivered_native_presubmit_reopen": {
+    "implementation_status": "installed60fe",
+    "new_build_identity_assigned": true,
+    "max_reopens": 1,
+    "first_result_must_be": "TIMED_OUT",
+    "requires_submitted_is_false": true,
+    "requires_no_cid_or_response_observed": true,
+    "requires_same_owner": true,
+    "uses_original_remaining_deadline": true,
+    "timeout_reset": false,
+    "excluded": [
+      "any_send_attempt_or_unknown_submission",
+      "rate_limit",
+      "upstream_rejection",
+      "capability_unavailable"
+    ],
+    "sdk_fallback": false,
+    "request_parameter_changes": false,
+    "second_failure_uses_original_operation": true,
+    "live_pass_claimed": false,
+    "first_state_must_be": "unverified",
+    "requires_no_media": true,
+    "excluded_stages": [
+      "send",
+      "observe"
+    ],
+    "on_chat_calls_must_be": 0,
+    "minimum_remaining_browser_seconds_after_original_reserve": 60,
+    "preserves_original_readback_reserve_plus_seconds": 2,
+    "live_result": "latest H real request submitted once and returned upstream rejection; no retry after rejection; not a file success"
+  },
+  "fresh_owned_absence_final": {
+    "known_targets_checked": 20,
+    "exact_absent": 20,
+    "mutation_requests": 0,
+    "legacy_local_reconciliation_count_excluded": 7,
+    "fresh_twenty_seven_claimed": false,
+    "unknown_target_absence_claimed": false,
+    "historical_before_latest_hydrogen_snapshot": true
+  },
+  "installed_60fe_round": {
+    "runtime_prefix": "60fe2a5025546098",
+    "workspace_pythonpath_override": false,
+    "diagnostic_hook_loaded": false,
+    "generations": [
+      {
+        "case_id": "installed60fe.hydrogen.video.standard.attempt1",
+        "thinking_level": "standard",
+        "seconds": 44.09,
+        "status": "failed",
+        "actual_model": "gemini-4-hydrogen",
+        "generation_submitted": true,
+        "exact_chat_response_candidate_identity_observed": true,
+        "completed_reply_verified": true,
+        "error_code": "UPSTREAM_REJECTED",
+        "verification_status": "upstream_media_error_card_observed",
+        "cleanup_reported": "completed",
+        "saved_files": 0,
+        "generation_retried_after_rejection": false
+      }
+    ]
+  },
+  "final60fe_readback": {
+    "read_cases": 13,
+    "completed_file_cases": 5,
+    "legacy_cleaned_unavailable_cases": 7,
+    "confirmed_refusal_cases": 1,
+    "all_identity_preserved": true,
+    "create_or_generate_tool_calls": 0,
+    "original_file_generation_builds": [
+      "67b",
+      "2663",
+      "b562"
+    ],
+    "older_file_generations_relabelled_as_final_build": false
+  },
+  "hydrogen_b562_no_send_control": {
+    "elapsed_seconds": 25.161,
+    "all_presend_guards_passed": true,
+    "generation_sent": false,
+    "entry_failure_reproduced": false,
+    "real_generation_success_claimed": false
+  },
+  "latest_fresh_owned_absence_final": {
+    "snapshot": "after60fe latest Hydrogen technical rejection",
+    "known_targets_checked": 21,
+    "exact_absent": 21,
+    "source_diagnosis_checked_absent": 9,
+    "installed67b_checked_absent": 4,
+    "later_known_targets_checked_absent": 8,
+    "mutation_requests": 0,
+    "legacy_local_reconciliation_count_excluded": 7,
+    "prior_twenty_target_snapshot_overwritten": false,
+    "active_owned_workers": 0,
+    "unknown_target_absence_claimed": false
+  },
+  "principal_deliverable_manifest_verification": {
+    "files": 4,
+    "all_sizes_and_sha256_match": true,
+    "final_reader_build": "60fe",
+    "relabelled_as_new_generation": false,
+    "file_cases": [
+      {
+        "model": "hydrogen",
+        "kind": "video",
+        "generation_build": "67b"
+      },
+      {
+        "model": "hydrogen",
+        "kind": "music",
+        "generation_build": "67b"
+      },
+      {
+        "model": "neon",
+        "kind": "music",
+        "thinking_level": "low",
+        "duration_seconds": 65.149333,
+        "generation_build": "2663"
+      },
+      {
+        "model": "neon",
+        "kind": "video",
+        "thinking_level": "standard",
+        "duration_seconds": 10.026667,
+        "generation_build": "b562"
+      }
+    ],
+    "private_paths_exported": false
+  },
+  "post_0200_patch_candidate": {
+    "product_version": "0.20.6",
+    "local_retrospective_patch_scopes": 6,
+    "historical_six_packages_or_releases_claimed": false,
+    "ruff": "passed",
+    "mypy_files": 153,
+    "offline_passed": 5063,
+    "offline_seconds": 81.09,
+    "contract_passed": 2858,
+    "contract_seconds": 47.48,
+    "ci_contract_checks_passed": 9,
+    "wheel_built": true,
+    "installation_validation": "in_progress",
+    "final_build_identity_exported": false,
+    "hookfree_hydrogen_artifact_verified": false,
+    "app_new_version_reload_verified": false,
+    "generic_failure_guard": {
+      "requires_exact_completed_empty_proof": true,
+      "unknown_pending_uri_identity_account_lease_or_429_overridden": false,
+      "recognized_media_takes_precedence": true
+    },
+    "prior60fe_app_english_video_control": {
+      "model": "hydrogen",
+      "thinking_levels": [
+        "standard",
+        "low"
+      ],
+      "outcomes": "UPSTREAM_REJECTED",
+      "retained_standard_exact_completed_empty_proof": "success",
+      "verified_media_count": 0
+    },
+    "prior60fe_chinese_video_diagnosis": {
+      "case_id": "installed60fe.instrumented.hydrogen.video.chinese.standard.attempt1",
+      "execution_origin": "installed60fe",
+      "private_observation_only_hook": true,
+      "workspace_override": false,
+      "new_version_hookfree_proof": false,
+      "thinking_level": "standard",
+      "requested_duration_seconds": 10,
+      "requested_aspect_ratio": "16:9",
+      "seconds": 200.13,
+      "status": "saved_media",
+      "saved_files": 2,
+      "container_duration_seconds": 10.026667,
+      "width": 1280,
+      "height": 720,
+      "video_codec": "h264",
+      "audio_codec": "aac",
+      "mp4_bytes": 6194499,
+      "mp4_sha256": "ed5e1656189bbc6eb9baeb2d7ffbf7b2a1c518203ae6593cf39864377abf432e",
+      "presubmit_first_tool_entry_timeout_at_seconds": 83,
+      "presubmit_second_open_at_seconds": 92,
+      "send_at_seconds": 104,
+      "observed_presubmit_reopen_count": 1,
+      "independent_qa_claimed": false
+    },
+    "earlier_build_versions_and_results_overwritten": false,
+    "historical_candidate_snapshot": true,
+    "superseded_by_report": "live-media-0.20.6-2026-11-22-evidence.json"
+  }
+}

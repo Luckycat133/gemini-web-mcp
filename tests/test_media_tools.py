@@ -1,7 +1,7 @@
 """媒体工具的集成契约测试。
 
-覆盖请求路由、超时与清理、产物保存和结构化状态。图片按当前
-Flash-Lite/Flash 路由；音乐只报告上游可验证的 Lyria 信息；视频空产物
+覆盖请求路由、超时与清理、产物保存和结构化状态。图片保留显式聊天模型
+选择；图片和音乐只报告上游可验证的生成后端信息；视频空产物
 应要求真实视频产物并提示检查状态。
 
 测试在 client_wrapper 接缝使用替身，parse_response 走真实实现。
@@ -321,7 +321,7 @@ def test_generate_media_passes_all_fields_to_generate_content(monkeypatch):
     kwargs = client.captured_generate_kwargs
     assert kwargs["prompt"] == "Generate an image. Prompt: sunset"
     assert kwargs["files"] is None
-    assert kwargs["model"] == "gemini-3-flash"  # image 恒用 flash
+    assert kwargs["model"] == "gemini-3-flash"  # Explicit compatibility default selector.
     assert kwargs["thinking_level"] == "extended"
     assert kwargs["timeout"] == 180  # image 默认
 
@@ -514,8 +514,8 @@ def test_generate_media_restores_timeouts_on_timeout_exception(monkeypatch):
 # ---------------------------------------------------------------------------
 
 
-def test_generate_media_image_always_routes_to_flash_regardless_of_model(monkeypatch):
-    """image + model=pro → 实际 model_name=gemini-3-flash（image 恒用 flash）。"""
+def test_generate_media_image_preserves_explicit_pro_selector(monkeypatch):
+    """An explicit Pro image request reaches the client without a silent Flash replacement."""
     client = _FakeMediaClient()
     _patch_media_env(monkeypatch, client)
 
@@ -526,11 +526,11 @@ def test_generate_media_image_always_routes_to_flash_regardless_of_model(monkeyp
                                 prompt="x", media_type="image", model="pro")
 
     asyncio.run(run())
-    assert client.captured_generate_kwargs["model"] == "gemini-3-flash"
+    assert client.captured_generate_kwargs["model"] == "gemini-3-pro"
 
 
-def test_generate_media_image_returns_nano_banana_2_backend_label(monkeypatch):
-    """image → 返回文本含 '后端: Nano Banana 2' 与 Pro redo 说明。"""
+def test_generate_media_image_reports_web_route_without_inventing_generator(monkeypatch):
+    """The response identifies the image route and leaves the generator unobserved."""
     client = _FakeMediaClient(response_text="ok")
     _patch_media_env(monkeypatch, client)
 
@@ -542,11 +542,12 @@ def test_generate_media_image_returns_nano_banana_2_backend_label(monkeypatch):
 
     result = asyncio.run(run())
     text = result[0].text
-    assert "后端: Nano Banana 2" in text
+    assert "后端: Gemini Web image mode" in text
+    assert result[0].meta["domain_result"]["data"]["observed_backend"] is None
     assert "Pro redo 属于网页生成后的二次操作" in text
 
 
-def test_generate_media_music_flash_uses_unversioned_lyria_label(monkeypatch):
+def test_generate_media_music_flash_reports_web_route_without_generator_claim(monkeypatch):
     """Music results do not claim a backend version the response did not expose."""
     client = _FakeMediaClient(response_text="ok")
     _patch_media_env(monkeypatch, client)
@@ -558,7 +559,8 @@ def test_generate_media_music_flash_uses_unversioned_lyria_label(monkeypatch):
                                 prompt="x", media_type="music", model="flash")
 
     result = asyncio.run(run())
-    assert "后端: Lyria" in result[0].text
+    assert "后端: Gemini Web music mode" in result[0].text
+    assert result[0].meta["domain_result"]["data"]["observed_backend"] is None
     assert "Lyria 3 Pro" not in result[0].text
 
 
@@ -574,7 +576,7 @@ def test_generate_media_music_pro_standard_keeps_unversioned_label(monkeypatch):
                                 thinking_level="standard")
 
     result = asyncio.run(run())
-    assert "后端: Lyria" in result[0].text
+    assert "后端: Gemini Web music mode" in result[0].text
     assert "Lyria 3 Pro" not in result[0].text
 
 
@@ -590,7 +592,7 @@ def test_generate_media_music_pro_extended_does_not_invent_backend(monkeypatch):
                                 thinking_level="extended")
 
     result = asyncio.run(run())
-    assert "后端: Lyria" in result[0].text
+    assert "后端: Gemini Web music mode" in result[0].text
     assert "Lyria 3 Pro" not in result[0].text
 
 
@@ -631,14 +633,14 @@ def test_generate_media_timeout_returns_timeout_message_with_backend(monkeypatch
 
     result = asyncio.run(run())
     text = result[0].text
-    assert "后端: Nano Banana 2" in text
+    assert "后端: Gemini Web image mode" in text
     assert "❌ image 生成超时: 180s" in text
     assert "可增大 timeout_seconds" in text
     domain = result[0].meta["domain_result"]
     assert domain["error"]["code"] == "TIMED_OUT"
     assert domain["data"]["state"] == "failed"
     assert domain["data"]["request_model"] == "gemini-3-flash"
-    assert domain["data"]["effective_backend"] == "Nano Banana 2"
+    assert domain["data"]["effective_backend"] == "Gemini Web image mode"
 
 
 def test_generate_media_timeout_retains_reference_image_identity(monkeypatch, tmp_path):
@@ -844,8 +846,8 @@ def test_generate_media_remote_uri_includes_backend_evidence(monkeypatch):
     assert domain["data"]["state"] == "remote"
     assert artifact["uri"] == "https://cdn.example.test/out.png"
     assert artifact["requested_backend"] == "pro"
-    assert artifact["request_model"] == "gemini-3-flash"
-    assert artifact["effective_backend"] == "Nano Banana 2"
+    assert artifact["request_model"] == "gemini-3-pro"
+    assert artifact["effective_backend"] == "Gemini Web image mode"
     assert artifact["observed_backend"] == "observed-image-generator"
     assert artifact["verification"]["status"] == "unverified"
 
@@ -1308,7 +1310,7 @@ def test_generate_media_music_recovery_failure_logs_warning_and_continues(monkey
 
     result = asyncio.run(run())
     # 不崩溃，返回正常 parsed 文本（无 Saved files）
-    assert "后端: Lyria" in result[0].text
+    assert "后端: Gemini Web music mode" in result[0].text
     assert "Saved files:" not in result[0].text
 
 
@@ -1391,7 +1393,7 @@ def test_generate_music_source_string_is_generate_media_music_not_generate_music
 
 
 def test_generate_music_default_thinking_level_does_not_invent_backend(monkeypatch):
-    """A Pro music request is still labeled Lyria until backend evidence exists."""
+    """A Pro music request reports the Web route until generator evidence exists."""
     client = _FakeMediaClient(response_text="ok")
     _patch_media_env(monkeypatch, client)
 
@@ -1401,7 +1403,7 @@ def test_generate_music_default_thinking_level_does_not_invent_backend(monkeypat
         return await _call_tool(mcp, "gemini_generate_music", prompt="x", model="pro")
 
     result = asyncio.run(run())
-    assert "后端: Lyria" in result[0].text
+    assert "后端: Gemini Web music mode" in result[0].text
     assert "Lyria 3 Pro" not in result[0].text
 
 

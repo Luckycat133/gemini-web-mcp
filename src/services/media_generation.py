@@ -5,7 +5,7 @@ from __future__ import annotations
 from contextlib import nullcontext
 from dataclasses import dataclass, field
 import inspect
-from typing import Any, Callable
+from typing import Any, Callable, Literal, TypedDict
 
 from ..constants import OMNI_VIDEO_MODEL, normalize_model_alias
 from ..domain import CleanupObservation, CleanupState, DomainResult, DomainWarning
@@ -15,6 +15,26 @@ from .cleanup_scope import observe_cleanup_frames
 from .model_policy import model_policy_scope
 
 IN_PROGRESS_CLEANUP_SECONDS = 1800
+MusicDuration = Literal["short", "standard"]
+MusicVocals = Literal["instrumental", "vocals", "auto"]
+
+
+class MusicOptionArguments(TypedDict, total=False):
+    music_duration: MusicDuration
+    music_vocals: MusicVocals
+
+
+def music_option_arguments(
+    music_duration: MusicDuration | None, music_vocals: MusicVocals | None,
+) -> MusicOptionArguments:
+    options: MusicOptionArguments = {}
+    if music_duration is not None:
+        options["music_duration"] = music_duration
+    if music_vocals is not None:
+        options["music_vocals"] = music_vocals
+    return options
+
+
 _MEDIA_PROMPT_PREFIXES = {
     "image": "Generate an image. Prompt: ",
     "video": "Generate a video using Gemini's video generation capability. Prompt: ",
@@ -35,21 +55,41 @@ def media_timeout(media_type: str, timeout_seconds: int | None = None) -> int:
 
 
 def video_options_error(
-    *, media_type: str, model: str, thinking_level: str, duration_seconds: int | None,
-    delete_after_seconds: int | None, background: bool = True,
+    *, media_type: str, model: str | None, thinking_level: str, duration_seconds: int | None,
+    delete_after_seconds: int | None, background: bool = True, aspect_ratio: str | None = None,
 ) -> str | None:
     if normalize_model_alias(model) != OMNI_VIDEO_MODEL:
-        if duration_seconds is not None:
-            return f"duration_seconds requires the video model {OMNI_VIDEO_MODEL}."
+        if media_type != "video":
+            if duration_seconds is not None or aspect_ratio is not None:
+                return "duration_seconds and aspect_ratio are only supported for video generation."
+            return None
+        if duration_seconds is not None and (type(duration_seconds) is not int or duration_seconds not in (10, 15)):
+            return "Gemini Web duration_seconds must be 10 or 15."
+        if aspect_ratio is not None and aspect_ratio not in ("16:9", "9:16"):
+            return "aspect_ratio must be '16:9' or '9:16'."
         return None
     if media_type != "video" or not background:
         return f"{OMNI_VIDEO_MODEL} requires background video generation."
     if duration_seconds is not None and (type(duration_seconds) is not int or not 3 <= duration_seconds <= 15):
         return "duration_seconds must be a whole number from 3 through 15."
+    if aspect_ratio is not None:
+        return "aspect_ratio is available for Gemini Web videos only."
     if thinking_level != "standard":
         return "The Gemini API video model does not accept a chat thinking level. Omit thinking_level."
     if delete_after_seconds not in {None, 0}:
         return "Delayed cleanup is available for Web chats only. Use retain_chat to keep the API interaction."
+    return None
+
+
+def music_options_error(
+    *, media_type: str, music_duration: MusicDuration | None = None, music_vocals: MusicVocals | None = None,
+) -> str | None:
+    if media_type != "music" and (music_duration is not None or music_vocals is not None):
+        return "music_duration and music_vocals are only supported for music generation."
+    if music_duration is not None and music_duration not in ("short", "standard"):
+        return "music_duration must be 'short' or 'standard'."
+    if music_vocals is not None and music_vocals not in ("instrumental", "vocals", "auto"):
+        return "music_vocals must be 'instrumental', 'vocals' or 'auto'."
     return None
 
 
@@ -185,6 +225,10 @@ async def generate_media_response(
     delete_after_seconds: int | None,
     source: str,
     media_type: str = "",
+    duration_seconds: int | None = None,
+    aspect_ratio: str | None = None,
+    music_duration: MusicDuration | None = None,
+    music_vocals: MusicVocals | None = None,
     progress: MediaGenerationProgress | None = None,
     checkpoint: Callable[[Any], None] | None = None,
 ) -> Any:
@@ -230,11 +274,43 @@ async def generate_media_response(
             progress.registration_failures.pop(cid, None)
             observed.add(cid)
 
+    from .native_media_generation import NativeMediaGenerationError, generate_native_media_response, native_media_enabled
+
+    arguments = dict(arguments)
+    transport = arguments.pop("web_media_transport", None)
+    if music_options_error(media_type=media_type, music_duration=music_duration, music_vocals=music_vocals):
+        raise NativeMediaGenerationError("INVALID_ARGUMENT")
+    if native_media_enabled(client, media_type, transport):
+        return await generate_native_media_response(
+            client, arguments=arguments, media_type=media_type, observe=observe,
+            duration_seconds=duration_seconds, aspect_ratio=aspect_ratio,
+            **music_option_arguments(music_duration, music_vocals),
+        )
+    if music_duration is not None or music_vocals is not None:
+        raise NativeMediaGenerationError("CAPABILITY_UNAVAILABLE")
+
     scope_factory = getattr(client, "video_generation_scope", None)
     if media_type == "video":
         if not callable(scope_factory):
             raise VideoModeUnavailable("Dedicated video model unavailable for this client.")
-        scope = scope_factory()
+        scope_options: dict[str, Any] = {}
+        for name, value in (("duration_seconds", duration_seconds), ("aspect_ratio", aspect_ratio)):
+            if value is None:
+                continue
+            try:
+                scope_parameters: dict[str, inspect.Parameter] = dict(inspect.signature(scope_factory).parameters)
+            except (TypeError, ValueError):
+                scope_parameters = {}
+            if name not in scope_parameters and not any(
+                parameter.kind is inspect.Parameter.VAR_KEYWORD for parameter in scope_parameters.values()
+            ):
+                raise VideoModeUnavailable(f"The video client does not support {name}.")
+            scope_options[name] = value
+        scope = scope_factory(**scope_options)
+    elif media_type == "image" and callable(image_scope := getattr(type(client), "image_generation_scope", None)):
+        scope = image_scope(client)
+    elif media_type == "music" and callable(music_scope := getattr(type(client), "music_generation_scope", None)):
+        scope = music_scope(client)
     else:
         scope = nullcontext()
     arguments = dict(arguments)
@@ -243,7 +319,7 @@ async def generate_media_response(
     if chat is None and callable(factory):
         chat = factory(client)
         arguments["chat"] = chat
-    if callable(factory):
+    if callable(factory) or checkpoint is not None:
         # SDK 2.1.1's decorated _generate defaults to five retries, which can
         # duplicate a request after its CID has already been observed.
         arguments.setdefault("current_retry", 0)

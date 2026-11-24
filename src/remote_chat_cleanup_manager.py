@@ -14,7 +14,7 @@ from pathlib import Path
 
 from .constants import DEFAULT_CHAT_RETENTION_SECONDS
 from .infrastructure.cleanup_store import CleanupStore
-from .infrastructure.account_identity import current_account_key
+from .infrastructure.account_identity import account_matches, current_account_key
 from .domain import (
     CleanupObservation,
     CleanupState,
@@ -108,7 +108,7 @@ class RemoteChatCleanupManager:
     def record_explicit_verified_absence(self, cid: str, *, expected_account: str | None = None) -> None:
         """Record an explicit deletion only for a previously owned queue entry."""
         account = self._account()
-        if not account or (expected_account is not None and account != expected_account):
+        if not account or (expected_account is not None and not account_matches(expected_account, account)):
             return
         if not self._store.record_explicit_verified_absence(account, cid):
             return
@@ -189,6 +189,8 @@ class RemoteChatCleanupManager:
 
         active_account = self._account()
         account = _owner_account or active_account
+        if account_matches(account, active_account):
+            account = active_account
         if not account:
             return CleanupObservation(state=CleanupState.FAILED, upstream_chat_id=cid, source=source)
 
@@ -330,7 +332,7 @@ class RemoteChatCleanupManager:
         account = self._account()
         if not account:
             return CleanupObservation(state=CleanupState.FAILED, upstream_chat_id=cid)
-        if _expected_account is not None and account != _expected_account:
+        if _expected_account is not None and not account_matches(_expected_account, account):
             return CleanupObservation(state=CleanupState.FAILED, upstream_chat_id=cid)
         force = _force or _expected_account is None
         if not force:
@@ -594,7 +596,6 @@ class RemoteChatCleanupManager:
         current = self._store.get(account, cid)
         if current is None or current["state"] != "completed":
             return CleanupObservation(state=CleanupState.PENDING, upstream_chat_id=cid, source=source)
-
         observation = CleanupObservation(
             state=CleanupState.COMPLETED,
             upstream_chat_id=cid,
@@ -682,7 +683,7 @@ class RemoteChatCleanupManager:
                 source=source,
             )
         account = self._account()
-        if expected_account is not None and account != expected_account:
+        if expected_account is not None and not account_matches(expected_account, account):
             return CleanupObservation(state=CleanupState.FAILED, upstream_chat_id=cid, source=source)
         with self._lock:
             pending = self._pending_cleanup.get(cid)

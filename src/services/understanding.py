@@ -89,6 +89,8 @@ class UnderstandRequest:
     model: str = "flash"
     thinking_level: str = "standard"
     cleanup_source: str = UNDERSTAND_CLEANUP_SOURCE
+    retain_chat: bool = False
+    delete_after_seconds: int | None = None
 
 
 @dataclass(frozen=True)
@@ -198,6 +200,8 @@ class UnderstandService:
                     thinking_level=request.thinking_level,
                     files=tuple(item.file_path for item in prepared if item.file_path is not None),
                     cleanup_source=request.cleanup_source,
+                    retain_chat=request.retain_chat,
+                    delete_after_seconds=request.delete_after_seconds,
                     include_gem_argument=False,
                     include_temporary_argument=False,
                 )

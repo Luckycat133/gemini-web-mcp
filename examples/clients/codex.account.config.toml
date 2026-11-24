@@ -1,0 +1,15 @@
+# Optional conversation-management server. Copy this table only when needed.
+# Export GEMINI_PSID and any optional Cookie variables in the Codex host environment.
+[mcp_servers.gemini_account]
+command = "uvx"
+args = [
+  "--from",
+  "git+https://github.com/Luckycat133/gemini-web-mcp@codex/gemini-tools-polish-20261101",
+  "gemini-mcp-account",
+]
+env_vars = ["GEMINI_PSID", "GEMINI_PSIDTS", "GEMINI_PSIDCC"]
+startup_timeout_sec = 60
+tool_timeout_sec = 120
+
+[mcp_servers.gemini_account.env]
+GEMINI_AUTO_REFRESH = "false"

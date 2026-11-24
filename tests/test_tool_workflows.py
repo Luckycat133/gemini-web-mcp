@@ -1043,12 +1043,12 @@ def test_current_web_models_resolve_thinking_mode_buckets():
     assert resolve_thinking_mode_id("3.1 Pro") == 3
     assert resolve_thinking_level_id("standard") == 1
     assert resolve_thinking_level_id("extended") == 2
-    assert resolve_media_request("flash-lite", "image")["backend_label"] == "Nano Banana 2 Lite"
-    assert resolve_media_request("flash-lite", "music", "standard")["backend_label"] == "Lyria"
+    assert resolve_media_request("flash-lite", "image")["backend_label"] == "Gemini Web image mode"
+    assert resolve_media_request("flash-lite", "music", "standard")["backend_label"] == "Gemini Web music mode"
     assert resolve_media_request("flash-lite", "video")["request_model"] == "Flash-Lite"
     assert resolve_media_request("flash", "music", "extended")["request_model"] == "gemini-3-flash"
-    assert resolve_media_request("flash", "music", "extended")["backend_label"] == "Lyria"
-    assert resolve_media_request("pro", "music", "extended")["backend_label"] == "Lyria"
+    assert resolve_media_request("flash", "music", "extended")["backend_label"] == "Gemini Web music mode"
+    assert resolve_media_request("pro", "music", "extended")["backend_label"] == "Gemini Web music mode"
     assert resolve_learning_mode_config("quiz")["id"] == 18
     assert resolve_learning_mode_config("study-guide")["x9b_value"] == 4
 
@@ -1115,10 +1115,10 @@ def test_skill_server_uses_v2_file_attachment_contract(monkeypatch, tmp_path):
             model="pro",
         )
         assert result[0].text.endswith("ok")
-        assert "Backend: Nano Banana 2" in result[0].text
+        assert "Backend: Gemini Web image mode" in result[0].text
         data = result[0].meta["domain_result"]["data"]
-        assert data["request_model"] == "gemini-3-flash"
-        assert data["effective_backend"] == "Nano Banana 2"
+        assert data["request_model"] == "gemini-3-pro"
+        assert data["effective_backend"] == "Gemini Web image mode"
 
     asyncio.run(run())
 
@@ -1126,7 +1126,7 @@ def test_skill_server_uses_v2_file_attachment_contract(monkeypatch, tmp_path):
         (
             "Edit this image: make it brighter",
             [str(reference_path.resolve())],
-            "gemini-3-flash",
+            "gemini-3-pro",
         )
     ]
     assert scheduled == ["skill_edit"]
@@ -1206,13 +1206,13 @@ def test_skill_server_create_routes_current_media_backends(monkeypatch):
             model="pro",
             thinking_level="extended",
         )
-        assert "Backend: Nano Banana 2" in image_result[0].text
-        assert "Backend: Lyria" in music_result[0].text
+        assert "Backend: Gemini Web image mode" in image_result[0].text
+        assert "Backend: Gemini Web music mode" in music_result[0].text
 
     asyncio.run(run())
 
     assert calls == [
-        ("Generate an image. Prompt: studio portrait", None, "gemini-3-flash", "standard"),
+        ("Generate an image. Prompt: studio portrait", None, "gemini-3-pro", "standard"),
         ("Create music/audio using Gemini's music generation capability. Prompt: cinematic trailer", None, "gemini-3-pro", "extended"),
     ]
 
@@ -1625,7 +1625,9 @@ def test_chat_listing_uses_current_chat_cid(monkeypatch):
             "gemini_list_chats",
             {"response_format": "json", "limit": 1, "offset": 0},
         )
-        assert '"total_count": 1' in _tool_text(json_result)
+        payload = json.loads(_tool_text(json_result))
+        assert payload["total_count"] == 1
+        assert payload["items"][0]["id"] == "c_latest"
 
     asyncio.run(run())
 
@@ -1979,10 +1981,12 @@ def test_tool_manifest_and_annotations_expose_agent_safety_metadata():
         assert payload["groups"] == {"history": 8}
         history_entry = next(item for item in payload["tools"] if item["name"] == "gemini_history")
         assert history_entry["read_only"] is True
-        assert history_entry["availability"] == ["history", "history-organize", "manage", "all"]
+        assert history_entry["availability"] == [
+            "history", "history-organize", "manage", "all", "gemini-mcp-account", "account-full",
+        ]
         delete_entry = next(item for item in payload["tools"] if item["name"] == "gemini_delete_chat")
         assert delete_entry["destructive"] is True
-        assert delete_entry["availability"] == ["admin", "manage", "all"]
+        assert delete_entry["availability"] == ["admin", "manage", "all", "gemini-mcp-account", "account-full"]
         cleanup_entry = next(item for item in payload["tools"] if item["name"] == "gemini_cleanup_test_artifacts")
         assert cleanup_entry["destructive"] is True
         assert cleanup_entry["availability"] == ["admin", "manage", "all"]
@@ -2000,12 +2004,13 @@ def test_tool_manifest_and_annotations_expose_agent_safety_metadata():
         )
         chat_payload = json.loads(_tool_text(chat_scope_result))
         assert chat_payload["scope"] == "chat"
-        assert chat_payload["groups"] == {"core": 7}
+        assert chat_payload["groups"] == {"core": 8}
         assert {item["name"] for item in chat_payload["tools"]} >= {
             "gemini_chat",
             "gemini_chat_stream",
             "gemini_start_chat",
             "gemini_send_message",
+            "gemini_ask",
         }
         assert any(item["name"] == "current_pro_generation" for item in chat_payload["workflows"])
 
@@ -2836,7 +2841,7 @@ def test_media_tool_reports_empty_media_response(monkeypatch):
             },
         )
         text = _tool_text(result)
-        assert "后端: Lyria" in text
+        assert "后端: Gemini Web music mode" in text
         assert "没有返回文本、图片、视频或音乐资源" in text
 
     asyncio.run(run())
@@ -2979,14 +2984,14 @@ def test_media_tool_routes_music_and_image_to_current_web_backends(monkeypatch):
             {"background": False, "prompt": "cinematic trailer", "model": "pro"},
         )
 
-        assert "后端: Nano Banana 2" in _tool_text(image_result)
+        assert "后端: Gemini Web image mode" in _tool_text(image_result)
         assert "Pro redo" in _tool_text(image_result)
-        assert "后端: Lyria" in _tool_text(music_result)
+        assert "后端: Gemini Web music mode" in _tool_text(music_result)
 
     asyncio.run(run())
 
     assert calls == [
-        ("Generate an image. Prompt: studio portrait", "gemini-3-flash", "standard"),
+        ("Generate an image. Prompt: studio portrait", "gemini-3-pro", "standard"),
         ("Create music/audio using Gemini's music generation capability. Prompt: cinematic trailer", "gemini-3-pro", "standard"),
     ]
 

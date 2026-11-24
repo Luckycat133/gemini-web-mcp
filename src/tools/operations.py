@@ -1,6 +1,9 @@
 """Explicit, restart-safe recovery of operations started by Gemini tools."""
 
 import logging
+from typing import Annotated
+
+from pydantic import Field
 
 from ..adapters import domain_error_boundary, domain_failure_text, domain_text, append_artifact_block
 from ..adapters.artifacts import omit_saved_preview
@@ -9,7 +12,8 @@ from ..client_wrapper import get_gemini_client, initialize_client, finalize_remo
 from ..domain import DomainResult
 from ..domain.operations import OperationReadData
 from ..infrastructure.operation_store import OperationStore
-from ..services.operations import OperationService
+from ..services.operations import MAX_RESULT_WAIT_SECONDS, OperationService
+from ..services.task_inputs import task_auto_approve_enabled
 from .annotations import READS_PRIVATE_REMOTE, DESTRUCTIVE_REMOTE
 
 logger = logging.getLogger(__name__)
@@ -32,20 +36,22 @@ def _present(result: DomainResult[OperationReadData], *, include_text: bool = Tr
     if not result.ok:
         text = domain_failure_text(result) + "\n" + text
     if task_operation:
+        if data.operation == "gemini_run_task" and task_auto_approve_enabled():
+            text += "\n🚩 Background approval is enabled for supported one-time browser permission cards."
         answer = data.task_response or data.answer
         if data.setup_required:
             app = f" ({data.setup_app_name})" if data.setup_app_name else ""
-            text += f"\nThe Task needs native app connection setup{app}; it is waiting for attention."
+            text += f"\n🚩 The Task needs native app connection setup{app}; it is waiting for attention."
             text += "\nConnect or decline in the original Gemini Task. gemini_run_task text replies cannot connect the app or complete OAuth."
             if data.setup_url:
                 text += "\nOpen the Task: " + data.setup_url
         elif data.needs_attention:
-            text += "\nA native app connection card was previously observed. Open the original Task to check its current setup state."
+            text += "\n🚩 A native app connection card was previously observed. Open the original Task to check its current setup state."
             text += "\nThis metadata-only read does not revalidate the card. Text replies cannot connect the app or complete OAuth."
             if data.setup_url:
                 text += "\nOpen the Task: " + data.setup_url
         elif data.input_required:
-            text += "\nThe Task requires explicit input; its chat remains protected from cleanup."
+            text += "\n🚩 The Task requires input; its chat remains protected from cleanup."
             if data.input_prompt:
                 text += "\n\n" + data.input_prompt
             for option in data.input_options:
@@ -97,7 +103,10 @@ def register_operation_tools(mcp: MCPServer) -> None:
 
     @mcp.tool(annotations=DESTRUCTIVE_REMOTE)
     @domain_error_boundary("gemini_get_operation_result", logger)
-    async def gemini_get_operation_result(operation_id: str, include_text: bool = True) -> list[TextContent]:
+    async def gemini_get_operation_result(
+        operation_id: str, include_text: bool = True,
+        wait_seconds: Annotated[int, Field(ge=0, le=MAX_RESULT_WAIT_SECONDS)] = 0,
+    ) -> list[TextContent]:
         """Recover verified media, research, Task or Notebook Chat for one saved operation_id.
 
         Resumes observation without repeating generation. Unknown or expired handles
@@ -108,5 +117,9 @@ def register_operation_tools(mcp: MCPServer) -> None:
         remote authentication. Missing or altered files stay unverified. Research
         derivatives use this same operation_id. Set include_text=false to omit a
         preview when the full verified file is returned.
+        wait_seconds waits on the original worker for up to 120 seconds without
+        repeating generation. Zero returns the current result immediately.
         """
+        if wait_seconds:
+            return _present(await _service().get_result(operation_id, wait_seconds=wait_seconds), include_text=include_text)
         return _present(await _service().get_result(operation_id), include_text=include_text)

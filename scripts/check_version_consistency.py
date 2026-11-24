@@ -29,7 +29,7 @@ else:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--tag", help="Release tag to compare with pyproject.toml (for example v0.2.1)")
+    parser.add_argument("--tag", help="Release tag to compare with pyproject.toml (vX.Y.Z)")
     parser.add_argument("--artifacts-dir", type=Path, help="Also validate built wheel/sdist/skill asset names")
     parser.add_argument(
         "--skip-python-assets",
@@ -40,10 +40,10 @@ def main() -> None:
 
     try:
         metadata = load_release_metadata(PROJECT_ROOT)
-        require_repository_version_consistency(PROJECT_ROOT, metadata)
         tag = args.tag or release_tag_from_environment()
-        if tag:
+        if tag is not None:
             validate_release_tag(tag, metadata)
+        require_repository_version_consistency(PROJECT_ROOT, metadata, require_dated_release=tag is not None)
         if args.artifacts_dir is not None:
             outdir = args.artifacts_dir
             if not outdir.is_absolute():

@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 from gemini_webapi import GeminiClient
+from gemini_webapi.constants import AccountStatus
 from gemini_webapi.exceptions import UsageLimitExceededError
 from gemini_webapi.types import AvailableModel, Candidate, ModelOutput
 from mcp import Client
@@ -22,6 +23,8 @@ def runtime(monkeypatch, tmp_path):
     monkeypatch.setenv("GEMINI_OPERATION_DB_PATH", str(tmp_path / "operations.sqlite3"))
     model_client = ThinkingLevelGeminiClient()
     model_client._running = True
+    model_client.account_status = AccountStatus.AVAILABLE
+    model_client._usage_info = {"tier": {"id": 6, "label": "ULTRA"}}
     model_client._model_registry = {
         name: AvailableModel(model_id=name, model_name=name, display_name=name, description="", capacity=1)
         for name in ("gemini-flash", "gemini-flash-lite", "gemini-argon")

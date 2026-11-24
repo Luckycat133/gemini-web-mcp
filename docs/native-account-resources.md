@@ -1,6 +1,6 @@
 # 原生 Skills 与 Notebook 管理
 
-以下工具在 `gemini-mcp-account` 账户面，默认函数面仍只暴露调用 Gemini 的功能。列表不返回用户指令正文；新增、覆盖和删除应有用户对该资源的明确意图。
+Notebook 与来源管理由 `gemini-mcp-account` 提供。原生 Skill 管理使用 `GEMINI_TOOLS=account-full gemini-mcp-server`。列表仅返回元数据，读取指令正文及新增、覆盖和删除需要用户对该资源的明确意图。
 
 ## 原生 Gemini Skills
 

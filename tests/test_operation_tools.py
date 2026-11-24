@@ -59,6 +59,35 @@ def test_recovery_failure_does_not_claim_report_ready(monkeypatch):
     assert "ready" not in result.content[0].text
 
 
+@pytest.mark.parametrize("surface", ["function", "compact"])
+@pytest.mark.parametrize("enabled", [False, True])
+def test_task_status_marks_pending_input_and_shows_background_setting(monkeypatch, surface, enabled):
+    monkeypatch.setenv("GEMINI_TASK_AUTO_APPROVE", "true" if enabled else "false")
+
+    class Service:
+        async def get_status(self, operation_id):
+            return DomainResult.success(OperationReadData(
+                operation_id, "gemini_run_task", OperationState.PARTIAL, True, False,
+                "task_input_required", input_required=True,
+            ))
+
+    if surface == "function":
+        monkeypatch.setattr(operations, "_service", Service)
+        mcp = MCPServer("task-approval-status")
+        operations.register_operation_tools(mcp)
+        result = asyncio.run(mcp.call_tool("gemini_get_operation_status", {"operation_id": "op_test"}))
+        content = result.content[0]
+    else:
+        from src.services import operations as operation_service
+        from src.skill_server import session
+
+        monkeypatch.setattr(operation_service, "OperationService", lambda *args: Service())
+        content = asyncio.run(session(action="operation_status", session_id="op_test"))[0]
+    assert "🚩 The Task requires input" in content.text
+    assert ("🚩 Background approval is enabled" in content.text) is enabled
+    assert content.meta["domain_result"]["data"]["input_required"] is True
+
+
 @pytest.mark.parametrize("surface", ["function", "assist", "compact"])
 def test_file_only_operation_result_keeps_verified_artifact_without_report_preview(monkeypatch, tmp_path, surface):
     from src.domain.artifacts import Artifact, ArtifactKind, ArtifactState, ArtifactVerification, ArtifactVerificationStatus

@@ -201,6 +201,15 @@ ASSIST_TOOLS = frozenset(
 )
 
 FUNCTION_TOOLS = frozenset({
+    "gemini_ask", "gemini_research", "gemini_run_task", "gemini_create_media",
+    "gemini_get_operation_status", "gemini_get_operation_result",
+})
+ACCOUNT_TOOLS = frozenset({
+    "gemini_history", "gemini_manage_chat", "gemini_delete_chat",
+    "gemini_notebooks", "gemini_manage_notebook", "gemini_tasks",
+})
+
+FUNCTION_FULL_TOOLS = frozenset({
     "gemini_ask", "gemini_understand_image", "gemini_understand", "gemini_research",
     "gemini_start_chat", "gemini_send_message", "gemini_list_sessions", "gemini_reset_session",
     "gemini_generate_image", "gemini_edit_image", "gemini_generate_video", "gemini_generate_music",
@@ -208,7 +217,7 @@ FUNCTION_TOOLS = frozenset({
     "gemini_list_research_report_actions", "gemini_create_from_research_report", "gemini_run_task",
 })
 
-ACCOUNT_TOOLS = frozenset({
+ACCOUNT_FULL_TOOLS = frozenset({
     "gemini_history", "gemini_delete_chat", "gemini_notebooks", "gemini_move_chat_to_notebook",
     "gemini_account_inventory", "gemini_list_scheduled_actions", "gemini_get_scheduled_action",
     "gemini_create_scheduled_action", "gemini_delete_scheduled_action", "gemini_manage_gems", "gemini_cleanup",
@@ -219,7 +228,13 @@ ACCOUNT_TOOLS = frozenset({
 
 async def _list_module_tools(module_name: str) -> list[str]:
     module = importlib.import_module(module_name)
-    return sorted(tool.name for tool in await module.mcp.list_tools())
+    profile = os.environ.get("GEMINI_TOOLS", "")
+    full = (module_name, profile) in {
+        ("src.surfaces.function", "function-full"),
+        ("src.surfaces.account", "account-full"),
+    }
+    server = module.build_server(full=True) if full else module.mcp
+    return sorted(tool.name for tool in await server.list_tools())
 
 
 def _probe(module_name: str) -> None:
@@ -286,7 +301,9 @@ def main() -> None:
             ("compact", "src.skill_server", "model", COMPACT_TOOLS),
             ("assist", "src.surfaces.assist", "model", ASSIST_TOOLS),
             ("function", "src.surfaces.function", "function", FUNCTION_TOOLS),
-            ("account", "src.surfaces.account", "function", ACCOUNT_TOOLS),
+            ("account", "src.surfaces.account", "account", ACCOUNT_TOOLS),
+            ("function-full", "src.surfaces.function", "function-full", FUNCTION_FULL_TOOLS),
+            ("account-full", "src.surfaces.account", "account-full", ACCOUNT_FULL_TOOLS),
         ]
     )
     # Profile probes use separate interpreters to preserve import-time tool

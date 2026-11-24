@@ -33,11 +33,13 @@ import json
 import logging
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import orjson
 import pytest
 from gemini_webapi import GeminiClient
-from gemini_webapi.constants import Endpoint
+from gemini_webapi.constants import AccountStatus, Endpoint
+from gemini_webapi.exceptions import APIError
 from gemini_webapi.types import AvailableModel
 
 from src.infrastructure.rpc_contracts import VIDEO_GENERATION_TRANSPORT, VideoTransportChanged, apply_video_generation_transport
@@ -90,6 +92,103 @@ def _new_client():
     return object.__new__(ThinkingLevelGeminiClient)
 
 
+def test_failed_startup_rpc_does_not_reenter_sdk_initialization(monkeypatch):
+    from curl_cffi.requests import Cookies
+    from gemini_webapi import client as sdk_client
+
+    transport = SimpleNamespace(
+        cookies=Cookies(), post=AsyncMock(return_value=SimpleNamespace(status_code=503)), close=AsyncMock(),
+    )
+    bootstrap = AsyncMock(return_value=SimpleNamespace(
+        client=transport, cookie_source="Base Cookies", access_token="synthetic", build_label="",
+        session_id="", language="en", push_id="",
+    ))
+    monkeypatch.setattr(sdk_client, "get_access_token", bootstrap)
+    monkeypatch.setattr(sdk_client, "save_cookies", lambda *_: None)
+
+    async def run():
+        client = ThinkingLevelGeminiClient("synthetic", "synthetic")
+        with pytest.raises(APIError, match="status code 503"):
+            await asyncio.wait_for(client.init(auto_refresh=False), timeout=1)
+        assert not client._running and not client._lock.locked()
+
+    asyncio.run(run())
+    bootstrap.assert_awaited_once()
+    transport.post.assert_awaited_once()
+    transport.close.assert_awaited_once()
+
+
+def test_media_history_preserves_http_429_through_the_real_sdk_parser(monkeypatch):
+    from curl_cffi.requests import Cookies
+    from gemini_webapi import client as sdk_client
+
+    from src.domain.results import classify_exception
+
+    transport = SimpleNamespace(
+        cookies=Cookies(), post=AsyncMock(return_value=SimpleNamespace(status_code=429)), close=AsyncMock(),
+    )
+    monkeypatch.setattr(sdk_client, "save_cookies", lambda *_: None)
+
+    async def run():
+        client = ThinkingLevelGeminiClient("synthetic", "synthetic")
+        client.client = transport
+        client._running = True
+        client.account_status = AccountStatus.AVAILABLE
+        with pytest.raises(APIError, match="status code 429") as error:
+            await asyncio.wait_for(client.read_chat_for_media("c_synthetic_media"), timeout=1)
+        assert classify_exception(error.value).error_code == "RATE_LIMITED"
+
+    asyncio.run(run())
+    transport.post.assert_awaited_once()
+    transport.close.assert_awaited_once()
+
+
+def test_media_readback_scope_isolated_from_parallel_and_later_chat_after_cancellation(monkeypatch):
+    captured = {}
+
+    async def run():
+        entered, run_inherited = asyncio.Event(), asyncio.Event()
+        client = ThinkingLevelGeminiClient("synthetic", "synthetic")
+        client.account_status = AccountStatus.AVAILABLE
+        inherited = []
+
+        async def inherited_chat():
+            await run_inherited.wait()
+            return await client.read_chat("c_after_inherited")
+
+        async def batch(_client, payloads, **kwargs):
+            cid = orjson.loads(payloads[0].payload)[0]
+            captured[cid] = kwargs
+            if cid == "c_media":
+                inherited.append(asyncio.create_task(inherited_chat()))
+                entered.set()
+                await asyncio.Future()
+            return SimpleNamespace(text="[]")
+
+        monkeypatch.setattr(GeminiClient, "_batch_execute", batch)
+
+        async def media_and_chat():
+            with pytest.raises(asyncio.CancelledError):
+                await client.read_chat_for_media("c_media")
+            await client.read_chat("c_after_same_task")
+
+        operation = asyncio.create_task(media_and_chat())
+        await asyncio.wait_for(entered.wait(), timeout=1)
+        await client.read_chat("c_parallel_chat")
+        operation.cancel()
+        await operation
+        run_inherited.set()
+        await inherited[0]
+
+    asyncio.run(run())
+    assert captured == {
+        "c_media": {"current_retry": 0, "close_on_error": False},
+        "c_parallel_chat": {},
+        "c_after_same_task": {},
+        "c_after_inherited": {},
+    }
+
+
 _VIDEO_CASES = json.loads((Path(__file__).parent / "fixtures" / "video_generation_transport_cases.json").read_text())
 
 
@@ -111,6 +210,36 @@ def test_video_transport_contract_preserves_nonce_and_mirrors_observed_mode():
     assert inner[VIDEO_GENERATION_TRANSPORT.mode_index] == 11
     assert inner[54] == [] and inner[55] == [[1]]
     assert inner[0][9] == [None] * 6 + [[[None, None, None, 1]]]
+
+
+def test_image_scope_sets_only_the_image_tool_selector_and_keeps_reference_order():
+    client = _new_client()
+    inner = [None] * 81
+    inner[0] = ["image prompt", 0, None, [[["first"], "first.png"], [["second"], "second.png"]], None, None, 0]
+    inner[79:81] = [1, 1]
+    request = _make_request_data(inner)
+
+    with client.image_generation_scope():
+        token = client._set_web_request("gemini-3-flash", "standard", None)
+        try:
+            updated = _parse_inner(inject_web_request_options(request, _web_request.get()))
+        finally:
+            _web_request.reset(token)
+
+    assert updated[49] == 14
+    updated[49] = None
+    assert updated == inner
+    assert _web_request.get() is None
+
+
+def test_image_transport_does_not_overwrite_another_tool_selector():
+    from src.infrastructure.rpc_contracts import WebWorkflowTransportChanged
+
+    inner = [None] * 81
+    inner[0] = ["image prompt", 0, None, None, None, None, 0]
+    inner[49] = 11
+    with pytest.raises(WebWorkflowTransportChanged, match="Image generation"):
+        inject_web_request_options(_make_request_data(inner), WebRequestOptions(image_generation=True))
 
 
 @pytest.mark.parametrize("case", ["empty", "rejected", "changed_shape"])
@@ -142,6 +271,8 @@ def test_video_transport_is_not_in_batch_rpc_probe_registry():
 
 def _registry_client(names):
     client = ThinkingLevelGeminiClient()
+    client.account_status = AccountStatus.AVAILABLE
+    client._usage_info = {"tier": {"id": 6, "label": "ULTRA"}}
     for name in names:
         client._model_registry[name] = AvailableModel(
             model_id=name, model_name=name, display_name=name, description="", capacity=1,
@@ -183,6 +314,19 @@ def test_model_resolution_does_not_trust_cross_family_alias():
 def test_model_resolution_accepts_explicit_legacy_family_name_when_discovered():
     client = _registry_client(["gemini-3-flash", "gemini-flash-lite"])
     assert client._resolve_model_by_name("gemini-3-flash").model_name == "gemini-3-flash"
+
+
+def test_default_web_model_uses_discovered_hydrogen_when_legacy_flash_is_absent():
+    client = _registry_client(["gemini-自动", "gemini-4-hydrogen", "gemini-neon", "gemini-carbon"])
+    assert client._resolve_policy_model("gemini-3-flash").model_name == "gemini-4-hydrogen"
+    assert not client._model_registry["gemini-4-hydrogen"].aliases
+
+
+def test_hydrogen_does_not_override_an_existing_flash_or_other_explicit_model():
+    client = _registry_client(["gemini-4-hydrogen", "gemini-flash", "gemini-flash-lite"])
+    assert client._resolve_policy_model("gemini-3-flash").model_name == "gemini-flash"
+    with pytest.raises(RuntimeError, match="unavailable"):
+        client._resolve_policy_model("gemini-3-pro")
 
 
 @pytest.mark.parametrize(("model", "expected"), [

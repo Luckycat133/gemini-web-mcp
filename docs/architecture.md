@@ -1,12 +1,12 @@
 # 技术架构
 
-深入了解 Gemini MCP Server v0.2.1 的设计与实现。
+深入了解 Gemini Web MCP 的设计与实现。
 
 ---
 
 ## 两类业务工具面
 
-`gemini-mcp-function` 提供 17 个功能工具；`gemini-mcp-account` 提供 17 个显式账号工具。普通问答、联网和自然语言应用请求使用默认 Flash 的 `gemini_ask`，不暴露联网或工具启用开关。带 `notebook_ids` 的 Ask 是后台普通聊天；`gemini_run_task` 明确启动 Gemini Task，两者通过共享持久句柄读取状态和完整回答产物。Task 完成不替代应用侧修改核验，Task 计划也不等同于聊天 scheduled actions。五工具 assist、compact 和显式 profile 保持兼容。
+`gemini-mcp-function` 与 `gemini-mcp-account` 各提供 6 个工具，可作为独立 MCP 连接启用。前者处理生成和操作结果，后者处理已有对话、Notebook 和 Task 元数据。普通问答、联网和自然语言应用请求使用默认 Flash 的 `gemini_ask`。带 `notebook_ids` 的 Ask 是后台普通聊天，`gemini_run_task` 启动 Gemini Task。两者通过持久句柄读取状态和完整产物。状态观察和可能触发自有对话清理的结果恢复使用各自的工具及注解。原先各 17 个工具的目录由 `function-full` 与 `account-full` 显式加载，assist、compact 和其他兼容配置继续可用。
 
 账号 `gemini_notebooks` 默认返回 NotebookLM／Gemini Notebook 来源目录，`source="gemini"` 保留同一产品的项目投影；移动聊天要在该投影中精确解析目标。`gemini_tasks` 提供紧凑 Task 元数据、有限进度、独立 Task 计划管理与经核验的显式删除；`gemini_task_browser` 提供截图和显式浏览器输入。Cookie、Doctor、本地 Prompts 不进入业务面；`gemini_cleanup` 只处理登记的 MCP 自有聊天。
 

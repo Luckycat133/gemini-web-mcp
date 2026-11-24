@@ -3,6 +3,7 @@ Gemini 常量配置
 """
 
 from enum import Enum
+import re
 from typing import TypedDict
 
 
@@ -27,6 +28,7 @@ DEFAULT_SESSION_MAX_AGE_SECONDS = 1800
 
 OMNI_VIDEO_MODEL = "gemini-omni-1.2-flash"
 OMNI_VIDEO_API_BACKEND = "Gemini API (Omni 1.2 Flash)"
+NATIVE_MEDIA_BROWSER_BACKEND = "Gemini Web native browser"
 GEMINI_GENERIC_FAILURE_REPLY = (
     "I'm having a hard time fulfilling your request. Can I help you with something else instead?"
 )
@@ -34,12 +36,128 @@ _GEMINI_GENERATION_FAILURE_REPLIES = frozenset({
     GEMINI_GENERIC_FAILURE_REPLY,
     "I encountered an error doing what you asked. Could you try again?",
     "Sorry, something went wrong. Please try your request again.",
+    "I'm sorry, I'm experiencing unusually high traffic right now generating videos and am at full capacity. Please try again later.",
+    "我只是一个文本 AI，在这方面没法帮到你。",
+    "由于程序代码的局限，我无法提供这方面的帮助。",
 })
+_MUSIC_TOOL_UNAVAILABLE = re.compile(
+    r"\A(?:I can['’]t generate or output an audio file directly right now(?: because|, as) "
+    r"the music generation tool isn['’]t available in this session|"
+    r"I cannot directly generate or output playable audio files here, as "
+    r"the music generation tool is currently unavailable|"
+    r"I can['’]t generate the audio track right now because "
+    r"the music generation tool isn['’]t available to run in this turn)\.(?:\s|$)", re.IGNORECASE,
+)
+_MUSIC_SCORE_FALLBACK = re.compile(
+    r"\AI can['’]t generate an audio track directly right now, but here is an original,(?:\s|$)", re.IGNORECASE,
+)
+_MUSIC_CHINESE_SCORE_FALLBACK = re.compile(
+    r"\A我已经为你创作了一段舒缓的钢琴纯音乐。\s*"
+    r"由于当前系统工具调用受限，暂时无法直接为你生成并导出音频文件，\s*但我为你编写了",
+)
+_IMAGE_TOOL_UNAVAILABLE = re.compile(
+    r"\A(?:I don['’]t have an (?:active )?image[- ]generation tool available in this (?:session|interface)|"
+    r"I don['’]t have access to an image[- ]generation tool in this (?:session|interface)|"
+    r"I cannot generate images directly in this (?:session|interface)|"
+    r"I can['’]t generate (?:or output )?images directly (?:right now|in this (?:session|interface)))(?:[\s.,—–:-]|$)",
+    re.IGNORECASE,
+)
+_MEDIA_GENERATION_ERROR = re.compile(
+    r"\A(?:I seem to be encountering an error\.|"
+    r"I can['’]t make (?:that type of video|videos?\b[^.?!]{0,200})\.)(?:\s|$)",
+    re.IGNORECASE,
+)
+_MARKDOWN_FENCE = re.compile(r" {0,3}(`{3,}|~{3,})(.*)")
+_ABC_FIELD = re.compile(r"([A-Za-z]):[ \t]*(.*)")
+_ABC_HEADERS = {
+    "X": re.compile(r"[0-9]+"),
+    "M": re.compile(r"(?:C\|?|none|(?:[1-9][0-9]*|\([1-9][0-9]*(?:[ \t]*\+[ \t]*[1-9][0-9]*)+\))"
+                    r"\s*/\s*[1-9][0-9]*)", re.IGNORECASE),
+    "L": re.compile(r"[1-9][0-9]*\s*/\s*[1-9][0-9]*"),
+    "K": re.compile(r"(?:[A-G](?:#|b)?(?:maj(?:or)?|m(?:in(?:or)?)?|dor(?:ian)?|mix(?:olydian)?|"
+                    r"phr(?:ygian)?|lyd(?:ian)?|loc(?:rian)?|aeo(?:lian)?|ion(?:ian)?)?(?:[ \t].*)?|none|HP)",
+                    re.IGNORECASE),
+}
+_ABC_INLINE_ANNOTATION = re.compile(r'"(?:[^"\\]|\\.)*"|![^!]*!|\+[^+]*\+|\[[A-Za-z]:[^\]]*\]')
+_ABC_MUSIC_SYMBOLS = re.compile(r"[A-Ga-gzZxX0-9|:()\[\]{}^_=,/'<>.&+*~\\ \t-]+")
+_ABC_NOTE = re.compile(r"[A-Ga-g]")
+
+
+def is_music_tool_unavailable_reply(text: object) -> bool:
+    """Match finite observed NoTool/score-fallback prefixes, never quoted instructions."""
+    if not isinstance(text, str):
+        return False
+    normalized = " ".join(text.split())
+    return bool(_MUSIC_TOOL_UNAVAILABLE.match(normalized) or _MUSIC_SCORE_FALLBACK.match(normalized)
+                or _MUSIC_CHINESE_SCORE_FALLBACK.match(normalized))
+
+
+def is_image_tool_unavailable_reply(text: object) -> bool:
+    """Match finite observed text-only image-tool-unavailable refusal prefixes."""
+    if not isinstance(text, str):
+        return False
+    normalized = " ".join(text.split())
+    return bool(_IMAGE_TOOL_UNAVAILABLE.match(normalized))
+
+
+def _abc_score_has_notes(lines: list[str]) -> bool:
+    headers: set[str] = set()
+    for raw_line in lines:
+        line = raw_line.strip()
+        if not line or line.startswith("%"):
+            continue
+        field = _ABC_FIELD.fullmatch(line)
+        if "K" in headers and (field is None or field[1] != "X"):
+            if field is None:
+                notation = _ABC_INLINE_ANNOTATION.sub("", line).partition("%")[0].strip()
+                if _ABC_MUSIC_SYMBOLS.fullmatch(notation) and _ABC_NOTE.search(notation):
+                    return True
+            continue
+        if field is None or not headers and field[1] != "X":
+            return False
+        name, value = field[1], field[2].partition("%")[0].strip()
+        if name == "X":
+            headers.clear()
+        if name in _ABC_HEADERS:
+            if not _ABC_HEADERS[name].fullmatch(value) or name == "K" and not {"X", "M", "L"} <= headers:
+                return False
+            headers.add(name)
+    return False
+
+
+def is_music_notation_reply(text: object) -> bool:
+    """Recognize a complete fenced ABC score as text evidence only."""
+    if not isinstance(text, str):
+        return False
+    fence = ""
+    score: list[str] | None = None
+    for line in text.splitlines():
+        boundary = _MARKDOWN_FENCE.fullmatch(line)
+        if boundary is not None:
+            marker, info = boundary[1], boundary[2].strip()
+            if not fence and (marker[0] == "~" or "`" not in info):
+                fence = marker
+                score = [] if info.lower() == "abc" else None
+                continue
+            if fence and marker[0] == fence[0] and len(marker) >= len(fence) and not info:
+                if score is not None and _abc_score_has_notes(score):
+                    return True
+                fence, score = "", None
+                continue
+        if score is not None:
+            score.append(line)
+    return False
+
+
+def is_media_generation_error_reply(text: object) -> bool:
+    """Recognize the observed generic error sentence at the start of a reply."""
+    return isinstance(text, str) and bool(_MEDIA_GENERATION_ERROR.match(" ".join(text.split())))
 
 
 def is_generation_failure_reply(text: object) -> bool:
     """Recognize the full observed Gemini failure notice, including browser whitespace."""
-    return isinstance(text, str) and " ".join(text.split()) in _GEMINI_GENERATION_FAILURE_REPLIES
+    return (isinstance(text, str) and " ".join(text.split()) in _GEMINI_GENERATION_FAILURE_REPLIES
+            or is_media_generation_error_reply(text))
 
 
 class ModelConfig(TypedDict):
@@ -177,20 +295,42 @@ LEARNING_MODE_CONFIG: dict[str, LearningModeConfig] = {
 }
 
 
+GEMINI_4_MODEL_NAMES = {
+    "argon": "gemini-argon",
+    "carbon": "gemini-carbon",
+    "hydrogen": "gemini-4-hydrogen",
+    "neon": "gemini-neon",
+}
+
+
+def gemini_4_model_family(label: str) -> str | None:
+    """Identify exact family names without guessing opaque model selectors."""
+    normalized = re.sub(r"[\s_-]+", "-", label.strip().lower())
+    match = re.fullmatch(r"(?:gemini-)?(?:4-)?(argon|carbon|hydrogen|neon)", normalized)
+    return match.group(1) if match else None
+
+
+def is_auto_model_name(label: str) -> bool:
+    """Recognize Auto labels returned by English or Chinese Web catalogs."""
+    normalized = re.sub(r"[\s_-]+", "-", label.strip().lower())
+    return normalized in {"auto", "automatic", "自动", "gemini-auto", "gemini-automatic", "gemini-自动"}
+
+
 def resolve_model_name(model: str | None) -> str:
     """Resolve MCP aliases while keeping runtime Gemini model names intact."""
     if model is None:
         return ""
+    family = gemini_4_model_family(model)
+    if family:
+        return GEMINI_4_MODEL_NAMES[family]
+    if is_auto_model_name(model):
+        return "auto"
     current_web_names = {
         "3.5 flash-lite": "flash-lite",
         "3.8 flash": "flash",
         "3.1 pro": "pro",
-        "4 argon": "argon",
-        "gemini-4-argon": "argon",
     }
     alias = current_web_names.get(model.strip().lower(), model)
-    if alias == "argon":
-        return "gemini-argon"
     config = MODEL_CONFIG.get(alias)
     return config["name"] if config else model
 
@@ -207,8 +347,11 @@ def normalize_model_alias(model: str | None) -> str:
         return "flash"
     if alias in {"3.1 pro", "pro"}:
         return "pro"
-    if alias in {"4 argon", "argon", "gemini-argon", "gemini-4-argon"}:
-        return "argon"
+    family = gemini_4_model_family(alias)
+    if family:
+        return family
+    if is_auto_model_name(alias):
+        return "auto"
     if alias in {"thinking", "gemini-3-flash-thinking"}:
         return "thinking"
     return alias
@@ -219,8 +362,9 @@ def resolve_media_request(
     media_type: str,
     thinking_level: str | None = None,
 ) -> dict[str, str]:
-    """Resolve media routing while keeping Web chat aliases and API IDs separate."""
-    alias = normalize_model_alias(model)
+    """Resolve Web selectors without asserting the hidden generator version."""
+    omitted = model is None or not model.strip()
+    alias = "hydrogen" if omitted else normalize_model_alias(model)
 
     if media_type == "video" and alias == OMNI_VIDEO_MODEL:
         return {
@@ -232,22 +376,14 @@ def resolve_media_request(
         }
 
     if media_type == "image":
-        if alias == "flash-lite":
-            return {
-                "requested_alias": alias,
-                "effective_alias": alias,
-                "request_model": resolve_model_name(alias),
-                "backend_label": "Nano Banana 2 Lite",
-                "note": "Gemini Web 的 Flash-Lite 图片模式使用 Nano Banana 2 Lite。",
-            }
         return {
             "requested_alias": alias,
-            "effective_alias": "flash",
-            "request_model": resolve_model_name("flash"),
-            "backend_label": "Nano Banana 2",
+            "effective_alias": alias,
+            "request_model": resolve_model_name(alias),
+            "backend_label": "Gemini Web image mode",
             "note": (
-                "Gemini Web 的 Flash / Pro 首轮图像生成使用 Nano Banana 2；"
-                "Pro redo 是生成后的二次操作。"
+                "使用网页图片生成入口；聊天模型选择器与图片生成后端分别记录，"
+                "仅在上游返回可验证的模型版本时报告实际后端。"
             ),
         }
 
@@ -256,10 +392,10 @@ def resolve_media_request(
             "requested_alias": alias,
             "effective_alias": alias,
             "request_model": resolve_model_name(alias),
-            "backend_label": "Lyria",
+            "backend_label": "Gemini Web music mode",
             "note": (
-                "当前 Gemini Web 公告使用 Lyria 3.5；此 MCP 响应不一定提供实际版本。"
-                "完整曲目由网页的模型和时长选项决定，thinking_level 不代表音乐版本。"
+                "使用网页音乐生成入口；聊天模型和 thinking_level 不代表音乐模型版本。"
+                "仅在上游返回可验证的模型版本时报告实际后端。"
             ),
         }
 

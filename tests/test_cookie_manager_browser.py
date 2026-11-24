@@ -34,7 +34,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from src.cookie_manager import BrowserCookieDiscovery, CookieManager
+from src.cookie_manager import BrowserCookieDiscovery, CookieManager, gemini_cookie_jar
 
 
 @pytest.fixture(autouse=True)
@@ -95,6 +95,36 @@ def test_read_cookie_jar_filters_non_google_domains():
     ]
     result = CookieManager._read_cookie_jar(jar, names)
     assert result == {"__Secure-1PSID": "v3"}  # v2 和 v3 都通过过滤，后者覆盖
+
+
+@pytest.mark.parametrize("reverse", [False, True])
+def test_gemini_cookie_selection_keeps_gemini_compass_over_sibling_services(reverse):
+    unrelated_route = _fake_cookie("COMPASS", "other-path", "gemini.google.com")
+    unrelated_route.path = "/other"
+    jar = [
+        _fake_cookie("COMPASS", "shared", ".google.com"),
+        _fake_cookie("COMPASS", "gemini-selector", "gemini.google.com"),
+        _fake_cookie("COMPASS", "drive-selector", "drive.google.com"),
+        _fake_cookie("COMPASS", "workspace-selector", "workspaceui-pa.clients6.google.com"),
+        unrelated_route,
+        _fake_cookie("__Secure-1PSID", "account", ".google.com"),
+    ]
+    assert CookieManager._read_cookie_jar(jar[::-1] if reverse else jar, {"COMPASS", "__Secure-1PSID"}) == {
+        "COMPASS": "gemini-selector",
+        "__Secure-1PSID": "account",
+    }
+
+
+def test_login_handoff_cookies_accept_only_their_original_hosts():
+    names = {"LSID", "OSID"}
+    jar = [
+        _fake_cookie("LSID", "accounts", "accounts.google.com"),
+        _fake_cookie("LSID", "shared-lsid", ".google.com"),
+        _fake_cookie("OSID", "gemini", "gemini.google.com"),
+        _fake_cookie("OSID", "shared-osid", ".google.com"),
+        _fake_cookie("OSID", "another-product", "notebooklm.google.com"),
+    ]
+    assert CookieManager._read_cookie_jar(jar, names) == {"LSID": "accounts", "OSID": "gemini"}
 
 
 # ---------------------------------------------------------------------------
@@ -795,7 +825,8 @@ def test_cookie_probe_uses_exact_jar_without_sdk_bootstrap_or_cache(monkeypatch,
     async def bootstrap(session, jar, *, verbose):
         assert session is transport and not verbose
         assert {cookie.name: cookie.value for cookie in jar.jar} == {"__Secure-1PSID": "candidate-psid"}
-        return SimpleNamespace(text='"SNlM0e":"synthetic-token"')
+        session.cookies.update(jar)
+        return SimpleNamespace(url="https://gemini.google.com/app", text='"SNlM0e":"synthetic-token"')
 
     async def observe_status(client):
         assert client.client is transport
@@ -812,6 +843,129 @@ def test_cookie_probe_uses_exact_jar_without_sdk_bootstrap_or_cache(monkeypatch,
     assert result.cookies == ({} if reason else candidate)
     blocked.assert_not_awaited()
     transport.close.assert_awaited_once()
+
+
+def test_cookie_probe_rejects_google_sign_in_page_with_frontend_tokens(monkeypatch):
+    from gemini_webapi import GeminiClient
+
+    sdk_auth = import_module("gemini_webapi.utils.get_access_token")
+    transport = SimpleNamespace(cookies=sdk_auth.Cookies(), close=AsyncMock())
+    monkeypatch.setattr(sdk_auth, "AsyncSession", lambda **_options: transport)
+    monkeypatch.setattr(sdk_auth, "_send_request", AsyncMock(return_value=SimpleNamespace(
+        url="https://accounts.google.com/ServiceLogin", text='"SNlM0e":"sign-in-page-token"',
+    )))
+    status = AsyncMock()
+    monkeypatch.setattr(GeminiClient, "_fetch_user_status", status)
+
+    result = _run(CookieManager._verify_cookie_candidates([
+        ("browser_chrome:Default", {"__Secure-1PSID": "candidate-psid"}),
+    ]))
+
+    assert not result.cookies and result.reason == "BROWSER_COOKIE_AUTH_REJECTED"
+    status.assert_not_awaited()
+    transport.close.assert_awaited_once()
+
+
+@pytest.mark.parametrize("same_account", [True, False])
+def test_cookie_probe_retains_gemini_session_from_login_handoff_for_the_same_account(monkeypatch, same_account):
+    from gemini_webapi import GeminiClient
+    from gemini_webapi.constants import AccountStatus
+
+    sdk_auth = import_module("gemini_webapi.utils.get_access_token")
+    transport = SimpleNamespace(cookies=sdk_auth.Cookies(), close=AsyncMock())
+    monkeypatch.setattr(sdk_auth, "AsyncSession", lambda **_options: transport)
+
+    async def bootstrap(session, jar, **_kwargs):
+        assert {cookie.name: cookie.domain for cookie in jar.jar} == {
+            "__Secure-1PSID": ".google.com", "LSID": "accounts.google.com", "COMPASS": "gemini.google.com",
+            "GOOGLE_ABUSE_EXEMPTION": ".google.com",
+        }
+        session.cookies.update(jar)
+        session.cookies.set("OSID", "warmed-gemini-session", domain="gemini.google.com", secure=True)
+        session.cookies.set("unapproved", "other-data", domain="gemini.google.com", secure=True)
+        if not same_account:
+            session.cookies.set("__Secure-1PSID", "different-account", domain=".google.com", secure=True)
+        return SimpleNamespace(url="https://gemini.google.com/app", text='"SNlM0e":"synthetic-token"')
+
+    async def status(client):
+        client.account_status = AccountStatus.AVAILABLE
+        client._model_registry["synthetic"] = object()
+
+    monkeypatch.setattr(sdk_auth, "_send_request", bootstrap)
+    monkeypatch.setattr(GeminiClient, "_fetch_user_status", status)
+    candidate = {"__Secure-1PSID": "bound", "LSID": "same-login", "COMPASS": "gemini-selector",
+                 "GOOGLE_ABUSE_EXEMPTION": "synthetic-manual-verification"}
+
+    result = _run(CookieManager._verify_cookie_candidates([("browser_chrome:Default", candidate)]))
+
+    if same_account:
+        assert result.cookies == {**candidate, "OSID": "warmed-gemini-session"}
+        assert gemini_cookie_jar(result.cookies).get("OSID", domain="gemini.google.com") == "warmed-gemini-session"
+        # Exercise the full extra-cookies path used by worker IPC, SDK and native browser.
+        manager = CookieManager(auto_refresh=False)
+        assert manager.update_cookie("bound", extra_cookies=result.cookies, source=result.source, notify=False)
+        extra = manager.get_cookie().extra_cookies
+        jar = gemini_cookie_jar(extra)
+        assert jar.get("__Secure-1PSID", domain=".google.com") == "bound"
+        assert jar.get("GOOGLE_ABUSE_EXEMPTION", domain=".google.com") == "synthetic-manual-verification"
+        from src.infrastructure.task_approval_browser import _cookie_parameters
+        native = {cookie["name"]: cookie for cookie in _cookie_parameters(extra)}
+        assert native["__Secure-1PSID"]["value"] == "bound"
+        assert native["GOOGLE_ABUSE_EXEMPTION"]["value"] == "synthetic-manual-verification"
+        assert native["GOOGLE_ABUSE_EXEMPTION"]["httpOnly"] is False
+    else:
+        assert not result.cookies and result.reason == "BROWSER_COOKIE_AUTH_REJECTED"
+
+
+@pytest.mark.parametrize("domain,path,expires,accepted", [
+    (".google.com", "/", 2000, True),
+    ("google.com", "/", 2000, False),
+    (".google.com", "/", None, True),
+    ("gemini.google.com", "/", 2000, False),
+    ("www.google.com", "/", 2000, False),
+    ("accounts.google.com", "/", 2000, False),
+    ("google.com.invalid", "/", 2000, False),
+    (".invalid.example", "/", 2000, False),
+    ("..google.com", "/", 2000, False),
+    (".google.com", "/sorry", 2000, False),
+    (".google.com", "/", 1000, False),
+    (".google.com", "/", 999, False),
+])
+def test_manual_verification_cookie_requires_original_google_root_scope_and_unexpired_value(
+    monkeypatch, domain, path, expires, accepted,
+):
+    import src.cookie_manager as cookie_module
+
+    monkeypatch.setattr(cookie_module.time, "time", lambda: 1000)
+    cookie = SimpleNamespace(name="GOOGLE_ABUSE_EXEMPTION", value="synthetic-manual-verification", domain=domain,
+                             path=path, expires=expires, secure=False)
+    jar = CookieManager._read_cookie_jar([cookie], CookieManager._google_cookie_names())
+    assert jar == ({"GOOGLE_ABUSE_EXEMPTION": "synthetic-manual-verification"} if accepted else {})
+
+
+def test_manual_verification_cookie_never_authenticates_alone_or_merges_another_profile(monkeypatch):
+    read = MagicMock(return_value=[
+        ("Default", {"GOOGLE_ABUSE_EXEMPTION": "synthetic-manual-verification"}),
+        ("Profile 2", {"__Secure-1PSID": "synthetic-other-account"}),
+    ])
+    verify = MagicMock()
+    monkeypatch.setattr(CookieManager, "_read_browser_candidates", read)
+    monkeypatch.setattr(CookieManager, "_validate_browser_candidates", verify)
+    result = CookieManager.discover_browser_cookies(profile="Default", expected_psid="synthetic-original-owner")
+    assert result.reason == "BROWSER_COOKIE_NOT_FOUND" and not result.cookies
+    verify.assert_not_called()
+
+
+def test_another_profiles_manual_verification_cookie_is_not_added_to_bound_default_jar(monkeypatch):
+    original = {"__Secure-1PSID": "synthetic-original-owner"}
+    read = MagicMock(return_value=[("Default", original),
+        ("Profile 2", {"__Secure-1PSID": "synthetic-other-owner", "GOOGLE_ABUSE_EXEMPTION": "synthetic-other-proof"})])
+    verify = MagicMock(return_value=BrowserCookieDiscovery(cookies=original, source="browser_chrome:Default"))
+    monkeypatch.setattr(CookieManager, "_read_browser_candidates", read)
+    monkeypatch.setattr(CookieManager, "_validate_browser_candidates", verify)
+    result = CookieManager.discover_browser_cookies(profile="Default", expected_psid="synthetic-original-owner")
+    assert result.cookies == original and "GOOGLE_ABUSE_EXEMPTION" not in result.cookies
+    assert verify.call_args.args[0] == [("browser_chrome:Default", original)]
 
 
 def test_validate_cookie_candidates_async_handles_init_exception(monkeypatch):

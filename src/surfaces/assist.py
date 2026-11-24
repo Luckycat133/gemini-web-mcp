@@ -37,12 +37,13 @@ from ..client_wrapper import (
     server_lifespan,
 )
 from ..constants import normalize_model_alias, resolve_model_name
-from ..domain import DomainErrorCode, DomainResult, LongOperationData, OperationState
+from ..domain import DomainErrorCode, DomainResult, LongOperationData, OperationState, result_from_exception
 from ..services.search import response_evidence
 from ..services import (
     DEFAULT_MAX_RESULTS,
     DEFAULT_RESEARCH_TIMEOUT_SECONDS,
     MAX_UNDERSTAND_INPUTS,
+    ChatOperationData,
     ChatRequest,
     ChatService,
     ChatServiceDependencies,
@@ -53,6 +54,8 @@ from ..services import (
     SearchOperationData,
     SearchRequest,
     SearchService,
+    SessionMessageRequest,
+    StartSessionRequest,
     UnderstandImageRequest,
     UnderstandInput,
     UnderstandOperationData,
@@ -172,6 +175,45 @@ def _compose_ask_message(prompt: str, context: Optional[str]) -> str:
     return message
 
 
+def _render_ask_response(
+    result: DomainResult[ChatOperationData], model: str, *, session_id: str | None = None,
+    show_session_id: bool = False,
+) -> list[TextContent]:
+    if not result.ok:
+        if session_id is None:
+            return domain_text(result, domain_failure_text(result), use_result_data=True)
+        data: dict[str, Any] = {"session_id": session_id}
+        if result.data is not None:
+            data["lifecycle"] = result.data.lifecycle
+        text = domain_failure_text(result)
+        if show_session_id:
+            text += f"\nSession handle: {session_id}"
+        return domain_text(result, text, data=data)
+    assert result.data is not None
+    evidence = response_evidence(result.data.responses, result.data.response,
+                                 stream_text=result.data.stream_text, observed_at=result.meta.observed_at)
+    final_text = getattr(result.data.response, "text", "")
+    display_text = final_text if isinstance(final_text, str) and final_text else result.data.stream_text
+    data = {
+        "requested_model": result.data.requested_model,
+        "effective_model": result.data.effective_model,
+        "observed_backend": observed_backend_from_response(result.data.response),
+        "lifecycle": result.data.lifecycle,
+        "answer": evidence.answer,
+        "grounding_state": evidence.grounding_state,
+        "sources": evidence.sources,
+        "observed_source_count": evidence.observed_source_count,
+        "observed_at": evidence.observed_at,
+        "model_selection": result.data.model_selection,
+    }
+    if session_id is not None:
+        data["session_id"] = session_id
+    content = parse_response(result.data.response, model, text_override=display_text)
+    if show_session_id:
+        content.append(TextContent(type="text", text=f"Session handle: {session_id}"))
+    return attach_domain_result(content, result, data=data)
+
+
 @mcp.tool(annotations=MUTATES_REMOTE)
 @domain_error_boundary("gemini_ask", logger)
 async def gemini_ask(
@@ -205,29 +247,7 @@ async def gemini_ask(
             include_temporary_argument=False,
         )
     )
-    if not result.ok:
-        return domain_text(result, domain_failure_text(result), use_result_data=True)
-    assert result.data is not None
-    evidence = response_evidence(result.data.responses, result.data.response,
-                                 stream_text=result.data.stream_text, observed_at=result.meta.observed_at)
-    final_text = getattr(result.data.response, "text", "")
-    display_text = final_text if isinstance(final_text, str) and final_text else result.data.stream_text
-    return attach_domain_result(
-        parse_response(result.data.response, model, text_override=display_text),
-        result,
-        data={
-            "requested_model": result.data.requested_model,
-            "effective_model": result.data.effective_model,
-            "observed_backend": observed_backend_from_response(result.data.response),
-            "lifecycle": result.data.lifecycle,
-            "answer": evidence.answer,
-            "grounding_state": evidence.grounding_state,
-            "sources": evidence.sources,
-            "observed_source_count": evidence.observed_source_count,
-            "observed_at": evidence.observed_at,
-            "model_selection": result.data.model_selection,
-        },
-    )
+    return _render_ask_response(result, model)
 
 
 def _render_search_result(data: SearchOperationData) -> list[TextContent]:
@@ -460,6 +480,139 @@ async def gemini_research(
     )
 
 
+async def _ask_notebook(
+    message: str, *, model: str, thinking_level: str, notebook_ids: list[str],
+    timeout_seconds: int, retain_chat: bool, delete_after_seconds: int | None, operation_id: str | None,
+) -> list[TextContent]:
+    from ..services.background import submit_notebook_chat
+
+    result = await submit_notebook_chat({
+        "prompt": message, "model": model, "thinking_level": thinking_level,
+        "notebook_ids": notebook_ids, "timeout_seconds": timeout_seconds,
+        "retain_chat": retain_chat, "delete_after_seconds": delete_after_seconds,
+    }, operation_id=operation_id)
+    text = (f"Notebook chat accepted. Operation handle: {result.data.operation_id}"
+            if result.ok and result.data else domain_failure_text(result))
+    return domain_text(result, text, use_result_data=True)
+
+
+def _reject_ask(message: str) -> list[TextContent]:
+    invalid = _invalid_argument(message)
+    return domain_text(invalid, domain_failure_text(invalid), use_result_data=True)
+
+
+async def _ask_session(
+    message: str, *, session_id: str | None, model: str, thinking_level: str,
+    retain_chat: bool | None, delete_after_seconds: int | None, recover_only: bool,
+) -> list[TextContent]:
+    created = session_id is None
+    if session_id is None:
+        opened = await _chat_service.start_session(StartSessionRequest(
+            model=model, thinking_level=thinking_level, retain_chat=bool(retain_chat),
+            delete_after_seconds=delete_after_seconds, include_gem_argument=False,
+        ))
+        if not opened.ok:
+            return domain_text(opened, domain_failure_text(opened), use_result_data=True)
+        assert opened.data is not None and opened.data.session_id is not None
+        session_id = opened.data.session_id
+    try:
+        result = await _chat_service.send_session_stream(SessionMessageRequest(
+            session_id=session_id, message=message, recover_only=recover_only,
+            retain_chat=None if created else retain_chat,
+            delete_after_seconds=None if created else delete_after_seconds,
+            include_temporary=False, cleanup_source="gemini_ask",
+        ))
+    except Exception as error:
+        # The first call already allocated a handle. Preserve it for the
+        # caller even if sending fails after creating the session.
+        result = result_from_exception(error, logger=logger, operation="gemini_ask")
+    display_model = result.data.requested_model if result.data is not None else model
+    return _render_ask_response(result, display_model, session_id=session_id, show_session_id=created)
+
+
+def register_lean_assist_tools(server: MCPServer) -> None:
+    @server.tool(name="gemini_ask", annotations=MUTATES_REMOTE)
+    @domain_error_boundary("gemini_ask", logger)
+    async def ask(
+        prompt: str = "", context: str | None = None, model: str | None = None,
+        thinking_level: str | None = None, notebook_ids: list[str] | None = None,
+        inputs: list[UnderstandInput] | None = Field(default=None, max_length=MAX_UNDERSTAND_INPUTS),
+        start_session: bool = False, session_id: str | None = None, recover_only: bool = False,
+        timeout_seconds: int = 600, retain_chat: bool | None = None, delete_after_seconds: int | None = None,
+        operation_id: str | None = None,
+    ) -> list[TextContent]:
+        """Ask Gemini Chat for an answer, web sources, writing or a named app.
+
+        Default to Flash and standard thinking. Describe the web or app use
+        in the prompt. Use inputs for up to 16 text, image, file or URL items
+        with stable IDs. Use notebook_ids for background Notebook Chat, then
+        retrieve the result by operation_id. A plain question returns inline.
+        Set start_session to send the first turn and return a local session_id.
+        Pass it on later turns to inherit the original model and thinking. If
+        a turn is unverified, pass only session_id and recover_only to read it.
+        Choose one of inputs, Notebook context or a multi-turn session. Timeout
+        and operation_id apply to Notebook Chat. Chats clean up by default.
+        """
+        in_session = start_session or session_id is not None or recover_only
+        if sum((bool(inputs), bool(notebook_ids), in_session)) > 1:
+            return _reject_ask("Choose only one of inputs, notebook_ids, or a multi-turn session.")
+        if not notebook_ids and (operation_id is not None or timeout_seconds != 600):
+            return _reject_ask("operation_id and a custom timeout_seconds require notebook_ids.")
+        if start_session and session_id is not None:
+            return _reject_ask("Use start_session for a new session or session_id to continue.")
+        if session_id is not None and (not session_id.strip() or model is not None or thinking_level is not None):
+            return _reject_ask("Provide a nonblank session_id and inherit its model and thinking level.")
+        if recover_only:
+            if session_id is None or prompt.strip() or context or retain_chat is not None or delete_after_seconds is not None:
+                return _reject_ask("For recovery, pass only session_id and recover_only.")
+        elif not prompt.strip():
+            return _reject_ask("prompt must not be blank.")
+
+        model = "flash" if model is None else model
+        thinking_level = "standard" if thinking_level is None else thinking_level
+        if in_session:
+            return await _ask_session(
+                _compose_ask_message(prompt, context), session_id=session_id, model=model,
+                thinking_level=thinking_level, retain_chat=retain_chat,
+                delete_after_seconds=delete_after_seconds, recover_only=recover_only,
+            )
+        if notebook_ids:
+            return await _ask_notebook(
+                _compose_ask_message(prompt, context), model=model, thinking_level=thinking_level,
+                notebook_ids=notebook_ids, timeout_seconds=timeout_seconds, retain_chat=bool(retain_chat),
+                delete_after_seconds=delete_after_seconds, operation_id=operation_id,
+            )
+        if inputs:
+            result = await _understand_service.understand(UnderstandRequest(
+                task=_compose_ask_message(prompt, context), inputs=tuple(inputs), model=model,
+                thinking_level=thinking_level, cleanup_source="gemini_ask",
+                retain_chat=bool(retain_chat), delete_after_seconds=delete_after_seconds,
+            ))
+            return _render_understand_response(result)
+        return await gemini_ask(
+            prompt, context, model, thinking_level,
+            retain_chat=bool(retain_chat), delete_after_seconds=delete_after_seconds,
+        )
+
+    @server.tool(name="gemini_research", annotations=DESTRUCTIVE_REMOTE)
+    async def research(
+        query: str = "", model: str = "flash", thinking_level: str = "standard",
+        timeout_seconds: int = DEFAULT_RESEARCH_TIMEOUT_SECONDS, retain_chat: bool = False,
+        delete_after_seconds: int | None = None, operation_id: str | None = None,
+    ) -> list[TextContent]:
+        """Start Deep Research in the background for a report from multiple sources.
+
+        Keep the operation_id for status and verified report retrieval.
+        timeout_seconds bounds startup. An optional caller-generated op_ plus
+        32 lowercase hex digits allows idempotent submission. Reuse it only for
+        the original request. Set retain_chat to keep the remote conversation.
+        """
+        return await gemini_research(
+            query, model, thinking_level, timeout_seconds, retain_chat, delete_after_seconds,
+            operation_id,
+        )
+
+
 def register_assist_tools(server: MCPServer, *, notebook_context: bool = False) -> None:
     """Expose the same five handlers on another thin MCP surface."""
     handlers: tuple[Any, ...]
@@ -481,16 +634,11 @@ def register_assist_tools(server: MCPServer, *, notebook_context: bool = False) 
             low/medium/high or the standard/extended aliases.
             """
             if notebook_ids:
-                from ..services.background import submit_notebook_chat
-                result = await submit_notebook_chat({
-                    "prompt": _compose_ask_message(prompt, context), "model": model,
-                    "thinking_level": thinking_level, "notebook_ids": notebook_ids,
-                    "timeout_seconds": timeout_seconds, "retain_chat": retain_chat,
-                    "delete_after_seconds": delete_after_seconds,
-                }, operation_id=operation_id)
-                text = (f"Notebook chat accepted. Operation handle: {result.data.operation_id}"
-                        if result.ok and result.data else domain_failure_text(result))
-                return domain_text(result, text, use_result_data=True)
+                return await _ask_notebook(
+                    _compose_ask_message(prompt, context), model=model, thinking_level=thinking_level,
+                    notebook_ids=notebook_ids, timeout_seconds=timeout_seconds, retain_chat=retain_chat,
+                    delete_after_seconds=delete_after_seconds, operation_id=operation_id,
+                )
             if operation_id is not None:
                 invalid = _invalid_argument("operation_id requires notebook_ids for a background chat.")
                 return domain_text(invalid, domain_failure_text(invalid), use_result_data=True)

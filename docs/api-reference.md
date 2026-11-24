@@ -9,25 +9,51 @@ dated Gemini Web observations are documented separately in the
 
 ## Business Surfaces
 
-`gemini-mcp-function` exposes 17 tools; `gemini-mcp-account` exposes 17 explicit account tools. The main server without `GEMINI_TOOLS` uses the function surface. Authentication helpers belong to explicit compatibility profiles, not these business catalogs.
+`gemini-mcp-function` and `gemini-mcp-account` each expose six tools on independent MCP connections. The main server without `GEMINI_TOOLS` uses the function surface. Use `gemini-mcp-server` with `GEMINI_TOOLS=function-full` or `GEMINI_TOOLS=account-full` for the respective prior 17-tool catalogs.
 
 | Tool | Current business contract |
 | --- | --- |
-| Function `gemini_ask` | Ordinary/current-web questions; optional `notebook_ids` starts a background ordinary chat with `execution_mode="chat"` |
-| Function `gemini_run_task` | Explicit background Task with `execution_mode="task"`, default Flash and optional Notebook sources |
-| Function `gemini_get_operation_status/result` | Read the original persistent operation; the worker verifies the full answer and recognized native Task file artifacts before default owned-thread cleanup |
+| Function `gemini_ask` | Ordinary/current-web questions, mixed inputs, session turns or Notebook Chat with `execution_mode="chat"` |
+| Function `gemini_run_task` | Explicit background Task with `execution_mode="task"`, default Flash compatibility alias (preferring discovered Hydrogen) and optional Notebook sources |
+| Function `gemini_research` | Deep Research submission and persistent handle for the report |
+| Function `gemini_create_media` | Background image generation, image edit, video or music via `kind` |
+| Function `gemini_get_operation_status` | Read-only status of the original persistent operation |
+| Function `gemini_get_operation_result` | Recover the result or verified artifacts. May trigger default cleanup of the operation's owned conversation |
+| Account `gemini_history` | Bounded metadata and explicitly requested chat text |
+| Account `gemini_manage_chat` | Rename, pin, unpin or move an exact conversation into a Notebook with fresh read-back |
+| Account `gemini_delete_chat` | Delete one exact conversation and independently verify absence |
 | Account `gemini_notebooks` | Default `source="notebooklm"` lists compact source metadata; `source="gemini"` retains the same product's project view and project-chat listing |
 | Account `gemini_manage_notebook` | Native Notebook and text-source create/read/delete with independent metadata verification; Notebook deletion includes its conversations |
-| Account `gemini_skills` | Native Skills list/get/create/update/enable/delete; instruction reads require explicit opt-in |
-| Account `gemini_preferences` | Saved browser/action preferences with read-back; runtime effects remain unverified unless separately observed |
-| Account `gemini_tasks` | Task metadata, bounded progress, explicit deletion and Task schedule management |
-| Account `gemini_task_browser` | Verified Task browser PNG, or one explicit journaled input |
+| Account `gemini_tasks` | Read-only Task list, get and bounded progress |
 
-The function version of `gemini_ask` accepts `prompt`, optional `context`, `model="flash"`, `thinking_level="standard"`, optional `notebook_ids`, `timeout_seconds=600`, `retain_chat=false`, optional `delete_after_seconds` and `operation_id`. A caller-supplied operation ID requires Notebook context. Other ordinary questions return through the usual direct path. Assist and compact compatibility schemas remain separate.
+`gemini_ask` keeps the `flash` compatibility default and standard thinking for new requests, preferring discovered Hydrogen. Explicit `neon`, `hydrogen` and `carbon` select exact current-account models; unavailable legacy Argon/Pro selections are refused rather than replaced. Its attachment, Notebook and session paths are mutually exclusive. For attachments, pass up to 16 typed `inputs` with caller-owned `id` values. For background Notebook Chat, pass `notebook_ids` and optionally `timeout_seconds` or `operation_id`. For a local multi-turn session, send a first prompt with `start_session=true`, then pass its `session_id` to inherit the model and thinking level. Read back an unverified turn with just `session_id` and `recover_only=true`. The ordinary path returns inline.
 
-`gemini_run_task` accepts the same model, thinking, Notebook, timeout, retention and operation controls, without `context`, plus optional `input_id` and `input_option_id` for a current confirmation card. Start returns an operation handle; to answer a card, keep that same `operation_id` and use the exact prompt returned in `input_options`. The token dispatches once and preserves original model/retention. `gemini_tasks` accepts list/get/delete/progress plus list_schedules/get_schedule/create_schedule/update_schedule/pause_schedule/resume_schedule/delete_schedule. Task list/get do not read chat text; progress reads bounded activity metadata. Schedule listing uses local offset/limit pagination. Both Task tools carry destructive annotations because they can perform explicitly requested app changes or delete a thread.
+`gemini_create_media` starts a background job and, by default, waits up to 120 seconds on that same operation. Set `wait_seconds=0` to return its handle immediately. `gemini_get_operation_result` accepts `wait_seconds=0..120`; waiting never resubmits generation. Omitted media `model` selects discovered Hydrogen. Explicit available chat-model choices are preserved. Image requests accept these reference controls.
 
-Task schedules are separate from Chat scheduled actions. Task browser observation and explicit input do not provide exclusive pause, automatic permission approval, login or Task stop/resume; website effects need independent verification. See [Notebook, Chat and Task workflows](notebook-task-workflows.md) for examples and evidence boundaries.
+| Argument | Contract |
+| --- | --- |
+| `image_paths` | Nonempty ordered local references for image generation or editing. Mutually exclusive with `image_path` |
+| `image_path` | One local reference for `kind="edit_image"` or `kind="video"` |
+| `source_operation_id` | Earlier completed same-account image operation whose saved artifact is verified again before upload |
+| `source_artifact_id` | Selects one image from that operation. Optional when it has exactly one usable image |
+
+For native Web video, `image_path` attaches one validated local image in the composer before Send. The uploaded preview token must remain unchanged through the final account/model/mode/format checks. An unsupported, missing or changed attachment blocks submission; the reference is never silently discarded. `image_paths` and saved-image lineage controls remain for image generation/editing. A [7c Carbon follow-up](live-model-followup-2026-11-22.md) verified one reference video through primary `background=false`, including local artifacts and cleanup. That does not establish all models, durations or compact live paths; earlier DOM-only probes remain pre-Send evidence.
+
+Legacy primary `gemini_generate_media(background=false)` and compact `create(background=false)` use one protected native music/video operation and wait on its original handle within the caller's wait budget. Verified completion preserves the compatible `state=local` artifact response, explicit `filename` and the `generated_media/` default directory. An omitted filename is opaque rather than prompt-derived, and the prompt is not persisted in the operation ledger. A wait timeout returns the same handle with `state=partial` and `verification_status=wait_elapsed`; unknown results and failed saves retain protection without cleanup or resubmission. SDK/API synchronous behavior is unchanged. `gemini_create_media` keeps its background-operation contract and `wait_seconds` controls.
+
+Native read-back rechecks the captured account and credentials after each awaited read before observing or checkpointing response metadata. Account drift refuses the new RID/RCID and artifacts; at most the previously observed CID stays bound to its original owner, protected from cleanup. Reading a response after a switch cannot authorize writing it into the old operation.
+
+Native Web music adds optional `music_duration="short"|"standard"` and `music_vocals="instrumental"|"vocals"|"auto"`, both defaulting to `None`. Set only options the user explicitly requests; `None` preserves observed webpage defaults rather than selecting the first item or guessing from the prompt. These controls are music-only and are rejected before dispatch with explicit SDK transport. The current delivery includes these contracts; per-request refusal and timeout results remain distinct from the successful Neon Short/Instrumental browser control.
+
+The same controls are accepted by `gemini_create_media(kind="music")`, `gemini_generate_music`, legacy `gemini_generate_media(media_type="music")` and compact `create(type="music")`.
+
+The saved source is uploaded first, followed by additional `image_paths`, into a new chat with a new operation handle. A missing, changed or unverified source stops the new dispatch. Use the result artifact ID, keep each step's handle, and inspect the generated image to verify the requested composition. Offline checks cover multi-reference and follow-up lineage. One authorized 2026-11-21 two-reference composition returned a verified 2048×2048 JPEG matching both synthetic references; follow-up edit fidelity remains a separate live check. [Image examples](tools.md#gemini_create_media)
+
+`gemini_run_task` accepts model, thinking, Notebook, timeout, retention and operation controls. To answer a current confirmation card, keep the same `operation_id` and provide `input_id`, `input_option_id` and the exact prompt from `input_options`. The token dispatches once and preserves the original model and retention. The tool carries a destructive annotation because Task can change connected app data.
+
+In `account-full`, `gemini_tasks` adds Task mutations and schedule management, with a destructive annotation. Schedule listing uses local offset/limit pagination. This profile also exposes `gemini_skills`, `gemini_preferences` and `gemini_task_browser` for native Skill management, saved settings and explicit browser actions.
+
+Task schedules are separate from Chat scheduled actions. Task browser observation and explicit input do not provide exclusive pause, login or Task stop/resume. Verify website effects independently. When `GEMINI_TASK_AUTO_APPROVE=true` is set in the startup environment, the worker can submit one single-use remote-browser grant per matching card on an MCP-owned Task. The default is off. `GEMINI_TASK_WEB_APPROVALS` separately enables discovery of website-created Tasks. Exact Google Tasks deletion rules require both switches and an explicit Task/title rule. Progress reports `browser_approval_configured` for configured deletion cards and `native_review_required` when native handling is needed. [Approval settings](task-preferences.md) · [Notebook, Chat and Task workflows](notebook-task-workflows.md)
 
 An App connection card returns `needs_attention`, `setup_required` and `setup_kind`, rather than a fabricated permission choice or completed answer. Connection setup must be resolved in the original Gemini Task; a text reply cannot grant OAuth. A metadata-only status read can report a previously observed setup state without revalidating the card.
 
@@ -35,15 +61,15 @@ Task result artifacts include the full answer and supported structured file card
 
 Research workers save and verify the full ready nonempty report as a Markdown Artifact before default cleanup. Result reads return a preview of at most 4,000 characters and the full local Artifact. Cached reads work after restart and recheck account, source identity, size and SHA-256; missing or corrupt files remain partial. Status uses progress metadata and never downloads or cleans a report.
 
-`gemini_list_research_report_actions` and `gemini_create_from_research_report` accept either `chat_id` or `operation_id`, never both. The operation path reads only its verified local report and does not authenticate remotely, generate or delete. An unavailable local report must first be recovered with the original result handle. This lets derivatives work after the source conversation was cleaned.
+In `function-full`, `gemini_list_research_report_actions` and `gemini_create_from_research_report` accept one `chat_id` or `operation_id`. The operation path reads its verified local report. Recover an unavailable local report with the original result handle before requesting derivatives. The derivatives remain available after cleanup of the source conversation.
 
 ## Explicit Compatibility Profiles
 
-## Tool Groups
+### Tool Groups
 
 | Group | Tools | Intended use |
 |-------|-------|--------------|
-| `core` | Chat, media, file/URL, Deep Research | Recommended default |
+| `core` | Chat, media, file/URL, Deep Research | Broad legacy content profile |
 | `manage` | Chat history, model listing, Gems | Account content management |
 | `prompts` | Local prompt library | Optional local helper |
 | `all` | `core` + `manage` | Complete Gemini workflow without local prompt library |
@@ -52,12 +78,14 @@ The explicitly selected primary compatibility profiles expose authentication hel
 
 ---
 
-## Tool Profiles
+### Tool Profiles
 
 Use narrow `GEMINI_TOOLS` profiles for agent-facing deployments:
 
 | Profile | Use case |
 |---------|----------|
+| `function-full` | Prior 17-tool function catalog with separate media, understanding and session tools and Research derivatives |
+| `account-full` | Prior 17-tool account catalog with Task mutations, schedules, native Skills, Gems, preferences, browser actions and cleanup |
 | `model` / `chat` | Call Gemini models only; no history, media, file, research, or account tools |
 | `history` | One read-only `gemini_history` facade for list/scan/search/read/export, without delete, scheduled actions, or Gems |
 | `history-organize` | `gemini_history`, read-only `gemini_notebooks`, and the explicit Notebook move operation |
@@ -90,7 +118,7 @@ Common chat parameters:
 
 | Parameter | Type | Notes |
 |-----------|------|-------|
-| `model` | `str` | `flash` (default), `argon`, `pro`; `fast` and `thinking` remain compatibility aliases. `flash-lite` requires fresh same-account basic Flash quota exhaustion evidence. |
+| `model` | `str` | `flash` (default, preferring discovered Hydrogen), `hydrogen`, `neon`, `carbon`, or exact discovered names. Legacy `argon`/`pro` require their own family to remain available; they are never mapped to Neon. `flash-lite` requires fresh same-account basic Flash quota exhaustion evidence. |
 | `thinking_level` | `str` | `low`, `medium` or `high`; `standard`/`extended` remain low/high aliases. Lite ignores caller strength and reports `thinking_selectable=false` |
 | `learning_mode` | `str` | Optional guided-learning companion: `interactive_quiz`/`quiz`, `flashcards`, `practice_test`, `study_guide`/`exam_prep` |
 | `image_paths` | `list[str]` | Optional local image attachments |
@@ -121,16 +149,16 @@ chunk semantics and counts.
 
 Current Gemini Web media routing:
 
-| Request | Effective backend |
+| Request | Route and evidence |
 |---------|-------------------|
-| `media_type=image`, `model=flash-lite` | `Nano Banana 2 Lite` route; exact observed backend may be unavailable |
-| `media_type=image`, `model=flash` / `pro` | First pass reports `Nano Banana 2`; Pro redo is separate |
-| `media_type=music` | `Lyria` family; exact version is unverified unless upstream identifies it |
-| `media_type=video`, default `model=flash` | Gemini Apps Create video mode with the account's current Omni rollout |
+| `media_type=image` | Web image route; omitted model prefers Hydrogen and explicit available selectors are preserved. A static label cannot identify Nano Banana version |
+| `media_type=music` | Web music route; exact generator version is unverified unless upstream identifies it |
+| `media_type=video`, omitted model | Gemini Apps Create video mode with discovered Hydrogen; `duration_seconds=10|15`, `aspect_ratio="16:9"|"9:16"` |
 | Video with `model=gemini-omni-1.2-flash` | Exact Gemini API model via `GEMINI_API_KEY`, with optional `duration_seconds` (integer 3–15, provider default 10) |
 
-`model=pro` does not directly select a different first-pass image backend than
-Flash. The Pro image redo control is a post-generation Gemini Web UI action.
+The chat selector does not identify the image generator. An explicit available
+selector is preserved. The Pro image redo control is a separate post-generation
+Gemini Web UI action. The API route is used only for the explicit API model ID.
 The signed-in 2026-09-26 live check produced images and music through MCP, while
 generic MCP video returned `ARTIFACT_NOT_RETURNED`. The current Web route uses
 the dedicated Create video transport. The exact API model requires a billed API

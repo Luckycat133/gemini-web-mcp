@@ -8,6 +8,25 @@ from src.infrastructure.operation_store import SCHEMA_VERSION, OperationStore
 from src.services.task_result_storage import save_task_result
 
 
+def test_v6_operation_store_adds_image_lineage_without_changing_main_table(tmp_path, monkeypatch):
+    monkeypatch.setenv("GEMINI_PSID", "synthetic-schema-test")
+    store = OperationStore(tmp_path / "v6.sqlite")
+    original, _ = store.create_or_get("legacy", "gemini_generate_image", media_type="image")
+    with sqlite3.connect(store.path) as connection:
+        connection.execute("DROP TRIGGER operation_image_sources_delete")
+        connection.execute("DROP TABLE operation_image_sources")
+        main_table = connection.execute("PRAGMA table_info(operations)").fetchall()
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == 6
+    assert OperationStore(store.path).get("legacy") == original
+    with sqlite3.connect(store.path) as connection:
+        assert connection.execute("PRAGMA table_info(operations)").fetchall() == main_table
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == 6
+        assert connection.execute("SELECT count(*) FROM operation_image_sources").fetchone()[0] == 0
+        connection.execute("INSERT INTO operation_image_sources VALUES ('legacy', 'parent', 'image')")
+        connection.execute("DELETE FROM operations WHERE operation_id='legacy'")
+        assert connection.execute("SELECT count(*) FROM operation_image_sources").fetchone()[0] == 0
+
+
 def test_current_status_reads_use_committed_snapshot_without_writer_lock_or_ddl(tmp_path, monkeypatch):
     store = OperationStore(tmp_path / "operations.sqlite3")
     store.create("job", "gemini_generate_image")

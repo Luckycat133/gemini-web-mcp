@@ -86,10 +86,6 @@ _register_mode = "full" if groups_enable_manage(TOOL_GROUPS) else "default"
 register_tools(mcp, TOOL_GROUPS, mode=_register_mode)
 
 
-def _tool_groups_include_manage() -> bool:
-    return _register_mode == "full"
-
-
 # ── 基础设施工具（仅在 full 模式下向 agent 暴露；default 模式下仅供后台自动化） ──
 
 
@@ -217,10 +213,17 @@ async def gemini_get_cookie_from_browser(browser: str = "chrome", profile: str =
 
 
 def main():
-    """启动服务器 — 基础设施后台自动化，AI 只看到默认底座工具。"""
-    if os.environ.get("GEMINI_TOOLS", "function").strip() in {"", "function", "functions"}:
+    """Start the selected business surface or an explicit legacy profile."""
+    profile = os.environ.get("GEMINI_TOOLS", "function").strip()
+    if profile in {"", "function", "functions", "function-full"}:
         from .surfaces.function import main as function_main
-        function_main()
+
+        function_main(full=profile == "function-full")
+        return
+    if profile == "account-full":
+        from .surfaces.account import main as account_main
+
+        account_main(full=True)
         return
     logger.info("🚀 启动 Gemini Web MCP Server (v%s)", __version__)
     logger.info(f"🔧 加载工具组: {', '.join(TOOL_GROUPS)} (mode=default)")

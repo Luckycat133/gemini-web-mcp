@@ -327,7 +327,7 @@ def test_primary_and_compact_media_adapters_return_same_artifact_identity(monkey
     assert compact_data["artifacts"][0]["uri"] == uri
     assert primary_data["observed_backend"] == "observed-image-backend"
     assert compact_data["observed_backend"] == "observed-image-backend"
-    assert primary_data["effective_backend"] == compact_data["effective_backend"] == "Nano Banana 2"
+    assert primary_data["effective_backend"] == compact_data["effective_backend"] == "Gemini Web image mode"
 
 
 def test_generated_image_extraction_uses_selected_candidate_provenance():

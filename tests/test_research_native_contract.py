@@ -275,8 +275,12 @@ def test_installed_sdk_ready_document_without_plan_is_preserved_and_never_confir
 
 def test_installed_sdk_plan_missing_does_not_promote_ordinary_or_empty_document(tmp_path, monkeypatch):
     from gemini_webapi.types import DeepResearchDocument
+    import src.services.research as research
     from src.infrastructure.operation_store import OperationStore
 
+    monkeypatch.setattr(research, "phase_timeout", lambda _: 0.02)
+    read_plan = AsyncMock(return_value=None)
+    monkeypatch.setattr(research, "read_existing_research_plan", read_plan)
     for with_document in (False, True):
         class NotReadyClient(_NativeContractClient):
             async def generate_content(self, prompt, **kwargs):
@@ -305,6 +309,7 @@ def test_installed_sdk_plan_missing_does_not_promote_ordinary_or_empty_document(
         assert len(client.calls) == 1
         assert OperationStore(path).is_cleanup_protected("c_not_ready")
         cleanup.assert_not_awaited()
+    assert read_plan.await_count == 2
 
 
 def test_late_plan_cid_is_checkpointed_without_replay_or_timeout_regression(tmp_path, monkeypatch):

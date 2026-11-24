@@ -4,12 +4,16 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 import uuid
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field, fields, is_dataclass
 from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Generic, TypeVar
+
+from .artifacts import ArtifactResultData
+from .conversations import CleanupObservation
 
 
 class DomainErrorCode(str, Enum):
@@ -92,6 +96,14 @@ class ResultMeta:
             diagnostic_id=diagnostic_id,
             details=dict(details or {}),
         )
+
+
+@dataclass(frozen=True, kw_only=True)
+class InlineMediaArtifactData(ArtifactResultData):
+    """A saved media result with its original operation and cleanup evidence."""
+
+    operation_id: str
+    cleanup: CleanupObservation | None = None
 
 
 T = TypeVar("T")
@@ -323,6 +335,17 @@ def result_from_exception(
 
 _Classification = tuple[DomainErrorCode, str, bool, str | None, OperationState]
 _TextRule = tuple[Callable[[str, str], bool], _Classification]
+_HTTP_RATE_LIMIT = re.compile(r"\b(?:http(?:/\d(?:\.\d)?)?\s*(?:status(?:\s+code)?\s*[:=]?\s*)?|status(?:\s+code)?\s*[:=]?\s*)429\b", re.IGNORECASE)
+
+
+def _is_http_rate_limit(error: BaseException) -> bool:
+    if any(cls.__name__ == "TemporarilyBlockedError" and cls.__module__.startswith("gemini_webapi.")
+           for cls in type(error).__mro__):
+        return True
+    for value in (getattr(error, "status_code", None), getattr(getattr(error, "response", None), "status_code", None)):
+        if isinstance(value, int) and not isinstance(value, bool) and value == 429:
+            return True
+    return bool(_HTTP_RATE_LIMIT.search(str(error)))
 
 
 def _exception_type_classification(error: BaseException) -> _Classification | None:
@@ -366,7 +389,34 @@ def _exception_type_classification(error: BaseException) -> _Classification | No
             "Check network or proxy settings and retry.",
             OperationState.FAILED,
         )
+    if _is_http_transport_error(error):
+        return (
+            DomainErrorCode.NETWORK_ERROR,
+            "The upstream service could not be reached.",
+            True,
+            "Check network or proxy settings and retry.",
+            OperationState.FAILED,
+        )
     return None
+
+
+def _is_http_transport_error(error: BaseException) -> bool:
+    """Match transient HTTP/curl transport exceptions without masking 4xx or timeouts."""
+    error_text = str(error).lower()
+    if "timeout" in error_text or "timed out" in error_text:
+        return False
+    status_code = getattr(error, "status_code", None)
+    if status_code is None:
+        status_code = getattr(getattr(error, "response", None), "status_code", None)
+    if isinstance(status_code, int) and not isinstance(status_code, bool) and 400 <= status_code < 500:
+        return False
+    for cls in type(error).__mro__:
+        mod = getattr(cls, "__module__", "") or ""
+        if cls.__name__ in {"HTTPError", "RequestsError", "RequestError", "TransportError", "CurlError"} and (
+            mod.startswith(("curl_cffi", "httpx", "httpx2", "urllib3", "aiohttp"))
+        ):
+            return True
+    return False
 
 
 def _matches_no_cookie(legacy_code: str, error_text: str) -> bool:
@@ -390,7 +440,22 @@ def _matches_session_not_found(legacy_code: str, error_text: str) -> bool:
 
 def _matches_network_error(legacy_code: str, error_text: str) -> bool:
     return legacy_code == "NETWORK_ERROR" or any(
-        marker in error_text for marker in ("network", "connection refused", "connection reset")
+        marker in error_text
+        for marker in (
+            "network",
+            "connection refused",
+            "connection reset",
+            "ssl_connect",
+            "connection closed abruptly",
+            "curl:",
+            "empty reply",
+            "recv failure",
+            "send failure",
+            "broken pipe",
+            "could not resolve",
+            "remote protocol",
+            "proxy error",
+        )
     )
 
 
@@ -489,6 +554,9 @@ _TEXT_CLASSIFICATION_RULES: tuple[_TextRule, ...] = (
 def _classify_exception(
     error: BaseException,
 ) -> _Classification:
+    if _is_http_rate_limit(error):
+        return (DomainErrorCode.RATE_LIMITED, "The upstream service temporarily limited requests.", True,
+                "Wait before retrying; keep the current account credentials.", OperationState.FAILED)
     type_classification = _exception_type_classification(error)
     if type_classification is not None:
         return type_classification
@@ -505,6 +573,13 @@ def _classify_exception(
         "Retry once; if it persists, report the diagnostic ID.",
         OperationState.FAILED,
     )
+
+
+def classify_exception(error: BaseException) -> DomainResult[None]:
+    """Inspect the shared error taxonomy without logging or starting any request."""
+    code, message, retryable, suggested_action, state = _classify_exception(error)
+    return DomainResult.failure(code, message, retryable=retryable, suggested_action=suggested_action,
+                                operation_state=state, verification_status="exception_classified")
 
 
 def _json_safe(value: Any) -> Any:

@@ -27,9 +27,12 @@ from ..services.music_recovery import (
     music_response_identity,
 )
 from ..services.media_generation import (
-    MediaGenerationProgress, add_media_cleanup_evidence, compose_media_prompt, generate_media_response, media_timeout_scope,
-    media_timeout as _media_timeout, video_options_error,
+    MediaGenerationProgress, MusicDuration, MusicVocals, add_media_cleanup_evidence, compose_media_prompt,
+    generate_media_response, media_timeout_scope, media_timeout as _media_timeout, music_option_arguments,
+    music_options_error, video_options_error,
 )
+from ..services.native_media_generation import native_media_enabled
+from ..services.native_media_inline import submit_and_wait_native_media
 from ..services import (
     artifact_exception_result,
     artifact_from_local_path,
@@ -44,6 +47,7 @@ from ..services import (
 )
 from .annotations import MUTATES_REMOTE
 from .utils import parse_response, validate_optional_image_path
+from ..services.media_inputs import image_workflow_options_error
 from ..services.media_storage import (
     _MediaSaveOutcome,
     _normalize_saved_image_extension as _normalize_saved_image_extension,
@@ -351,13 +355,25 @@ def register_media_tools(mcp: MCPServer):
         background: bool = True,
         operation_id: Optional[str] = None,
         duration_seconds: Optional[int] = None,
+        aspect_ratio: Literal["16:9", "9:16"] | None = None,
+        image_paths: list[str] | None = None,
+        source_operation_id: str | None = None,
+        source_artifact_id: str | None = None,
+        music_duration: MusicDuration | None = None,
+        music_vocals: MusicVocals | None = None,
     ) -> list[TextContent]:
         """生成媒体；默认后台运行，以 operation_id 查询任务状态和结果。
 
         使用 gemini_get_operation_status / gemini_get_operation_result 查询；
         background=false 显式选择同步模式，不接受 operation_id。
+        同步网页视频和音乐会等待原任务，未取得可验证结果时可继续查询返回的任务句柄。
+        后台生图支持有序 image_paths，也可用 source_operation_id 和可选
+        source_artifact_id 续编已保存的图片。源图排在本地参考图前。
         视频可显式使用付费 API 模型 gemini-omni-1.2-flash，需 GEMINI_API_KEY
         及后台模式。此路线接受 3 至 15 秒的 duration_seconds。
+        网页视频支持 duration_seconds=10 或 15，以及 aspect_ratio="16:9" 或 "9:16"。
+        网页音乐支持 music_duration（short、standard）及
+        music_vocals（instrumental、vocals、auto）。
         """
         if not background and operation_id is not None:
             return _invalid_media_argument("operation_id requires background=true.")
@@ -367,21 +383,35 @@ def register_media_tools(mcp: MCPServer):
             return _invalid_media_argument("filename must be a single non-empty file name.")
         invalid = video_options_error(media_type=media_type, model=model, thinking_level=thinking_level,
                                       duration_seconds=duration_seconds, delete_after_seconds=delete_after_seconds,
-                                      background=background)
+                                      background=background, aspect_ratio=aspect_ratio)
+        if invalid:
+            return _invalid_media_argument(invalid)
+        invalid = music_options_error(media_type=media_type, music_duration=music_duration, music_vocals=music_vocals)
+        if invalid:
+            return _invalid_media_argument(invalid)
+        invalid = image_workflow_options_error(
+            media_type=media_type, image_path=image_path, image_paths=image_paths, background=background,
+            source_operation_id=source_operation_id, source_artifact_id=source_artifact_id,
+        )
         if invalid:
             return _invalid_media_argument(invalid)
         valid_image, safe_image_path, image_error = validate_optional_image_path(image_path)
         if not valid_image:
             return _invalid_image_response(image_error)
 
+        request = {
+            "prompt": prompt, "media_type": media_type, "model": model, "thinking_level": thinking_level,
+            "image_path": safe_image_path, "output_dir": output_dir, "filename": filename,
+            "timeout_seconds": timeout_seconds, "retain_chat": retain_chat,
+            "delete_after_seconds": delete_after_seconds, "edit": False, "duration_seconds": duration_seconds,
+            "aspect_ratio": aspect_ratio,
+            "image_paths": image_paths, "source_operation_id": source_operation_id,
+            "source_artifact_id": source_artifact_id,
+            **music_option_arguments(music_duration, music_vocals),
+        }
         if background:
             from ..services.background import submit_media
-            result = await submit_media({
-                "prompt": prompt, "media_type": media_type, "model": model, "thinking_level": thinking_level,
-                "image_path": safe_image_path, "output_dir": output_dir, "filename": filename,
-                "timeout_seconds": timeout_seconds, "retain_chat": retain_chat,
-                "delete_after_seconds": delete_after_seconds, "edit": False, "duration_seconds": duration_seconds,
-            }, operation="gemini_generate_media", operation_id=operation_id)
+            result = await submit_media(request, operation="gemini_generate_media", operation_id=operation_id)
             return domain_text(result, "媒体任务已提交，可用任务句柄查询状态和结果。" if result.ok
                                else domain_failure_text(result), use_result_data=True)
 
@@ -415,6 +445,15 @@ def register_media_tools(mcp: MCPServer):
         progress = MediaGenerationProgress()
         try:
             client = get_gemini_client()
+            if native_media_enabled(client, media_type):
+                waited = await submit_and_wait_native_media(request, operation="gemini_generate_media",
+                                                            timeout_seconds=effective_timeout)
+                inline_data = waited.data
+                summary = (f"媒体任务 {inline_data.operation_id}，状态 {inline_data.state.value}。"
+                           if inline_data and inline_data.operation_id else "")
+                text = summary if waited.ok else f"{domain_failure_text(waited)}\n{summary}".rstrip()
+                content = domain_text(waited, text, use_result_data=True)
+                return append_artifact_block(content, getattr(inline_data, "artifacts", ()))
             await initialize_client()
             await cleanup_due_remote_chats(client)
             with media_timeout_scope(client, effective_timeout):
@@ -427,7 +466,9 @@ def register_media_tools(mcp: MCPServer):
                         retain_chat=retain_chat, delete_after_seconds=delete_after_seconds,
                         source=f"gemini_generate_media:{job.media_type}",
                         media_type=job.media_type,
+                        duration_seconds=duration_seconds, aspect_ratio=aspect_ratio,
                         progress=progress,
+                        **music_option_arguments(music_duration, music_vocals),
                     ),
                     timeout=effective_timeout,
                 )
@@ -494,11 +535,15 @@ def register_media_tools(mcp: MCPServer):
         filename: Optional[str] = None,
         background: bool = True,
         operation_id: Optional[str] = None,
+        music_duration: MusicDuration | None = None,
+        music_vocals: MusicVocals | None = None,
     ) -> list[TextContent]:
         """生成音乐；默认后台运行，以操作句柄查询状态和结果。
 
         使用 gemini_get_operation_status / gemini_get_operation_result 查询；
         background=false 显式选择同步模式，不接受 operation_id。
+        同步网页音乐未取得可验证结果时，可继续查询返回的原任务句柄。
+        可选 music_duration（short、standard）及 music_vocals（instrumental、vocals、auto）。
         """
         result = await gemini_generate_media(
             prompt=prompt,
@@ -512,5 +557,7 @@ def register_media_tools(mcp: MCPServer):
             filename=filename,
             background=background,
             operation_id=operation_id,
+            music_duration=music_duration,
+            music_vocals=music_vocals,
         )
         return cast(list[TextContent], result)

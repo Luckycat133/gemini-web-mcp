@@ -9,6 +9,8 @@ from typing import Any
 from unittest.mock import AsyncMock
 
 import pytest
+from gemini_webapi.exceptions import APIError, TemporarilyBlockedError
+from src.domain.results import classify_exception
 from src.adapters.mcp_sdk import MCPServer, TextContent
 
 import src.client_wrapper as client_wrapper
@@ -72,6 +74,47 @@ class _CodedError(RuntimeError):
     def __init__(self, code: str, message: str):
         super().__init__(message)
         self.code = code
+
+
+@pytest.mark.parametrize("error", [
+    TemporarilyBlockedError("synthetic private cookie invalid network details"),
+    RuntimeError("HTTP 429 Too Many Requests"),
+    RuntimeError("HTTP/2 429"),
+    RuntimeError("status code: 429"),
+    APIError("Batch execution failed with status code 429"),
+])
+def test_observed_http_429_is_rate_limited_without_login_advice_or_private_text(error, caplog):
+    result = classify_exception(error)
+    assert result.error_code == "RATE_LIMITED" and result.retryable
+    assert "cookie" not in result.suggested_action.lower() or "keep" in result.suggested_action.lower()
+    assert "sign" not in result.suggested_action.lower() and "refresh" not in result.suggested_action.lower()
+    assert "synthetic private" not in json.dumps(result.to_dict())
+    assert not caplog.records
+
+
+@pytest.mark.parametrize("location", ["direct", "response"])
+def test_structured_http_429_takes_priority_over_auth_or_network_text(location):
+    error = ConnectionError("network cookie rejected")
+    if location == "direct":
+        error.status_code = 429
+    else:
+        error.response = SimpleNamespace(status_code=429)
+    assert classify_exception(error).error_code == "RATE_LIMITED"
+
+
+@pytest.mark.parametrize("error,expected", [
+    (PermissionError("HTTP 401 auth required"), "AUTH_REQUIRED"),
+    (PermissionError("HTTP 403 forbidden"), "AUTH_REQUIRED"),
+    (ConnectionError("HTTP 503 network unavailable"), "NETWORK_ERROR"),
+    (_CodedError("AUTH_REQUIRED", "401"), "AUTH_REQUIRED"),
+    (RuntimeError("synthetic task number 429"), "INTERNAL_ERROR"),
+    (RuntimeError("HTTP 4290 is not a status"), "INTERNAL_ERROR"),
+    (APIError("Batch execution failed with status code 401"), "INTERNAL_ERROR"),
+    (APIError("Batch execution failed with status code 403"), "INTERNAL_ERROR"),
+    (APIError("Batch execution failed with status code 500"), "INTERNAL_ERROR"),
+])
+def test_non_429_auth_network_and_ordinary_numbers_keep_existing_taxonomy(error, expected):
+    assert classify_exception(error).error_code == expected
 
 
 @pytest.mark.parametrize(

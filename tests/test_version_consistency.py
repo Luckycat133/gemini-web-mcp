@@ -108,6 +108,7 @@ def test_public_onboarding_surfaces_use_the_canonical_source_install(tmp_path):
         "docs/launch-kit.md",
         "docs/client-examples.md",
         "examples/clients/codex.config.toml",
+        "examples/clients/codex.account.config.toml",
         "examples/clients/claude-desktop.json",
         "examples/clients/claude-code.mcp.json",
         "examples/clients/vscode.mcp.json",
@@ -144,6 +145,7 @@ def test_versioned_wheel_url_is_optional_but_must_match_when_present(tmp_path):
         "docs/launch-kit.md",
         "docs/client-examples.md",
         "examples/clients/codex.config.toml",
+        "examples/clients/codex.account.config.toml",
         "examples/clients/claude-desktop.json",
         "examples/clients/claude-code.mcp.json",
         "examples/clients/vscode.mcp.json",
@@ -221,6 +223,55 @@ def test_skill_and_changelog_versions_must_match_package(tmp_path):
     errors = repository_version_errors(tmp_path, metadata)
     assert any("gemini-web-mcp/SKILL.md: Skill version '9.8.7'" in error for error in errors)
     assert any("docs/changelog.md: current release section '9.8.7'" in error for error in errors)
+
+
+def _changelog_errors(tmp_path, changelog, *, require_dated_release=False):
+    metadata = load_release_metadata(PROJECT_ROOT)
+    _write_active_version_consumers(tmp_path, metadata)
+    (tmp_path / "docs/changelog.md").write_text(changelog, encoding="utf-8")
+    errors = repository_version_errors(tmp_path, metadata, require_dated_release=require_dated_release)
+    return [error for error in errors if error.startswith("docs/changelog.md:")]
+
+
+def test_development_version_uses_unreleased_until_the_tag_build(tmp_path):
+    metadata = load_release_metadata(PROJECT_ROOT)
+    draft = "# Changelog\n\n## [Unreleased]\n\n### Added\n\n- Current changes.\n\n## [0.2.2] - 2026-10-25\n"
+
+    assert _changelog_errors(tmp_path, draft) == []
+    assert _changelog_errors(tmp_path, draft, require_dated_release=True) == [
+        f"docs/changelog.md: current release section '0.2.2' != {metadata.version!r}"
+    ]
+
+    dated = draft.replace("### Added", f"## [{metadata.version}] - 2026-11-20\n\n### Added", 1)
+    assert _changelog_errors(tmp_path, dated, require_dated_release=True) == []
+
+
+@pytest.mark.parametrize("unreleased", [
+    "",
+    "## [Unreleased]\n\nRelease planning.\n\n",
+    "## [Unreleased]\n\n```markdown\n- Example entry.\n```\n\n",
+    "## [Unreleased]\n\n<!--\n- Hidden placeholder.\n-->\n\n",
+    "## Other changes\n\n## [Unreleased]\n\n- This section is not first.\n\n",
+])
+def test_development_version_requires_real_entries_in_leading_unreleased(tmp_path, unreleased):
+    errors = _changelog_errors(tmp_path, unreleased + "## [0.2.2] - 2026-10-25\n\n- Shipped changes.\n")
+
+    assert len(errors) == 1
+    assert "needs a leading [Unreleased] with entries" in errors[0]
+
+
+@pytest.mark.parametrize(("release_headings", "message"), [
+    ("## [0.2.2] - yesterday\n", "invalid release heading"),
+    ("## [0.02.2] - 2026-10-25\n", "invalid release heading"),
+    ("## [0.2.2] - 2026-02-30\n", "invalid release date"),
+    ("## [0.2.2] - 2026-10-25\n## [0.2.2] - 2026-08-23\n", "duplicate release section"),
+    ("## [0.2.2] - 2026-08-23\n## [0.2.1] - 2026-10-25\n", "dated release sections must be newest first"),
+    ("## [0.2.2] - 2026-10-25\n## [0.3.0] - 2026-10-25\n", "release versions must be newest first"),
+])
+def test_changelog_rejects_malformed_or_out_of_order_release_headings(tmp_path, release_headings, message):
+    errors = _changelog_errors(tmp_path, "## [Unreleased]\n\n- Current changes.\n\n" + release_headings)
+
+    assert any(message in error for error in errors)
 
 
 def test_release_tag_validation_uses_pyproject_version():

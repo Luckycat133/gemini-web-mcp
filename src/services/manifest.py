@@ -7,6 +7,7 @@ import os
 from typing import Any, Literal
 
 from ..infrastructure.rpc_contracts import WEB_FEATURE_PROBES
+from ..surfaces.catalogs import ACCOUNT_FULL_TOOLS, ACCOUNT_TOOLS, FUNCTION_FULL_TOOLS, FUNCTION_TOOLS
 from ..tools.manifest_data import TOOL_MANIFEST, WEB_UI_CAPABILITIES
 
 
@@ -72,6 +73,18 @@ CHAT_TOOL_NAMES = {
     "gemini_reset_session",
 }
 OPERATION_TOOL_NAMES = {"gemini_get_operation_status", "gemini_get_operation_result"}
+BUSINESS_PROFILES = {
+    "gemini-mcp-function": FUNCTION_TOOLS,
+    "gemini-mcp-account": ACCOUNT_TOOLS,
+    "function-full": FUNCTION_FULL_TOOLS,
+    "account-full": ACCOUNT_FULL_TOOLS,
+}
+BUSINESS_ONLY_TOOL_NAMES = {
+    "gemini_ask", "gemini_understand", "gemini_understand_image", "gemini_research",
+    "gemini_create_media", "gemini_generate_image", "gemini_edit_image", "gemini_generate_video",
+    "gemini_run_task", "gemini_manage_chat", "gemini_tasks", "gemini_task_browser",
+    "gemini_preferences", "gemini_skills", "gemini_manage_notebook", "gemini_cleanup",
+}
 HISTORY_READ_TOOL_NAMES = {
     "gemini_list_chats",
     "gemini_scan_chat_history_sources",
@@ -125,6 +138,24 @@ ALL_MANAGE_TOOL_NAMES = (
 MANAGE_TOOL_LAYER_NAMES["all"] = ALL_MANAGE_TOOL_NAMES
 
 TOOL_PROFILE_GUIDE = [
+    {
+        "name": "function",
+        "gemini_tools": "function",
+        "purpose": "Default generation surface for Chat, Task, Research, media and saved operations.",
+        "writes_remote": True,
+    },
+    {
+        "name": "function-full",
+        "gemini_tools": "function-full",
+        "purpose": "Previous function catalog, including separate understanding, media and session tools.",
+        "writes_remote": True,
+    },
+    {
+        "name": "account-full",
+        "gemini_tools": "account-full",
+        "purpose": "Previous account catalog with explicit maintenance. Use gemini-mcp-account for focused conversation management.",
+        "writes_remote": True,
+    },
     {
         "name": "model",
         "gemini_tools": "model",
@@ -210,11 +241,11 @@ MANIFEST_WORKFLOWS = [
         "name": "chat_history_to_native_notebooks",
         "steps": [
             "gemini_history(action='scan'|'list')",
-            "gemini_notebooks(action='list')",
-            "gemini_move_chat_to_notebook",
-            "gemini_notebooks(action='chats')",
+            "gemini_notebooks(action='list', source='gemini')",
+            "gemini_manage_chat(action='move_to_notebook')",
+            "gemini_notebooks(action='chats', source='gemini')",
         ],
-        "notes": "Moves existing Gemini Web chats into native Gemini Web Notebooks; delete unrelated chats only through explicit destructive tools.",
+        "notes": "Use the focused account surface for an exact chat and Notebook. The legacy history-organize profile exposes gemini_move_chat_to_notebook.",
     },
     {
         "name": "scheduled_action_create_and_cleanup",
@@ -282,6 +313,11 @@ def _configured_manage_layers(configured: list[str]) -> set[str]:
 
 
 def _enabled_manifest_tool_names(configured: list[str], enabled_groups: set[str]) -> set[str]:
+    if configured in (["function"], ["functions"]):
+        return set(FUNCTION_TOOLS)
+    if len(configured) == 1 and configured[0] in {"function-full", "account-full"}:
+        return set(BUSINESS_PROFILES[configured[0]])
+
     enabled_tools = set(MANIFEST_TOOL_NAMES) | set(COOKIE_TOOL_NAMES)
     if enabled_groups & {"media", "research"}:
         enabled_tools.update(OPERATION_TOOL_NAMES)
@@ -289,6 +325,8 @@ def _enabled_manifest_tool_names(configured: list[str], enabled_groups: set[str]
     if manage_layers:
         enabled_tools.update(resolve_manage_tool_names(manage_layers))
     for item in TOOL_MANIFEST:
+        if item["name"] in BUSINESS_ONLY_TOOL_NAMES:
+            continue
         group = item["group"]
         if group == "prompts":
             if "prompts" in enabled_groups:
@@ -307,12 +345,7 @@ def _enabled_manifest_tool_names(configured: list[str], enabled_groups: set[str]
     return enabled_tools
 
 
-def _tool_availability(tool: dict[str, Any]) -> list[str]:
-    if tool["name"] in {"gemini_manage_chat", "gemini_tasks", "gemini_task_browser", "gemini_preferences",
-                        "gemini_skills", "gemini_manage_notebook"}:
-        return ["gemini-mcp-account"]
-    if tool["name"] == "gemini_run_task":
-        return ["gemini-mcp-function"]
+def _legacy_tool_availability(tool: dict[str, Any]) -> list[str]:
     if tool["name"] == "gemini_get_tool_manifest":
         return ["always"]
     name = tool["name"]
@@ -350,6 +383,12 @@ def _tool_availability(tool: dict[str, Any]) -> list[str]:
     if group == "prompts":
         return ["prompts"]
     return []
+
+
+def _tool_availability(tool: dict[str, Any]) -> list[str]:
+    name = tool["name"]
+    dedicated = [profile for profile, names in BUSINESS_PROFILES.items() if name in names]
+    return dedicated if name in BUSINESS_ONLY_TOOL_NAMES else _legacy_tool_availability(tool) + dedicated
 
 
 def _current_enabled_manifest_groups() -> tuple[list[str], set[str]]:
@@ -433,6 +472,8 @@ def format_tool_manifest_markdown(payload: dict[str, Any]) -> str:
         lines.append(f"- `{item['name']}` [{item['group']}; {', '.join(flags)}]: {item['purpose']}")
         lines.append(f"  privacy: {item['privacy']}")
         lines.append(f"  availability: {', '.join(item['availability']) or 'custom'}")
+        if item.get("profile_annotations"):
+            lines.append("  gemini-mcp-account: read-only Task metadata and progress")
         lines.append(f"  current_enabled: {item['current_enabled']}")
     if payload["workflows"]:
         lines.extend(["", "### Recommended Workflows"])

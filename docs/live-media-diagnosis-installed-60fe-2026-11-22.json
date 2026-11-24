@@ -1,0 +1,77 @@
+{
+  "schema_version": 1,
+  "matrix_version": 1,
+  "generated_at": "2026-11-22T06:03:13.655123+00:00",
+  "repository_commit": "unknown",
+  "trigger": "manual",
+  "status": "degraded",
+  "terminal_state": "failed",
+  "dependencies": {
+    "python": {
+      "installed": "3.12.15",
+      "supported": ">=3.11"
+    },
+    "gemini-mcp-server": {
+      "installed": "0.20.0",
+      "supported": "0.20.0 installed60fe final Hydrogen attempt"
+    },
+    "gemini-webapi": {
+      "installed": "2.1.1",
+      "supported": ">=2.1.1,<3"
+    },
+    "mcp": {
+      "installed": "2.3.0",
+      "supported": ">=2.0.0,<3"
+    },
+    "mcp-types": {
+      "installed": "2.3.0",
+      "supported": ">=2.0.0,<3"
+    }
+  },
+  "web": {
+    "locale": null,
+    "build_label": null
+  },
+  "summary": {
+    "total": 1,
+    "available": 0,
+    "empty": 0,
+    "unavailable": 1,
+    "drift": 0,
+    "failed": 0
+  },
+  "capabilities": [
+    {
+      "capability": "installed60fe.hydrogen.video.standard.attempt1",
+      "surface": "installed_media",
+      "name": "gemini_generate_media",
+      "rpc_id": "not_observed",
+      "source_path": "/src/tools/media.py",
+      "parser": "mcp_cohort_result",
+      "stability": "experimental",
+      "expected_dependency": "gemini-mcp-server==0.20.0; installed60fe without hooks",
+      "compatibility": "unavailable",
+      "capability_state": "unavailable",
+      "outcome": "unavailable",
+      "terminal_state": "rejected",
+      "parser_stage": "complete",
+      "status_code": null,
+      "reject_code": null,
+      "response_parts": 0,
+      "body_count": 0,
+      "warning_count": 0,
+      "error_code": "UPSTREAM_REJECTED",
+      "error_type": null
+    }
+  ],
+  "failure": {
+    "stage": "installed_cohort",
+    "error_code": "SCOPED_NATIVE_CASES_DEGRADED",
+    "error_type": "NativeCasesDegraded"
+  },
+  "privacy": {
+    "raw_responses_included": false,
+    "account_content_included": false,
+    "credentials_included": false
+  }
+}

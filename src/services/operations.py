@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import logging
+import asyncio
 import hashlib
-import sqlite3
 from collections.abc import Awaitable, Callable
 from dataclasses import replace
 from typing import Any
@@ -14,10 +14,10 @@ from ..domain.conversations import CleanupObservation, CleanupState
 from ..domain.operations import InlineReportArtifact, OperationReadData, operation_failure_code
 from ..domain.results import DomainErrorCode, DomainResult, DomainWarning, OperationState, result_from_exception
 from ..infrastructure.account_identity import operation_account_matches, uses_omni_video_api
-from ..infrastructure.cleanup_store import CleanupStore
 from ..infrastructure.operation_store import RETENTION_SECONDS, OperationRecord, OperationStore
 from ..infrastructure.rpc_contracts import execute_contract, get_contract
 from ..infrastructure.rpc_parsers import parse_contract_body, parse_rpc_envelope
+from .media_cleanup import has_verified_owned_cleanup
 from .media_storage import read_verified_media_artifacts
 from .research_result_storage import (
     RESEARCH_OPERATIONS, RESEARCH_REPORT_PREVIEW_CHARS, ResearchResultUnavailable, load_research_result, save_research_result,
@@ -25,6 +25,12 @@ from .research_result_storage import (
 from .deadlines import await_before_deadline
 
 logger = logging.getLogger(__name__)
+MAX_RESULT_WAIT_SECONDS = 120
+_RESULT_WAIT_POLL_SECONDS = 2.0
+_RESULT_FAILURE_STATES = frozenset({"failed", "unavailable", "timed_out", "cancelled"})
+_TASK_INPUT_PHASES = frozenset({
+    "task_input_required", "task_plan_review_required", "task_setup_required", "task_setup_input_required",
+})
 
 
 def _account_mismatch() -> DomainResult[Any]:
@@ -34,15 +40,8 @@ def _account_mismatch() -> DomainResult[Any]:
 
 def _observe_owned_cleanup(record: OperationRecord) -> OperationRecord:
     """Read the verified cleanup ledger when a separate process deleted the chat."""
-    if (not record.account_key or not record.upstream_chat_id or record.retain_chat or record.cleanup_protected
-            or uses_omni_video_api(record)
-            or record.cleanup_state in {CleanupState.COMPLETED.value, CleanupState.ALREADY_COMPLETED.value}):
-        return record
-    try:
-        entry = CleanupStore().get(record.account_key, record.upstream_chat_id)
-    except (OSError, sqlite3.Error):
-        return record
-    if entry is not None and entry["state"] == CleanupState.COMPLETED.value:
+    if (record.cleanup_state not in {CleanupState.COMPLETED.value, CleanupState.ALREADY_COMPLETED.value}
+            and has_verified_owned_cleanup(record)):
         return replace(record, cleanup_state=CleanupState.COMPLETED.value)
     return record
 
@@ -93,23 +92,73 @@ class OperationService:
     async def get_status(self, operation_id: str) -> DomainResult[OperationReadData]:
         return await self._read(operation_id, include_report=False)
 
-    async def get_result(self, operation_id: str) -> DomainResult[OperationReadData]:
-        return await self._read(operation_id, include_report=True)
+    async def get_result(self, operation_id: str, *, wait_seconds: int = 0) -> DomainResult[OperationReadData]:
+        """Wait on the original worker's checkpoints without submitting new work."""
+        from .background import worker_active
 
-    async def _read(self, operation_id: str, *, include_report: bool) -> DomainResult[OperationReadData]:
+        if type(wait_seconds) is not int or not 0 <= wait_seconds <= MAX_RESULT_WAIT_SECONDS:
+            return DomainResult.failure(DomainErrorCode.INVALID_ARGUMENT,
+                                        f"wait_seconds must be an integer from 0 to {MAX_RESULT_WAIT_SECONDS}.")
+        if wait_seconds == 0:
+            return await self._read(operation_id, include_report=True)
+        clock = asyncio.get_running_loop().time
+        deadline = clock() + wait_seconds
+        last_read: tuple[object, ...] | None = None
+        while True:
+            record, failure = self._load_operation(operation_id)
+            if failure is not None:
+                return failure
+            assert record is not None
+            active = worker_active(record, now=self.store.clock())
+            remaining = deadline - clock()
+            observation = (active, record.state, record.phase, record.upstream_response_id,
+                           record.upstream_candidate_id, record.artifact_state, record.cleanup_state)
+            saved = record.artifact_state == ArtifactState.LOCAL.value and record.cleanup_state != "not_scheduled"
+            failed_answer_pending = record.phase in {"task_failed", "task_failure_saved"} and not saved
+            ready = ((record.state in _RESULT_FAILURE_STATES and not failed_answer_pending)
+                     or (record.state == "completed" and saved) or record.phase in _TASK_INPUT_PHASES)
+            if (ready or not active) and last_read != observation and remaining > 0:
+                last_read = observation
+                try:
+                    result: DomainResult[OperationReadData] = await await_before_deadline(
+                        self._read(operation_id, include_report=True), timeout=remaining,
+                    )
+                except TimeoutError:
+                    pass
+                else:
+                    data = result.data
+                    if (not result.ok or data is None or data.state == OperationState.COMPLETED
+                            or data.input_required or data.needs_attention or data.setup_required
+                            or not (data.worker_active or active)):
+                        return result
+            remaining = deadline - clock()
+            if remaining <= 0:
+                data = OperationReadData(
+                    operation_id=record.operation_id, operation=record.operation, state=OperationState.PARTIAL,
+                    continuation_possible=active or bool(record.upstream_chat_id or record.upstream_operation_id),
+                    report_available=False, verification_status="wait_elapsed", worker_active=active,
+                    media_type=record.media_type,
+                    execution_mode={"gemini_run_task": "task", "gemini_notebook_chat": "chat"}.get(record.operation),
+                )
+                return DomainResult.success(data, operation_state=data.state, verification_status=data.verification_status)
+            await asyncio.sleep(min(_RESULT_WAIT_POLL_SECONDS, remaining))
+
+    def _load_operation(
+        self, operation_id: str,
+    ) -> tuple[OperationRecord | None, DomainResult[OperationReadData] | None]:
         if not operation_id.strip():
-            return DomainResult.failure(DomainErrorCode.INVALID_ARGUMENT, "operation_id must not be blank.")
+            return None, DomainResult.failure(DomainErrorCode.INVALID_ARGUMENT, "operation_id must not be blank.")
         try:
             record = self.store.get(operation_id)
         except Exception as error:
-            return result_from_exception(error, logger=logger, operation="operation_read")
+            return None, result_from_exception(error, logger=logger, operation="operation_read")
         if record is None:
-            return DomainResult.failure(
+            return None, DomainResult.failure(
                 DomainErrorCode.INVALID_ARGUMENT, "The operation handle was not found.",
                 verification_status="operation_not_found",
             )
         if not operation_account_matches(record):
-            return DomainResult.failure(DomainErrorCode.CAPABILITY_UNAVAILABLE, "Operation account could not be verified.",
+            return None, DomainResult.failure(DomainErrorCode.CAPABILITY_UNAVAILABLE, "Operation account could not be verified.",
                                         verification_status="account_mismatch_or_unbound")
         expired = self.store.clock() - record.created_at >= RETENTION_SECONDS
         expired_protected = expired and record.cleanup_protected and bool(
@@ -117,10 +166,21 @@ class OperationService:
         )
         if expired and not expired_protected:
             self.store.delete_expired(operation_id)
-            return DomainResult.failure(
+            return None, DomainResult.failure(
                 DomainErrorCode.INVALID_ARGUMENT, "The operation handle has expired.",
                 verification_status="operation_expired",
             )
+        return record, None
+
+    async def _read(self, operation_id: str, *, include_report: bool) -> DomainResult[OperationReadData]:
+        record, failure = self._load_operation(operation_id)
+        if failure is not None:
+            return failure
+        assert record is not None
+        expired = self.store.clock() - record.created_at >= RETENTION_SECONDS
+        expired_protected = expired and record.cleanup_protected and bool(
+            record.upstream_chat_id or (uses_omni_video_api(record) and record.upstream_operation_id)
+        )
         record = _observe_owned_cleanup(record)
         if not operation_account_matches(record):
             return _account_mismatch()
@@ -226,8 +286,10 @@ class OperationService:
                 DomainErrorCode.CAPABILITY_UNAVAILABLE, "A saved media artifact is missing or no longer matches its verification.",
                 verification_status="local_artifact_unavailable",
             )
-        if (include_artifacts and upstream_id and not active
-                and (not artifacts or (omni_api and record.cleanup_protected))):
+        if upstream_id and not active and (
+            record.state == "running"
+            or (include_artifacts and (not artifacts or (omni_api and record.cleanup_protected)))
+        ):
             await resume_media_worker(self.store, record)
             record = self.store.get(record.operation_id) or record
             if not operation_account_matches(record):
@@ -266,6 +328,7 @@ class OperationService:
             artifact_state=ArtifactState.LOCAL if artifacts else None, worker_active=active,
             error_code=record.error_code, cleanup=cleanup,
             upstream_operation_id=record.upstream_operation_id if omni_api else None,
+            source_operation_id=record.source_operation_id, source_artifact_id=record.source_artifact_id,
         )
         return _operation_read_result(data, warnings=warnings)
 

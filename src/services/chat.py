@@ -218,7 +218,7 @@ class ChatService:
             observer.fallback(immediate=True, delete_after_seconds=request.delete_after_seconds)
         try:
             with observe_cleanup_frames(observer.observe):
-                with client_timeout_scope(client, CHAT_GENERATION_TIMEOUT_SECONDS), model_policy_scope("query", allow_fallback=True):
+                with client_timeout_scope(client, CHAT_GENERATION_TIMEOUT_SECONDS), model_policy_scope("query", allow_fallback=True, requested_alias=normalized_model):
                     response = await await_before_deadline(
                         client.generate_content(**request_kwargs), timeout=CHAT_GENERATION_TIMEOUT_SECONDS,
                         on_late=late_response,
@@ -304,7 +304,7 @@ class ChatService:
 
         try:
             with observe_cleanup_frames(observer.observe):
-                with client_timeout_scope(client, CHAT_GENERATION_TIMEOUT_SECONDS), model_policy_scope("query", allow_fallback=True):
+                with client_timeout_scope(client, CHAT_GENERATION_TIMEOUT_SECONDS), model_policy_scope("query", allow_fallback=True, requested_alias=normalized_model):
                     await await_before_deadline(collect_stream(), timeout=CHAT_GENERATION_TIMEOUT_SECONDS,
                                                 on_late=late_stream)
                 final_response = responses[-1] if responses else None

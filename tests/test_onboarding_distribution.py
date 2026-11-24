@@ -54,6 +54,16 @@ def test_codex_configuration_parses_and_forwards_host_secrets() -> None:
     assert server["tool_timeout_sec"] == 720
 
 
+def test_codex_optional_account_configuration_loads_only_account_tools() -> None:
+    payload = tomllib.loads((CLIENTS / "codex.account.config.toml").read_text(encoding="utf-8"))
+    assert set(payload["mcp_servers"]) == {"gemini_account"}
+    server = payload["mcp_servers"]["gemini_account"]
+    assert server["command"] == "uvx"
+    assert server["args"] == ["--from", CANONICAL_GIT_SOURCE, "gemini-mcp-account"]
+    assert server["env"] == {"GEMINI_AUTO_REFRESH": "false"}
+    assert server["env_vars"] == ["GEMINI_PSID", "GEMINI_PSIDTS", "GEMINI_PSIDCC"]
+
+
 def test_claude_desktop_configuration_uses_explicit_local_placeholders() -> None:
     _, server = _server_from_json("claude-desktop.json", "mcpServers")
 

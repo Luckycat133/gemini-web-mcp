@@ -35,12 +35,13 @@ from ..services.artifacts import response_chat_id
 from ..services.cleanup_scope import observe_cleanup_frames
 from ..services.deadlines import await_before_deadline
 from ..services.client_timeouts import client_timeout_scope
-from ..services.model_policy import ModelPolicyError, model_policy_scope
+from ..services.model_policy import ModelPolicyError, model_policy_scope, model_selection_from_response
 from ..services.notebooklm import resolve_notebook_context
 from ..services.web_context_transport import fetch_task_metadata, fetch_workflow_turn, refresh_task_schedule_guard
 from ..services.web_context_transport import fetch_task_file_cards
 from .task_result_storage import TaskResultUnavailable, load_task_files, load_task_result, save_task_result
 from .task_file_artifacts import save_task_file
+from .task_inputs import auto_approve_task_input, task_auto_approve_enabled
 from .task_inputs import input_handle as _input_id
 
 logger = logging.getLogger(__name__)
@@ -125,9 +126,12 @@ def _checkpoint_task(store: Any, operation_id: str, worker_token: str, response:
             # ChatSession keeps the previous candidate while receiving the new
             # RID. Never checkpoint that stale candidate as the new answer.
             rcid = ""
+    selection = model_selection_from_response(response)
+    selected = {"selected_model": selection.effective_model} if selection is not None else {}
     if cid and not store.checkpoint_media(
         operation_id, worker_token=worker_token, chat_id=cid,
         response_id=rid or None, candidate_id=rcid or None,
+        **selected,
     ):
         # A replacement worker may have taken the lease while the SDK request
         # was still receiving its first CID. Save only the opaque ID under the
@@ -258,6 +262,14 @@ async def execute_task_job(request: dict, *, operation_id: str, store: Any, work
             record is None or operation_account_matches(record)
         ):
             _task_unknown(store, operation_id, worker_token, phase="task_initialize_timeout", code="TIMED_OUT")
+        return
+    except Exception as error:
+        if store.is_worker_owner(operation_id, worker_token) and (
+            record is None or operation_account_matches(record)
+        ):
+            failure = result_from_exception(error, logger=logger, operation="task_initialize")
+            _task_unknown(store, operation_id, worker_token, phase="task_initialize_failed",
+                          code=failure.error.code.value if failure.error is not None else "INTERNAL_ERROR")
         return
     client = get_gemini_client()
     if not store.is_worker_owner(operation_id, worker_token) or (
@@ -409,7 +421,7 @@ async def execute_task_job(request: dict, *, operation_id: str, store: Any, work
 
 
 async def recover_task_job(record: Any, *, store: Any, worker_token: str) -> None:
-    """Read exact Task metadata once; never send a generation request again."""
+    """Read exact Task state and optionally answer a verified permission card once."""
     if not operation_account_matches(record):
         return
     cid = getattr(record, "upstream_chat_id", None)
@@ -500,13 +512,19 @@ async def recover_task_job(record: Any, *, store: Any, worker_token: str) -> Non
                             verification_status="task_failed_verified", error_code="UPSTREAM_REJECTED")
     elif status == TASK_STATUS_INPUT_REQUIRED:
         try:
-            turn = await fetch_workflow_turn(client, cid, rid, rcid)
+            turn = await await_before_deadline(
+                fetch_workflow_turn(client, cid, rid, rcid), timeout=TASK_READBACK_TIMEOUT_SECONDS,
+            )
         except Exception:
             turn = None
-        if (isinstance(turn, dict) and turn.get("input_required") is True
-                and operation_account_matches(record) and store.is_worker_owner(record.operation_id, worker_token)):
-            _task_unknown(store, record.operation_id, worker_token, phase="task_input_required")
-        else:
+        if not operation_account_matches(record) or not store.is_worker_owner(record.operation_id, worker_token):
+            return
+        if task_auto_approve_enabled() and isinstance(turn, dict):
+            # If this read bound a previously missing candidate, use the updated identity.
+            current = store.get(record.operation_id)
+            if current is not None:
+                await auto_approve_task_input(store, current, turn, worker_token=worker_token)
+        if store.is_worker_owner(record.operation_id, worker_token):
             _task_unknown(store, record.operation_id, worker_token, phase="task_input_required")
     elif status == _TASK_SETUP_OBSERVED_STATUS:
         try:

@@ -15,11 +15,11 @@ uvx --from git+https://github.com/Luckycat133/gemini-web-mcp@codex/gemini-tools-
 ```
 
 `uvx` 会创建隔离环境并运行 `gemini-mcp-onboarding`。该客户端启动真实
-`gemini-mcp-function`，核对 17 个工具并验证空提示的 `gemini_ask` 返回
+`gemini-mcp-function`，核对 6 个工具并验证空提示的 `gemini_ask` 返回
 `INVALID_ARGUMENT`。预检会移除 `GEMINI_PSID`、`GEMINI_PSIDTS` 和
 `GEMINI_PSIDCC`，并输出 `mode=offline`、`credentials_accessed=false`；它不会访问 Gemini。
 
-预检应输出 `profile=function`、`enabled_tools=17` 和 `text_tool=gemini_ask`。命令安装 [PR #39 的开发分支](source-update-integration.md)，需要固定版本时，把 `@` 后的分支名换成已审核的 commit SHA。
+预检应输出 `profile=function`、`enabled_tools=6` 和 `text_tool=gemini_ask`。需要固定版本时，把 `@` 后的分支名换成已审核的 commit SHA。该命令使用 [PR #39 的开发分支](source-update-integration.md)。
 
 ## 2. 配置实时账号
 
@@ -64,12 +64,17 @@ export GEMINI_PSIDTS='your __Secure-1PSIDTS value'
 
 | 工具面 | 使用场景 |
 | --- | --- |
-| `gemini-mcp-function` | 默认 17 个功能工具：问答、理解、会话、Task、图像／视频／音乐及 Research |
-| `gemini-mcp-account` | 显式账号管理：历史、Notebook、Skills、偏好、Task 计划及浏览器 |
+| `gemini-mcp-function` | 6 个功能工具，覆盖问答、附件和续聊、Task、媒体、Research、状态和结果 |
+| `gemini-mcp-account` | 6 个对话和账号管理工具，覆盖历史、对话整理和删除、Notebook、已有 Task 的元数据和进度 |
+| `GEMINI_TOOLS=function-full` / `account-full` | 在 `gemini-mcp-server` 中按需选择原先各 17 个工具的目录。Task 计划、偏好、原生 Skills 和显式浏览器输入位于 `account-full` |
 | `gemini-mcp-skill-server` | 固定四工具兼容入口：chat/create/edit/session |
 | `gemini-mcp-assist` | 只需要第二意见、有据搜索、图像/混合输入理解或异步 Deep Research 的专注五工具面 |
 | `GEMINI_TOOLS=model` / `core` | 在 `gemini-mcp-server` 中显式选择旧版模型／完整内容工具组 |
 | `GEMINI_TOOLS=all` | 维护者验证账号、历史和管理能力；不适合作为通用默认 |
+
+在客户端把功能和账号命令配置成两条 MCP 连接，按任务启用相应连接。仅需要整理或删除对话时，可以只连接账号面。普通问答和生成可以只连接功能面。[Codex 账号独立配置](../examples/clients/codex.account.config.toml)
+
+多参考图和连续编辑的参数与示例见[图像工作流](tools.md#gemini_create_media)。后台批准的两个开关和精确删除规则见[Task 权限配置](task-preferences.md)。
 
 ## 5. 显式实时验证
 

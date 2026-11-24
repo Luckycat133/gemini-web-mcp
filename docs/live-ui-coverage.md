@@ -34,9 +34,9 @@ The subsequent image regression succeeded: a 2.7 MB JPEG was saved as
 `image-check_2.jpg` without replacing an existing file and was visually checked
 against the prompt (orange cat, blue cup, white background).
 
-Current Google help distinguishes Nano Banana 2 Lite for Flash-Lite images and
-Nano Banana 2 for Flash/Pro images. Google documents Gemini Omni for video and
-announced Lyria 3.5 for music. These are current Web product descriptions;
+At the time of this 2026-09-26 observation, Google help distinguished Nano Banana 2 Lite for Flash-Lite images and
+Nano Banana 2 for Flash/Pro images. Google also documented Gemini Omni for video and
+Lyria for music. These dated descriptions are historical; current model selection is documented in [models](models.md), and
 they are not backend identifiers observed in the MCP response. See the
 [image](https://support.google.com/gemini/answer/14286560),
 [video](https://support.google.com/gemini/answer/16126339), and
@@ -242,7 +242,9 @@ In the 2026-09-26 run, the runtime registry exposed generic `Flash-Lite`,
 `Flash`, and `Pro` names without the full UI version labels. Check both the
 runtime request names and the signed-in Web model picker when updating aliases.
 
-## Media Routing Notes
+## Historical Media Routing Notes (2026-09-26)
+
+The mappings below describe that observation, not the current runtime. Current media defaults to discovered Hydrogen, preserves explicit selectors and exposes Web video options. See [current model routing](models.md).
 
 - Flash-Lite image generation is routed to `Flash-Lite` and labeled
   `Nano Banana 2 Lite`; Flash/Pro first pass routes to `gemini-3-flash` and is

@@ -384,38 +384,38 @@ def test_supported_learning_modes_returns_expected_string():
 # ---------------------------------------------------------------------------
 
 
-def test_resolve_media_request_image_uses_current_web_model_family():
-    """Flash-Lite image requests keep the Lite route; Flash and Pro use NB2."""
+def test_resolve_media_request_image_preserves_selector_without_inventing_generator():
+    """Image routing preserves each explicit chat selector independently of the generator."""
     lite = resolve_media_request("flash-lite", "image")
-    assert lite["backend_label"] == "Nano Banana 2 Lite"
+    assert lite["backend_label"] == "Gemini Web image mode"
     assert lite["effective_alias"] == "flash-lite"
     assert lite["request_model"] == "Flash-Lite"
     for alias in ("flash", "pro"):
         out = resolve_media_request(alias, "image")
-        assert out["backend_label"] == "Nano Banana 2"
-        assert out["effective_alias"] == "flash"
-        assert out["request_model"] == resolve_model_name("flash")
+        assert out["backend_label"] == "Gemini Web image mode"
+        assert out["effective_alias"] == alias
+        assert out["request_model"] == resolve_model_name(alias)
         assert out["requested_alias"] == alias
 
 
 def test_resolve_media_request_music_does_not_claim_unobserved_version():
     """The Web response may produce music without exposing its version."""
     out = resolve_media_request("flash", "music")
-    assert out["backend_label"] == "Lyria"
+    assert out["backend_label"] == "Gemini Web music mode"
     assert out["effective_alias"] == "flash"
     assert out["requested_alias"] == "flash"
 
 
 def test_resolve_media_request_music_pro_standard_keeps_pro_model():
     out = resolve_media_request("pro", "music", thinking_level="standard")
-    assert out["backend_label"] == "Lyria"
+    assert out["backend_label"] == "Gemini Web music mode"
     assert out["effective_alias"] == "pro"
     assert out["request_model"] == "gemini-3-pro"
 
 
 def test_resolve_media_request_music_thinking_level_does_not_claim_backend():
     out = resolve_media_request("pro", "music", thinking_level="extended")
-    assert out["backend_label"] == "Lyria"
+    assert out["backend_label"] == "Gemini Web music mode"
     assert out["effective_alias"] == "pro"
 
 

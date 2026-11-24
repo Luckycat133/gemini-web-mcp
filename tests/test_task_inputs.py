@@ -146,16 +146,42 @@ def test_card_reply_requires_the_exact_current_button_query(waiting):
     assert not dispatched and not store.task_input_dispatched(record.operation_id, token)
 
 
-def _choice_turn(*, local=False, body='Synthetic public page permission'):
-    allow = ['Allow', [None, None, None, 'synthetic-allow']]
+def _choice_turn(*, local=False, body='Synthetic public page permission', label='Allow'):
+    allow = [label, [None, None, None, 'synthetic-allow']]
     deny = ['Deny', [None, None, None, 'synthetic-deny']]
     override = ['Browser permission', body, None, None, None, None, [allow], [deny]]
     choices = [['vm', 'Remote browser', 'Read-only public fixture', override]]
     if local:
         choices.append(['local_chrome:synthetic-private-device', 'Local browser', None, override])
     card = [None, 'Browser permission', body, None, None, None, None, [allow], [deny], 1, None, None, None, choices]
-    return {'input_required': True, **parse_confirmation_replies(
+    return {'input_required': True, 'chat_id': 'c_task', 'rid': 'r_card', 'rcid': 'rc_card', **parse_confirmation_replies(
         card, chat_id='c_task', response_id='r_card', candidate_id='rc_card')}
+
+
+def test_automatic_and_manual_replies_share_one_atomic_card_claim(waiting, monkeypatch):
+    store, record, token, dispatched = waiting
+    turn = _choice_turn(label='Allow once')
+    monkeypatch.setattr(web_context_transport, 'fetch_workflow_turn', AsyncMock(return_value=turn))
+    deny = turn['input_options'][1]
+
+    async def race():
+        return await asyncio.gather(
+            task_inputs.submit_task_input({'input_id': token, 'prompt': deny['prompt'],
+                                          'input_option_id': deny['input_option_id']}, operation_id=record.operation_id),
+            task_inputs.auto_approve_task_input(store, record, turn, worker_token='old'),
+        )
+
+    manual, _ = asyncio.run(race())
+    assert manual.ok and len(dispatched) == 1 and store.task_input_dispatched(record.operation_id, token)
+
+
+def test_automatic_reply_with_lost_worker_lease_leaves_card_for_current_owner(waiting):
+    store, record, token, dispatched = waiting
+    store.retire_worker(record.operation_id, 'old')
+    assert store.claim_worker(record.operation_id, 'replacement')
+    asyncio.run(task_inputs.auto_approve_task_input(store, record, _choice_turn(label='Allow once'), worker_token='old'))
+    assert not dispatched and not store.task_input_dispatched(record.operation_id, token)
+    assert store.is_worker_owner(record.operation_id, 'replacement')
 
 
 def test_native_choice_card_requires_opaque_option_and_dispatches_exact_choice_once(waiting, monkeypatch):

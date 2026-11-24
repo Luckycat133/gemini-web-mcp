@@ -131,7 +131,7 @@ async def fetch_task_progress_turn(client: Any, chat_id: str, rid: str | None = 
     if len(selected) != 1:
         raise WebContextUnavailable("The Task candidate is ambiguous or unavailable.")
     return {'chat_id': chat_id, 'response_id': value['response_id'], 'candidate': selected[0],
-            'latest_verified': rid is None}
+            'latest_verified': rid is None, 'upstream_status': task.get('upstream_status')}
 
 
 async def fetch_task_browser_turn(client: Any, chat_id: str, rid: str | None = None,

@@ -36,6 +36,9 @@ def _assert_installed_import() -> Path:
 
 
 def _check_package_data() -> dict[str, Any]:
+    for browser_script in ("task_delete_approval.js", "native_media_browser.js"):
+        if not files("src").joinpath("data", browser_script).is_file():
+            raise RuntimeError(f"Installed wheel is missing src/data/{browser_script}")
     resource = files("src").joinpath("data", "prompts_default.json")
     if not resource.is_file():
         raise RuntimeError("Installed wheel is missing src/data/prompts_default.json")
@@ -171,7 +174,7 @@ def _call_offline_text_tool() -> dict[str, Any]:
     except json.JSONDecodeError as exc:
         raise RuntimeError(f"Onboarding preflight returned invalid JSON: {completed.stdout!r}") from exc
     if (payload.get("status") != "ok" or payload.get("text_tool") != "gemini_ask"
-            or payload.get("profile") != "function" or payload.get("enabled_tools") != 17):
+            or payload.get("profile") != "function" or payload.get("enabled_tools") != 6):
         raise RuntimeError(f"Onboarding preflight did not call the expected text tool: {payload!r}")
     if payload.get("credentials_accessed") is not False or payload.get("mode") != "offline":
         raise RuntimeError(f"Onboarding preflight did not preserve its offline boundary: {payload!r}")

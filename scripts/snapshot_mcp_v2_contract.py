@@ -23,8 +23,10 @@ def _digest(value: object) -> str:
 
 async def _snapshot_module(module_name: str) -> list[dict[str, Any]]:
     module = importlib.import_module(module_name)
+    full = os.environ.get("GEMINI_TOOLS") in {"function-full", "account-full"}
+    server = module.build_server(full=True) if full else module.mcp
     snapshot = []
-    for tool in sorted(await module.mcp.list_tools(), key=lambda item: item.name):
+    for tool in sorted(await server.list_tools(), key=lambda item: item.name):
         wire = tool.model_dump(mode="json", by_alias=True, exclude_none=True)
         input_schema = wire["inputSchema"]
         output_schema = wire.get("outputSchema")
@@ -75,8 +77,10 @@ def build_snapshot() -> dict[str, object]:
         "surfaces": {
             "primary:model": _probe("src.server", "model"),
             "compact": _probe("src.skill_server", "model"),
-            "account": _probe("src.surfaces.account", "function"),
+            "account": _probe("src.surfaces.account", "account"),
             "function": _probe("src.surfaces.function", "function"),
+            "account-full": _probe("src.surfaces.account", "account-full"),
+            "function-full": _probe("src.surfaces.function", "function-full"),
             "assist": _probe("src.surfaces.assist", "function"),
         },
     }

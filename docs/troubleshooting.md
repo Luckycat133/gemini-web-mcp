@@ -119,7 +119,7 @@ mcp dev src/server.py
 ### 媒体生成失败
 
 1. 装图像依赖：`pip install -e ".[image]"`（Pillow）
-2. 图像首轮：Flash-Lite 使用 Nano Banana 2 Lite，Flash / Pro 使用 Nano Banana 2；检查本地 Artifact 与 `observed_backend`
+2. 图像选择：省略媒体模型使用发现的 Hydrogen；显式选择必须在当前账号注册表中。检查本地 Artifact 与 `observed_backend`，静态路由标签不能证明 Nano Banana 的实际版本
 3. 视频若返回 `ARTIFACT_NOT_RETURNED`，检查上游聊天是否只给了文本；当前已验证的生成入口是 Gemini Web 的专用 Omni 视频模式
 4. 音乐结果只报告 Lyria 家族；实际版本以可观察证据为准
 5. 地区限制：部分功能在某些区域不可用，错误文本会提示
@@ -140,11 +140,11 @@ mcp dev src/server.py
 
 ---
 
-## 历史与账号管理（需 `GEMINI_TOOLS=all`）
+## 历史与账号管理
 
 ### 症状：`gemini_history` / `gemini_account_inventory` 不存在
 
-这些是 facade 工具，只在 `all` 或对应 intent profile（`history` / `account-read`）下注册。默认 `core` 不含。重启服务时设 `GEMINI_TOOLS=all`。
+查询或管理对话时连接独立的 `gemini-mcp-account`，其中有 `gemini_history`。账号盘点可用 `GEMINI_TOOLS=account-full`，或显式旧配置 `GEMINI_TOOLS=account-read`，两者均通过 `gemini-mcp-server` 启动。检查客户端是否启用了所需的连接。
 
 ### 症状：删除 / 定时操作"成功"但实际没生效
 

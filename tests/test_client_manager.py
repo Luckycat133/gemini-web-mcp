@@ -617,6 +617,7 @@ def test_explicit_unauthenticated_refreshes_same_bound_browser_account_once(monk
     monkeypatch.setenv("GEMINI_PSID", "synthetic-bound")
     monkeypatch.setenv("GEMINI_PSIDTS", "old")
     monkeypatch.setenv("GEMINI_BROWSER_AUTO_LOAD", "true")
+    monkeypatch.setenv("GEMINI_BROWSER_COOKIE_PROFILE", "Default")
     monkeypatch.setattr(client_manager, "prepare_browser_cookie_cache", lambda **_kwargs: None)
     cookies = {"__Secure-1PSID": "synthetic-bound", "__Secure-1PSIDTS": "fresh"}
     cm = CookieManager(auto_refresh=False)
@@ -633,7 +634,7 @@ def test_explicit_unauthenticated_refreshes_same_bound_browser_account_once(monk
     asyncio.run(run())
     assert client.init.await_count == 2 and client.close.await_count == 1
     assert client._cookies.clear.call_count == 1 and client.cookies == cookies
-    discover.assert_called_once_with(expected_psid="synthetic-bound")
+    discover.assert_called_once_with(profile="Default", expected_psid="synthetic-bound")
     assert cm.get_cookie().extra_cookies == cookies and cm.get_cookie().source == "browser_chrome:Default"
     assert os.environ["GEMINI_PSIDTS"] == "old"  # No environment/config change.
 
@@ -755,6 +756,7 @@ def test_browser_autoload_retries_on_next_use_after_a_read_denial(monkeypatch):
     from src.cookie_manager import BrowserCookieDiscovery, CookieManager
 
     monkeypatch.setenv("GEMINI_BROWSER_AUTO_LOAD", "true")
+    monkeypatch.setenv("GEMINI_BROWSER_COOKIE_PROFILE", "Default")
     monkeypatch.delenv("GEMINI_PSID", raising=False)
     monkeypatch.delenv("GEMINI_PSIDTS", raising=False)
     manager = CookieManager(auto_refresh=False)
@@ -780,4 +782,119 @@ def test_browser_autoload_retries_on_next_use_after_a_read_denial(monkeypatch):
     mgr._browser_retry_at = 0
     assert mgr.get_client() is client
     assert discover.call_count == 2 and mgr.browser_auth_reason is None
+    assert all(call.kwargs == {"profile": "Default"} for call in discover.call_args_list)
     assert client.cookies == cookies and manager.get_cookie().source == "browser_chrome:Default"
+
+
+def test_rate_limited_browser_discovery_is_debounced_without_binding_or_replacing_cookies(monkeypatch):
+    from src.cookie_manager import BrowserCookieDiscovery
+    from src.domain.results import classify_exception
+
+    monkeypatch.delenv("GEMINI_PSID", raising=False)
+    monkeypatch.setenv("GEMINI_BROWSER_AUTO_LOAD", "true")
+    monkeypatch.setattr(client_manager, "COOKIE_MANAGER_AVAILABLE", True)
+    cookies = {"__Secure-1PSID": "synthetic-original"}
+    cm = MagicMock()
+    cm.discover_browser_cookies.side_effect = [BrowserCookieDiscovery(reason="BROWSER_COOKIE_RATE_LIMITED"),
+                                              BrowserCookieDiscovery(cookies=cookies, source="browser_chrome:Default")]
+    cm.update_cookie.return_value = True
+    monkeypatch.setattr(client_manager, "get_cookie_manager", lambda: cm)
+    mgr = ClientManager()
+    for _ in range(2):
+        with pytest.raises(client_manager.ClientRateLimited) as caught:
+            mgr.ensure_browser_cookie()
+        assert classify_exception(caught.value).error_code == "RATE_LIMITED"
+    cm.discover_browser_cookies.assert_called_once()
+    cm.update_cookie.assert_not_called()
+    assert not os.environ.get("GEMINI_PSID")
+    mgr._browser_retry_at = 0
+    mgr.ensure_browser_cookie()
+    assert cm.discover_browser_cookies.call_count == 2
+    assert os.environ["GEMINI_PSID"] == "synthetic-original" and mgr.browser_auth_reason is None
+
+
+def test_browser_cookie_session_defaults_auto_refresh_off(monkeypatch):
+    from src.cookie_manager import CookieManager
+
+    monkeypatch.delenv("GEMINI_AUTO_REFRESH", raising=False)
+    monkeypatch.setenv("GEMINI_PSID", "synthetic-browser")
+    cm = CookieManager(auto_refresh=False)
+    cm.update_cookie("synthetic-browser", "ts", source="browser_chrome:Default", notify=False)
+    monkeypatch.setattr(client_manager, "get_cookie_manager", lambda: cm)
+    monkeypatch.setattr(client_manager, "COOKIE_MANAGER_AVAILABLE", True)
+    seen = {}
+
+    class FakeClient:
+        account_status = None
+        async def init(self, **kwargs):
+            seen.update(kwargs)
+        async def close(self):
+            pass
+
+    mgr = ClientManager()
+    mgr._client = FakeClient()
+    asyncio.run(mgr.initialize())
+    assert seen["auto_refresh"] is False
+
+
+def test_sdk_429_retains_bound_credentials_and_does_not_refresh_during_cooldown(monkeypatch):
+    from gemini_webapi.constants import AccountStatus
+    from gemini_webapi.exceptions import TemporarilyBlockedError
+    from src.domain.results import classify_exception
+
+    monkeypatch.setenv("GEMINI_PSID", "synthetic-bound")
+    monkeypatch.setenv("GEMINI_PSIDTS", "synthetic-ts")
+    cm = MagicMock()
+    monkeypatch.setattr(client_manager, "get_cookie_manager", lambda: cm)
+    client = _synthetic_auth_client([])
+    client.cookies = {"__Secure-1PSID": "synthetic-bound"}
+
+    async def initialize(**_kwargs):
+        if client.init.await_count == 1:
+            raise TemporarilyBlockedError("synthetic HTTP 429")
+        client.account_status = AccountStatus.AVAILABLE
+
+    client.init.side_effect = initialize
+    mgr = ClientManager()
+    mgr._client = client
+    for _ in range(2):
+        with pytest.raises(client_manager.ClientRateLimited) as caught:
+            asyncio.run(mgr.initialize())
+        assert classify_exception(caught.value).error_code == "RATE_LIMITED"
+    assert client.init.await_count == 1 and not mgr._initialized
+    assert os.environ["GEMINI_PSID"] == "synthetic-bound" and os.environ["GEMINI_PSIDTS"] == "synthetic-ts"
+    assert client.cookies == {"__Secure-1PSID": "synthetic-bound"}
+    client._cookies.clear.assert_not_called()
+    cm.discover_browser_cookies.assert_not_called()
+    cm.update_cookie.assert_not_called()
+    mgr._browser_retry_at = 0
+    assert asyncio.run(mgr.initialize()) is client
+    assert client.init.await_count == 2 and mgr.browser_auth_reason is None
+    client.generate_content.assert_not_called()
+
+
+@pytest.mark.parametrize("throws", [False, True])
+def test_browser_refresh_rate_limit_does_not_expire_or_clear_original_account(monkeypatch, throws):
+    from gemini_webapi.constants import AccountStatus
+    from gemini_webapi.exceptions import TemporarilyBlockedError
+    from src.cookie_manager import BrowserCookieDiscovery
+
+    monkeypatch.setenv("GEMINI_PSID", "synthetic-bound")
+    monkeypatch.setenv("GEMINI_BROWSER_AUTO_LOAD", "true")
+    monkeypatch.setattr(client_manager, "COOKIE_MANAGER_AVAILABLE", True)
+    cm = MagicMock()
+    cm.discover_browser_cookies.return_value = BrowserCookieDiscovery(reason="BROWSER_COOKIE_RATE_LIMITED")
+    if throws:
+        cm.discover_browser_cookies.side_effect = TemporarilyBlockedError("synthetic")
+    monkeypatch.setattr(client_manager, "get_cookie_manager", lambda: cm)
+    client = _synthetic_auth_client([AccountStatus.UNAUTHENTICATED])
+    mgr = ClientManager()
+    mgr._client = client
+    for _ in range(2):
+        with pytest.raises(client_manager.ClientRateLimited):
+            asyncio.run(mgr.initialize())
+    assert client.init.await_count == 1 and cm.discover_browser_cookies.call_count == 1
+    client._cookies.clear.assert_not_called()
+    cm.update_cookie.assert_not_called()
+    assert os.environ["GEMINI_PSID"] == "synthetic-bound"
+    client.generate_content.assert_not_called()

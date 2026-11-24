@@ -1,0 +1,475 @@
+{
+  "evidence_kind": "Synthetic protocol cases, not live account responses. Reuses registered web_workflow.turn.",
+  "arguments": {
+    "chat_id": "c_0123456789abcdef",
+    "rid": "r_fixture",
+    "rcid": "rc_fixture",
+    "text": "I seem to be encountering an error."
+  },
+  "cases": [
+    {
+      "name": "success_exact_completed_empty",
+      "status": "success",
+      "body": [
+        [
+          [
+            [
+              "c_0123456789abcdef",
+              "r_fixture"
+            ],
+            null,
+            null,
+            [
+              [
+                [
+                  "rc_fixture",
+                  [
+                    "I seem to be encountering an error."
+                  ],
+                  null,
+                  null,
+                  null,
+                  null,
+                  null,
+                  null,
+                  [
+                    2
+                  ],
+                  null,
+                  null,
+                  null,
+                  [
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    []
+                  ]
+                ]
+              ]
+            ]
+          ]
+        ]
+      ]
+    },
+    {
+      "name": "empty_turns",
+      "status": "empty",
+      "body": [
+        []
+      ]
+    },
+    {
+      "name": "rejected",
+      "status": "rejected",
+      "body": null,
+      "reject_code": 5
+    },
+    {
+      "name": "changed_shape",
+      "status": "changed_shape",
+      "body": {
+        "unexpected": []
+      }
+    },
+    {
+      "name": "duplicate_turn",
+      "status": "changed_shape",
+      "body": [
+        [
+          [
+            [
+              "c_0123456789abcdef",
+              "r_fixture"
+            ],
+            null,
+            null,
+            [
+              [
+                [
+                  "rc_fixture",
+                  [
+                    "I seem to be encountering an error."
+                  ],
+                  null,
+                  null,
+                  null,
+                  null,
+                  null,
+                  null,
+                  [
+                    2
+                  ],
+                  null,
+                  null,
+                  null,
+                  [
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    []
+                  ]
+                ]
+              ]
+            ]
+          ],
+          [
+            [
+              "c_0123456789abcdef",
+              "r_fixture"
+            ],
+            null,
+            null,
+            [
+              [
+                [
+                  "rc_fixture",
+                  [
+                    "I seem to be encountering an error."
+                  ],
+                  null,
+                  null,
+                  null,
+                  null,
+                  null,
+                  null,
+                  [
+                    2
+                  ],
+                  null,
+                  null,
+                  null,
+                  [
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    []
+                  ]
+                ]
+              ]
+            ]
+          ]
+        ]
+      ]
+    },
+    {
+      "name": "duplicate_candidate",
+      "status": "changed_shape",
+      "body": [
+        [
+          [
+            [
+              "c_0123456789abcdef",
+              "r_fixture"
+            ],
+            null,
+            null,
+            [
+              [
+                [
+                  "rc_fixture",
+                  [
+                    "I seem to be encountering an error."
+                  ],
+                  null,
+                  null,
+                  null,
+                  null,
+                  null,
+                  null,
+                  [
+                    2
+                  ],
+                  null,
+                  null,
+                  null,
+                  [
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    []
+                  ]
+                ],
+                [
+                  "rc_fixture",
+                  [
+                    "I seem to be encountering an error."
+                  ],
+                  null,
+                  null,
+                  null,
+                  null,
+                  null,
+                  null,
+                  [
+                    2
+                  ],
+                  null,
+                  null,
+                  null,
+                  [
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    []
+                  ]
+                ]
+              ]
+            ]
+          ]
+        ]
+      ]
+    },
+    {
+      "name": "opaque_card",
+      "status": "changed_shape",
+      "body": [
+        [
+          [
+            [
+              "c_0123456789abcdef",
+              "r_fixture"
+            ],
+            null,
+            null,
+            [
+              [
+                [
+                  "rc_fixture",
+                  [
+                    "I seem to be encountering an error."
+                  ],
+                  null,
+                  null,
+                  null,
+                  null,
+                  null,
+                  null,
+                  [
+                    2
+                  ],
+                  null,
+                  null,
+                  null,
+                  [
+                    {
+                      "job": "synthetic-handle"
+                    }
+                  ]
+                ]
+              ]
+            ]
+          ]
+        ]
+      ]
+    },
+    {
+      "name": "media_uri",
+      "status": "changed_shape",
+      "body": [
+        [
+          [
+            [
+              "c_0123456789abcdef",
+              "r_fixture"
+            ],
+            null,
+            null,
+            [
+              [
+                [
+                  "rc_fixture",
+                  [
+                    "I seem to be encountering an error."
+                  ],
+                  null,
+                  null,
+                  null,
+                  null,
+                  null,
+                  null,
+                  [
+                    2
+                  ],
+                  null,
+                  null,
+                  null,
+                  [
+                    {
+                      "60": [
+                        "https://lh3.googleusercontent.com/synthetic-video"
+                      ]
+                    }
+                  ]
+                ]
+              ]
+            ]
+          ]
+        ]
+      ]
+    },
+    {
+      "name": "pending",
+      "status": "changed_shape",
+      "body": [
+        [
+          [
+            [
+              "c_0123456789abcdef",
+              "r_fixture"
+            ],
+            null,
+            null,
+            [
+              [
+                [
+                  "rc_fixture",
+                  [
+                    "I seem to be encountering an error."
+                  ],
+                  null,
+                  null,
+                  null,
+                  null,
+                  null,
+                  null,
+                  [
+                    1
+                  ],
+                  null,
+                  null,
+                  null,
+                  [
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    []
+                  ]
+                ]
+              ]
+            ]
+          ]
+        ]
+      ]
+    },
+    {
+      "name": "foreign_chat",
+      "status": "changed_shape",
+      "body": [
+        [
+          [
+            [
+              "c_fedcba9876543210",
+              "r_fixture"
+            ],
+            null,
+            null,
+            [
+              [
+                [
+                  "rc_fixture",
+                  [
+                    "I seem to be encountering an error."
+                  ],
+                  null,
+                  null,
+                  null,
+                  null,
+                  null,
+                  null,
+                  [
+                    2
+                  ],
+                  null,
+                  null,
+                  null,
+                  [
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    []
+                  ]
+                ]
+              ]
+            ]
+          ]
+        ]
+      ]
+    },
+    {
+      "name": "bool_completion",
+      "status": "changed_shape",
+      "body": [
+        [
+          [
+            [
+              "c_0123456789abcdef",
+              "r_fixture"
+            ],
+            null,
+            null,
+            [
+              [
+                [
+                  "rc_fixture",
+                  [
+                    "I seem to be encountering an error."
+                  ],
+                  null,
+                  null,
+                  null,
+                  null,
+                  null,
+                  null,
+                  [
+                    true
+                  ],
+                  null,
+                  null,
+                  null,
+                  [
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    []
+                  ]
+                ]
+              ]
+            ]
+          ]
+        ]
+      ]
+    }
+  ]
+}

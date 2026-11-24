@@ -1,0 +1,529 @@
+{
+  "schema_version": 1,
+  "report_kind": "mcp_installed_followup_evidence",
+  "status": "degraded",
+  "followup_wheel_sha256": "7c2757c28cc21ce5056992be356f60087f13c94bcbdb9e2c8d5e9a9966a88a65",
+  "product_version": "0.20.0",
+  "related_historical_cohort_wheel_sha256": "ba8e0ab20c1bf3b42d1dc5dcdbfed733e3126191952a3e1bdbd9291d25e0a041",
+  "followup_state": "local_observations_resolved_with_four_identity_unknown_video_outcomes",
+  "summary": {
+    "original_followup8": {
+      "planned_cases": 8,
+      "recorded_cases": 8,
+      "passed": 4,
+      "refused": 1,
+      "local_timeouts": 2,
+      "pending": 1
+    },
+    "sequential_video": {
+      "generation_attempts": 2,
+      "local_timeouts": 2,
+      "upstream_outcomes_verified": 0
+    },
+    "generation_attempts_total": 10,
+    "same_handle_readbacks": 2,
+    "schema_local_results": 10,
+    "pending_generation_cases": 0,
+    "current_generation_outcomes": {
+      "passed": 4,
+      "refused": 2,
+      "local_timeouts_with_unknown_remote_outcome": 4
+    }
+  },
+  "schema_report_semantics": {
+    "pending_case_excluded": "The original Hydrogen music snapshot stays pending in its original case; a final9 readback resolves that same generation as refusal without new dispatch.",
+    "terminal_state": "local observed-call result, not a statement that unknown upstream work terminated",
+    "rpc_id_not_observed": "no raw RPC/HTTP telemetry collected; explicit sentinel",
+    "source_path": "public source code entrypoint, not an observed HTTP request path",
+    "zero_http_counters": "uncollected, not proof of no dispatch",
+    "unavailable": "refusal of this Neon music request; not a universal model limitation"
+  },
+  "independent_qa": {
+    "saved_operation_lineage_verified": true,
+    "saved_files_checked": 6,
+    "all_size_hash_checks_passed": true,
+    "neon_images_visually_verified": 2,
+    "carbon_video_sampled_frames_verified": [
+      1,
+      8
+    ],
+    "carbon_music_non_silent_signal_verified": true,
+    "carbon_music_manually_listened": false
+  },
+  "installed_build_verification": {
+    "source_data_files": 143,
+    "source_byte_mismatches": 0,
+    "extra_wheel_files": 0,
+    "extra_installed_files": 0,
+    "installed_distributions": 47,
+    "pinned_dependencies_compared": 46,
+    "dependency_version_mismatches": 0,
+    "offline_passed": 4676,
+    "retained_contract_passed": 2499,
+    "manifest_passed": 9,
+    "mypy_files": 152,
+    "ruff": "passed",
+    "installed_entrypoints": 6,
+    "protocol_current": "passed",
+    "protocol_legacy": "passed",
+    "profiles": "passed"
+  },
+  "client_verification": {
+    "followup_generation_stdio_build_prefix": "7c2757c28cc21ce5",
+    "delivery_operation_readback_build_prefix": "fcdf1138268623cc",
+    "current_shared_cli_build_prefix": "fcdf1138268623cc",
+    "desktop_app_active_build_prefix": "655d1612cb725167",
+    "desktop_app_reloaded_to_delivery": false,
+    "desktop_app_auth_required_observed": true
+  },
+  "worker_cache_isolation": {
+    "per_worker_temporary_directory": true,
+    "directory_mode": "0700",
+    "parent_and_user_caches_preserved": true,
+    "historical_internal_error_root_cause_proven": false
+  },
+  "cases": [
+    {
+      "model": "neon",
+      "workflow": "image",
+      "tool": "gemini_generate_media",
+      "profile": "media",
+      "status": "passed",
+      "local_observation_state": "completed",
+      "phase": "completed",
+      "seconds": 51.15,
+      "effective_model": "gemini-neon",
+      "dispatch_identity_observed": true,
+      "artifact_verified": true,
+      "error_code": null,
+      "verification_status": "local_artifacts_verified",
+      "upstream_terminal_state": "completed_reply_verified",
+      "cleanup": {
+        "runner_snapshot": "completed",
+        "current": "completed"
+      },
+      "source_mode": null,
+      "inline_initial_state": null,
+      "ordered_reference_count": 2,
+      "visually_verified": true,
+      "saved_size_hash_verified": true,
+      "width": 2752,
+      "height": 1536,
+      "round": "followup8",
+      "attempt": 1,
+      "case_id": "final7.followup8.neon.image.attempt1"
+    },
+    {
+      "model": "neon",
+      "workflow": "edit_image",
+      "tool": "gemini_generate_media",
+      "profile": "media",
+      "status": "passed",
+      "local_observation_state": "completed",
+      "phase": "completed",
+      "seconds": 47.11,
+      "effective_model": "gemini-neon",
+      "dispatch_identity_observed": true,
+      "artifact_verified": true,
+      "error_code": null,
+      "verification_status": "local_artifacts_verified",
+      "upstream_terminal_state": "completed_reply_verified",
+      "cleanup": {
+        "runner_snapshot": "completed",
+        "current": "completed"
+      },
+      "source_mode": "saved_operation",
+      "inline_initial_state": null,
+      "saved_operation_chain_verified": true,
+      "visually_verified": true,
+      "saved_size_hash_verified": true,
+      "width": 2752,
+      "height": 1536,
+      "round": "followup8",
+      "attempt": 1,
+      "case_id": "final7.followup8.neon.edit_image.attempt1"
+    },
+    {
+      "model": "hydrogen",
+      "workflow": "video",
+      "tool": "gemini_generate_media",
+      "profile": "media",
+      "status": "failed",
+      "local_observation_state": "partial",
+      "phase": "media_outcome_unverified",
+      "seconds": 31.03,
+      "effective_model": null,
+      "dispatch_identity_observed": false,
+      "artifact_verified": false,
+      "error_code": "TIMED_OUT",
+      "verification_status": "not_observed",
+      "upstream_terminal_state": "unknown",
+      "cleanup": {
+        "runner_snapshot": "not_applicable",
+        "current": "unverified_no_identity"
+      },
+      "source_mode": null,
+      "inline_initial_state": null,
+      "requested_options": {
+        "duration_seconds": 10,
+        "aspect_ratio": "16:9"
+      },
+      "round": "followup8",
+      "attempt": 1,
+      "case_id": "final7.followup8.hydrogen.video.attempt1",
+      "worker_exited_verified": true,
+      "persisted_local_error_verified": true,
+      "historical_dispatch_verified": false,
+      "failure_stage_verified": false
+    },
+    {
+      "model": "neon",
+      "workflow": "video",
+      "tool": "gemini_generate_media",
+      "profile": "media",
+      "status": "failed",
+      "local_observation_state": "partial",
+      "phase": "media_outcome_unverified",
+      "seconds": 31.03,
+      "effective_model": null,
+      "dispatch_identity_observed": false,
+      "artifact_verified": false,
+      "error_code": "TIMED_OUT",
+      "verification_status": "not_observed",
+      "upstream_terminal_state": "unknown",
+      "cleanup": {
+        "runner_snapshot": "not_applicable",
+        "current": "unverified_no_identity"
+      },
+      "source_mode": null,
+      "inline_initial_state": null,
+      "requested_options": {
+        "duration_seconds": 15,
+        "aspect_ratio": "9:16"
+      },
+      "round": "followup8",
+      "attempt": 1,
+      "case_id": "final7.followup8.neon.video.attempt1",
+      "worker_exited_verified": true,
+      "persisted_local_error_verified": true,
+      "historical_dispatch_verified": false,
+      "failure_stage_verified": false
+    },
+    {
+      "model": "carbon",
+      "workflow": "video",
+      "tool": "gemini_generate_media",
+      "profile": "media",
+      "status": "passed",
+      "local_observation_state": "completed",
+      "phase": "completed",
+      "seconds": 146.12,
+      "effective_model": "gemini-carbon",
+      "dispatch_identity_observed": true,
+      "artifact_verified": true,
+      "error_code": null,
+      "verification_status": "local_artifacts_verified",
+      "upstream_terminal_state": "completed_reply_verified",
+      "cleanup": {
+        "runner_snapshot": "completed",
+        "current": "completed"
+      },
+      "source_mode": "native_single_reference_sync",
+      "inline_initial_state": "local",
+      "requested_options": {
+        "duration_seconds": 10,
+        "aspect_ratio": "16:9",
+        "background": false,
+        "reference_count": 1
+      },
+      "video_verification": {
+        "duration_seconds": 10.026667,
+        "width": 1280,
+        "height": 720,
+        "video_codec": "h264",
+        "audio_codec": "aac",
+        "audio_sample_rate_hz": 48000,
+        "audio_channels": 2,
+        "sampled_frames_seconds": [
+          1,
+          8
+        ],
+        "blue_paper_cube_rotation_visually_verified": true,
+        "saved_size_hash_verified": true
+      },
+      "round": "followup8",
+      "attempt": 1,
+      "case_id": "final7.followup8.carbon.video.attempt1"
+    },
+    {
+      "model": "neon",
+      "workflow": "music",
+      "tool": "gemini_generate_media",
+      "profile": "media",
+      "status": "failed",
+      "local_observation_state": "failed",
+      "phase": "media_rejected",
+      "seconds": 88.08,
+      "effective_model": "gemini-neon",
+      "dispatch_identity_observed": true,
+      "artifact_verified": false,
+      "error_code": "ARTIFACT_NOT_RETURNED",
+      "verification_status": "model_media_refusal_observed",
+      "upstream_terminal_state": "refusal_verified",
+      "cleanup": {
+        "runner_snapshot": "completed",
+        "current": "completed"
+      },
+      "source_mode": null,
+      "inline_initial_state": null,
+      "requested_options": {
+        "music_duration": "short",
+        "music_vocals": "instrumental"
+      },
+      "round": "followup8",
+      "attempt": 1,
+      "case_id": "final7.followup8.neon.music.attempt1"
+    },
+    {
+      "model": "carbon",
+      "workflow": "music",
+      "tool": "gemini_generate_media",
+      "profile": "media",
+      "status": "passed",
+      "local_observation_state": "completed",
+      "phase": "completed",
+      "seconds": 101.09,
+      "effective_model": "gemini-carbon",
+      "dispatch_identity_observed": true,
+      "artifact_verified": true,
+      "error_code": null,
+      "verification_status": "local_artifacts_verified",
+      "upstream_terminal_state": "completed_reply_verified",
+      "cleanup": {
+        "runner_snapshot": "completed",
+        "current": "completed"
+      },
+      "source_mode": null,
+      "inline_initial_state": null,
+      "requested_options": {
+        "music_duration": null,
+        "music_vocals": null
+      },
+      "audio_verification": {
+        "container": "mp4",
+        "bytes": 3659520,
+        "duration_seconds": 64.733333,
+        "width": 1024,
+        "height": 1024,
+        "video_codec": "h264",
+        "audio_codec": "aac",
+        "audio_sample_rate_hz": 44100,
+        "audio_channels": 2,
+        "non_silent_verified": true,
+        "mean_volume_db": -14.4,
+        "max_volume_db": -0.3,
+        "manually_listened": false,
+        "saved_size_hash_verified": true
+      },
+      "round": "followup8",
+      "attempt": 1,
+      "case_id": "final7.followup8.carbon.music.attempt1"
+    },
+    {
+      "model": "hydrogen",
+      "workflow": "music",
+      "tool": "gemini_generate_media",
+      "profile": "media",
+      "status": "pending",
+      "local_observation_state": "partial",
+      "phase": "media_artifact_not_observed",
+      "seconds": 434.17,
+      "effective_model": "gemini-4-hydrogen",
+      "dispatch_identity_observed": true,
+      "artifact_verified": false,
+      "error_code": null,
+      "verification_status": "wait_elapsed",
+      "upstream_terminal_state": "unknown",
+      "cleanup": {
+        "runner_snapshot": "not_scheduled",
+        "current": "protected_pending"
+      },
+      "source_mode": null,
+      "inline_initial_state": null,
+      "requested_options": {
+        "music_duration": null,
+        "music_vocals": null
+      },
+      "original_handle_observation_only": true,
+      "generation_replayed": false,
+      "remote_termination_claimed": false,
+      "round": "followup8",
+      "attempt": 1,
+      "case_id": "final7.followup8.hydrogen.music.attempt1"
+    }
+  ],
+  "privacy": {
+    "raw_responses_included": false,
+    "account_content_included": false,
+    "credentials_included": false
+  },
+  "round_id": "final7_followup8",
+  "source_selection": "first eight generation records from the original followup round; later same-handle readbacks and new sequential generation attempts are separate",
+  "diagnostics": {
+    "isolated_default_no_send_initialization": {
+      "seconds": 9.785,
+      "passed": true,
+      "sdk_timeout_reproduced": false,
+      "historical_dispatch_proven": false
+    },
+    "sdk_initialization_windows": "candidate explanation only; exact historical worker stage unavailable"
+  },
+  "subsequent_rounds": [
+    {
+      "round": "video_sequential",
+      "generation_attempts": 2,
+      "state": "local_observations_finished_with_unknown_remote_outcomes",
+      "cases": [
+        {
+          "round": "video_sequential",
+          "attempt": 1,
+          "case_id": "final7.video_sequential.hydrogen.video.attempt1",
+          "model": "hydrogen",
+          "workflow": "video",
+          "status": "failed",
+          "seconds": 219.11,
+          "local_observation_state": "partial",
+          "phase": "native_media_outcome_unverified",
+          "error_code": "TIMED_OUT",
+          "dispatch_identity_observed": false,
+          "upstream_terminal_state": "unknown",
+          "cleanup": {
+            "runner_snapshot": "not_applicable",
+            "current": "unverified_no_identity"
+          },
+          "submission_evidence": "internal_send_attempt_observed_without_identity",
+          "replays_original_operation": false
+        },
+        {
+          "round": "video_sequential",
+          "attempt": 1,
+          "case_id": "final7.video_sequential.neon.video.attempt1",
+          "model": "neon",
+          "workflow": "video",
+          "status": "failed",
+          "seconds": 31.01,
+          "local_observation_state": "partial",
+          "phase": "media_outcome_unverified",
+          "error_code": "TIMED_OUT",
+          "dispatch_identity_observed": false,
+          "upstream_terminal_state": "unknown",
+          "cleanup": {
+            "runner_snapshot": "not_applicable",
+            "current": "unverified_no_identity"
+          },
+          "submission_evidence": "identity_not_observed",
+          "replays_original_operation": false
+        }
+      ]
+    }
+  ],
+  "delivery_state": "deployed_verified",
+  "hydrogen_music_independent_diagnostic": {
+    "exact_turn_match_verified": true,
+    "completion_flag": 2,
+    "rich_media_inventory_empty": true,
+    "media_uri_count": 0,
+    "explicit_tool_or_session_music_refusal_observed": true,
+    "previous_predicate_matched": false,
+    "stored_operation_state": "failed_after_final9_original_handle_readback",
+    "cleanup_completed": true,
+    "raw_response_exported": false,
+    "original_local_readonly_observer_retired": true,
+    "identity_and_protection_preserved": true,
+    "remote_generation_or_cancel_requested": false
+  },
+  "independent_cleanup_verification": {
+    "exact_cases_checked": 6,
+    "all_canonical_absent_verified": true,
+    "all_account_bindings_verified": true,
+    "mutation_requests": 0,
+    "hydrogen_music_included": true,
+    "unidentified_video_cases_included": false,
+    "already_absent_counted_as_new_deletion": false
+  },
+  "readbacks": [
+    {
+      "round": "original_handle_readback",
+      "attempt": 1,
+      "source_case_id": "final7.followup8.hydrogen.music.attempt1",
+      "new_generation": false,
+      "seconds": 93.09,
+      "local_state": "partial",
+      "phase": "media_artifact_not_observed",
+      "verification_status": "wait_elapsed",
+      "error_code": null,
+      "upstream_identity_observed": true,
+      "artifact_verified": false,
+      "cleanup_completed": false
+    },
+    {
+      "round": "final9_original_handle_readback",
+      "attempt": 1,
+      "event_id": "final9.readback.hydrogen.music",
+      "source_case_id": "final7.followup8.hydrogen.music.attempt1",
+      "new_generation": false,
+      "seconds": 16.07,
+      "local_state": "failed",
+      "phase": "media_rejected",
+      "error_code": "ARTIFACT_NOT_RETURNED",
+      "verification_status": "model_media_refusal_observed",
+      "upstream_terminal_state": "refusal_verified",
+      "cleanup_completed": true,
+      "independent_canonical_absence_verified": true,
+      "original_generation_build_prefix": "7c2757c28cc21ce5",
+      "reader_build_prefix": "fcdf1138268623cc"
+    }
+  ],
+  "delivery_wheel_sha256": "fcdf1138268623cc4ccdc5491002e74292947958d50dcf12770d1457d7b62d15",
+  "resolved_generation_cases": [
+    {
+      "case_id": "final7.followup8.hydrogen.music.attempt1",
+      "outcome_event_id": "final9.readback.hydrogen.music",
+      "current_status": "refused",
+      "current_cleanup": "completed",
+      "new_generation": false
+    }
+  ],
+  "operation_ledger_verification": {
+    "operations": 10,
+    "known_remote_identity_cases": 6,
+    "known_cleanup_completed": 6,
+    "identity_unknown_video_cases_protected": 4,
+    "live_workers": 0,
+    "unknown_cases_declared_absent": false
+  },
+  "delivery_build_verification": {
+    "source_data_files": 143,
+    "source_byte_mismatches": 0,
+    "extra_wheel_files": 0,
+    "extra_installed_files": 0,
+    "installed_distributions": 47,
+    "pinned_dependencies_compared": 46,
+    "dependency_version_mismatches": 0,
+    "offline_passed": 4699,
+    "offline_seconds": 58.58,
+    "contract_passed": 2522,
+    "contract_seconds": 28.79,
+    "mypy_files": 152,
+    "ruff": "passed",
+    "clean_wheel_entrypoints": 6,
+    "auth_free_text_smoke": "passed",
+    "local_image_smoke": "passed",
+    "protocol_current": "passed",
+    "protocol_legacy": "passed",
+    "profiles": "passed",
+    "browser_refusal_quote_checks_passed": 50,
+    "prior_strict_refusal_review_checks_passed": 124,
+    "raw_completed_empty_gate_widened": false
+  }
+}

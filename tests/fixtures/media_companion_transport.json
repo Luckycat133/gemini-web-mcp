@@ -1,0 +1,13 @@
+{
+  "observed": "Official Gemini Web BardChatUi.en.c3ZkJFn_XPs.2018.O qve -> ewe -> mwe, inspected 2026-11-21",
+  "request_paths": {
+    "selection": [55, 0],
+    "music_parameters": [0, 9, 6, 2]
+  },
+  "cases": {
+    "success": {"option_ids": [42, 69, 41], "parameters": [4, 3]},
+    "empty": {"option_ids": []},
+    "rejected": {"option_ids": [42, 43, 69]},
+    "changed_shape": {"option_ids": [42, 69, 41], "context": {"unexpected": true}}
+  }
+}

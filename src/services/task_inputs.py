@@ -1,18 +1,24 @@
-"""Explicit, idempotent replies to an observed Task confirmation card."""
+"""Idempotent replies to observed Task confirmation cards."""
 
 import asyncio
 from dataclasses import replace
 import hashlib
+import os
 import re
 import uuid
 from typing import Any
 
 from ..domain import DomainErrorCode, DomainResult, DomainWarning, LongOperationData
 from ..infrastructure.account_identity import operation_account_matches
+from ..infrastructure.task_confirmation import one_time_browser_option
 from .deadlines import await_before_deadline
 
 TASK_INPUT_INITIALIZE_SECONDS = 60.0
 TASK_INPUT_READ_SECONDS = 60.0
+
+
+def task_auto_approve_enabled() -> bool:
+    return os.environ.get("GEMINI_TASK_AUTO_APPROVE", "").strip().lower() == "true"
 
 
 def input_handle(record: Any) -> str:
@@ -25,7 +31,7 @@ async def submit_task_input(request: dict[str, Any], *, operation_id: str) -> Do
     """Send one new explicit instruction; a duplicate card token never sends it twice."""
     from ..client_wrapper import get_gemini_client, initialize_client
     from ..infrastructure.operation_store import OperationStore
-    from .background import _accepted, _launch_detached_worker
+    from .background import _accepted
     from .web_context_transport import fetch_task_metadata, fetch_workflow_turn
 
     token = request.get("input_id")
@@ -72,6 +78,33 @@ async def submit_task_input(request: dict[str, Any], *, operation_id: str) -> Do
             or goal.get("upstream_status") != 5 or not turn or turn.get("input_required") is not True):
         return DomainResult.failure(DomainErrorCode.VERIFICATION_FAILED, "The exact Task input request is no longer verified.",
                                     verification_status="task_input_unverified")
+    return await _dispatch_task_input(store, record, turn, request, token=token)
+
+
+async def auto_approve_task_input(store: Any, record: Any, turn: dict[str, Any], *, worker_token: str) -> None:
+    """Allow the observed browser-use permission once on the worker's current turn."""
+    if (turn.get("input_required") is not True or turn.get("setup_card_present")
+            or (turn.get("chat_id"), turn.get("rid"), turn.get("rcid")) != (
+                record.upstream_chat_id, record.upstream_response_id, record.upstream_candidate_id)
+            or not operation_account_matches(record)):
+        return
+    allow = one_time_browser_option(turn)
+    if allow is None:
+        return
+    await _dispatch_task_input(
+        store, record, turn, {"input_option_id": allow["input_option_id"], "prompt": allow["prompt"]},
+        token=input_handle(record), expected_worker_token=worker_token,
+    )
+
+
+async def _dispatch_task_input(
+    store: Any, record: Any, turn: dict[str, Any], request: dict[str, Any], *, token: str,
+    expected_worker_token: str | None = None,
+) -> DomainResult[LongOperationData]:
+    from .background import _accepted, _launch_detached_worker
+
+    operation_id = record.operation_id
+    option_id = request.get("input_option_id")
     choices = turn.get("input_options") or ()
     card = turn.get("input_card")
     selected: dict[str, Any] | None = None
@@ -101,7 +134,8 @@ async def submit_task_input(request: dict[str, Any], *, operation_id: str) -> Do
         return DomainResult.failure(DomainErrorCode.INVALID_ARGUMENT, "The native confirmation choice is unsupported.")
     worker_token = uuid.uuid4().hex
     if not store.begin_task_input(operation_id, token, response_id=record.upstream_response_id,
-                                  candidate_id=record.upstream_candidate_id, worker_token=worker_token):
+                                  candidate_id=record.upstream_candidate_id, worker_token=worker_token,
+                                  expected_worker_token=expected_worker_token):
         if store.task_input_dispatched(operation_id, token):
             return _accepted(store.get(operation_id) or record)
         return DomainResult.failure(DomainErrorCode.VERIFICATION_FAILED, "The Task changed before input was claimed.")

@@ -13,8 +13,9 @@ import re
 import tarfile
 import tomllib
 import zipfile
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass
+from datetime import date
 from email.parser import Parser
 from pathlib import Path
 
@@ -25,7 +26,7 @@ CANONICAL_GIT_SOURCE = "git+https://github.com/Luckycat133/gemini-web-mcp@codex/
 PROJECT_LICENSE_EXPRESSION = "AGPL-3.0-only"
 PROJECT_LICENSE_FILENAME = "LICENSE"
 
-_STABLE_SEMVER = re.compile(r"[0-9]+\.[0-9]+\.[0-9]+")
+_STABLE_SEMVER = re.compile(r"(?:0|[1-9][0-9]*)(?:\.(?:0|[1-9][0-9]*)){2}")
 _PRODUCT_VERSION_PATTERNS = (
     re.compile(
         r"Gemini(?: Web)? MCP(?: Server)?[^\n`]*?\(?v(?P<version>[0-9]+\.[0-9]+(?:\.[0-9]+)?)\)?",
@@ -50,6 +51,7 @@ _PUBLIC_SOURCE_INSTALL_PATHS = (
     Path("docs/launch-kit.md"),
     Path("docs/client-examples.md"),
     Path("examples/clients/codex.config.toml"),
+    Path("examples/clients/codex.account.config.toml"),
     Path("examples/clients/claude-desktop.json"),
     Path("examples/clients/claude-code.mcp.json"),
     Path("examples/clients/vscode.mcp.json"),
@@ -69,10 +71,13 @@ _SKILL_VERSION = re.compile(
     re.MULTILINE,
 )
 _CHANGELOG_PATH = Path("docs/changelog.md")
+_CHANGELOG_SECTION_HEADING = re.compile(r"##[ \t]+(?P<title>\S.*?)[ \t]*")
 _CHANGELOG_RELEASE_HEADING = re.compile(
-    r"^## \[(?P<version>[0-9]+\.[0-9]+\.[0-9]+)\] - (?P<date>[0-9]{4}-[0-9]{2}-[0-9]{2})\s*$",
-    re.MULTILINE,
+    rf"\[(?P<version>{_STABLE_SEMVER.pattern})\] - (?P<date>[0-9]{{4}}-[0-9]{{2}}-[0-9]{{2}})"
 )
+_CHANGELOG_VERSION_PREFIX = re.compile(r"\[v?[0-9]")
+_CHANGELOG_BULLET = re.compile(r"^[ ]{0,3}[-*+][ \t]+\S")
+_CHANGELOG_FENCE = re.compile(r"^[ ]{0,3}(?P<marker>`{3,}|~{3,})(?P<suffix>.*)")
 
 
 class ReleaseMetadataError(ValueError):
@@ -152,9 +157,81 @@ def find_product_version_errors(path: Path, text: str, expected_version: str) ->
     return errors
 
 
+def _changelog_content_lines(changelog: str) -> Iterator[str]:
+    fence = ""
+    comment = False
+    for line in changelog.splitlines():
+        if not fence and (comment or line.lstrip().startswith("<!--")):
+            comment = "-->" not in line
+            continue
+        marker = _CHANGELOG_FENCE.match(line)
+        if marker:
+            observed = marker.group("marker")
+            if not fence:
+                fence = observed
+            elif observed.startswith(fence) and not marker.group("suffix").strip():
+                fence = ""
+        elif not fence:
+            yield line
+
+
+def _version_key(version: str) -> tuple[int, ...]:
+    return tuple(map(int, version.split(".")))
+
+
+def _changelog_version_errors(
+    changelog: str, version: str, *, require_dated_release: bool
+) -> list[str]:
+    lines = list(_changelog_content_lines(changelog))
+    headings = [
+        (index, match.group("title"))
+        for index, line in enumerate(lines)
+        if (match := _CHANGELOG_SECTION_HEADING.fullmatch(line))
+    ]
+    errors: list[str] = []
+    releases: list[str] = []
+    previous_date = None
+    for _, title in headings:
+        if _CHANGELOG_VERSION_PREFIX.match(title) is None:
+            continue
+        release = _CHANGELOG_RELEASE_HEADING.fullmatch(title)
+        if release is None:
+            errors.append(f"{_CHANGELOG_PATH}: invalid release heading {title!r}, expected [X.Y.Z] - YYYY-MM-DD")
+            continue
+        observed = release.group("version")
+        try:
+            observed_date = date.fromisoformat(release.group("date"))
+        except ValueError:
+            errors.append(f"{_CHANGELOG_PATH}: invalid release date in {title!r}")
+            continue
+        if observed in releases:
+            errors.append(f"{_CHANGELOG_PATH}: duplicate release section {observed!r}")
+        if releases and _version_key(observed) > _version_key(releases[-1]):
+            errors.append(f"{_CHANGELOG_PATH}: release versions must be newest first")
+        if previous_date is not None and observed_date > previous_date:
+            errors.append(f"{_CHANGELOG_PATH}: dated release sections must be newest first")
+        releases.append(observed)
+        previous_date = observed_date
+
+    latest = releases[0] if releases else None
+    if latest is None:
+        if not errors:
+            errors.append(f"{_CHANGELOG_PATH}: no dated [X.Y.Z] release section was found")
+    elif latest != version:
+        if require_dated_release or _version_key(latest) > _version_key(version):
+            errors.append(f"{_CHANGELOG_PATH}: current release section {latest!r} != {version!r}")
+        elif headings[0][1] != "[Unreleased]" or not any(
+            _CHANGELOG_BULLET.match(line) for line in lines[headings[0][0] + 1 : headings[1][0]]
+        ):
+            errors.append(f"{_CHANGELOG_PATH}: development version {version!r} needs a leading [Unreleased] with entries")
+    return errors
+
+
 def repository_version_errors(
     project_root: Path = PROJECT_ROOT,
     metadata: ReleaseMetadata | None = None,
+    *,
+    require_dated_release: bool = False,
 ) -> list[str]:
     """Return all known repository version drift without mutating the checkout."""
 
@@ -187,17 +264,9 @@ def repository_version_errors(
     if not changelog_path.is_file():
         errors.append(f"{_CHANGELOG_PATH.as_posix()}: required changelog is missing")
     else:
-        changelog = changelog_path.read_text(encoding="utf-8")
-        headings = list(_CHANGELOG_RELEASE_HEADING.finditer(changelog))
-        if not headings:
-            errors.append(
-                f"{_CHANGELOG_PATH.as_posix()}: no dated [X.Y.Z] release section was found"
-            )
-        elif headings[0].group("version") != release.version:
-            errors.append(
-                f"{_CHANGELOG_PATH.as_posix()}: current release section "
-                f"{headings[0].group('version')!r} != {release.version!r}"
-            )
+        errors.extend(_changelog_version_errors(
+            changelog_path.read_text(encoding="utf-8"), release.version, require_dated_release=require_dated_release,
+        ))
 
     markdown_paths = [project_root / "README.md", project_root / "README.zh-CN.md"]
     markdown_paths.extend(sorted((project_root / "docs").rglob("*.md")))
@@ -273,10 +342,12 @@ def repository_version_errors(
 def require_repository_version_consistency(
     project_root: Path = PROJECT_ROOT,
     metadata: ReleaseMetadata | None = None,
+    *,
+    require_dated_release: bool = False,
 ) -> None:
     """Raise one actionable error when repository version consumers drift."""
 
-    errors = repository_version_errors(project_root, metadata)
+    errors = repository_version_errors(project_root, metadata, require_dated_release=require_dated_release)
     if errors:
         details = "\n".join(f"- {error}" for error in errors)
         raise ReleaseMetadataError(f"Version consistency check failed:\n{details}")

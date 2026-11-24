@@ -4,13 +4,13 @@ These examples use the [development branch from PR #39](source-update-integratio
 
 ## One-command offline proof
 
-With [uv](https://docs.astral.sh/uv/) installed, this command installs the current source, starts `gemini-mcp-function`, checks its 17-tool catalog and verifies the typed `INVALID_ARGUMENT` response to an empty `gemini_ask` prompt:
+With uv installed, run this command to start `gemini-mcp-function` from the development source, check its six-tool catalog and verify the typed `INVALID_ARGUMENT` response to an empty `gemini_ask` prompt. [uv installation](https://docs.astral.sh/uv/)
 
 ```bash
 uvx --from git+https://github.com/Luckycat133/gemini-web-mcp@codex/gemini-tools-polish-20261101 gemini-mcp-onboarding
 ```
 
-The command removes Gemini Cookie variables from the child process and makes no Gemini request. Check for `mode=offline`, `credentials_accessed=false`, `profile=function`, `enabled_tools=17`, and `text_tool=gemini_ask`.
+The command removes Gemini Cookie variables from the child process and makes no Gemini request. Check for `mode=offline`, `credentials_accessed=false`, `profile=function`, `enabled_tools=6`, and `text_tool=gemini_ask`.
 
 ## Authentication
 
@@ -50,9 +50,9 @@ Authoritative configuration references: [Codex MCP](https://developers.openai.co
 
 ## Choose a surface
 
-The supplied client configurations connect only `gemini-mcp-function` by default. This 17-tool surface covers assistance, chat, Task, image/video/music, Research and operation recovery. Ask ordinary and current-web questions through `gemini_ask`, naming an available app in natural language when needed; Flash is the default and no web/tool enable switch is required. Function Ask with Notebook IDs starts background ordinary Chat; `gemini_run_task` explicitly starts Task. Both return a persistent operation handle. See [Notebook, Chat and Task workflows](notebook-task-workflows.md). The compatibility assist entrypoint retains its five-tool catalog including `gemini_search`, without Notebook attachment arguments.
+The supplied client configurations connect only `gemini-mcp-function` by default. Its six tools cover Chat, Task, media, Research, status and result retrieval. Use `gemini_ask` for ordinary questions, current web information and mixed inputs. Name an available app naturally when needed. Flash is the default. Notebook IDs start background Chat, while `gemini_run_task` starts Task. Keep the original operation handle for either workflow. [Notebook, Chat and Task workflows](notebook-task-workflows.md)
 
-For explicitly requested account management, add a second server configuration. This optional entry is not enabled by the supplied default files:
+For explicitly requested account management, configure a separate server entry. This optional entry is not enabled by the supplied default files. For Codex, copy the account-only TOML as a standalone entry. [Optional Codex account config](../examples/clients/codex.account.config.toml)
 
 ```json
 {
@@ -65,7 +65,9 @@ For explicitly requested account management, add a second server configuration. 
 }
 ```
 
-Configure the account entry's authentication as you do for the function entry, or use browser discovery. The account surface exposes 17 tools, including Notebook metadata, Task activity and schedules, and verified Task browser frames with explicit one-shot inputs; `gemini_cleanup` only acts on MCP-owned ledger records, never title matches.
+Configure the account entry's authentication as you do for the function entry, or use browser discovery. Its six tools cover history, chat organization and deletion, Notebooks, and read-only native Task metadata and progress. You can connect just this entry for conversation management. Enable the function entry for generation. Host controls for enabling servers vary by client.
+
+Use `gemini-mcp-server` with the server entry's `env.GEMINI_TOOLS` set to `function-full` or `account-full` when a workflow needs the corresponding prior 17-tool catalog. The latter includes schedules, Skills, preferences and explicit browser inputs. Its `gemini_cleanup` acts only on MCP-owned ledger records, never title matches.
 
 The older `gemini-mcp-assist` and `gemini-mcp-skill-server` entrypoints remain compatibility options. Explicit `GEMINI_TOOLS=model` or `GEMINI_TOOLS=core` still selects the corresponding legacy profile when running `gemini-mcp-server`. Do not set that variable for the default function entry.
 

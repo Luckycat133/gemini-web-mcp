@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 from gemini_webapi import GeminiClient
-from gemini_webapi.constants import MODEL_HEADER_KEY, Model
+from gemini_webapi.constants import AccountStatus, MODEL_HEADER_KEY, Model
 from gemini_webapi.exceptions import UsageLimitExceededError
 from gemini_webapi.types import AvailableModel, Candidate, ModelOutput
 
@@ -25,6 +25,8 @@ def synthetic_account(monkeypatch, tmp_path):
 def client_for_models(*names):
     client = ThinkingLevelGeminiClient()
     client._running = True
+    client.account_status = AccountStatus.AVAILABLE
+    client._usage_info = {"tier": {"id": 6, "label": "ULTRA"}}
     client._model_registry = {
         name: AvailableModel(model_id=name, model_name=name, display_name=name, description="", capacity=1)
         for name in names

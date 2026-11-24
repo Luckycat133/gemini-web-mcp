@@ -18,38 +18,48 @@
 
 ## 当前支持的工具
 
-下面这份清单对应当前仓库真实注册结果，而不是历史文档残留。
+功能面与账号面是两条独立的 MCP 连接。选择完成当前任务所需的入口。
 
 ### 默认功能面（`gemini-mcp-function`）
 
-`gemini-mcp-server` 未设置 `GEMINI_TOOLS` 时也使用此功能面：
+`gemini-mcp-server` 未设置 `GEMINI_TOOLS` 时也使用这 6 个工具。
 
-- 协助：`gemini_ask`、`gemini_understand_image`、`gemini_understand`、`gemini_research`
-- Gemini Task：`gemini_run_task`
-- 会话：`gemini_start_chat`、`gemini_send_message`、`gemini_list_sessions`、`gemini_reset_session`
-- 媒体：`gemini_generate_image`、`gemini_edit_image`、`gemini_generate_video`、`gemini_generate_music`
-- 长任务：`gemini_get_operation_status`、`gemini_get_operation_result`
-- 研究报告：`gemini_list_research_report_actions`、`gemini_create_from_research_report`
+| 工具 | 用途 |
+| --- | --- |
+| `gemini_ask` | 普通问答、联网、App 请求、附件理解、Notebook Chat 和按需续聊 |
+| `gemini_run_task` | 委托 Gemini 执行和跟踪 Task |
+| `gemini_research` | 深度调研并交付完整报告 |
+| `gemini_create_media` | 后台生成图片、编辑图片、视频或音乐 |
+| `gemini_get_operation_status` | 只读查看原操作的状态 |
+| `gemini_get_operation_result` | 取回经核验的结果或产物。恢复时可能触发自有对话自动清理 |
 
-四个媒体专用工具始终后台启动，保存返回的 `operation_id` 并使用状态/结果工具取回同一任务。报告的 `audio_overview` 是旁白稿，`custom_app` 是应用规格，不冒充已生成音频或已部署应用。
+后台请求返回 `operation_id`，用这个句柄查询原任务。状态和结果分开，以便客户端区分只读观察与可能包含清理的结果恢复。
 
-`gemini_ask` 合并普通问答和联网问题，也可直接在提示中指定“去用某个 App”，默认使用 Flash，不提供联网或工具启用开关。返回观察到的 `sources`、`grounding_state`、来源数量和时间；普通文本中的链接不冒充联网证据。旧 `gemini_search` 在五工具 assist 兼容入口保留。App/Task 的实测范围与协议边界见 [Connected Apps](connected-apps.md)。
+`gemini_ask` 合并普通问答和联网问题，也可直接在提示中指定“去用某个 App”，默认 `flash` 兼容别名优先选择当前账号发现的 Hydrogen，可显式选择 Neon／Carbon；不提供联网或工具启用开关。返回观察到的 `sources`、`grounding_state`、来源数量和时间；普通文本中的链接不冒充联网证据。旧 `gemini_search` 在五工具 assist 兼容入口保留。App/Task 的实测范围与协议边界见 [Connected Apps](connected-apps.md)。
 
-功能面 `gemini_ask` 另接受 `notebook_ids`、`timeout_seconds=600` 和 `operation_id`。提供 Notebook ID 时启动后台普通聊天，返回 `execution_mode="chat"` 与持久操作句柄；不带 Notebook 时保持直接问答。仅此后台分支接受调用方提供的 `operation_id`。完整回答先保存并校验本地产物，再按默认策略清理自有线程。
+功能面 `gemini_ask` 可以选择 `inputs`、`notebook_ids` 或续聊。附件最多 16 项，按 `id` 和 `kind` 标识，用对应的 `text`、`path` 或 `url` 提供内容。需要续聊时首轮传 `start_session=true`，后续用返回的 `session_id` 并继承原模型和思考等级。上轮未核验时仅传 `session_id` 和 `recover_only=true` 读回原轮次。会话句柄在原进程内有效。
+
+提供 `notebook_ids` 时启动后台普通 Chat，返回 `execution_mode="chat"` 与持久操作句柄。这条路径支持调用方提供 `operation_id` 和自定义 `timeout_seconds`，默认超时 600 秒。完整回答先保存并校验本地产物，再按默认策略清理自有线程。
 
 `gemini_run_task(prompt, model="flash", thinking_level="standard", notebook_ids=None, timeout_seconds=600, retain_chat=false, delete_after_seconds=None, operation_id=None)` 明确启动后台 Task，返回 `execution_mode="task"`。使用 `gemini_get_operation_status/result` 读取同一操作，不能通过重发提示查询进度。该工具可按用户提示执行应用修改，注解为 destructive；Task 完成不替代应用侧修改的独立核验。见 [Notebook 与 Task 工作流](notebook-task-workflows.md)。
 
-功能面的 `gemini_generate_video` 默认用 `model="flash"` 进入 Gemini 网页的「创建视频」模式。需要明确指定 Omni 1.2 Flash 或精确时长时，使用单独计费的 Developer API 路径。见[视频生成参数与示例](#gemini_generate_video)。
+功能面的 `gemini_create_media(kind="video")` 默认省略 `model`，选择发现的 Hydrogen 并进入 Gemini 网页的「创建视频」模式。网页路径支持 10／15 秒及横／竖画幅。只有明确选择 API 模型 ID 时才使用单独计费的 Developer API 路径。见[视频生成参数与示例](#gemini_generate_video)。
 
 ### 显式账号面（`gemini-mcp-account`）
 
-`gemini_history`、`gemini_manage_chat`、`gemini_delete_chat`、`gemini_notebooks`、`gemini_manage_notebook`、`gemini_skills`、`gemini_move_chat_to_notebook`、`gemini_tasks`、`gemini_task_browser`、`gemini_account_inventory`、`gemini_list_scheduled_actions`、`gemini_get_scheduled_action`、`gemini_create_scheduled_action`、`gemini_delete_scheduled_action`、`gemini_manage_gems`、`gemini_cleanup`、`gemini_preferences`。
+`gemini_history`、`gemini_manage_chat`、`gemini_delete_chat`、`gemini_notebooks`、`gemini_manage_notebook`、`gemini_tasks`。
 
-原生 `gemini_skills` 支持 list/get/create/update/enable/delete，指令正文读取须 `include_instructions=true`。`gemini_manage_notebook` 支持纯文本、网页 URL 和本地 UTF-8 `.txt` 来源，删除 Notebook 包含其中对话。参数和读回方式见[原生账号资源](native-account-resources.md)。
+`gemini_manage_notebook` 支持纯文本、网页 URL 和本地 UTF-8 `.txt` 来源。删除 Notebook 包含其中对话。参数和读回方式见[原生账号资源](native-account-resources.md)。
 
-账号面的历史查询默认 `response_format="compact"`，返回 ID、标题、置顶状态和分页信息；普通 read 每轮默认最多 800 字符。`gemini_manage_chat` 用准确 ID 执行 rename/pin/unpin，修改前后读取元数据核验；只发送成功但未读回验证时，`changed=null`。详见[紧凑对话管理](web-chat-management.md)。
+历史查询默认 `response_format="compact"`，返回 ID、标题、置顶状态和分页信息。普通 read 每轮默认最多 800 字符。`gemini_manage_chat` 按准确 ID 执行 `rename`、`pin`、`unpin` 或 `move_to_notebook`。移动前从 `gemini_notebooks(source="gemini")` 解析准确目标。对话删除由单独的 `gemini_delete_chat` 执行。详见[紧凑对话管理](web-chat-management.md)。
 
-`gemini_cleanup` 仅清理本项目登记的 MCP 自有聊天。旧记录可用准确 `chat_id` 执行 `recheck`。已知 Task 的清理须核验 Task 目标和普通历史均不存在。显式删除已有 Task 使用 `gemini_tasks(action="delete", chat_id=...)`。Cookie、Doctor 和本地 Prompts 不属于两个业务面。账号数据和删除操作按用户明确意图使用。
+`gemini_tasks` 提供只读的 `list`、`get` 和 `progress`。已有 Task 的修改、删除和计划管理位于 `account-full`。账号数据按用户明确意图读取或修改。
+
+### 按需加载完整目录
+
+在 `gemini-mcp-server` 中设置 `GEMINI_TOOLS=function-full` 或 `GEMINI_TOOLS=account-full`，可使用原先各 17 个工具的目录。前者保留独立识图、会话、媒体和报告派生工具。后者保留原生 Skills、Gems、Task 计划、浏览器、偏好、Chat 定时操作和清理等工具。旧 `gemini_move_chat_to_notebook` 也在 `account-full` 中。
+
+`gemini_cleanup` 仅按账本处理 MCP 自有聊天，可用准确 `chat_id` 执行 `recheck`。已知 Task 须独立核验 Task 目标和对话均不存在。报告派生中的 `audio_overview` 输出旁白稿，`custom_app` 输出应用规格。
 
 ### 显式兼容配置 (`GEMINI_TOOLS=core`)
 
@@ -191,7 +201,7 @@ report 本地产物；history 的 list/search/read/export/delete 也在 primary 
       "duration_seconds": null,
       "requested_backend": "pro",
       "request_model": "gemini-3-flash",
-      "effective_backend": "Nano Banana 2",
+      "effective_backend": "Gemini Web image mode",
       "observed_backend": null,
       "verification": {
         "status": "verified",
@@ -202,7 +212,7 @@ report 本地产物；history 的 list/search/read/export/delete 也在 primary 
   "input_artifacts": [],
   "requested_model": "pro",
   "request_model": "gemini-3-flash",
-  "effective_backend": "Nano Banana 2",
+  "effective_backend": "Gemini Web image mode",
   "observed_backend": null,
   "source_chat_id": "c_...",
   "media_type": "image"
@@ -232,7 +242,7 @@ report 本地产物；history 的 list/search/read/export/delete 也在 primary 
 
 **参数：**
 - `message`: str - 要发送的消息
-- `model`: str - `flash` / `argon` / `pro`，兼容别名或运行时模型名 (默认: `flash`)；`flash-lite` 仅在运行时确认当前账号基础 Flash 额度耗尽时可用，且不可选思考强度
+- `model`: str - `flash`（优先发现的 Hydrogen）/ `hydrogen` / `neon` / `carbon`，兼容别名或运行时模型名；旧 Argon／Pro 仅在注册表仍提供时可用 (默认: `flash`)；`flash-lite` 仅在运行时确认当前账号基础 Flash 额度耗尽时可用，且不可选思考强度
 - `thinking_level`: str - `standard` / `extended` (默认: `standard`)
 - `learning_mode`: str - 可选；`interactive_quiz`/`quiz`、`flashcards`、`practice_test`、`study_guide`/`exam_prep`
 - `image_paths`: list[str] - 可选图片路径
@@ -332,14 +342,50 @@ report 本地产物；history 的 list/search/read/export/delete 也在 primary 
 
 ## 媒体工具
 
-### gemini_generate_video
+### gemini_create_media
 
-后台视频生成。省略 `model` 或传入 `model="flash"` 时，使用 Cookie 登录并进入当前账号的网页「创建视频」模式。Google 将此入口标为 Gemini Omni 1.2 Flash，账号开放范围由 Google 决定。网页结果未提供精确版本时，`observed_backend` 留空。[Gemini Apps 视频帮助](https://support.google.com/gemini/answer/16126339?hl=en)
+功能面统一用 `kind="image" | "edit_image" | "video" | "music"` 和 `prompt` 提交后台任务。默认 `wait_seconds=120` 在同一次工具调用中等待原操作；设为 0 立即返回句柄。结果恢复接受 `wait_seconds=0..120`，等待期间不重发生成。用 `gemini_get_operation_status` 查状态，用 `gemini_get_operation_result` 取回产物。两次查询均使用提交时返回的 `operation_id`，断开重连后也使用原句柄。
 
-如需锁定版本，在 MCP 进程中配置 `GEMINI_API_KEY`，显式选择官方 API 模型：
+原生音乐新增 `music_duration="short"|"standard"` 和 `music_vocals="instrumental"|"vocals"|"auto"`，默认均为 `None`。用户明确要短纯音乐时传 `short`／`instrumental`，其余留空保留网页实际默认，不从 prompt 或菜单首项猜默认。仅音乐支持；显式 SDK 路线带这些参数会在提交前拒绝。Neon Short＋Instrumental 的原生浏览器对照成功，当前交付包已包含这些参数，但不能据浏览器对照推断任意 MCP 请求都能成功。
+
+这些参数在 `gemini_create_media(kind="music")`、`gemini_generate_music`、`gemini_generate_media(media_type="music")` 和紧凑入口 `create(type="music")` 保持一致。
+
+生成或编辑图片时，可用 `image_paths` 按提示中的引用顺序提供多张本地参考图。编辑图片仍接受单张 `image_path`，两种路径参数互斥。视频可选一张 `image_path`。
+
+原生网页视频会在 Send 前上传并核验这张参考图的预览；发送前再次确认附件 token 未变，以及账号、模型、媒体入口和格式一致。附件缺失、变化、未识别或不受支持时拒绝发送，不忽略参考图。`image_paths`／保存图片来源参数仍仅用于图片生成与编辑。[7c Carbon 补测](live-model-followup-2026-11-22.md)已验证一次主入口同步参考视频及清理；这不把早期 DOM 上传探测改写为成功，也不证明其他模型／参数组合均通过。
 
 ```json
 {
+  "kind": "image",
+  "prompt": "保留第一张图的红色机器人，采用第二张图的蓝色森林作为背景。",
+  "image_paths": ["/path/to/red-robot.png", "/path/to/blue-forest.png"]
+}
+```
+
+取回生成图片后，用 `source_operation_id` 和结果中的 `artifacts[].id` 发起后续编辑。只有一张可用图片时可以省略 `source_artifact_id`。后续编辑可同时传 `image_paths` 补充参考图。
+
+```json
+{
+  "kind": "edit_image",
+  "prompt": "把背景改为夜晚森林，保留机器人的造型和颜色。",
+  "source_operation_id": "<上一步的 operation_id>",
+  "source_artifact_id": "<上一步图片的 id>"
+}
+```
+
+每次后续编辑都会把校验过的本地源图作为第一张图上传到新的 Gemini Web 对话，返回新的操作句柄。提交、状态和结果中的 `source_operation_id`、`source_artifact_id` 记录了父任务和源图。源对话在默认清理后仍可用本地图片继续编辑。源图需要仍可读取，且与账本中的验证记录一致。产物解码能验证文件可用性，图片是否遵循参考图和编辑要求需检查实际画面。
+
+多图参考与续编省略 `model` 时选择已发现的 Hydrogen，显式可用模型不会被强制改成 Flash。兼容入口 `gemini_generate_image`（`function-full`）、`gemini_generate_media(media_type="image")` 和紧凑入口 `create(type="image")` 也接受这些参数。兼容入口的同步调用继续使用原有单图参数。
+
+### gemini_generate_video
+
+`gemini_create_media(kind="video")` 是默认视频入口，`gemini_generate_video` 在 `function-full` 中保留原参数。省略 `model` 时选择已发现的 Hydrogen；兼容 `model="flash"` 也优先选择 Hydrogen。使用 Cookie 登录并进入当前账号的网页「创建视频」模式。网页参数支持 `duration_seconds=10|15` 和 `aspect_ratio="16:9"|"9:16"`，具体权限由账号决定。Google 将此入口标为 Gemini Omni 1.2 Flash，账号开放范围由 Google 决定。网页结果未提供精确版本时，`observed_backend` 留空。[Gemini Apps 视频帮助](https://support.google.com/gemini/answer/16126339?hl=en)
+
+如需锁定版本，在 MCP 进程中配置 `GEMINI_API_KEY`，为 `gemini_create_media` 提供以下参数。
+
+```json
+{
+  "kind": "video",
   "prompt": "一只纸飞机穿过安静的图书馆，连续跟拍",
   "model": "gemini-omni-1.2-flash",
   "duration_seconds": 15
@@ -354,21 +400,28 @@ report 本地产物；history 的 list/search/read/export/delete 也在 primary 
 
 通用媒体生成。默认 `background=true`：立即返回 `operation_id`，用 `gemini_get_operation_status` / `gemini_get_operation_result` 查询同一任务和取回 Artifact；`background=false` 保留等待结果的路径。
 
+原生音乐／视频的 `background=false` 与紧凑入口 `create(background=false)` 复用受保护的后台操作，在本次等待预算内读同一原句柄，不另发生成。完成返回兼容的 `state=local` 及本地 Artifact，保留显式 `filename`；默认目录为 `generated_media/`，省略文件名使用不含 prompt 的不透明名称，账本不持久化 prompt。等待耗尽返回同一 `operation_id`、`state=partial`／`verification_status=wait_elapsed`，之后继续读该句柄；结果未知或保存失败时保持保护，不清理远端。SDK／API 原同步合同不变。
+
+原生读回在等待返回后再次核验原账号和凭据，才允许观察或保存回复身份。切换账号后拒绝新 RID／RCID 和产物；最多保留原来已观察的 CID，不向旧操作写入新账号回复，也不据此释放保护或清理。
+
 **参数：**
 - `prompt`: str - 生成描述
 - `media_type`: "image" | "video" | "music"
 - `model`: str - MCP 别名或运行时模型名（默认 `flash`）。视频还可显式选择 `gemini-omni-1.2-flash`
 - `thinking_level`: str - `standard` / `extended` (默认: `standard`)
 - `image_path`: str - 可选参考图片
-- `duration_seconds`: int - 仅供显式选择的 Omni 1.2 Flash API 视频使用
+- `duration_seconds`: int - 网页视频支持 10／15 秒，显式 Omni API 视频支持 3–15 秒
+- `aspect_ratio`: "16:9" | "9:16" - 网页视频画幅选项；API 兼容路径不接受此参数
+- `music_duration`: "short" | "standard" | None - 原生网页音乐时长选项，默认保留网页默认
+- `music_vocals`: "instrumental" | "vocals" | "auto" | None - 原生网页音乐人声选项，显式 SDK 路线不接受
 - `background`: bool - 默认 `true`；网页路径可传 `false` 等待本次结果
 - `operation_id`: str - 可选调用方生成的操作句柄
 
 **真实网页行为：**
-- `image`: Flash-Lite 使用 `Nano Banana 2 Lite`；Flash / Pro 使用 `Nano Banana 2`
-- `music`: 返回 Lyria 产物；当前 MCP 响应没有提供可验证的具体版本
+- `image`: 使用网页图片路径；聊天 selector 不证明 Nano Banana 的具体版本，静态标签不充当观测证据
+- `music`: 返回实际音乐产物；上游没有明确版本证据时 `observed_backend` 留空
 - `video`: 网页路径使用专用「创建视频」模式。需要实际视频 Artifact 才算成功
-- `image + model=pro` 不会直接切换首轮图像后端；Pro redo 是网页生成后的二次操作
+- 显式可用的图片聊天模型选择会保留；它不等于首轮图像后端型号。Pro redo 是网页生成后的二次操作
 
 **artifact 行为：** 后台任务默认保存到操作数据库同级的 `artifacts/<operation_id>/` 持久目录，也可指定 `output_dir`；显式同步路径仍默认使用 `generated_media/`。实际写入的文件会检查存在性、
 非零大小、MIME，以及可用的尺寸/时长。排队、空响应和保存失败有独立结构化状态。
@@ -383,6 +436,8 @@ report 本地产物；history 的 list/search/read/export/delete 也在 primary 
 - `prompt`: str - 音乐描述
 - `model`: str - MCP 别名或运行时模型名 (默认: `flash`)
 - `thinking_level`: str - `standard` / `extended` (默认: `standard`)
+- `music_duration`: "short" | "standard" | None - 默认保留网页时长设置
+- `music_vocals`: "instrumental" | "vocals" | "auto" | None - 默认保留网页人声设置；与 Auto 模型不同
 
 媒体工具默认使用对应的 Gemini Web 生成模式。网页账号可用性、上游排队和响应形状由 Gemini Web 决定。
 
@@ -1039,6 +1094,8 @@ Task confirmation cards return `input_required`; an explicit result read returns
 App connection setup is separate: `needs_attention`, `setup_required` and `setup_kind` identify a native setup requirement. Open the original Task to connect or decline; text confirmation cannot grant OAuth. A previously observed card in metadata is not fresh verification of its current state.
 
 ### gemini_task_browser
+
+`gemini_task_browser` 由显式 `account-full` profile 提供。
 
 重复观察时可传上一帧的 `known_frame_sha256`。新帧摘要一致时返回 `frame_unchanged`，省去 PNG 和内联图片；摘要变化时照常返回新帧。只要本地文件时传 `include_image=false`。输入动作仍使用 `expected_frame_sha256`，不能同时传 `known_frame_sha256`。
 

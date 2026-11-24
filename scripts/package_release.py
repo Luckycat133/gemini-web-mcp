@@ -51,6 +51,10 @@ def require_skill_files() -> None:
 
 
 def build_python_distributions(outdir: Path) -> None:
+    # Setuptools reuses build/lib; deleted modules must not leak into a new
+    # wheel or sdist and silently diverge from the checkout being verified.
+    shutil.rmtree(ROOT / "build", ignore_errors=True)
+    shutil.rmtree(ROOT / "gemini_mcp_server.egg-info", ignore_errors=True)
     subprocess.run([sys.executable, "-m", "build", "--outdir", str(outdir)], cwd=ROOT, check=True)
     shutil.rmtree(ROOT / "build", ignore_errors=True)
     shutil.rmtree(ROOT / "gemini_mcp_server.egg-info", ignore_errors=True)
@@ -87,10 +91,10 @@ def main() -> None:
 
     try:
         metadata = load_release_metadata(ROOT)
-        require_repository_version_consistency(ROOT, metadata)
         tag = args.tag or release_tag_from_environment(os.environ)
-        if tag:
+        if tag is not None:
             validate_release_tag(tag, metadata)
+        require_repository_version_consistency(ROOT, metadata, require_dated_release=tag is not None)
     except ReleaseMetadataError as exc:
         raise SystemExit(str(exc)) from exc
 

@@ -14,6 +14,14 @@ class TaskActivity:
 
 
 @dataclass(frozen=True, slots=True)
+class TaskPendingApproval:
+    kind: str
+    action: str
+    state: str
+    url: str
+
+
+@dataclass(frozen=True, slots=True)
 class TaskProgress:
     chat_id: str
     response_id: str
@@ -21,3 +29,4 @@ class TaskProgress:
     activities: tuple[TaskActivity, ...]
     verification: str
     truncated: bool = False
+    pending_approval: TaskPendingApproval | None = None

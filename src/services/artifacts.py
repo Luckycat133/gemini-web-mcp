@@ -76,6 +76,12 @@ def observed_backend_from_response(response: Any) -> str | None:
     return None
 
 
+def reusable_artifact_uri(value: Any) -> str | None:
+    """Browser object URLs expire with their page and cannot locate delivered artifacts."""
+    uri = value.strip() if isinstance(value, str) else ""
+    return uri if uri and urlparse(uri).scheme.lower() != "blob" else None
+
+
 def artifact_from_remote(
     kind: ArtifactKind,
     uri: str,
@@ -92,12 +98,14 @@ def artifact_from_remote(
     duration_seconds: float | None = None,
     verification_method: str = "response_uri_observed",
 ) -> Artifact:
+    reusable_uri = reusable_artifact_uri(uri)
+    available = reusable_uri is not None
     return Artifact(
-        id=artifact_id(kind, uri=uri),
+        id=artifact_id(kind, uri=reusable_uri, source_chat_id=source_chat_id, title=title),
         kind=kind,
-        state=ArtifactState.REMOTE,
+        state=ArtifactState.REMOTE if available else ArtifactState.FAILED,
         title=title,
-        uri=uri,
+        uri=reusable_uri,
         mime_type=_guess_mime_type(uri),
         size_bytes=_positive_int(size_bytes),
         width=_positive_int(width),
@@ -109,8 +117,8 @@ def artifact_from_remote(
         effective_backend=effective_backend,
         observed_backend=observed_backend,
         verification=ArtifactVerification(
-            ArtifactVerificationStatus.UNVERIFIED,
-            methods=(verification_method,),
+            ArtifactVerificationStatus.UNVERIFIED if available else ArtifactVerificationStatus.FAILED,
+            methods=(verification_method,) if available else ("browser_object_uri_unavailable",),
         ),
     )
 
@@ -186,6 +194,7 @@ def artifact_from_local_path(
     duration_probe: Callable[[str], float | None] | None = None,
     dimensions_probe: Callable[[str], tuple[int, int] | None] | None = None,
 ) -> Artifact:
+    uri = reusable_artifact_uri(uri)
     resolved_path = _normalized_local_path(path)
     identity = artifact_id(kind, uri=uri, local_path=resolved_path)
     file_path = Path(resolved_path)
@@ -302,7 +311,7 @@ def extract_response_artifacts(
 
     image_items = response_image_items(response, generated_only=media_type in {"image", "image_edit"})
     for item in image_items if media_type in {None, "image", "image_edit"} else ():
-        uri = _string_attr(item, "url")
+        uri = reusable_artifact_uri(_string_attr(item, "url"))
         if uri:
             artifacts.append(
                 _remote_from_item(
@@ -317,7 +326,7 @@ def extract_response_artifacts(
                 )
             )
     for item in (getattr(response, "videos", None) or ()) if media_type in {None, "video"} else ():
-        uri = _string_attr(item, "url")
+        uri = reusable_artifact_uri(_string_attr(item, "url"))
         if uri:
             artifacts.append(
                 _remote_from_item(
@@ -333,7 +342,7 @@ def extract_response_artifacts(
             )
     for item in (getattr(response, "media", None) or ()) if media_type in {None, "music"} else ():
         for attribute in ("mp3_url", "url"):
-            uri = _string_attr(item, attribute)
+            uri = reusable_artifact_uri(_string_attr(item, attribute))
             if uri:
                 kind = ArtifactKind.AUDIO if attribute == "mp3_url" else ArtifactKind.VIDEO
                 artifacts.append(
@@ -357,7 +366,7 @@ def extract_response_artifacts(
                    "audio_url": {None, "music"}}
         if media_type not in allowed[attribute]:
             continue
-        uri = _string_attr(response, attribute)
+        uri = reusable_artifact_uri(_string_attr(response, attribute))
         if uri:
             artifacts.append(
                 artifact_from_remote(
