@@ -342,3 +342,89 @@ def test_operation_store_reject_research_turn_requires_exact_identity(tmp_path):
             os.environ.pop("GEMINI_PSID", None)
         else:
             os.environ["GEMINI_PSID"] = old
+
+
+def test_skill_bard_error_info_1130_maps_to_upstream_rejected(monkeypatch):
+    from src.domain import DomainErrorCode
+    from src.services import managed_skill_transport as transport
+    from src.services.managed_skills import ManagedSkillDependencies, ManagedSkillService
+
+    monkeypatch.setattr(transport, "current_account_key", lambda: "acct-1")
+    wire = (
+        ")]}\'\n\n225\n"
+        '[["wrb.fr","SMuXte",null,null,null,[3,null,[["type.googleapis.com/assistant.boq.bard.application.BardErrorInfo",'
+        '[1130,null,"无法上传附件"]]]],"generic"]]\n'
+    )
+
+    async def fake_execute(_client, _key, **_kwargs):
+        return SimpleNamespace(status_code=200, text=wire)
+
+    monkeypatch.setattr(transport, "execute_contract", fake_execute)
+
+    async def upload(_client, _content, _filename):
+        return "private-upload-handle"
+
+    service = ManagedSkillService(
+        ManagedSkillDependencies(
+            lambda: object(),
+            AsyncMock(),
+            AsyncMock(),
+            lambda: "acct-1",
+            upload,
+            transport.mutate_skill,
+        )
+    )
+    res = _run(
+        service.mutate(
+            "create",
+            title="synth-skill",
+            description="Temp desc",
+            instructions="Always begin with X",
+        )
+    )
+    assert res.ok is False
+    assert res.error is not None
+    assert res.error.code == DomainErrorCode.UPSTREAM_REJECTED
+    assert "1130" in res.error.message
+    assert res.meta.verification_status == "mutation_rejected"
+
+
+def test_native_media_browser_js_strips_show_thinking_prefix_before_error_match():
+    import shutil
+    import subprocess
+    from pathlib import Path
+
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("Node is required for native_media_browser.js contract")
+    script = Path(__file__).parents[1] / "src/data/native_media_browser.js"
+    program = """
+const fs = require('fs');
+const fn = eval('(' + fs.readFileSync(process.argv[1], 'utf8') + ')');
+const mk = (text) => ({
+    innerText: text,
+    matches: (sel) => sel.includes('model-response'),
+    querySelector: () => null,
+    querySelectorAll: () => [],
+    closest: () => null,
+    getClientRects: () => [{width: 100, height: 40, left: 0, top: 0}],
+    getBoundingClientRect: () => ({width: 100, height: 40, left: 0, top: 0}),
+    hasAttribute: () => false,
+    disabled: false,
+    offsetParent: {},
+});
+globalThis.location = {origin: 'https://gemini.google.com', pathname: '/app/0123456789abcdef'};
+globalThis.getComputedStyle = () => ({display: 'block', visibility: 'visible', opacity: '1'});
+globalThis.document = {
+    querySelectorAll: (sel) => sel.includes('model-response')
+        ? [mk("显示思路 I'm having a hard time fulfilling your request. Can I help you with something else instead?"),
+           mk("Show thinking I seem to be encountering an error.")]
+        : [],
+};
+globalThis.window = {};
+globalThis.window.top = globalThis.window;
+fn({action: 'status', kind: 'video'}).then(r => console.log(JSON.stringify(r)));
+"""
+    completed = subprocess.run([node, "-e", program, str(script)], check=True, capture_output=True, text=True, timeout=5)
+    signals = json.loads(completed.stdout)["signals"]
+    assert [s["code"] for s in signals] == ["UPSTREAM_REJECTED", "UPSTREAM_REJECTED"]

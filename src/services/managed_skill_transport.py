@@ -9,11 +9,34 @@ from urllib.parse import urlsplit
 
 from ..infrastructure.account_identity import current_account_key
 from ..infrastructure.rpc_contracts import execute_contract, get_contract
-from ..infrastructure.rpc_parsers import parse_contract_body, parse_rpc_envelope
+from ..infrastructure.rpc_parsers import _extract_parts, parse_contract_body, parse_rpc_envelope
 from .deadlines import await_before_deadline
 
 
 _SKILL_PUSH_UPLOAD = "https://push.clients6.google.com/upload/"
+_SKILL_BARD_ERROR_REASONS: dict[int, str] = {
+    1125: "Uploaded file is not a valid ZIP archive.",
+    1126: "Skill folder contains too many files.",
+    1127: "Skill folder exceeds the maximum allowed size.",
+    1128: "Skill folder contains an unsupported file type.",
+    1129: "Uploaded Skill archive failed integrity verification.",
+    1130: "Uploaded Skill archive failed Gemini Web's safety scan (avoid prompt-injection-like directives in SKILL.md).",
+    1131: "SKILL.md was not found at the archive root.",
+    1132: "SKILL.md frontmatter delimiters ('---') are invalid.",
+    1133: "SKILL.md frontmatter is missing the required 'name' field.",
+    1134: "Skill name must be 1-64 lowercase alphanumeric/hyphen characters.",
+    1135: "Skill description exceeds Gemini Web's maximum length.",
+    1136: "Uploaded Skill archive handle was not found.",
+    1138: "Skill was not found or was already deleted.",
+    1139: "Skill version was not found.",
+    1140: "Uploaded Skill archive was rejected as invalid.",
+    1141: "Skill folder contains an unsupported file type.",
+    1142: "Uploaded Skill archive was rejected as invalid.",
+    1145: "Uploaded file is not a valid ZIP archive.",
+    1158: "A Skill with this name already exists.",
+    1194: "Gemini Web refused to save this Skill.",
+    1195: "Maximum number of custom Skills reached (100).",
+}
 
 
 class SkillTransportUnavailable(RuntimeError):
@@ -22,6 +45,38 @@ class SkillTransportUnavailable(RuntimeError):
     def __init__(self, message: str, *, stage: str = "unknown") -> None:
         super().__init__(message)
         self.stage = stage
+
+
+class SkillMutationRejected(SkillTransportUnavailable):
+    """Gemini Web explicitly rejected the Skill mutation with a BardErrorInfo code."""
+
+    def __init__(self, bard_code: int, message: str) -> None:
+        super().__init__(message, stage="rejected")
+        self.bard_code = bard_code
+
+
+def _extract_skill_rejection(response_text: str, rpc_id: str) -> SkillMutationRejected | None:
+    try:
+        parts = _extract_parts(response_text)
+    except Exception:
+        return None
+    for part in parts:
+        if not isinstance(part, list) or len(part) < 6 or part[0] != "wrb.fr" or part[1] != rpc_id:
+            continue
+        meta = part[5]
+        if not isinstance(meta, list) or len(meta) < 3 or not isinstance(meta[2], list):
+            continue
+        for entry in meta[2]:
+            if (isinstance(entry, list) and len(entry) >= 2
+                    and isinstance(entry[0], str) and entry[0].endswith("BardErrorInfo")
+                    and isinstance(entry[1], list) and entry[1] and isinstance(entry[1][0], int)):
+                code = entry[1][0]
+                if code in _SKILL_BARD_ERROR_REASONS or 1120 <= code <= 1200:
+                    detail = _SKILL_BARD_ERROR_REASONS.get(code)
+                    upstream_msg = entry[1][2] if len(entry[1]) > 2 and isinstance(entry[1][2], str) else None
+                    msg = f"{detail} (BardErrorInfo {code})" if detail else f"Skill rejected by Gemini Web (BardErrorInfo {code}: {upstream_msg or 'unknown'})"
+                    return SkillMutationRejected(code, msg)
+    return None
 
 
 def _check(owner: str | None) -> None:
@@ -150,7 +205,11 @@ async def mutate_skill(client: Any, action: str, *, skill_id: str | None,
     _check(owner)
     if getattr(response, "status_code", None) != 200:
         raise SkillTransportUnavailable("The Skill mutation response was not accepted.")
-    envelope = parse_rpc_envelope(getattr(response, "text", ""), contract.rpc_id)
+    raw_text = getattr(response, "text", "")
+    envelope = parse_rpc_envelope(raw_text, contract.rpc_id)
+    if envelope.reject_code is not None:
+        if rejection := _extract_skill_rejection(raw_text, contract.rpc_id):
+            raise rejection
     if not envelope.parsed or envelope.reject_code is not None or len(envelope.bodies) != 1:
         raise SkillTransportUnavailable("The Skill mutation envelope was not accepted.")
     parsed = parse_contract_body(contract, envelope.bodies[0])

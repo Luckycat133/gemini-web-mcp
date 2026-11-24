@@ -247,7 +247,7 @@ async ({action, kind, model, model_token, prompt, url, offset, size, option, dur
         const signals = Array.from(document.querySelectorAll(`${responseSelector}, [role="alert"]`)).flatMap(el => {
             if (!visible(el) || el.querySelector("audio,video") || el.closest(userQuerySelector)) return [];
             const rawValue = norm(el.innerText);
-            const value = rawValue.replace(/^(?:Gemini\s*说|Gemini\s+said)\s+/i, "").trim();
+            const value = rawValue.replace(/^(?:(?:Gemini\s*说|Gemini\s+said)\s+)?(?:(?:显示思路|Show\s+thinking)\s+)?/i, "").trim();
             const quotedStart = (() => {
                 const selector = "blockquote, pre, code, q";
                 if (!el.querySelectorAll(selector).length) return false;

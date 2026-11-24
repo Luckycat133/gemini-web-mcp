@@ -8,6 +8,7 @@ from collections.abc import Awaitable, Callable, Mapping
 from contextlib import suppress
 from dataclasses import dataclass
 from importlib.resources import files
+import inspect
 import json
 import math
 from pathlib import Path
@@ -126,6 +127,16 @@ class _Composer:
         target = await self.call("Target.createTarget", {"url": "about:blank", "browserContextId": self.browser_context})
         attached = await self.call("Target.attachToTarget", {"targetId": target["targetId"], "flatten": True})
         self.session = attached["sessionId"]
+        if isinstance(self.pipe, _DevToolsPipe):
+            with suppress(Exception):
+                version = await self.call("Browser.getVersion")
+                ua = str(version.get("userAgent") or "")
+                if "HeadlessChrome/" in ua:
+                    await self.call(
+                        "Emulation.setUserAgentOverride",
+                        {"userAgent": ua.replace("HeadlessChrome/", "Chrome/"), "platform": "MacIntel"},
+                        page=True,
+                    )
         await self.call("Emulation.setDeviceMetricsOverride", {
             "width": 1280, "height": 900, "deviceScaleFactor": 1, "mobile": False,
         }, page=True)
@@ -571,7 +582,8 @@ async def run_native_media_browser(kind: Literal["music", "video"], prompt: str,
             raise TaskApprovalBrowserUnavailable("The native media account could not be verified.")
         script = files("src").joinpath("data/native_media_browser.js").read_text(encoding="utf-8")
         attempt.stage = "open_composer"
-        async with asyncio.timeout(timeout), _open_browser(_chrome_executable()) as pipe:
+        open_kwargs = {"stealth": True} if "stealth" in inspect.signature(_open_browser).parameters else {}
+        async with asyncio.timeout(timeout), _open_browser(_chrome_executable(), **open_kwargs) as pipe:
             uploaded_reference_token: str | None = None
             composer = _Composer(pipe, script, kind, model_label, account_matches, duration_seconds=duration_seconds,
                                  aspect_ratio=aspect_ratio, thinking_level=level,

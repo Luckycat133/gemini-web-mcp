@@ -14,6 +14,7 @@ from ..domain.results import classify_exception
 from ..domain.managed_skills import ManagedSkill, ManagedSkillMutation, ManagedSkillPage
 from ..infrastructure.account_identity import current_account_key
 from ..services.deadlines import await_before_deadline
+from ..services.managed_skill_transport import SkillMutationRejected
 
 
 def _skill_description_yaml(description: str) -> str:
@@ -195,6 +196,10 @@ class ManagedSkillService:
             return DomainResult.failure(DomainErrorCode.RATE_LIMITED,
                                         "The upstream service temporarily limited requests.",
                                         data=failure_data, retryable=True, verification_status="rate_limited")
+        except SkillMutationRejected as error:
+            failure_data = ManagedSkillMutation(returned_id, action, False, None) if dispatched and self._deps.account_key_provider() == owner else None
+            return DomainResult.failure(DomainErrorCode.UPSTREAM_REJECTED, str(error),
+                                        data=failure_data, verification_status="mutation_rejected")
         except Exception as error:
             failure_data = ManagedSkillMutation(returned_id, action, False, None) if dispatched and self._deps.account_key_provider() == owner else None
             if classify_exception(error).error_code == "RATE_LIMITED":
