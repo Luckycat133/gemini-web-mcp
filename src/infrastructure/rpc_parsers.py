@@ -607,8 +607,10 @@ def parse_research_chat_plan(body: Any, *, chat_id: str = "", **_: Any) -> RPCPa
             candidate, fallback_text=text if isinstance(text, str) else ""
         )
         if plan is None:
+            from ..constants import is_research_refusal_reply
+
             document = _upstream_utils.extract_deep_research_document(candidate)
-            if text == "我是一个语言模型，这超出了我的设计用途。" and document is None:
+            if is_research_refusal_reply(text) and document is None:
                 return RPCParseResult("rejected", value={"metadata": [chat_id, rid, rcid]})
             return RPCParseResult("empty", value=None)
         return RPCParseResult("success", value={"plan": plan, "metadata": [chat_id, rid, rcid]})

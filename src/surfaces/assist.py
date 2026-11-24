@@ -231,7 +231,8 @@ async def gemini_ask(
     Name the app in the prompt. Use observed sources for grounding and verify
     app effects independently. Thinking accepts low/medium/high or standard/extended.
     Supports optional gem_id (from `gemini-web-cli gems list`) and guided
-    learning_mode (interactive_quiz/quiz, flashcards, practice_test, study_guide).
+    learning_mode (guided_learning/guided, canvas, interactive_quiz/quiz,
+    flashcards, practice_test, study_guide).
     """
     if not prompt.strip():
         return domain_text(
@@ -680,24 +681,30 @@ def register_lean_assist_tools(server: MCPServer) -> None:
         timeout_seconds: int = 600, retain_chat: bool | None = None, delete_after_seconds: int | None = None,
         operation_id: str | None = None,
         gem_id: str | None = None,
+        canvas: bool = False,
         learning_mode: Literal[
+            "guided_learning", "guided", "canvas",
             "interactive_quiz", "quiz", "flashcards", "practice_test", "study_guide", "exam_prep",
         ] | None = None,
     ) -> list[TextContent]:
-        """Ask Gemini Chat for an answer, web sources, writing, Gem, or guided learning.
+        """Ask Gemini Chat for an answer, web sources, writing, Gem, Canvas, or guided learning.
 
         Default to Flash (Hydrogen) and standard thinking. Describe web or app use
         in the prompt. Use inputs for up to 16 text, image, file or URL items
         with stable IDs. Use notebook_ids for background Notebook Chat, then
-        retrieve the result by operation_id. Pass gem_id (from `gemini-web-cli gems list`)
-        or learning_mode (interactive_quiz/quiz, flashcards, practice_test, study_guide)
-        for Gem or guided-learning requests on new chats or start_session=True.
+        retrieve the result by operation_id. Pass gem_id (from `gemini-web-cli gems list`),
+        canvas=True, or learning_mode (guided_learning/guided, canvas, interactive_quiz/quiz,
+        flashcards, practice_test, study_guide) on new chats or start_session=True.
         Set start_session to send the first turn and return a local session_id.
         Pass it on later turns to inherit the original model and thinking. If
         a turn is unverified, pass only session_id and recover_only to read it.
         Choose one of inputs, Notebook context or a multi-turn session. Timeout
         and operation_id apply to Notebook Chat. Chats clean up by default.
         """
+        if canvas and learning_mode is not None and learning_mode != "canvas":
+            return _reject_ask("Choose either canvas=True or learning_mode, not both.")
+        if canvas:
+            learning_mode = "canvas"
         in_session = start_session or session_id is not None or recover_only
         if sum((bool(inputs), bool(notebook_ids), in_session)) > 1:
             return _reject_ask("Choose only one of inputs, notebook_ids, or a multi-turn session.")

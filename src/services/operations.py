@@ -506,10 +506,23 @@ def _has_report(response: Any) -> bool:
     return bool(getattr(document, "ready", False)) and isinstance(content, str) and bool(content.strip())
 
 
+def _operation_failure_message(data: OperationReadData) -> str:
+    if data.error_code == "UPSTREAM_LIMIT_EXCEEDED" or data.verification_status == "upstream_limit_message_observed":
+        return "Gemini Web reported that the generation quota or capacity limit was reached; retry after quota reset."
+    if data.error_code == "ARTIFACT_NOT_RETURNED" or data.verification_status in {
+        "model_media_refusal_observed",
+        "completed_music_notation_without_artifact_observed",
+    }:
+        return "Gemini Web replied without a media file and reported that direct media generation is unavailable for this turn."
+    if data.verification_status in {"upstream_media_error_card_observed", "upstream_media_failure_reply_observed"}:
+        return "Gemini Web returned an upstream media generation error card for this request."
+    return "The background operation failed; no verified artifact was produced."
+
+
 def _operation_read_result(data: OperationReadData, *, warnings: tuple[DomainWarning, ...] = ()) -> DomainResult[OperationReadData]:
     if data.state in {OperationState.FAILED, OperationState.UNAVAILABLE, OperationState.TIMED_OUT, OperationState.CANCELLED}:
         return DomainResult.failure(
-            operation_failure_code(data.error_code), "The background operation failed; no verified artifact was produced.",
+            operation_failure_code(data.error_code), _operation_failure_message(data),
             data=data, operation_state=data.state, verification_status=data.verification_status, warnings=warnings,
         )
     return DomainResult.success(data, operation_state=data.state, verification_status=data.verification_status, warnings=warnings)

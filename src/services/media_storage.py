@@ -38,8 +38,8 @@ async def _fallback_save_media_on_403(
     save_name: str,
     error: Exception,
 ) -> Optional[str]:
-    """Retry media download with Chrome's CookieJar when SDK save hits HTTP 403."""
-    if media_type not in {"image", "video"} or "403" not in str(error):
+    """Retry media download with in-memory cookies or Chrome's CookieJar on HTTP errors."""
+    if media_type not in {"image", "video"} or not any(tok in str(error) for tok in ("403", "401", "400")):
         return None
     url = getattr(media, "url", None)
     if not isinstance(url, str) or not url.startswith("https://"):
@@ -50,31 +50,61 @@ async def _fallback_save_media_on_403(
             or host == "google.com" or host.endswith(".google.com")):
         return None
     try:
-        import browser_cookie3
         from curl_cffi.requests import AsyncSession
-        from ..client_manager import browser_cookie_auto_load_enabled, get_configured_proxy
-        from ..cookie_manager import CookieManager
-    except Exception:
-        return None
-    if not browser_cookie_auto_load_enabled():
-        return None
-    profile = os.environ.get("GEMINI_BROWSER_COOKIE_PROFILE", "").strip() or "Default"
-    base_dir = CookieManager._chrome_base_path() if hasattr(CookieManager, "_chrome_base_path") else None
-    cookie_file = (base_dir / profile / "Cookies") if base_dir is not None else None
-    if cookie_file is None or not cookie_file.exists():
-        return None
-    try:
-        jar = browser_cookie3.chrome(cookie_file=str(cookie_file))
+        from ..client_manager import browser_cookie_auto_load_enabled, get_configured_proxy, get_extra_cookies
+        from ..cookie_manager import CookieManager, _bounded_macos_keychain_reader, gemini_cookie_jar
     except Exception:
         return None
     target_path = destination / save_name
     proxy = get_configured_proxy()
     candidate_urls = [url if "=" in url.rsplit("/", 1)[-1] else f"{url}=s0", url] if media_type == "image" else [url]
+    headers = {"Referer": "https://gemini.google.com/"}
+
+    extra = get_extra_cookies()
+    if extra:
+        for session_cookies in (dict(extra), gemini_cookie_jar(dict(extra))):
+            try:
+                async with AsyncSession(
+                    impersonate="chrome", cookies=session_cookies, proxy=proxy, timeout=120,
+                ) as session:
+                    for candidate_url in candidate_urls:
+                        try:
+                            resp = await session.get(candidate_url, headers=headers)
+                            if resp.status_code == 200 and resp.content and not resp.content[:32].lstrip().startswith(b"<"):
+                                target_path.write_bytes(resp.content)
+                                logger.info("artifact session-cookie fallback download succeeded path=%s bytes=%s", target_path, len(resp.content))
+                                return str(target_path)
+                        except Exception:
+                            continue
+            except Exception:
+                continue
+
+    if not browser_cookie_auto_load_enabled():
+        return None
+    try:
+        import browser_cookie3
+    except Exception:
+        return None
+    profile = os.environ.get("GEMINI_BROWSER_COOKIE_PROFILE", "").strip() or "Default"
+    base_dir = CookieManager._chrome_base_path() if hasattr(CookieManager, "_chrome_base_path") else None
+    if base_dir is None:
+        return None
+    cookie_file = next(
+        (cand for cand in (base_dir / profile / "Cookies", base_dir / profile / "Network" / "Cookies") if cand.exists()),
+        None,
+    )
+    if cookie_file is None:
+        return None
+    try:
+        with _bounded_macos_keychain_reader(browser_cookie3, 10.0):
+            jar = browser_cookie3.chrome(cookie_file=str(cookie_file))
+    except Exception:
+        return None
     async with AsyncSession(impersonate="chrome", cookies=jar, proxy=proxy, timeout=120) as session:
         for candidate_url in candidate_urls:
             try:
-                resp = await session.get(candidate_url)
-                if resp.status_code == 200 and resp.content:
+                resp = await session.get(candidate_url, headers=headers)
+                if resp.status_code == 200 and resp.content and not resp.content[:32].lstrip().startswith(b"<"):
                     target_path.write_bytes(resp.content)
                     logger.info("artifact fallback download succeeded path=%s bytes=%s", target_path, len(resp.content))
                     return str(target_path)

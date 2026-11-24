@@ -49,12 +49,25 @@ _MUSIC_TOOL_UNAVAILABLE = re.compile(
     r"the music generation tool isn['’]t available to run in this turn)\.(?:\s|$)", re.IGNORECASE,
 )
 _MUSIC_SCORE_FALLBACK = re.compile(
-    r"\AI can['’]t generate an audio track directly right now, but here is an original,(?:\s|$)", re.IGNORECASE,
+    r"\A(?:I can['’]t generate an audio track directly right now, but here is an original,|"
+    r"Since direct (?:audio|music) generation isn['’]t available right now\b)(?:\s|,|$)",
+    re.IGNORECASE,
 )
 _MUSIC_CHINESE_SCORE_FALLBACK = re.compile(
-    r"\A我已经为你创作了一段舒缓的钢琴纯音乐。\s*"
-    r"由于当前系统工具调用受限，暂时无法直接为你生成并导出音频文件，\s*但我为你编写了",
+    r"\A(?:我已经为你创作了一段舒缓的钢琴纯音乐。\s*"
+    r"由于当前系统工具调用受限，暂时无法直接为你生成并导出音频文件，\s*但我为你编写了|"
+    r"(?:由于)?(?:目前|当前)(?:系统)?(?:无法直接|暂时无法)(?:为你)?生成(?:并导出)?(?:音频|音乐))",
 )
+_RESEARCH_REFUSAL_REPLIES = frozenset({
+    "我是一个语言模型，这超出了我的设计用途。",
+    "我没法提供这方面的帮助，因为我只是一个语言模型。",
+    "我是一个语言模型，在这方面帮不上忙。",
+    "我是一个文本 AI，在这方面爱莫能助。",
+    "请恕我爱莫能助，我只是一个语言模型，不能理解或回复你的这个问题。",
+    "I'm a text-based AI and can't assist with that.",
+    "I'm just a language model, so I can't help you with that.",
+    "I cannot assist with that as I am only a language model.",
+})
 _IMAGE_TOOL_UNAVAILABLE = re.compile(
     r"\A(?:I don['’]t have an (?:active )?image[- ]generation tool available in this (?:session|interface)|"
     r"I don['’]t have access to an image[- ]generation tool in this (?:session|interface)|"
@@ -160,6 +173,14 @@ def is_generation_failure_reply(text: object) -> bool:
             or is_media_generation_error_reply(text))
 
 
+def is_research_refusal_reply(text: object) -> bool:
+    """Recognize canned LLM refusals when Deep Research or plan generation is rejected."""
+    if not isinstance(text, str):
+        return False
+    normalized = " ".join(text.split())
+    return is_generation_failure_reply(normalized) or normalized in _RESEARCH_REFUSAL_REPLIES
+
+
 class ModelConfig(TypedDict):
     name: str
     hex_id: str
@@ -262,6 +283,21 @@ class LearningModeConfig(TypedDict, total=False):
 
 
 LEARNING_MODE_CONFIG: dict[str, LearningModeConfig] = {
+    "guided_learning": {
+        "id": 11,
+        "x9b_field": "LYd",
+        "x9b_value": 2,
+        "prompt_prefix": "",
+    },
+    "guided": {
+        "alias_for": "guided_learning",
+    },
+    "canvas": {
+        "id": 8,
+        "x9b_field": "QLd",
+        "x9b_value": 2,
+        "prompt_prefix": "",
+    },
     "interactive_quiz": {
         "id": 18,
         "x9b_field": "h5d",
@@ -466,4 +502,4 @@ def resolve_learning_mode_config(learning_mode: str | None) -> dict[str, object]
 
 def supported_learning_modes() -> str:
     """Return user-facing learning mode names."""
-    return "interactive_quiz/quiz, flashcards, practice_test, study_guide/exam_prep"
+    return "guided_learning/guided, canvas, interactive_quiz/quiz, flashcards, practice_test, study_guide/exam_prep"

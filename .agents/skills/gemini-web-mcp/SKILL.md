@@ -51,7 +51,7 @@ Choose the MCP entry that serves the user's next step. For a task that spans bot
 
 | User intent | Preferred route | What success means |
 | --- | --- | --- |
-| Second opinion, search, Gem, learning mode, image or mixed-input understanding | function `gemini_ask` with optional `inputs`, `gem_id`, `learning_mode` | usable information incorporated into the task |
+| Second opinion, search, Gem, Canvas, learning mode, image or mixed-input understanding | function `gemini_ask` with optional `inputs`, `gem_id`, `canvas`, `learning_mode` | usable information incorporated into the task |
 | Ask about an existing Notebook's sources | `gemini-web-cli notebooks list` or account `gemini_notebooks`, then function `gemini_ask(notebook_ids=...)` | original background chat handle yields a verified full-answer Artifact |
 | Delegate a workflow needing Task execution, or explicitly request Task | function `gemini_run_task` | original Task handle yields the requested result; app changes require read-back |
 | Deep Research & report derivatives | function `gemini_research`, then `report_action` on ready `operation_id` | same operation handle yields a ready report or local quiz/infographic/webpage/flashcards/audio_overview/custom_app |
@@ -90,7 +90,7 @@ For recurring work, enable `account-full`. Use `gemini_create_scheduled_action` 
 Settings that matter:
 
 - **Model:** the Flash compatibility default prefers discovered Hydrogen. Select Neon or Carbon explicitly when the account offers them. Task supports the current account's Hydrogen/Neon/Carbon families according to its verified plan. Legacy Argon/Pro are preserved only when still discovered, never silently replaced. Lite remains a runtime-controlled exhausted-quota fallback for ordinary Chat.
-- **Thinking:** use `thinking_level="low" | "medium" | "high"`. Legacy `standard` / `extended` still select low/high. Lite has no selectable thinking strength.
+- **Thinking & Canvas / Guided Learning:** use `thinking_level="low" | "medium" | "high"`. Legacy `standard` / `extended` still select low/high. Lite has no selectable thinking strength. Pass `canvas=true` (or `learning_mode="canvas"`) for Canvas artifacts (`candidate[30][0]` immersive content is merged cleanly), or `learning_mode="guided_learning"` / `"interactive_quiz"` / `"flashcards"` / `"practice_test"` / `"study_guide"` on new chats or `start_session=true`. Live Deep Research defaults to native headless Chrome submission so BotGuard attestation passes cleanly.
 - **Sources and retention:** use returned `notebook_ids` when required. Temporary chats clean up automatically; set `retain_chat=true` only when the user wants retention. Associated Task schedules protect their thread.
 - **Task permissions and browser.** Follow existing preferences unless the user asks to change them. In `account-full`, `gemini_preferences` manages saved `automatic` / `remote_only` and `always_ask` / `always_allow`. Select an action by its returned permission handle. Read-back verifies the stored preference. Native confirmations may still appear.
 

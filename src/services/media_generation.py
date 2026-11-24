@@ -321,7 +321,17 @@ async def generate_media_response(
             scope_options[name] = value
         scope = scope_factory(**scope_options)
     elif media_type == "image" and callable(image_scope := getattr(type(client), "image_generation_scope", None)):
-        scope = image_scope(client)
+        try:
+            image_params: dict[str, inspect.Parameter] = dict(inspect.signature(image_scope).parameters)
+        except (TypeError, ValueError):
+            image_params = {}
+        if aspect_ratio is not None and (
+            "aspect_ratio" in image_params
+            or any(p.kind is inspect.Parameter.VAR_KEYWORD for p in image_params.values())
+        ):
+            scope = image_scope(client, aspect_ratio=aspect_ratio)
+        else:
+            scope = image_scope(client)
     elif media_type == "music" and callable(music_scope := getattr(type(client), "music_generation_scope", None)):
         scope = music_scope(client)
     else:

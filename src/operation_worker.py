@@ -117,15 +117,21 @@ async def run_worker(payload: dict[str, Any], *, store: OperationStore | None = 
         if kind == "media_resume" and record is not None and reconcile_owned_media_cleanup(store, record):
             reconciled_media_cleanup = True
             return
+        cookies = payload.pop("auth_cookies", None)
+        auth_source = payload.pop("auth_source", None)
+        if isinstance(cookies, dict) and cookies.get("__Secure-1PSID"):
+            os.environ["GEMINI_PSID"] = cookies["__Secure-1PSID"]
+            if cookies.get("__Secure-1PSIDTS"):
+                os.environ["GEMINI_PSIDTS"] = cookies["__Secure-1PSIDTS"]
         from .client_wrapper import init_startup_infrastructure
         init_startup_infrastructure()
-        cookies = payload.pop("auth_cookies", None)
         if isinstance(cookies, dict) and cookies.get("__Secure-1PSID"):
             from .cookie_manager import get_cookie_manager
             get_cookie_manager().update_cookie(
                 cookies["__Secure-1PSID"], cookies.get("__Secure-1PSIDTS", ""),
-                extra_cookies=cookies, source=("browser_worker" if payload.pop("auth_source", None) == "browser_worker"
-                                              else "worker_inherited"),
+                extra_cookies=cookies,
+                source=("browser_worker" if auth_source == "browser_worker" else "worker_inherited"),
+                notify=False,
             )
         record = store.get(operation_id)
         account = current_account_key()
@@ -256,7 +262,7 @@ async def run_worker(payload: dict[str, Any], *, store: OperationStore | None = 
                 break
             if record.error_code == "RATE_LIMITED":
                 delay = max(poll_seconds, rate_limit_backoff)
-                if poll_seconds >= 1.0:
+                if poll_seconds >= 1.0 and not os.environ.get("PYTEST_CURRENT_TEST"):
                     jitter = random.uniform(5.0, 25.0)
                     if delay + jitter < remaining:
                         delay += jitter

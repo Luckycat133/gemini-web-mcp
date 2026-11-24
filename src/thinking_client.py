@@ -26,9 +26,9 @@ from .constants import (
 )
 from .domain.results import classify_exception
 from .infrastructure.rpc_contracts import (
-    VideoTransportChanged, WebWorkflowTransportChanged, apply_image_generation_transport,
-    apply_music_companion_options, apply_music_generation_transport, apply_notebook_attachments,
-    apply_task_generation_transport, apply_video_generation_transport,
+    VideoTransportChanged, WebWorkflowTransportChanged, apply_image_companion_options,
+    apply_image_generation_transport, apply_music_companion_options, apply_music_generation_transport,
+    apply_notebook_attachments, apply_task_generation_transport, apply_video_generation_transport,
 )
 from .infrastructure.rpc_parsers import CandidateSourceEvidence, parse_candidate_attribution_sources
 from .infrastructure.media_companions import MediaCompanionCatalog, parse_media_companions
@@ -51,6 +51,7 @@ class WebRequestOptions:
     learning_x9b_field: str | None = None
     learning_x9b_value: int | None = None
     image_generation: bool = False
+    image_aspect_ratio: str | None = None
     music_generation: bool = False
     media_option_ids: tuple[int, ...] = ()
     video_generation: bool = False
@@ -278,6 +279,8 @@ def inject_web_request_options(
             raise WebWorkflowTransportChanged("Media companion choices require a media composer.")
         if options.music_generation:
             apply_music_companion_options(inner_request, options.media_option_ids)
+        elif options.image_generation:
+            apply_image_companion_options(inner_request, options.media_option_ids)
         else:
             inner_request[55] = [list(options.media_option_ids)]
 
@@ -585,6 +588,27 @@ class ThinkingLevelGeminiClient(GeminiClient):
             return ()
         mode = 11 if options.video_generation else 14 if options.image_generation else 21
         selected = list(catalog.default_option_ids(mode))
+        if mode == 14:
+            groups_14 = catalog.by_mode.get(14, ())
+            formats = [group for group in groups_14 if group.id == 20 and group.available]
+            if formats:
+                img_choices = [choice for group in formats for choice in group.options if choice.id == 65 and choice.available]
+                if len(img_choices) == 1:
+                    selected = [item for item in selected if item not in {choice.id for group in formats for choice in group.options}]
+                    selected.append(65)
+            if options.image_aspect_ratio:
+                aspects = [group for group in groups_14 if group.id == 19 and group.available]
+                if len(aspects) == 1:
+                    group = aspects[0]
+                    target_ratio = options.image_aspect_ratio.strip()
+                    matches = [
+                        choice for choice in group.options
+                        if choice.available and (choice.title.strip() == target_ratio or target_ratio in choice.title)
+                    ]
+                    if len(matches) == 1:
+                        selected = [item for item in selected if item not in {choice.id for choice in group.options}]
+                        selected.append(matches[0].id)
+            return tuple(dict.fromkeys(selected))
         if mode == 11:
             formats = [group for group in catalog.by_mode.get(mode, ()) if group.id == 21 and group.available]
             if formats:
@@ -614,6 +638,23 @@ class ThinkingLevelGeminiClient(GeminiClient):
         evidence = _candidate_evidence.get()
         if evidence is not None:
             evidence[rcid] = parse_candidate_attribution_sources(candidate_data)
+        options = _web_request.get()
+        if (options and options.learning_mode_id == 8 and isinstance(candidate_data, list)
+                and len(candidate_data) > 30 and isinstance(candidate_data[30], list)
+                and candidate_data[30] and isinstance(candidate_data[30][0], list)
+                and isinstance(result, tuple) and len(result) >= 1 and isinstance(result[0], str)):
+            doc = candidate_data[30][0]
+            if len(doc) <= 3 or not doc[3]:
+                doc_title = doc[2] if len(doc) > 2 and isinstance(doc[2], str) else ""
+                doc_body = ""
+                if len(doc) > 4 and isinstance(doc[4], str) and doc[4].strip():
+                    doc_body = doc[4]
+                elif len(doc) > 17 and isinstance(doc[17], list) and doc[17] and isinstance(doc[17][0], str):
+                    doc_body = doc[17][0]
+                if doc_body.strip() and doc_body.strip() not in result[0]:
+                    header = f"## {doc_title.strip()}\n\n" if doc_title.strip() else ""
+                    merged = f"{result[0].rstrip()}\n\n{header}{doc_body}".strip()
+                    result = (merged, *result[1:])
         return result
 
     async def init(self, *args: Any, **kwargs: Any) -> None:
@@ -729,6 +770,7 @@ class ThinkingLevelGeminiClient(GeminiClient):
                 int(learning_config["x9b_value"]) if learning_config is not None else None  # type: ignore[call-overload]
             ),
             image_generation=bool(previous and previous.image_generation),
+            image_aspect_ratio=(previous.image_aspect_ratio if previous else None),
             music_generation=bool(previous and previous.music_generation),
             video_generation=_video_generation.get(),
             video_duration_seconds=_video_duration_seconds.get(),
@@ -762,9 +804,13 @@ class ThinkingLevelGeminiClient(GeminiClient):
             _web_request.reset(token)
 
     @contextmanager
-    def image_generation_scope(self) -> Iterator[None]:
+    def image_generation_scope(self, *, aspect_ratio: str | None = None) -> Iterator[None]:
         """Select the Web image tool for this request."""
-        token = _web_request.set(replace(_web_request.get() or WebRequestOptions(), image_generation=True))
+        token = _web_request.set(replace(
+            _web_request.get() or WebRequestOptions(),
+            image_generation=True,
+            image_aspect_ratio=aspect_ratio,
+        ))
         try:
             yield
         finally:

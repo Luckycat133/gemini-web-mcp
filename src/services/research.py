@@ -16,13 +16,16 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import re
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, replace
 from types import SimpleNamespace
 from typing import Any
 
-from ..constants import resolve_model_name
+from ..constants import (
+    gemini_4_model_family, is_research_refusal_reply, resolve_model_name,
+)
 from ..domain import (
     CleanupObservation,
     CleanupState,
@@ -72,6 +75,16 @@ class ResearchCleanupPreconditionError(RuntimeError):
 @dataclass(frozen=True)
 class _ResearchPlanRejection:
     metadata: tuple[str, str, str]
+
+
+class _ResearchPlanRejectedError(RuntimeError):
+    """Confirmed upstream refusal of Deep Research plan generation."""
+
+    code = "UPSTREAM_REJECTED"
+
+    def __init__(self, cid: str | None = None, message: str = "Deep Research request was rejected by Gemini.") -> None:
+        super().__init__(message)
+        self.cid = cid
 
 
 def research_cleanup_checkpoint(
@@ -570,6 +583,156 @@ class DeepResearchStart:
     failure_phase: str | None = None
 
 
+def native_research_enabled(client: Any) -> bool:
+    """Use headless Chrome submission in live sessions so BotGuard attestation passes."""
+    selected = os.environ.get("GEMINI_WEB_RESEARCH_TRANSPORT", "").strip().lower()
+    if selected == "sdk":
+        return False
+    if selected == "native":
+        return True
+    if os.environ.get("PYTEST_CURRENT_TEST"):
+        return False
+    from ..client_manager import get_extra_cookies
+    from ..thinking_client import ThinkingLevelGeminiClient
+
+    return isinstance(client, ThinkingLevelGeminiClient) and bool(get_extra_cookies().get("__Secure-1PSID"))
+
+
+def _native_research_model_label(client: Any, requested_model: str, research_model: Any) -> str:
+    target = requested_model or "flash"
+    if isinstance(research_model, str) and not is_default_deep_research_transport(research_model):
+        name = research_model
+        display = ""
+    else:
+        name = str(getattr(research_model, "model_name", "") or target)
+        display = str(getattr(research_model, "display_name", "") or "")
+    family = gemini_4_model_family(name) or gemini_4_model_family(target)
+    if not family and target.strip().lower() in {"flash", "fast"}:
+        family = "hydrogen"
+    if family:
+        return f"4 {family.title()}"
+    if display:
+        return display
+    registry = getattr(client, "_model_registry", None)
+    if isinstance(registry, dict):
+        for item in registry.values():
+            if getattr(item, "model_name", None) == name and getattr(item, "display_name", None):
+                return str(item.display_name)
+    return ""
+
+
+async def _run_native_research_start(
+    client: Any,
+    *,
+    query: str,
+    requested_model: str,
+    research_model: Any,
+    thinking_level: str,
+    timeout_seconds: int,
+    operation: str,
+    operation_id: str | None,
+    schedule_chat_cleanup: Callable[..., Any],
+    retain_chat: bool,
+    delete_after_seconds: int | None,
+    cleanup_source: str,
+    checkpoint: Callable[[Any, Any, Any], str] | None = None,
+    early_checkpoint: Callable[[Any], None] | None = None,
+    claim_confirmation: Callable[[], bool] | None = None,
+) -> DeepResearchStart:
+    from ..client_manager import get_extra_cookies
+    from ..infrastructure.account_identity import current_account_key
+    from ..infrastructure.native_research_browser import run_native_research_browser
+
+    expected_account = current_account_key()
+    cookies = dict(get_extra_cookies())
+    model_label = _native_research_model_label(client, requested_model, research_model)
+    observed_cid: str | None = None
+    checkpointed_cid: str | None = None
+    start_attempted = False
+
+    async def on_chat(cid: str) -> None:
+        nonlocal observed_cid
+        observed_cid = cid
+        if early_checkpoint is not None:
+            early_checkpoint(SimpleNamespace(cid=cid, metadata=[cid]))
+
+    def claim_confirm(cid: str) -> bool:
+        nonlocal checkpointed_cid, start_attempted
+        chat_obj = SimpleNamespace(cid=cid, metadata=[cid])
+        plan_obj = SimpleNamespace(cid=cid, title=None, metadata=[cid], research_id=None)
+        if checkpoint is not None:
+            checkpointed_cid = checkpoint(plan_obj, chat_obj, None)
+        start_attempted = True
+        if claim_confirmation is not None and not claim_confirmation():
+            return False
+        return True
+
+    obs = await run_native_research_browser(
+        query,
+        model_label,
+        cookies,
+        timeout=phase_timeout(timeout_seconds),
+        account_matches=lambda: bool(expected_account and current_account_key() == expected_account),
+        thinking_level=thinking_level,
+        on_chat=on_chat,
+        claim_confirmation=claim_confirm,
+    )
+    cid = obs.chat_id or observed_cid
+    chat_obj = SimpleNamespace(cid=cid, metadata=[cid]) if cid else None
+    plan_obj = (
+        SimpleNamespace(cid=cid, title=obs.title, metadata=[cid], research_id=None)
+        if cid else None
+    )
+    if cid and cid != checkpointed_cid:
+        try:
+            if checkpoint is not None and obs.state == "started":
+                checkpoint(plan_obj, chat_obj, None)
+            elif checkpoint is None:
+                schedule_chat_cleanup(
+                    cid,
+                    retain_chat=retain_chat,
+                    delete_after_seconds=(
+                        delete_after_seconds if retain_chat else
+                        max(RESEARCH_DEFERRED_CLEANUP_SECONDS, delete_after_seconds or 0)
+                    ),
+                    source=cleanup_source,
+                )
+        except Exception:
+            logger.exception("Native research cleanup backstop could not be registered")
+
+    if obs.state == "rejected":
+        return DeepResearchStart(
+            chat_obj,
+            None,
+            None,
+            error=_ResearchPlanRejectedError(cid=cid, message=obs.error_message or "Deep Research request was rejected."),
+            start_attempted=False,
+            failure_phase="plan",
+        )
+    if obs.state == "started" and cid:
+        start_output = SimpleNamespace(cid=cid, metadata=[cid], state="running", text="")
+        return DeepResearchStart(chat_obj, plan_obj, start_output, start_attempted=True)
+    if obs.error_code == "TIMED_OUT":
+        return DeepResearchStart(
+            chat_obj,
+            plan_obj,
+            None,
+            timed_out=research_timed_out_result(
+                operation=operation, operation_id=operation_id, plan=plan_obj, chat=chat_obj,
+            ),
+            start_attempted=start_attempted,
+            failure_phase="start" if obs.confirmed else "plan",
+        )
+    return DeepResearchStart(
+        chat_obj,
+        plan_obj,
+        None,
+        error=RuntimeError(obs.error_message or "Native Deep Research start could not be verified."),
+        start_attempted=start_attempted,
+        failure_phase="start" if obs.confirmed else "plan",
+    )
+
+
 async def run_deep_research_start_phase(
     client: Any,
     *,
@@ -603,6 +766,25 @@ async def run_deep_research_start_phase(
     classifier, and schedules retention-aware chat cleanup exactly once in
     ``finally``.
     """
+    if native_research_enabled(client):
+        return await _run_native_research_start(
+            client,
+            query=query,
+            requested_model=requested_model,
+            research_model=research_model,
+            thinking_level=thinking_level,
+            timeout_seconds=timeout_seconds,
+            operation=operation,
+            operation_id=operation_id,
+            schedule_chat_cleanup=schedule_chat_cleanup,
+            retain_chat=retain_chat,
+            delete_after_seconds=delete_after_seconds,
+            cleanup_source=cleanup_source,
+            checkpoint=checkpoint,
+            early_checkpoint=early_checkpoint,
+            claim_confirmation=claim_confirmation,
+        )
+
     chat = None
     plan = None
     start_output = None
@@ -903,7 +1085,9 @@ def research_operation_data(
 
 def research_start_outcome_unknown(start: DeepResearchStart) -> bool:
     return bool(
-        start.error is not None and start.failure_phase == "plan"
+        start.error is not None
+        and not isinstance(start.error, _ResearchPlanRejectedError)
+        and start.failure_phase == "plan"
         and research_chat_id(plan=start.plan, chat=start.chat, response=start.start_output)
     )
 
@@ -1035,14 +1219,31 @@ async def create_deep_research_plan(client: Any, query: str, chat: Any, model: A
         return await client.create_deep_research_plan(query, chat=chat, model=model)
     except Exception as e:
         cid = research_chat_id(chat=chat)
+        last_output = getattr(chat, "last_output", None)
+        last_text = getattr(last_output, "text", None)
+        if is_research_refusal_reply(last_text):
+            raise _ResearchPlanRejectedError(cid=cid, message=str(last_text)) from None
+        err_text = str(e)
+        if err_text.startswith("Gemini did not return a deep research plan. Preview: "):
+            preview = err_text.split("Preview: ", 1)[1].strip()
+            if (len(preview) >= 2 and preview[0] == preview[-1] and preview[0] in ("'", '"')):
+                preview = preview[1:-1]
+            if is_research_refusal_reply(preview):
+                raise _ResearchPlanRejectedError(cid=cid, message=preview) from None
         if (cid and _safe_research_failure_reason(e) in {"plan_missing", "no_output", "research_no_output"}
-                and not _has_ready_research_document(getattr(chat, "last_output", None))):
+                and not _has_ready_research_document(last_output)):
             try:
                 recovered = await read_existing_research_plan(client, cid)
-                if recovered is not None and not isinstance(recovered, _ResearchPlanRejection):
+                if isinstance(recovered, _ResearchPlanRejection):
+                    chat.metadata = list(recovered.metadata)
+                    chat.cid, chat.rid, chat.rcid = recovered.metadata[:3]
+                    raise _ResearchPlanRejectedError(cid=cid) from None
+                if recovered is not None:
                     chat.metadata = list(recovered.metadata)
                     chat.cid, chat.rid, chat.rcid = recovered.metadata[:3]
                     return recovered
+            except _ResearchPlanRejectedError:
+                raise
             except Exception:
                 logger.warning("Research plan readback could not be verified")
         if not is_capability_probe_false_negative(e) or not all(
@@ -1116,15 +1317,27 @@ def resolve_deep_research_transport_model(requested_model: str, client: Any = No
     # descriptor actually present in the runtime registry and in the exact
     # requested family; never infer the selected model from default transport.
     families = {
-        "flash": ("gemini-3-flash", {"gemini-3-flash", "gemini-flash"}),
-        "fast": ("gemini-3-flash", {"gemini-3-flash", "gemini-flash"}),
-        "thinking": ("gemini-3-flash", {"gemini-3-flash", "gemini-flash"}),
+        "flash": ("gemini-3-flash", {"gemini-3-flash", "gemini-flash", "gemini-4-hydrogen", "gemini-hydrogen"}),
+        "fast": ("gemini-3-flash", {"gemini-3-flash", "gemini-flash", "gemini-4-hydrogen", "gemini-hydrogen"}),
+        "thinking": ("gemini-3-flash", {"gemini-3-flash", "gemini-flash", "gemini-4-hydrogen", "gemini-hydrogen"}),
         "gemini-3-flash-thinking": ("gemini-3-flash", {"gemini-3-flash", "gemini-flash"}),
         "gemini-flash": ("gemini-3-flash", {"gemini-3-flash", "gemini-flash"}),
         "gemini-3-flash": ("gemini-3-flash", {"gemini-3-flash", "gemini-flash"}),
+        "hydrogen": ("hydrogen", {"gemini-4-hydrogen", "gemini-hydrogen"}),
+        "4 hydrogen": ("hydrogen", {"gemini-4-hydrogen", "gemini-hydrogen"}),
+        "gemini-hydrogen": ("hydrogen", {"gemini-4-hydrogen", "gemini-hydrogen"}),
+        "gemini-4-hydrogen": ("hydrogen", {"gemini-4-hydrogen", "gemini-hydrogen"}),
         "pro": ("gemini-3-pro", {"gemini-3-pro", "gemini-pro"}),
         "gemini-pro": ("gemini-3-pro", {"gemini-3-pro", "gemini-pro"}),
         "gemini-3-pro": ("gemini-3-pro", {"gemini-3-pro", "gemini-pro"}),
+        "neon": ("neon", {"gemini-neon", "gemini-4-neon"}),
+        "4 neon": ("neon", {"gemini-neon", "gemini-4-neon"}),
+        "gemini-neon": ("neon", {"gemini-neon", "gemini-4-neon"}),
+        "gemini-4-neon": ("neon", {"gemini-neon", "gemini-4-neon"}),
+        "carbon": ("carbon", {"gemini-carbon", "gemini-4-carbon"}),
+        "4 carbon": ("carbon", {"gemini-carbon", "gemini-4-carbon"}),
+        "gemini-carbon": ("carbon", {"gemini-carbon", "gemini-4-carbon"}),
+        "gemini-4-carbon": ("carbon", {"gemini-carbon", "gemini-4-carbon"}),
         "argon": ("gemini-argon", {"gemini-argon", "gemini-4-argon"}),
         "4 argon": ("gemini-argon", {"gemini-argon", "gemini-4-argon"}),
         "gemini-argon": ("gemini-argon", {"gemini-argon", "gemini-4-argon"}),
@@ -1211,6 +1424,16 @@ def _failure_from_exception(
 ) -> DomainResult[LongOperationData]:
     details = {"service": "research", "exception_type": type(error).__name__,
                "failure_phase": failure_phase or "unknown", "failure_reason": _safe_research_failure_reason(error)}
+    if isinstance(error, _ResearchPlanRejectedError):
+        data = research_operation_data(
+            OperationState.FAILED, operation=request.operation, operation_id=operation_id, plan=plan, chat=chat,
+        )
+        return DomainResult.failure(
+            DomainErrorCode.UPSTREAM_REJECTED,
+            str(error) or "The original research request was rejected.",
+            data=data, operation_state=OperationState.FAILED, verification_status="plan_rejected",
+            retryable=False, details=details,
+        )
     if isinstance(error, ResearchCleanupPreconditionError):
         data = research_operation_data(
             OperationState.FAILED, operation=request.operation, operation_id=operation_id, plan=plan, chat=chat,

@@ -196,7 +196,10 @@ def _extract_domain_payload(result: CallToolResult) -> tuple[bool, Any, list[str
         else:
             data = structured.get("data", structured if "ok" not in structured else None)
         return ok, data, texts, error
-    return not is_err, None, texts, ({"message": "\n".join(texts)} if is_err else None)
+    combined = "\n\n".join(texts).strip()
+    if is_err or combined.lstrip().startswith("❌"):
+        return False, None, texts, {"code": "TOOL_ERROR", "message": combined or "Tool call failed."}
+    return True, None, texts, None
 
 
 async def _call_account_tool(tool_name: str, arguments: dict[str, Any], *, command_label: str) -> dict[str, Any]:

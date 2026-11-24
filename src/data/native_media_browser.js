@@ -246,7 +246,8 @@ async ({action, kind, model, model_token, prompt, url, offset, size, option, dur
         const seen = window.__geminiNativeMediaNodes ||= {ids: new WeakMap(), next: 0};
         const signals = Array.from(document.querySelectorAll(`${responseSelector}, [role="alert"]`)).flatMap(el => {
             if (!visible(el) || el.querySelector("audio,video") || el.closest(userQuerySelector)) return [];
-            const value = norm(el.innerText);
+            const rawValue = norm(el.innerText);
+            const value = rawValue.replace(/^(?:Gemini\s*说|Gemini\s+said)\s+/i, "").trim();
             const quotedStart = (() => {
                 const selector = "blockquote, pre, code, q";
                 if (!el.querySelectorAll(selector).length) return false;
@@ -261,7 +262,9 @@ async ({action, kind, model, model_token, prompt, url, offset, size, option, dur
             const musicRefusal = kind === "music" && el.matches(responseSelector) && !quotedStart
                 && (/^I don['’]t have a built-in audio generation tool available right now to render a playable sound file directly\b/i.test(value)
                     || /^I can['’]t generate or output an audio file directly right now(?: because|, as) the music generation tool isn['’]t available in this session\.(?:\s|$)/i.test(value)
-                    || /^I cannot directly generate or output playable audio files here, as the music generation tool is currently unavailable\.(?:\s|$)/i.test(value));
+                    || /^I cannot directly generate or output playable audio files here, as the music generation tool is currently unavailable\.(?:\s|$)/i.test(value)
+                    || /^Since direct (?:audio|music) generation isn['’]t available right now\b/i.test(value)
+                    || /^(?:由于)?(?:目前|当前)(?:系统)?(?:无法直接|暂时无法)(?:为你)?生成(?:并导出)?(?:音频|音乐)/u.test(value));
             const generationError = el.matches(responseSelector) && !quotedStart
                 && (/(?:^|\n)I seem to be encountering an error\.(?:\s|$)/i.test(value)
                     || /(?:^|\n)I encountered an error doing what you asked\. Could you try again\?(?:\s|$)/i.test(value)

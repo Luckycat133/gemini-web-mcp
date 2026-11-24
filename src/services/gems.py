@@ -184,7 +184,7 @@ async def create_gem(
     from ..thinking_client import gem_mutation_scope
 
     with gem_mutation_scope():
-        created = await client.create_gem(name=clean_name, prompt=instructions, description=description)
+        created = await client.create_gem(name=clean_name, prompt=instructions, description=description or "")
     fence()
     created_id = gem_field(created, "id", "gem_id")[1].strip()
     observed, verification_status, verification_error = (

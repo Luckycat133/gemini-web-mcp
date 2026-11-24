@@ -265,6 +265,75 @@ def apply_image_generation_transport(inner_request: Any) -> None:
     inner_request[49] = 14
 
 
+_IMAGE_FORMAT_OPTIONS = {64: 1, 65: 2}
+_IMAGE_ASPECT_OPTIONS = {61: "1:1", 59: "9:16", 60: "3:4", 62: "4:3", 63: "16:9"}
+
+
+def apply_image_companion_options(inner_request: Any, option_ids: tuple[int, ...]) -> None:
+    """Encode confirmed Image companion options in query[55] and query[0][9][6][1].
+
+    Official PI8Ctf ``Hze`` writes Eze (format) to TYd.field3, Fze (aspect ratio)
+    to TYd.field2, and stores TYd at query[0][9][6][1] (media field 2).
+    """
+    if (not isinstance(inner_request, list) or len(inner_request) <= 55
+            or inner_request[49] != 14 or not isinstance(inner_request[0], list)
+            or len(inner_request[0]) < 7 or not isinstance(option_ids, tuple) or not option_ids):
+        raise WebWorkflowTransportChanged("Image companion request shape changed.")
+    if any(type(value) is not int for value in option_ids) or len(set(option_ids)) != len(option_ids):
+        raise WebWorkflowTransportChanged("Image companion choices are invalid.")
+    aspect_value: str | None = None
+    format_value: int | None = None
+    for option_id in option_ids:
+        if option_id in _IMAGE_ASPECT_OPTIONS:
+            if aspect_value is not None:
+                raise WebWorkflowTransportChanged("Image companion aspect ratio choices conflict.")
+            aspect_value = _IMAGE_ASPECT_OPTIONS[option_id]
+        elif option_id in _IMAGE_FORMAT_OPTIONS:
+            if format_value is not None:
+                raise WebWorkflowTransportChanged("Image companion format choices conflict.")
+            format_value = _IMAGE_FORMAT_OPTIONS[option_id]
+        else:
+            raise WebWorkflowTransportChanged("Image companion option is not in the observed transport contract.")
+    parameters: list[Any] = [None, aspect_value, format_value]
+    while parameters and parameters[-1] is None:
+        parameters.pop()
+    if not parameters:
+        raise WebWorkflowTransportChanged("Image companion choices contain no observed native parameters.")
+    selection = [list(option_ids)]
+    if inner_request[55] not in (None, [], selection):
+        raise WebWorkflowTransportChanged("Image companion selection metadata conflicts with the request.")
+    content = deepcopy(inner_request[0])
+    content.extend([None] * max(0, 10 - len(content)))
+    context = content[9]
+    if context is None:
+        context = []
+    if not isinstance(context, list):
+        raise WebWorkflowTransportChanged("Image content context shape changed.")
+    context.extend([None] * max(0, 7 - len(context)))
+    media = context[6]
+    if media is None:
+        media = []
+    if not isinstance(media, list):
+        raise WebWorkflowTransportChanged("Image content options shape changed.")
+    media.extend([None] * max(0, 2 - len(media)))
+    if (media[0] not in (None, []) or any(value not in (None, []) for value in media[2:])):
+        raise WebWorkflowTransportChanged("Image content conflicts with another media type.")
+    existing = media[1]
+    if existing not in (None, []):
+        if not isinstance(existing, list):
+            raise WebWorkflowTransportChanged("Image native parameter shape changed.")
+        comparable = existing.copy()
+        while comparable and comparable[-1] is None:
+            comparable.pop()
+        if comparable != parameters:
+            raise WebWorkflowTransportChanged("Image native parameters conflict with the selected choices.")
+    media[1] = parameters
+    context[6] = media
+    content[9] = context
+    inner_request[0] = content
+    inner_request[55] = selection
+
+
 def apply_music_generation_transport(inner_request: Any) -> None:
     """Select the current official Web Create music composer feature."""
     # 2026-11-21 official BardChatUi.en.c3ZkJFn_XPs.2018.O frontend:
@@ -279,6 +348,7 @@ def apply_music_generation_transport(inner_request: Any) -> None:
 _MUSIC_DURATION_OPTIONS = {23: 1, 24: 2, 25: 3, 42: 4, 43: 5}
 _MUSIC_VOCAL_OPTIONS = {26: 1, 27: 2, 69: 3}
 _MUSIC_GENRE_OPTIONS = {option_id: option_id - 27 for option_id in range(28, 41)}
+_MUSIC_CUSTOM_GENRE_OPTIONS = frozenset({41, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 68})
 
 
 def apply_music_companion_options(inner_request: Any, option_ids: tuple[int, ...]) -> None:
@@ -305,7 +375,7 @@ def apply_music_companion_options(inner_request: Any, option_ids: tuple[int, ...
             category, value = 0, _MUSIC_DURATION_OPTIONS[option_id]
         elif option_id in _MUSIC_VOCAL_OPTIONS:
             category, value = 1, _MUSIC_VOCAL_OPTIONS[option_id]
-        elif option_id in _MUSIC_GENRE_OPTIONS or option_id == 41:
+        elif option_id in _MUSIC_GENRE_OPTIONS or option_id in _MUSIC_CUSTOM_GENRE_OPTIONS:
             category, value = 2, _MUSIC_GENRE_OPTIONS.get(option_id)
         else:
             raise WebWorkflowTransportChanged("Music companion option is not in the observed transport contract.")
