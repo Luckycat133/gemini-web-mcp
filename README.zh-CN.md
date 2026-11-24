@@ -2,7 +2,7 @@
   <img src="docs/assets/gemini-web-mcp-banner.svg" alt="Gemini Web MCP" width="100%">
 </p>
 
-<h1 align="center">Gemini Web MCP Server (v0.2.1)</h1>
+<h1 align="center">Gemini Web MCP Server (v0.20.8)</h1>
 
 <p align="center">
   <a href="https://github.com/Luckycat133/gemini-web-mcp/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/Luckycat133/gemini-web-mcp/actions/workflows/ci.yml/badge.svg"></a>
@@ -31,28 +31,39 @@
 
 ## ✨ 主要功能
 
-本文安装示例使用 [PR #39](https://github.com/Luckycat133/gemini-web-mcp/pull/39) 的开发分支。已发布的 0.2.2 使用不同的入口和状态存储，切换前请先阅读[源码集成说明](docs/source-update-integration.md)。
+本文安装示例使用 [PR #39](https://github.com/Luckycat133/gemini-web-mcp/pull/39) 的开发分支。已发布的[0.3.0](https://github.com/Luckycat133/gemini-web-mcp/releases/tag/v0.3.0)仍同时保留旧版与新版入口，与本分支存在差异；较早的[0.2.2接口与存储历史](docs/version-history.md#022---2026-10-25)继续保留。切换已有安装前请先阅读[源码集成说明](docs/source-update-integration.md)。
 
-当前默认功能面提供 17 个工具，账号面提供 17 个工具。功能面的 `gemini_ask(notebook_ids=[...])` 基于 NotebookLM／Gemini Notebook 来源启动后台普通聊天；`gemini_run_task` 明确启动独立 Task。保存返回的 `operation_id`，使用状态／结果工具取回完整回答产物；支持的原生 Task 文件附件也须保存并校验后，才释放默认清理保护。提交连接关闭后可继续，已保存的结果可跨进程读取。
+将 `gemini-mcp-function` 和 `gemini-mcp-account` 配成两个独立的 MCP 入口，各有 6 个工具。问答、Task、媒体、研究及操作结果用功能面。查历史、改名、置顶、移动或删除已有对话，以及管理 Notebook、查看已有 Task，用账号面。客户端可以只启用其中一个。原先各 17 个工具的目录可通过 `function-full` 和 `account-full` 显式加载。
 
-账号 `gemini_notebooks` 默认返回 Notebook 来源目录，`source="gemini"` 保留同一产品的项目视图；`gemini_tasks` 提供 Task 元数据、进度和独立 Task 计划管理；`gemini_task_browser` 提供截图与显式浏览器输入。原生 Skills 与 Notebook／文本来源管理见[账号资源工具](docs/native-account-resources.md)。`gemini_preferences` 管理已保存偏好，读回不证明后续 Task 会省略确认。Task 计划与聊天定时操作不同；浏览器输入不证明独占接管或网站操作成功。详见 [Notebook、聊天与 Task 工作流](docs/notebook-task-workflows.md)和[网页版功能实测矩阵](docs/web-feature-coverage.md)。
+`gemini_ask(notebook_ids=[...])` 基于 Notebook 来源启动后台普通聊天，`gemini_run_task` 则启动独立 Task。保留 `operation_id`，用状态工具查进度、用结果工具取回经核验的完整产物。结果恢复可能触发自有对话自动清理，所以两者使用独立工具。Task 文件附件也须保存并校验，才会释放清理保护。已保存的结果可跨进程读取。
+
+`gemini_notebooks` 默认返回来源目录，`source="gemini"` 可查看项目。默认 `gemini_tasks` 只读元数据和进度。Task 计划、显式浏览器输入、原生 Skills 和持久偏好按需使用 `account-full`。设置读回仅证明偏好已保存。详见 [Notebook、聊天与 Task 工作流](docs/notebook-task-workflows.md)和[网页版功能实测矩阵](docs/web-feature-coverage.md)。
 
 ### 🤖 模型支持
-- **flash-lite** → Web UI `3.5 Flash-Lite`
-- **flash** / **fast** → Web UI `3.8 Flash`
-- **pro** → Web UI `3.1 Pro`
-- **argon** → Web UI `4 Argon`，按需用于写作与特别困难的推理；默认仍用 Flash
+- **flash** / **fast** → 兼容默认，优先当前账号发现的 Hydrogen
+- **hydrogen** / **neon** / **carbon** → 精确匹配当前账号注册表并校验套餐
+- **auto** / **自动** → 当前账号的自动 Chat 选择，不用于 Task 或媒体
+- 旧 **pro** / **argon** 只有账号仍返回对应家族时才可用，不静默替换为 Neon
+- **flash-lite** → 受运行时额度证据门控的兼容候选
 - 思考等级接受 `low` / `medium` / `high`，请求体与模型请求头同步使用已验证的三档选择；`standard` / `extended` 兼容低／高
 - 不自动选择 3.1 Pro；Flash-Lite 由运行时限制为基础 Flash 额度耗尽后的快速文本／搜索降级，且不可选思考强度
 - **thinking** 仍保留为旧兼容别名
 - `learning_mode` 可触发网页 `学习辅导` companion：互动测验、抽认卡、模拟测试、备考/学习指南
 
 ### 🎨 媒体生成
-- **图像**: Flash-Lite 首轮使用 Nano Banana 2 Lite，Flash / Pro 首轮使用 Nano Banana 2；Pro redo 是后续网页操作
-- **视频**: 功能面的 `gemini_generate_video` 默认 Flash；本轮取回经独立解码的 10 秒视频和音轨。历史请求也出现过拒绝，不自动改用 Pro，缩略图不能当作视频完成
-- **音乐**: 本轮 Flash 已取回约 175.6 秒的 MP3、MP4 与单独封面；具体 Lyria 版本仍以返回证据为准，不把单次成功外推为所有模型、时长和账号均可用
+- **图像**: 默认发现的 Hydrogen，保留显式可用聊天模型选择；图像生成器版本只依据实际上游证据，Pro redo 是后续网页操作
+- **视频** `gemini_create_media(kind="video")` 默认用发现的 Hydrogen 进入原生网页 composer／ProcessSession，填写提示后核验模型再发送一次。保留 10／15 秒与横／竖参数，当前网页无法提供时拒绝。完成以可验证的视频文件为准
+- **音乐**: 同样默认使用原生浏览器路线，产物可为带已验证音轨的 MP4，不保证 MP3。生成器版本以实际返回证据为准，不把单次成功外推为所有模型、时长和账号均可用
 
-音乐和 Deep Research 新请求默认 `thinking_level="standard"`，显式 `extended` 会保留；研究恢复沿用原请求等级。思考等级不标识 Lyria、Veo 或 Research 的具体版本。
+原生音乐／视频需要 Chrome／Chromium；显式 `GEMINI_WEB_MEDIA_TRANSPORT=sdk` 保留 SDK 兼容路线，图片和付费 API 不受影响。授权安装版MCP测试已保存可用的Hydrogen／Neon视频与音乐，包括明确选择Low／Short／Instrumental的Neon音乐，并有独立文件QA和清理证据；其他请求仍有拒绝、乐谱或提交前错误，不外推全部模型、选项与提示均成功。恢复结果保留原操作及生成身份，逐包证据和限制见[当前诊断](docs/live-media-diagnosis-2026-11-22.md)。
+
+原生网页视频可传一张本地 `image_path`，Send 前必须上传并核验同一参考图预览；附件缺失、变化或无法核验就拒绝发送。独立记录的Carbon补测已保存 10.026667 秒参考视频，主入口 `background=false` 首次返回 local 且清理完成。兼容主入口／compact 原生调用复用受保护操作，超时返回原句柄；结果未知或保存失败不清理远端。[参数与恢复合同](docs/api-reference.md)
+
+用户明确要短曲／纯音乐时，可传 `music_duration="short"`、`music_vocals="instrumental"`；其余选项留空保留网页实际默认。时长还接受 `standard`，人声接受 `vocals`／`auto`。显式 SDK 路线会在派发前拒绝这些选项，不静默忽略。当前交付包已包含这些合同，实际生成仍可能拒绝或超时。
+
+[19项同包报告](docs/live-model-matrix-2026-11-22.md)与[独立补测](docs/live-model-followup-2026-11-22.md)保留各自成功和失败，包含有序参考图、真实保存产物续编及参考视频。[当前诊断](docs/live-media-diagnosis-2026-11-22.md)另记提示、鉴权、模型选择和恢复修复，并保留实际构建身份。每个活动客户端连接都需独立验证重载和真实调用；共享运行时切换不证明既有App连接已加载新包。
+
+音乐和 Deep Research 入参默认 `thinking_level="standard"`；原生媒体保留网页默认，不将其等同 Low，显式等级另行选择并核验实际 UI。Chat／SDK 行为保持原合同，研究恢复沿用原请求等级。思考等级不标识媒体生成器版本。
 一次授权本地 Flash/standard 音乐测试和另一次研究测试分别返回了经验证的文件与报告，清理后均独立确认对话不存在；其他请求和账号条件可能得到不同结果。
 
 ### 💬 对话功能
@@ -76,7 +87,7 @@
 - 运行时 skill：`.agents/skills/gemini-web-mcp`（兼容路由）
 - 专注 assistance skill：`.agents/skills/gemini-assist`（第二意见、有据搜索、图像/混合输入理解、异步 Deep Research，入口 `gemini-mcp-assist`）
 - 仓库开发 skill：`.agents/skills/gemini-web-mcp-development`
-- 当前仓库运行时 skill 元数据为 `0.2.1`；可使用 `clawhub install gemini-web-mcp` 安装公开版本，实际版本以 ClawHub 列表为准
+- 当前仓库运行时 Skill 版本为 `0.20.8`。ClawHub 提供的版本以其列表为准，可用 `clawhub install gemini-web-mcp` 安装。
 - `.agents/skills` 是唯一仓库来源，避免同时扫描 `.agents` 与 `.codex` 的客户端重复发现同名 skill
 - 各 skill 都可直接从 GitHub 安装，并在 CI 中验证
 - Tag release 工作流构建 standalone skill zip（`gemini-web-mcp` 与 `gemini-assist`）、wheel 和源码包
@@ -98,7 +109,7 @@ ClawHub 上的运行 skill 包按 MIT-0 分发；MCP 服务器源码和仓库开
 uvx --from git+https://github.com/Luckycat133/gemini-web-mcp@codex/gemini-tools-polish-20261101 gemini-mcp-onboarding
 ```
 
-这条命令会在隔离环境中安装开发分支源码，启动 `gemini-mcp-function`，核对 17 个功能工具，并用空 `gemini_ask` 的结构化 `INVALID_ARGUMENT` 响应验证连接。预检不读取 Gemini Cookie，也不向 Gemini 发请求。需要固定版本时，把 `@` 后的分支名换成已审核的 commit SHA。
+这条命令会在隔离环境中安装开发分支源码，启动 `gemini-mcp-function`，核对 6 个功能工具，并用空 `gemini_ask` 的结构化 `INVALID_ARGUMENT` 响应验证连接。预检不读取 Gemini Cookie，也不向 Gemini 发请求。需要固定版本时，把 `@` 后的分支名换成已审核的 commit SHA。
 
 ### 1. 使用已有 Chrome 会话
 
@@ -154,11 +165,15 @@ GEMINI_TOOLS=core python -m src.server
 # 完整维护/验证工具面
 GEMINI_TOOLS=all python -m src.server
 
-# 默认功能面（17 个工具）
+# 默认功能面（6 个工具）
 gemini-mcp-function
 
-# 账号管理面（11 个工具，按需连接）
+# 对话和账号管理面（6 个工具，按需连接）
 gemini-mcp-account
+
+# 兼容原先各 17 个工具的目录
+GEMINI_TOOLS=function-full gemini-mcp-server
+GEMINI_TOOLS=account-full gemini-mcp-server
 
 # 未设置 GEMINI_TOOLS 的主入口同样使用功能面
 gemini-mcp-server
@@ -169,7 +184,7 @@ gemini-mcp-skill-server
 
 ---
 
-功能面包含协助理解、聊天会话、媒体生成、研究报告与任务状态；账号面单独提供历史、笔记本、定时任务、Gems、清理等显式操作。媒体专用工具始终后台启动，同一 `operation_id` 用状态和结果工具取回；`gemini_cleanup` 只处理 MCP 自己登记的聊天，不按标题匹配。原主服务显式 `GEMINI_TOOLS` 配置、assist 和 compact 入口继续兼容。
+媒体统一用 `gemini_create_media`，通过 `kind` 选择生成图片、编辑图片、视频或音乐。省略媒体 `model` 时选择当前账号发现的 Hydrogen，显式 Neon／Carbon 等可用选择保留。默认 `wait_seconds=120` 等待同一后台操作，设为 0 立即返回句柄；后续用同一 `operation_id` 查状态和取结果，`gemini_get_operation_result(wait_seconds=30)` 不重发生成。网页视频支持 10／15 秒和横／竖画幅。当前模型与后端证据边界见[模型指南](docs/models.md)。旧媒体工具和报告派生留在 `function-full`。定时任务、Gems 和按账本处理自有聊天的 `gemini_cleanup` 留在 `account-full`。原主服务的显式兼容工具组、assist 和 compact 入口继续可用。
 
 ## 📦 环境变量
 
@@ -186,10 +201,12 @@ gemini-mcp-skill-server
 
 ---
 
-## 🔧 工具组 (分层加载)
+## 🔧 兼容工具组
 
 | 工具组 | 包含功能 | 用途 | Token 消耗 |
 |--------|---------|------|-----------|
+| `function-full` | 原先 17 个功能工具和参数 | 已有专用媒体、理解、会话或报告派生调用 | 高 |
+| `account-full` | 原先 17 个账号工具和参数 | Task 写操作、定时计划、浏览器、原生 Skills、偏好或清理 | 高 |
 | `model` / `chat` | 仅对话和会话工具 | 只想调用 Gemini 模型的 AI agent | 低 |
 | `history` | `gemini_history` 聚合 list/scan/search/read/export + manifest | 只整理或导出对话历史，不暴露删除/账号写操作 | 低 |
 | `history-organize` | `gemini_history` + `gemini_notebooks` + Notebook move | 把选定对话整理进 Gemini 原生 Notebook | 中 |
@@ -200,9 +217,7 @@ gemini-mcp-skill-server
 | `prompts` | 本地提示词库存取 | 可选附加能力 | 低 |
 | `all` | `core` + `manage` | 完整维护/验证工具面 | 高 |
 
-文本调用优先从 `model` 开始；图片、音乐、文件、URL 或 Deep Research 使用 `core`；
-视频使用 `core` 的专用视频模式并检查视频 Artifact；
-需要低 token facade 时使用 `gemini-mcp-skill-server`（默认四工具，`GEMINI_SKILL_MODE=full` 启用八工具）；`all` 只适合维护验证，不是通用默认值。
+日常问答和生成连接 `gemini-mcp-function`，对话和账号管理连接 `gemini-mcp-account`。表中的工具组用于显式兼容配置或维护验证。需要旧四工具 facade 时使用 `gemini-mcp-skill-server`。
 
 ---
 
@@ -210,7 +225,7 @@ gemini-mcp-skill-server
 
 ### 当前工具清单
 
-按当前代码和 `list_tools()` 实际输出整理如下。
+默认目录和各工具的用途见[当前工具清单](docs/tools.md#当前支持的工具)。以下列出兼容主入口的工具。
 
 #### 显式兼容配置 (`GEMINI_TOOLS=core`)
 
@@ -292,18 +307,19 @@ gemini-mcp-skill-server
 - `gemini_list_sessions`: 列会话
 - `gemini_reset_session`: 重置会话
 
-对话工具支持 `thinking_level=standard|extended`，并可选
+对话工具支持 `thinking_level=low|medium|high`，旧 `standard|extended` 仍映射到低／高；并可选
 `learning_mode=interactive_quiz|flashcards|practice_test|study_guide` 来对齐
 Gemini Web `学习辅导` 输入模式。
 
-默认情况下，一次性请求在结果和产物提取后自动尝试删除远端对话并等待验证，再返回清理状态。`retain_chat=true` 可明确保留，`delete_after_seconds` 可指定延迟。活跃会话为后续对话暂时保留，结束后清理；未读取的研究报告受保护，服务端读取并组装报告后再清理。清理发生时尚未确认客户端收到结果，响应中断且远端已删除时可能无法再次取回报告。后台媒体操作的句柄和状态元数据持久保存在 SQLite；排队或结果未确认的任务保持清理保护，可用同一句柄查询或恢复。
+默认情况下，一次性请求在结果和产物验证后尝试清理自有远端对话，再返回清理状态。`retain_chat=true` 可明确保留，`delete_after_seconds` 可指定延迟。活跃会话为后续对话暂时保留。Research worker 会先保存并验证完整本地 Markdown 报告，再安排清理；重启或响应中断后，仍可通过原 `operation_id` 重新校验并取回本地报告。后台任务的状态元数据保存在 SQLite，完整报告和媒体单独存为产物文件。排队或结果未确认的任务保持清理保护。
 
 清理队列保存在按账号隔离的 SQLite 中；删除失败或无法验证时保持待处理，在服务运行期间或使用同一账号重启后重试。服务每 15 秒扫描到期任务，失败后按退避间隔重试；执行中被强制终止时，领取的租约最长 600 秒后才可重新领取。这些间隔不保证删除完成时间，请查看返回的清理状态。
 
 ### 媒体工具
-- `gemini_generate_media`: 图像、视频和音乐生成；视频需检查实际视频产物
-- 兼容的 `gemini_generate_media` 和 compact `create` 可显式传 `model="pro"` 使用本次视频实测路线；其默认值保持不变
-- `gemini_generate_music`: 音乐生成便捷工具；不要从模型别名推断精确 Lyria 版本
+
+默认功能面使用 `gemini_create_media`，通过 `kind` 选择图片、编辑、视频或音乐。图片可用 `image_paths` 按顺序传入参考图。后续编辑可通过 `source_operation_id` 和可选的 `source_artifact_id` 取用已验证的本地源图，再返回新操作句柄。多参考图和续编已有离线验证；2026-11-21 的双参考图实测返回 2048×2048 JPEG，画面符合两张合成参考。续编效果仍需单独验收。[图像工作流示例](docs/tools.md#gemini_create_media)
+
+`gemini_generate_media` 和 `gemini_generate_music` 保留在对应兼容目录。视频默认使用发现的 Hydrogen 和网页创建视频路径，可传 10／15 秒及横／竖画幅；只有显式 API 模型使用单独计费的 API。精确后端信息以响应证据为准。[媒体路由](docs/models.md#视频生成)
 
 ### 文件和 URL
 - `gemini_upload_file`: 上传并分析本地文件
@@ -485,7 +501,7 @@ mcp dev src/server.py
 
 2026-11-06 用已有 Chrome 会话实测了 Flash 图片生成、编辑、重连取回和自动删除。Task 使用远程浏览器且保存了「始终允许」时，两组对照均未弹确认。普通 Flash Chat、联网搜索、续聊、Notebook Chat 和识图在这批请求中没有得到可验证答案。
 
-详见[真实请求验证记录](docs/development-status.md#flash-and-browser-permission-follow-up-2026-11-06)和[逐工具质量记录](docs/tool-quality.md)。当前包与 Skill 元数据仍为 `0.2.1`，开发分支的改动记在 [Unreleased](docs/changelog.md#unreleased)。
+详见[真实请求验证记录](docs/development-status.md#flash-and-browser-permission-follow-up-2026-11-06)和[逐工具质量记录](docs/tool-quality.md)。完整版本记录见 [CHANGELOG.md](CHANGELOG.md)（含[详细验证日志](docs/changelog.md)与[发布标签归档](docs/version-history.md)）。
 
 ---
 
