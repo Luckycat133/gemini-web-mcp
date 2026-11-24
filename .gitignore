@@ -21,3 +21,4 @@ dist/
 
 # Claude agent context migration backups (external tool artifacts, not project files)
 .agent-context-migration/
+.worktrees/

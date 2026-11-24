@@ -47,10 +47,10 @@ mcp = MCPServer(
 
 ## 可用模型
 - flash-lite → Web UI 3.5 Flash-Lite
-- flash / fast → Web UI 3.8 Flash
-- pro → Web UI 3.1 Pro
-- argon → Web UI 4 Argon（仅按运行时注册表解析，不猜测 ID）
-- 默认 Flash；Argon 适合写作、创意和特别困难的推理
+- flash / fast → Web UI Hydrogen（兼容默认）
+- pro / neon → Web UI Neon（更深入的分析）
+- carbon → Web UI Carbon（代码和复杂工作）
+- auto / 自动 → 当前账号的自动 Chat 选择
 - thinking_level=low/medium/high；standard/extended 兼容低/高；Lite 仅在当前账号基础 Flash 额度耗尽时允许，思考强度不可选
 - thinking 保留为旧兼容别名
 

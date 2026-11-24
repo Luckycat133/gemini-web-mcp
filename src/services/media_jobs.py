@@ -189,6 +189,42 @@ def _matching_response(history: Any, cid: str, rid: str, rcid: str) -> Any | Non
     return None
 
 
+def _recover_exact_chat_response(history: Any, cid: str, expected_rid: str | None = None) -> Any | None:
+    """Recover a single unambiguous turn (rid, rcid) from read_chat when checkpointing lagged."""
+    outputs = []
+    for turn in getattr(history, "turns", ()) or ():
+        response = getattr(turn, "model_output", None)
+        if getattr(turn, "role", None) != "model" or response is None:
+            continue
+        metadata: Any = getattr(response, "metadata", ())
+        candidates = getattr(response, "candidates", ()) or ()
+        if (not isinstance(metadata, (list, tuple)) or len(metadata) < 2 or metadata[0] != cid
+                or not isinstance(metadata[1], str) or not metadata[1].startswith("r_")
+                or (expected_rid and metadata[1] != expected_rid)
+                or not isinstance(candidates, (list, tuple)) or len(candidates) != 1):
+            continue
+        rcid = getattr(candidates[0], "rcid", None)
+        if not isinstance(rcid, str) or not rcid.startswith("rc_"):
+            continue
+        if len(metadata) > 2 and metadata[2] and metadata[2] != rcid:
+            continue
+        copy = getattr(response, "model_copy", None)
+        if callable(copy):
+            outputs.append(copy(update={"chosen": 0}))
+        else:
+            outputs.append(SimpleNamespace(
+                metadata=metadata,
+                candidates=candidates,
+                chosen=0,
+                rcid=rcid,
+                text=getattr(candidates[0], "text", getattr(response, "text", "")),
+                images=getattr(candidates[0], "generated_images", getattr(response, "images", ())),
+                videos=getattr(candidates[0], "generated_videos", getattr(response, "videos", ())),
+                media=getattr(candidates[0], "generated_media", getattr(response, "media", ())),
+            ))
+    return outputs[0] if len(outputs) == 1 else None
+
+
 async def _finish_media_rejection(
     client: Any, response: Any, record: Any, *, store: Any, token: str, code: str,
     verification_status: str | None = None,
@@ -422,8 +458,12 @@ async def execute_media_job(request: dict, *, operation_id: str, store: Any, wor
     settings = resolve_media_request(request.get("model", "flash"), media_type, request.get("thinking_level", "standard"))
     filename = request.get("filename") or operation_id
     if (media_type not in {"image", "video", "music"} or not _valid_media_filename(filename)
-            or music_options_error(media_type=media_type, music_duration=request.get("music_duration"),
-                                   music_vocals=request.get("music_vocals"))):
+            or music_options_error(
+                media_type=media_type,
+                music_duration=request.get("music_duration"),
+                music_vocals=request.get("music_vocals"),
+                music_genre=request.get("music_genre"),
+            )):
         store.finish_worker(operation_id, worker_token=worker_token, state="failed", phase="input_rejected",
                             verification_status="input_rejected", error_code="INVALID_ARGUMENT")
         return
@@ -480,6 +520,9 @@ async def execute_media_job(request: dict, *, operation_id: str, store: Any, wor
                     files.insert(0, stack.enter_context(source_image_upload(store, source_operation, source_artifact)))
                 transport = request.get("web_media_transport")
                 prompt = request["prompt"]
+                if media_type == "image" and (image_aspect := request.get("aspect_ratio")):
+                    if image_aspect not in prompt:
+                        prompt = f"{prompt.rstrip()} (aspect ratio {image_aspect})"
                 if not native_media_enabled(client, media_type, transport):
                     if request.get("edit") or source_operation:
                         prefix = ("Edit the first attached image using the other images as references: "
@@ -501,7 +544,11 @@ async def execute_media_job(request: dict, *, operation_id: str, store: Any, wor
                     delete_after_seconds=request.get("delete_after_seconds"), source="media_job",
                     media_type=media_type, duration_seconds=request.get("duration_seconds"),
                     aspect_ratio=request.get("aspect_ratio"),
-                    **music_option_arguments(request.get("music_duration"), request.get("music_vocals")),
+                    **music_option_arguments(
+                        request.get("music_duration"),
+                        request.get("music_vocals"),
+                        request.get("music_genre"),
+                    ),
                     checkpoint=lambda response: _checkpoint(store, operation_id, worker_token, response),
                 ), timeout=timeout)
             if not store.is_worker_owner(operation_id, worker_token):
@@ -559,8 +606,36 @@ async def recover_media_job(record: Any, *, store: Any, worker_token: str) -> No
                               and getattr(record, "error_code", None) in _REJECTIONS)
     native_identity_pending = (getattr(record, "phase", None) == "native_media_submitted"
                                and record.media_type in {"video", "music"} and not rid and not rcid)
-    if not cid or (not rejection_checkpointed and not native_identity_pending and (not rid or not rcid)):
+    if not cid:
         _unknown(store, record.operation_id, worker_token, phase="media_identity_incomplete")
+        return
+    if not rejection_checkpointed and not native_identity_pending and (not rid or not rcid):
+        try:
+            client = get_gemini_client()
+            await await_before_deadline(initialize_client(), timeout=MEDIA_READBACK_TIMEOUT_SECONDS)
+            if not store.is_worker_owner(record.operation_id, worker_token) or not operation_account_matches(record):
+                return
+            read_history = getattr(client, "read_chat_for_media", client.read_chat)
+            history = await await_before_deadline(
+                read_history(cid, limit=10), timeout=MEDIA_READBACK_TIMEOUT_SECONDS,
+            )
+        except Exception as error:
+            if _rate_limited_read(error, record, store=store, token=worker_token):
+                return
+            if operation_account_matches(record):
+                _unknown(store, record.operation_id, worker_token, phase="media_identity_incomplete")
+            return
+        if not operation_account_matches(record):
+            return
+        recovered = _recover_exact_chat_response(history, cid, rid) if history is not None else None
+        if recovered is None:
+            _unknown(store, record.operation_id, worker_token, phase="media_identity_incomplete")
+            return
+        _checkpoint(store, record.operation_id, worker_token, recovered)
+        current = store.get(record.operation_id)
+        if current is not None and store.is_worker_owner(record.operation_id, worker_token):
+            await _save_response(client, recovered, current, store=store, token=worker_token,
+                                 readback_timeout=MEDIA_READBACK_TIMEOUT_SECONDS)
         return
     try:
         client = get_gemini_client()

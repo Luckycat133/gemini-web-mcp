@@ -117,7 +117,7 @@ def register_operation_tools(mcp: MCPServer) -> None:
         remote authentication. Missing or altered files stay unverified. Research
         derivatives use this same operation_id. Set include_text=false to omit a
         preview when the full verified file is returned.
-        wait_seconds waits on the original worker for up to 120 seconds without
+        wait_seconds waits on the original worker for up to 300 seconds without
         repeating generation. Zero returns the current result immediately.
         """
         if wait_seconds:

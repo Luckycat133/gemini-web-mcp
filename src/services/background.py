@@ -175,11 +175,16 @@ async def submit_media(request: dict[str, Any], *, operation: str,
     )
     if invalid:
         return DomainResult.failure(DomainErrorCode.INVALID_ARGUMENT, invalid)
-    invalid = music_options_error(media_type=media_type, music_duration=request.get("music_duration"),
-                                  music_vocals=request.get("music_vocals"))
+    invalid = music_options_error(
+        media_type=media_type,
+        music_duration=request.get("music_duration"),
+        music_vocals=request.get("music_vocals"),
+        music_genre=request.get("music_genre"),
+    )
     if invalid:
         return DomainResult.failure(DomainErrorCode.INVALID_ARGUMENT, invalid)
-    if ((request.get("music_duration") is not None or request.get("music_vocals") is not None)
+    if ((request.get("music_duration") is not None or request.get("music_vocals") is not None
+            or request.get("music_genre") is not None)
             and request.get("web_media_transport", os.environ.get("GEMINI_WEB_MEDIA_TRANSPORT")) == "sdk"):
         return DomainResult.failure(DomainErrorCode.CAPABILITY_UNAVAILABLE,
                                     "Explicit music options require the native Gemini Web composer.")
@@ -193,10 +198,15 @@ async def submit_media(request: dict[str, Any], *, operation: str,
     if invalid:
         return DomainResult.failure(DomainErrorCode.INVALID_ARGUMENT, invalid)
     settings = resolve_media_request(model, media_type, thinking_level)
+    if settings["backend_label"] == OMNI_VIDEO_API_BACKEND:
+        return DomainResult.failure(
+            DomainErrorCode.INVALID_ARGUMENT,
+            "Paid Gemini API (gemini-omni-1.2-flash / GEMINI_API_KEY) is disabled; use Gemini Web.",
+        )
     if settings["effective_alias"] == "flash-lite" and (source_operation_id or len(image_paths or ()) > 1):
         return DomainResult.failure(DomainErrorCode.CAPABILITY_UNAVAILABLE,
                                     "Use Flash for multiple image references or editing a previous result.")
-    omni_job = settings["backend_label"] == OMNI_VIDEO_API_BACKEND
+    omni_job = False
     if omni_job and not omni_video_api_key():
         return DomainResult.failure(
             DomainErrorCode.AUTH_REQUIRED, "The Gemini API video route requires GEMINI_API_KEY.",

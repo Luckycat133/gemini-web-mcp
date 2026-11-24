@@ -4,7 +4,7 @@ description: "Use this skill when an agent should extend itself with Gemini Web:
 license: MIT-0
 compatibility: "Requires Python 3.11+ and a connected Gemini Web MCP server. The function server covers assistance, understanding, media, and Deep Research; the separate account server handles explicit account work. Assist and compact compatibility servers remain supported. Media completion requires verified artifacts, and availability depends on the account and upstream service. Live calls require Gemini Web account Cookies."
 metadata:
-  version: "0.20.8"
+  version: "0.21.0"
   openclaw:
     emoji: "♊️"
     homepage: https://github.com/Luckycat133/gemini-web-mcp
@@ -51,22 +51,24 @@ Choose the MCP entry that serves the user's next step. For a task that spans bot
 
 | User intent | Preferred route | What success means |
 | --- | --- | --- |
-| Second opinion, search, image or mixed-input understanding | function `gemini_ask` with optional `inputs` | usable information incorporated into the task |
-| Ask about an existing Notebook's sources | account `gemini_notebooks`, then function `gemini_ask(notebook_ids=...)` | original background chat handle yields a verified full-answer Artifact |
+| Second opinion, search, Gem, learning mode, image or mixed-input understanding | function `gemini_ask` with optional `inputs`, `gem_id`, `learning_mode` | usable information incorporated into the task |
+| Ask about an existing Notebook's sources | `gemini-web-cli notebooks list` or account `gemini_notebooks`, then function `gemini_ask(notebook_ids=...)` | original background chat handle yields a verified full-answer Artifact |
 | Delegate a workflow needing Task execution, or explicitly request Task | function `gemini_run_task` | original Task handle yields the requested result; app changes require read-back |
-| Deep Research | function `gemini_research` | same operation handle yields a ready report |
+| Deep Research & report derivatives | function `gemini_research`, then `report_action` on ready `operation_id` | same operation handle yields a ready report or local quiz/infographic/webpage/flashcards/audio_overview/custom_app |
 | Continue a Chat | function `gemini_ask(start_session=true)` on the first turn, then pass `session_id` | requested response and session continuity |
-| Generate or edit media | function `gemini_create_media` with `kind` | verified Artifact used in the user's task |
-| Report derivatives | `function-full` report action and creation tools | correctly identified local artifact or manuscript |
-| Explicit conversation or account work | account `gemini_history`, `gemini_manage_chat`, `gemini_delete_chat`, `gemini_notebooks`, `gemini_manage_notebook`, `gemini_tasks` | requested data or verified change |
+| Generate or edit media | function `gemini_create_media` with `kind` (`wait_seconds` defaults: 120s image, 240s music, 300s video; `0` = immediate handle) | verified Artifact used in the user's task |
+| Report derivatives | `gemini_research(operation_id=..., report_action=...)` or `function-full` report tools | correctly identified local artifact or manuscript |
+| Explicit conversation, Notebooks, Gems, Skills, Schedules, Cleanup, or account work | `gemini-web-cli` (zero MCP context tax) or account `gemini_history`, `gemini_manage_chat`, `gemini_delete_chat`, `gemini_notebooks`, `gemini_manage_notebook`, `gemini_tasks` | requested data or verified change |
 
-For ordered image references, use `gemini_create_media(kind="image", image_paths=[...])`. To edit a saved result, use `kind="edit_image"` with its `source_operation_id` and optional `source_artifact_id`. The verified source is attached first in a new chat. Keep each operation handle and inspect the resulting images. [Image workflow](references/workflows.md)
+For ordered image references, use `gemini_create_media(kind="image", image_paths=[...], aspect_ratio=...)` (`16:9`, `9:16`, `1:1`, `4:3`, `3:4`). To edit a saved result, use `kind="edit_image"` with its `source_operation_id` and optional `source_artifact_id`. The verified source is attached first in a new chat. Keep each operation handle and inspect the resulting images. Paid `model="gemini-omni-1.2-flash"` / `GEMINI_API_KEY` is disabled; use Gemini Web (`hydrogen`/`flash`, `neon`/`pro`, or `carbon`). [Image workflow](references/workflows.md)
 
-Web music/video default to the native browser workflow; `GEMINI_WEB_MEDIA_TRANSPORT=sdk` explicitly selects compatibility transport without affecting image or paid API routes. Verify the actual artifact: music may be an MP4 with audio and need not include MP3. Recover the original handle instead of resubmitting after a timeout; exact completed replies and verified saved files precede the existing canonical cleanup, while unknown identities remain protected.
+Web music/video default to the native browser workflow; `GEMINI_WEB_MEDIA_TRANSPORT=sdk` explicitly selects compatibility transport without affecting image routes. Verify the actual artifact: music may be an MP4 with audio and need not include MP3. Recover the original handle instead of resubmitting after a timeout; exact completed replies and verified saved files precede the existing canonical cleanup, while unknown identities remain protected.
 
-Native video accepts one validated local `image_path`; require its uploaded preview to remain verified before Send. Missing, changed or unknown attachment evidence blocks submission, and upload observation alone does not prove reference-video generation. Legacy primary `gemini_generate_media(background=false)` and compact `create(background=false)` wait on one protected native operation. A timeout returns the original handle with partial/wait_elapsed; unknown or save-failed outcomes never authorize cleanup. Completed inline results keep local artifacts, explicit filenames and the `generated_media/` default, with opaque default names. After an awaited read, an account change refuses new reply metadata and artifacts; keep the original operation protected.
+Native video accepts one validated local `image_path` (only `duration_seconds=10` is supported when `image_path` is attached; `15` seconds is rejected fast as `INVALID_ARGUMENT`); require its uploaded preview to remain verified before Send. Missing, changed or unknown attachment evidence blocks submission, and upload observation alone does not prove reference-video generation. `gemini_create_media` defaults `wait_seconds` to `120` (image), `240` (music), or `300` (video); pass `wait_seconds=0` for an immediate handle. Legacy primary `gemini_generate_media(background=false)` and compact `create(background=false)` wait on one protected native operation. A timeout returns the original handle with partial/wait_elapsed; unknown or save-failed outcomes never authorize cleanup. Completed inline results keep local artifacts, explicit filenames and the `generated_media/` default, with opaque default names. After an awaited read, an account change refuses new reply metadata and artifacts; keep the original operation protected.
 
-For an explicit short instrumental request, use `gemini_create_media(kind="music", music_duration="short", music_vocals="instrumental", prompt=...)`. Duration also accepts `standard`; vocals accepts `vocals` or `auto`. Leave unspecified options as `None` to preserve actual webpage defaults; never guess defaults from prompt style or menu order. All music entrypoints expose these optional controls, and explicit SDK transport rejects them before submission. A Neon browser control produced a player, while one explicit Short/Instrumental MCP request was refused and cleaned; preserve each request's actual result rather than inferring universal availability.
+For music, use `gemini_create_media(kind="music", music_duration="short"|"standard", music_vocals="instrumental"|"vocals"|"auto", music_genre="auto"|"pop"|"hip_hop"|"rock"|"kpop"|"latin"|"electronic"|"rnb"|"country"|"afrobeats"|"reggae"|"jazz_blues"|"classical"|"folk"|"lofi"|"acoustic"|"cinematic"|"ambient", prompt=...)`. Leave unspecified options as `None` to preserve actual webpage defaults; never guess defaults from prompt style or menu order. All music entrypoints expose these optional controls, and explicit SDK transport rejects them before submission.
+
+For workspace and account operations without adding MCP tools, use the companion JSON CLI `~/.local/bin/gemini-web-cli` (`doctor --validate-browser`, `models`, `quotas`, `notebooks`, `gems`, `skills`, `scheduled`, `tasks`, `history`, `chats`, `preferences`, `public-links`, `library`, `cleanup`).
 
 ## Choose Chat or Task
 

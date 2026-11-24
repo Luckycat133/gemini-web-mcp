@@ -195,7 +195,7 @@ def test_function_catalog_over_real_stdio(tmp_path):
             legacy_research_read = await client.call_tool("gemini_research", {
                 "query": "Original synthetic query", "operation_id": "op_" + "a" * 32, "action": "result",
             })
-            assert domain_result_from_call(missing_key)["error"]["code"] == "AUTH_REQUIRED"
+            assert domain_result_from_call(missing_key)["error"]["code"] == "INVALID_ARGUMENT"
             assert domain_result_from_call(invalid_duration)["error"]["code"] == "INVALID_ARGUMENT"
             assert domain_result_from_call(paid_model_wrong_kind)["error"]["code"] == "INVALID_ARGUMENT"
             assert domain_result_from_call(invalid_image_sources)["error"]["code"] == "INVALID_ARGUMENT"
@@ -376,3 +376,91 @@ def test_function_ask_rejects_conflicting_modes_before_dispatch(monkeypatch, arg
     service.generate_stream.assert_not_awaited()
     understand.assert_not_awaited()
     notebook.assert_not_awaited()
+
+
+def test_function_create_media_uses_modality_wait_defaults_and_new_options(monkeypatch):
+    from src.tools import operations as op_tools
+
+    submitted = []
+    waits = []
+
+    async def fake_submit(request, *, operation, operation_id=None):
+        submitted.append(request)
+        return DomainResult.success(
+            LongOperationData(operation=operation, state=OperationState.ACCEPTED, operation_id="op_" + "b" * 32)
+        )
+
+    class FakeService:
+        store = SimpleNamespace(get=lambda handle: SimpleNamespace(operation_id=handle))
+
+        async def get_result(self, handle, wait_seconds=0):
+            waits.append((handle, wait_seconds))
+            return DomainResult.success(
+                LongOperationData(
+                    operation="gemini_generate_media",
+                    state=OperationState.COMPLETED,
+                    operation_id=handle,
+                )
+            )
+
+    monkeypatch.setattr(function, "submit_media", fake_submit)
+    monkeypatch.setattr(op_tools, "_service", lambda: FakeService())
+
+    async def run():
+        async with Client(function.mcp, mode="auto", cache=None) as client:
+            await client.call_tool("gemini_create_media", {"kind": "image", "prompt": "landscape", "aspect_ratio": "16:9"})
+            await client.call_tool("gemini_create_media", {
+                "kind": "music", "prompt": "folk tune", "music_duration": "short", "music_genre": "acoustic",
+            })
+            await client.call_tool("gemini_create_media", {"kind": "video", "prompt": "waves", "duration_seconds": 10})
+            await client.call_tool("gemini_create_media", {"kind": "music", "prompt": "async", "wait_seconds": 0})
+            rejected = await client.call_tool("gemini_create_media", {
+                "kind": "video", "prompt": "paid", "model": "gemini-omni-1.2-flash",
+            })
+            assert domain_result_from_call(rejected)["error"]["code"] == "INVALID_ARGUMENT"
+
+    asyncio.run(run())
+    assert [wait for _, wait in waits] == [120, 240, 300]
+    assert submitted[0]["aspect_ratio"] == "16:9"
+    assert submitted[1]["music_genre"] == "acoustic"
+    assert len(submitted) == 4
+
+
+def test_function_ask_supports_gem_id_and_learning_mode_and_research_report_actions(monkeypatch, tmp_path):
+    from src.domain import DomainErrorCode
+
+    captured = []
+
+    class FakeChatService:
+        async def generate_stream(self, request):
+            captured.append(request)
+            return DomainResult.failure(DomainErrorCode.INTERNAL_ERROR, "stop-after-capture")
+
+    monkeypatch.setattr(assist, "_chat_service", FakeChatService())
+    handle = "op_" + "c" * 32
+
+    async def fake_actions(*, operation_id, report_action, output_dir):
+        captured.append(("research_action", operation_id, report_action, output_dir))
+        return [function.TextContent(type="text", text=f"action:{report_action}")]
+
+    monkeypatch.setattr(assist, "_handle_research_report_action", fake_actions)
+
+    async def run():
+        async with Client(function.mcp, mode="auto", cache=None) as client:
+            await client.call_tool("gemini_ask", {
+                "prompt": "Quiz me", "gem_id": "gem_123", "learning_mode": "quiz",
+            })
+            res = await client.call_tool("gemini_research", {
+                "operation_id": handle, "report_action": "quiz", "output_dir": str(tmp_path),
+            })
+            assert res.content[0].text == "action:quiz"
+            bad = await client.call_tool("gemini_research", {
+                "query": "cannot combine", "operation_id": handle, "report_action": "quiz",
+            })
+            assert domain_result_from_call(bad)["error"]["code"] == "INVALID_ARGUMENT"
+
+    asyncio.run(run())
+    assert captured[0].gem_id == "gem_123"
+    assert captured[0].learning_mode == "quiz"
+    assert captured[0].include_gem_argument is True
+    assert captured[1] == ("research_action", handle, "quiz", str(tmp_path))

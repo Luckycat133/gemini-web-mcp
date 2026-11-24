@@ -58,6 +58,15 @@ def _completed(data: bytes | None = MP4_FIXTURE):
     })
 
 
+def test_omni_model_submission_is_rejected_without_dispatch(jobs, monkeypatch):
+    store, dispatched = jobs
+    rejected = asyncio.run(_submit())
+    assert not rejected.ok
+    assert rejected.error.code == DomainErrorCode.INVALID_ARGUMENT
+    assert "disabled" in rejected.error.message.lower()
+    assert dispatched == []
+
+
 def test_omni_generation_resumes_exact_id_and_cleans_up_only_after_verified_mp4(jobs, monkeypatch):
     store, dispatched = jobs
     calls = []
@@ -89,25 +98,31 @@ def test_omni_generation_resumes_exact_id_and_cleans_up_only_after_verified_mp4(
     web_cleanup = AsyncMock(side_effect=AssertionError("API result used Web cleanup"))
     web_init = AsyncMock(side_effect=AssertionError("API result used Web authentication"))
     service = OperationService(OperationStore(store.path), lambda: None, web_init, web_cleanup)
+    settings = resolve_media_request(OMNI_VIDEO_MODEL, "video")
+    store.create_or_get(
+        HANDLE, "gemini_generate_video", retain_chat=False, requested_model=OMNI_VIDEO_MODEL,
+        thinking_level="standard", media_type="video", output_dir=str(store.path.parent / "out"),
+        filename=HANDLE, request_model=settings["request_model"], effective_backend=settings["backend_label"],
+    )
+    assert store.claim_worker(HANDLE, "worker-omni-1")
+    job = {"kind": "omni_video", "operation_id": HANDLE, "worker_token": "worker-omni-1", "request": {
+        "prompt": PROMPT, "model": OMNI_VIDEO_MODEL, "media_type": "video",
+        "duration_seconds": 15, "output_dir": str(store.path.parent / "out"), "filename": HANDLE,
+    }}
 
     async def scenario():
         nonlocal fail_read
-        start = await _submit()
-        assert start.ok and start.data.operation_id == HANDLE and start.data.state == OperationState.ACCEPTED
-        assert (await _submit(prompt="different prompt")).ok
-        assert [job["kind"] for job in dispatched] == ["omni_video"]
-        await run_worker(dispatched[0], store=store, poll_seconds=0)
+        await run_worker(job, store=store, poll_seconds=0)
         record = store.get(HANDLE)
         assert record.state == "partial" and record.upstream_operation_id == INTERACTION
         assert record.upstream_chat_id is None and record.cleanup_protected
 
         monkeypatch.setenv("GEMINI_API_KEY", "synthetic-other-project")
         assert (await service.get_result(HANDLE)).error.code == DomainErrorCode.CAPABILITY_UNAVAILABLE
-        assert len(dispatched) == 1 and calls == ["POST", "GET"]
+        assert calls == ["POST", "GET"]
         monkeypatch.setenv("GEMINI_API_KEY", KEY)
         status = await service.get_status(HANDLE)
         assert status.data.upstream_operation_id == INTERACTION and not status.data.artifacts
-        assert len(dispatched) == 1
 
         fail_read = False
         await service.get_result(HANDLE)
@@ -137,8 +152,8 @@ def test_omni_generation_resumes_exact_id_and_cleans_up_only_after_verified_mp4(
     (b"invalid video", False, "partial", "not_scheduled"),
     (MP4_FIXTURE, True, "completed", "retained"),
 ])
-def test_omni_keeps_retained_or_unverified_interactions(jobs, monkeypatch, data, retain, expected, cleanup):
-    store, dispatched = jobs
+def test_omni_keeps_retained_or_unverified_interactions(jobs, monkeypatch, tmp_path, data, retain, expected, cleanup):
+    store, _dispatched = jobs
 
     def handler(request):
         if request.method == "POST":
@@ -147,8 +162,18 @@ def test_omni_keeps_retained_or_unverified_interactions(jobs, monkeypatch, data,
         return _completed(data)
 
     _mock_http(monkeypatch, handler)
-    asyncio.run(_submit(retain_chat=retain))
-    asyncio.run(run_worker(dispatched[0], store=store))
+    settings = resolve_media_request(OMNI_VIDEO_MODEL, "video")
+    store.create_or_get(
+        HANDLE, "gemini_generate_video", retain_chat=retain, requested_model=OMNI_VIDEO_MODEL,
+        thinking_level="standard", media_type="video", output_dir=str(tmp_path),
+        filename=HANDLE, request_model=settings["request_model"], effective_backend=settings["backend_label"],
+    )
+    assert store.claim_worker(HANDLE, "worker-omni-2")
+    job = {"kind": "omni_video", "operation_id": HANDLE, "worker_token": "worker-omni-2", "request": {
+        "prompt": PROMPT, "model": OMNI_VIDEO_MODEL, "media_type": "video",
+        "duration_seconds": 15, "retain_chat": retain, "output_dir": str(tmp_path), "filename": HANDLE,
+    }}
+    asyncio.run(run_worker(job, store=store))
     record = store.get(HANDLE)
     assert (record.state, record.cleanup_state, record.cleanup_protected) == (expected, cleanup, not retain)
     assert bool(store.get_media_artifacts(HANDLE)) is retain
@@ -156,7 +181,7 @@ def test_omni_keeps_retained_or_unverified_interactions(jobs, monkeypatch, data,
         assert not list(Path(record.output_dir).glob("*.mp4"))
 
 
-def test_unconfirmed_omni_post_never_replays_same_handle(jobs, monkeypatch):
+def test_unconfirmed_omni_post_never_replays_same_handle(jobs, monkeypatch, tmp_path):
     store, dispatched = jobs
     calls = []
 
@@ -165,12 +190,19 @@ def test_unconfirmed_omni_post_never_replays_same_handle(jobs, monkeypatch):
         raise httpx2.ReadTimeout("upstream timed out", request=request)
 
     _mock_http(monkeypatch, handler)
-    asyncio.run(_submit())
-    asyncio.run(run_worker(dispatched[0], store=store))
-    retry = asyncio.run(_submit())
-    assert retry.data.state == OperationState.PARTIAL and not retry.data.continuation_possible
-    assert retry.data.error_code == "TIMED_OUT" and retry.data.upstream_operation_id is None
-    assert len(dispatched) == 1 and calls == ["POST"]
+    settings = resolve_media_request(OMNI_VIDEO_MODEL, "video")
+    store.create_or_get(
+        HANDLE, "gemini_generate_video", retain_chat=False, requested_model=OMNI_VIDEO_MODEL,
+        thinking_level="standard", media_type="video", output_dir=str(tmp_path),
+        filename=HANDLE, request_model=settings["request_model"], effective_backend=settings["backend_label"],
+    )
+    assert store.claim_worker(HANDLE, "worker-omni-3")
+    job = {"kind": "omni_video", "operation_id": HANDLE, "worker_token": "worker-omni-3", "request": {
+        "prompt": PROMPT, "model": OMNI_VIDEO_MODEL, "media_type": "video",
+        "duration_seconds": 15, "output_dir": str(tmp_path), "filename": HANDLE,
+    }}
+    asyncio.run(run_worker(job, store=store))
+    assert calls == ["POST"] and store.get(HANDLE).error_code == "TIMED_OUT"
 
 
 def test_maintenance_filters_other_owners_before_limiting_recovery(jobs, monkeypatch, tmp_path):

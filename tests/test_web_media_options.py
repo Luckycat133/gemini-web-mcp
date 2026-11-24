@@ -30,13 +30,14 @@ def test_web_video_and_explicit_api_options_stay_separate():
                                    duration_seconds=seconds, delete_after_seconds=None)
     for ratio in ("square", " 16:9 ", 1):
         assert validate(aspect_ratio=ratio)
-    for kind in ("image", "music"):
-        assert video_options_error(media_type=kind, model=None, thinking_level="standard",
-                                   duration_seconds=None, aspect_ratio="9:16", delete_after_seconds=None)
-    assert video_options_error(media_type="video", model=OMNI_VIDEO_MODEL, thinking_level="standard",
-                               duration_seconds=3, delete_after_seconds=None) is None
-    assert video_options_error(media_type="video", model=OMNI_VIDEO_MODEL, thinking_level="standard",
-                               duration_seconds=15, aspect_ratio="9:16", delete_after_seconds=None)
+    assert video_options_error(media_type="image", model=None, thinking_level="standard",
+                               duration_seconds=None, aspect_ratio="9:16", delete_after_seconds=None) is None
+    assert video_options_error(media_type="image", model=None, thinking_level="standard",
+                               duration_seconds=None, aspect_ratio="wide", delete_after_seconds=None)
+    assert video_options_error(media_type="music", model=None, thinking_level="standard",
+                               duration_seconds=None, aspect_ratio="9:16", delete_after_seconds=None)
+    assert video_options_error(media_type=OMNI_VIDEO_MODEL and "video", model=OMNI_VIDEO_MODEL,
+                               thinking_level="standard", duration_seconds=3, delete_after_seconds=None)
 
 
 def test_video_options_reach_generation_scope_and_unsupported_client_refuses():

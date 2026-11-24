@@ -25,7 +25,7 @@ from .research_result_storage import (
 from .deadlines import await_before_deadline
 
 logger = logging.getLogger(__name__)
-MAX_RESULT_WAIT_SECONDS = 120
+MAX_RESULT_WAIT_SECONDS = 300
 _RESULT_WAIT_POLL_SECONDS = 2.0
 _RESULT_FAILURE_STATES = frozenset({"failed", "unavailable", "timed_out", "cancelled"})
 _TASK_INPUT_PHASES = frozenset({

@@ -95,6 +95,16 @@ def prepare_browser_cookie_cache(force: bool = False) -> None:
     cache_dir = Path(tempfile.gettempdir()) / "gemini_web_mcp_webapi_cookie_cache"
     configured_cache = os.environ.get("GEMINI_COOKIE_PATH")
     if configured_cache and Path(configured_cache) != cache_dir:
+        configured_dir = Path(configured_cache)
+        # Never touch a detached worker's ephemeral cache directory.
+        if configured_dir.name.startswith("gemini-web-worker-cookies-"):
+            return
+        if configured_dir.is_dir():
+            for cache_file in configured_dir.glob(".cached_cookies_*.json"):
+                try:
+                    cache_file.unlink()
+                except OSError as e:
+                    logger.debug("无法删除 Gemini WebAPI cookie cache error_type=%s", type(e).__name__)
         return
 
     cache_dir.mkdir(parents=True, exist_ok=True)
@@ -260,6 +270,7 @@ class ClientManager:
     async def initialize(self) -> Any:
         """Initialize one current client and share the attempt across callers."""
         loop = asyncio.get_running_loop()
+        retried_browser_reload = False
 
         while True:
             client = self.get_client()
@@ -268,23 +279,53 @@ class ClientManager:
                     continue
                 if self._initialized:
                     if _explicitly_unauthenticated(client):
-                        raise ClientAuthenticationRequired(auth_reason="GEMINI_SESSION_REJECTED")
-                    return client
-
-                generation = self._generation
-                init_task = self._init_task
-                if init_task is not None and not init_task.done():
-                    if init_task.get_loop() is not loop:
-                        raise RuntimeError("client initialization is already running on another event loop")
+                        cookie_source = ""
+                        if COOKIE_MANAGER_AVAILABLE:
+                            try:
+                                cookie_info = get_cookie_manager().get_cookie()
+                                cookie_source = str(getattr(cookie_info, "source", "") or "")
+                            except Exception:
+                                cookie_source = ""
+                        if (
+                            not retried_browser_reload
+                            and COOKIE_MANAGER_AVAILABLE
+                            and browser_cookie_auto_load_enabled()
+                            and cookie_source.startswith(("browser_", "browser_worker"))
+                        ):
+                            retried_browser_reload = True
+                        else:
+                            raise ClientAuthenticationRequired(auth_reason="GEMINI_SESSION_REJECTED")
+                    else:
+                        return client
                 else:
-                    init_task = loop.create_task(
-                        self._initialize_generation(client, generation),
-                        name=f"gemini-client-init-{generation}",
-                    )
-                    self._init_task = init_task
+                    retried = False
+                if self._initialized and retried_browser_reload:
+                    retried = True
+                else:
+                    retried = False
+                    generation = self._generation
+                    init_task = self._init_task
+                    if init_task is not None and not init_task.done():
+                        if init_task.get_loop() is not loop:
+                            raise RuntimeError("client initialization is already running on another event loop")
+                    else:
+                        init_task = loop.create_task(
+                            self._initialize_generation(client, generation),
+                            name=f"gemini-client-init-{generation}",
+                        )
+                        self._init_task = init_task
+            if retried:
+                await self.reset_async()
+                os.environ.pop("GEMINI_PSID", None)
+                os.environ.pop("GEMINI_PSIDTS", None)
+                prepare_browser_cookie_cache(force=True)
+                self.browser_auth_reason = None
+                self._browser_retry_at = 0.0
+                continue
 
             # A cancelled caller must not cancel the shared initialization used by
             # other requests. Reset explicitly cancels the underlying task.
+            assert init_task is not None
             return await asyncio.shield(init_task)
 
     async def _initialize_generation(self, client: Any, generation: int) -> Any:

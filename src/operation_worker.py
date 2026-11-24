@@ -17,12 +17,27 @@ from .services.media_cleanup import has_verified_owned_cleanup, reconcile_owned_
 
 _MEDIA_RATE_LIMIT_BACKOFF_SECONDS = 5 * 60
 _MEDIA_RATE_LIMIT_MAX_BACKOFF_SECONDS = 30 * 60
-_STATIC_PARTIAL_PHASES = frozenset({
-    "media_artifact_not_observed",
+_STATIC_FAILURE_PHASES = frozenset({
     "media_readback_error",
     "media_identity_unverified",
 })
-_MAX_STATIC_PARTIAL_POLLS = 3
+_MAX_STATIC_FAILURE_POLLS = 3
+_MAX_MEDIA_ARTIFACT_POLLS = {
+    "image": 4,
+    "music": 12,
+    "video": 15,
+}
+_DEFAULT_MAX_MEDIA_ARTIFACT_POLLS = 6
+
+
+def _static_partial_poll_limit(record: OperationRecord) -> int | None:
+    if record.state != "partial" or record.error_code == "RATE_LIMITED":
+        return None
+    if record.phase == "media_artifact_not_observed":
+        return _MAX_MEDIA_ARTIFACT_POLLS.get(record.media_type or "", _DEFAULT_MAX_MEDIA_ARTIFACT_POLLS)
+    if record.phase in _STATIC_FAILURE_PHASES:
+        return _MAX_STATIC_FAILURE_POLLS
+    return None
 
 
 async def _heartbeat(store: OperationStore, operation_id: str, token: str) -> None:
@@ -231,8 +246,8 @@ async def run_worker(payload: dict[str, Any], *, store: OperationStore | None = 
                 break
             if record.state == "partial" and record.phase == "media_identity_incomplete":
                 break
-            if (record.state == "partial" and record.phase in _STATIC_PARTIAL_PHASES
-                    and record.error_code != "RATE_LIMITED" and static_partial_polls >= _MAX_STATIC_PARTIAL_POLLS):
+            poll_limit = _static_partial_poll_limit(record)
+            if poll_limit is not None and static_partial_polls >= poll_limit:
                 exhausted_static_partial = True
                 break
             remaining = observation_seconds - (time.monotonic() - started)
@@ -263,9 +278,7 @@ async def run_worker(payload: dict[str, Any], *, store: OperationStore | None = 
             except TimeoutError:
                 break
             after_recover = store.get(operation_id)
-            if (after_recover is not None and after_recover.state == "partial"
-                    and after_recover.phase in _STATIC_PARTIAL_PHASES
-                    and after_recover.error_code != "RATE_LIMITED"):
+            if after_recover is not None and _static_partial_poll_limit(after_recover) is not None:
                 static_partial_polls += 1
             else:
                 static_partial_polls = 0
@@ -316,9 +329,7 @@ async def run_worker(payload: dict[str, Any], *, store: OperationStore | None = 
                             saved.state in {"failed", "unavailable", "cancelled"}
                             or (
                                 saved.state == "partial"
-                                and (kind == "media_resume"
-                                     or saved.phase == "media_identity_incomplete"
-                                     or exhausted_static_partial)
+                                and (saved.phase == "media_identity_incomplete" or exhausted_static_partial)
                             )
                         )
                     ):
@@ -328,7 +339,7 @@ async def run_worker(payload: dict[str, Any], *, store: OperationStore | None = 
                             cleanup = await finalize_remote_chat_cleanup(
                                 saved.upstream_chat_id,
                                 retain_chat=False,
-                                delete_after_seconds=0,
+                                delete_after_seconds=saved.delete_after_seconds or 0,
                                 source=f"{saved.operation}:{saved.state}",
                             )
                             store.update_cleanup(operation_id, cleanup.state.value)

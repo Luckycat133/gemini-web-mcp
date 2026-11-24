@@ -16,6 +16,7 @@ from typing import Any, Literal
 from urllib.parse import urlsplit
 
 from ..constants import resolve_thinking_level_id
+from ..services.media_generation import MUSIC_GENRES
 from .task_approval_browser import (
     TaskApprovalBrowserUnavailable, _DevToolsPipe, _chrome_executable, _cookie_parameters, _open_browser, _ready_context,
 )
@@ -47,6 +48,7 @@ class NativeMediaObservation:
     error_code: str | None = None
     submitted: bool = False
     stage: str | None = None
+    error_message: str | None = None
 
 
 @dataclass
@@ -57,9 +59,10 @@ class _Attempt:
     stage: str = "request"
 
     def result(self, state: Literal["ready", "rejected", "unverified"] = "unverified", *,
-               media: tuple[dict[str, Any], ...] = (), error_code: str | None = None) -> NativeMediaObservation:
+               media: tuple[dict[str, Any], ...] = (), error_code: str | None = None,
+               error_message: str | None = None) -> NativeMediaObservation:
         return NativeMediaObservation(state, self.chat_id, self.selected_model_verified, media, error_code,
-                                      self.submitted, self.stage)
+                                      self.submitted, self.stage, error_message)
 
 
 def _gemini_path(url: str) -> str | None:
@@ -84,14 +87,19 @@ class _VideoIntroAcknowledged(Exception):
     """Reopen a native composer menu that was interrupted by the introduction."""
 
 
+class _InvalidNativeArgument(Exception):
+    """Fail fast when Gemini Web disables a requested option for the active inputs."""
+
+
 class _Composer:
     def __init__(self, pipe: _DevToolsPipe, script: str, kind: str, model: str, account_matches: Callable[[], bool],
                  *, duration_seconds: int | None, aspect_ratio: str | None, thinking_level: str,
-                 music_duration: str | None = None, music_vocals: str | None = None, reference_required: bool = False):
+                 music_duration: str | None = None, music_vocals: str | None = None,
+                 music_genre: str | None = None, reference_required: bool = False):
         self.pipe, self.script, self.kind, self.model = pipe, script, kind, model
         self.account_matches = account_matches
         self.options = {"duration_seconds": duration_seconds, "aspect_ratio": aspect_ratio, "thinking_level": thinking_level,
-                        "music_duration": music_duration, "music_vocals": music_vocals,
+                        "music_duration": music_duration, "music_vocals": music_vocals, "music_genre": music_genre,
                         "reference_required": reference_required}
         self.session: str | None = None
         self.world: int | None = None
@@ -242,11 +250,19 @@ class _Composer:
                 if target_action == "media_tool" and self.kind == "music":
                     try:
                         async with asyncio.timeout(_TOOLS_MENU_OPEN_TIMEOUT):
-                            await self.hover(await self.wait("more"))
-                            return await self.wait("media_tool")
+                            hovered_more = False
+                            while True:
+                                if (direct := await self.evaluate("media_tool")):
+                                    return direct
+                                if not hovered_more and (more_point := await self.evaluate("more")):
+                                    await self.hover(more_point)
+                                    hovered_more = True
+                                await asyncio.sleep(_POLL_INTERVAL)
                     except TimeoutError:
                         if not attempt and await self.evaluate("composer_menu_closed") is True:
                             continue
+                        if (direct := await self.evaluate("media_tool")):
+                            return direct
                         await self.hover(await self.wait("more"))
                         return await self.wait("media_tool")
                 try:
@@ -383,9 +399,19 @@ class _Composer:
         while True:
             try:
                 if select:
+                    if await self.evaluate("video_option_menu_disabled", option=option) is True:
+                        raise _InvalidNativeArgument(
+                            f"Gemini Web disabled the video {option} control for the current configuration."
+                        )
                     await self.open_video_option_menu(option)
                     if await self.evaluate("video_option_checked", option=option) is not True:
-                        await self.click(await self.video_control("video_option_target", option=option))
+                        if await self.evaluate("video_option_target_disabled", option=option) is True:
+                            await self.exit_menu()
+                            raise _InvalidNativeArgument(
+                                f"Gemini Web disabled the requested video {option} option for the current configuration."
+                            )
+                        target = await self.video_control("video_option_target", option=option)
+                        await self.click(target)
                     await self.exit_menu()
                     await self.video_control("video_option_closed", option=option)
                 await self.open_video_option_menu(option)
@@ -500,7 +526,12 @@ async def _observe_generation(composer: _Composer, attempt: _Attempt, baseline: 
             if (code in {"UPSTREAM_LIMIT_EXCEEDED", "UPSTREAM_REJECTED"}
                     or (code == "ARTIFACT_NOT_RETURNED" and composer.kind == "music")) \
                     and (item.get("id"), code) not in old_signals:
-                return attempt.result("rejected", error_code=code)
+                msg = item.get("message")
+                return attempt.result(
+                    "rejected",
+                    error_code=code,
+                    error_message=msg if isinstance(msg, str) and msg.strip() else None,
+                )
         await asyncio.sleep(_POLL_INTERVAL)
 
 
@@ -510,6 +541,7 @@ async def run_native_media_browser(kind: Literal["music", "video"], prompt: str,
                                    account_matches: Callable[[], bool], duration_seconds: int | None = None,
                                    aspect_ratio: str | None = None, thinking_level: str = "standard",
                                    music_duration: str | None = None, music_vocals: str | None = None,
+                                   music_genre: str | None = None,
                                    reference_image_path: str | None = None) -> NativeMediaObservation:
     """Send once from an empty exact composer, preserving whether submission was attempted."""
     attempt = _Attempt()
@@ -527,9 +559,10 @@ async def run_native_media_browser(kind: Literal["music", "video"], prompt: str,
     if (kind not in ("music", "video") or not prompt.strip() or not model_label.strip()
             or not math.isfinite(timeout) or timeout <= 0 or level is None
             or (kind != "video" and (duration_seconds is not None or aspect_ratio is not None))
-            or (kind != "music" and (music_duration is not None or music_vocals is not None))
+            or (kind != "music" and (music_duration is not None or music_vocals is not None or music_genre is not None))
             or music_duration not in (None, "short", "standard")
             or music_vocals not in (None, "instrumental", "vocals", "auto")
+            or (music_genre is not None and music_genre not in MUSIC_GENRES)
             or (duration_seconds is not None and (type(duration_seconds) is not int or duration_seconds not in (10, 15)))
             or aspect_ratio not in (None, "16:9", "9:16")):
         return attempt.result(error_code="INVALID_ARGUMENT")
@@ -542,7 +575,7 @@ async def run_native_media_browser(kind: Literal["music", "video"], prompt: str,
             uploaded_reference_token: str | None = None
             composer = _Composer(pipe, script, kind, model_label, account_matches, duration_seconds=duration_seconds,
                                  aspect_ratio=aspect_ratio, thinking_level=level,
-                                 music_duration=music_duration, music_vocals=music_vocals,
+                                 music_duration=music_duration, music_vocals=music_vocals, music_genre=music_genre,
                                  reference_required=reference is not None)
             await composer.navigate(cookies)
             attempt.stage = "open_tools"
@@ -580,7 +613,7 @@ async def run_native_media_browser(kind: Literal["music", "video"], prompt: str,
             if kind == "music":
                 attempt.stage = "music_options"
                 await composer.wait("music_options")
-                for option, value in (("duration", music_duration), ("vocals", music_vocals)):
+                for option, value in (("duration", music_duration), ("vocals", music_vocals), ("genre", music_genre)):
                     if value is not None:
                         attempt.stage = f"music_{option}"
                         await composer.configure_music_option(option, select=True)
@@ -601,7 +634,7 @@ async def run_native_media_browser(kind: Literal["music", "video"], prompt: str,
                 await composer.configure_video_option("format", select=False)
             music_tokens: dict[str, str] = {}
             if kind == "music":
-                for option, value in (("duration", music_duration), ("vocals", music_vocals)):
+                for option, value in (("duration", music_duration), ("vocals", music_vocals), ("genre", music_genre)):
                     if value is not None:
                         attempt.stage = f"music_{option}"
                         music_tokens[option] = await composer.configure_music_option(option, select=False)
@@ -622,6 +655,8 @@ async def run_native_media_browser(kind: Literal["music", "video"], prompt: str,
             await composer.click(point)
             attempt.stage = "observe"
             return await _observe_generation(composer, attempt, baseline, on_chat)
+    except _InvalidNativeArgument as error:
+        return attempt.result(error_code="INVALID_ARGUMENT", error_message=str(error))
     except TimeoutError:
         return attempt.result(error_code="TIMED_OUT")
     except _FAILURES:

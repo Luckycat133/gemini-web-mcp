@@ -223,27 +223,39 @@ async def gemini_ask(
     thinking_level: str = "standard",
     retain_chat: bool = False,
     delete_after_seconds: int | None = None,
+    gem_id: str | None = None,
+    learning_mode: str | None = None,
 ) -> list[TextContent]:
     """Ask Gemini Chat for answers, writing, web research, or direct app requests.
 
     Name the app in the prompt. Use observed sources for grounding and verify
     app effects independently. Thinking accepts low/medium/high or standard/extended.
+    Supports optional gem_id (from `gemini-web-cli gems list`) and guided
+    learning_mode (interactive_quiz/quiz, flashcards, practice_test, study_guide).
     """
     if not prompt.strip():
         return domain_text(
             _invalid_argument("prompt must not be blank."),
             "Error: prompt must not be blank.",
         )
+    if gem_id is not None and not gem_id.strip():
+        return domain_text(
+            _invalid_argument("gem_id must not be blank when provided."),
+            "Error: gem_id must not be blank when provided.",
+        )
+    cleaned_gem = gem_id.strip() if gem_id is not None else None
 
     result = await _chat_service.generate_stream(
         ChatRequest(
             message=_compose_ask_message(prompt, context),
             model=model,
             thinking_level=thinking_level,
+            learning_mode=learning_mode,
+            gem_id=cleaned_gem,
             retain_chat=retain_chat,
             delete_after_seconds=delete_after_seconds,
             cleanup_source="gemini_ask",
-            include_gem_argument=False,
+            include_gem_argument=bool(cleaned_gem),
             include_temporary_argument=False,
         )
     )
@@ -504,12 +516,15 @@ def _reject_ask(message: str) -> list[TextContent]:
 async def _ask_session(
     message: str, *, session_id: str | None, model: str, thinking_level: str,
     retain_chat: bool | None, delete_after_seconds: int | None, recover_only: bool,
+    gem_id: str | None = None, learning_mode: str | None = None,
 ) -> list[TextContent]:
     created = session_id is None
     if session_id is None:
+        cleaned_gem = gem_id.strip() if gem_id is not None else None
         opened = await _chat_service.start_session(StartSessionRequest(
-            model=model, thinking_level=thinking_level, retain_chat=bool(retain_chat),
-            delete_after_seconds=delete_after_seconds, include_gem_argument=False,
+            model=model, thinking_level=thinking_level, learning_mode=learning_mode,
+            gem_id=cleaned_gem, retain_chat=bool(retain_chat),
+            delete_after_seconds=delete_after_seconds, include_gem_argument=bool(cleaned_gem),
         ))
         if not opened.ok:
             return domain_text(opened, domain_failure_text(opened), use_result_data=True)
@@ -518,6 +533,7 @@ async def _ask_session(
     try:
         result = await _chat_service.send_session_stream(SessionMessageRequest(
             session_id=session_id, message=message, recover_only=recover_only,
+            learning_mode=learning_mode if created else None,
             retain_chat=None if created else retain_chat,
             delete_after_seconds=None if created else delete_after_seconds,
             include_temporary=False, cleanup_source="gemini_ask",
@@ -530,6 +546,129 @@ async def _ask_session(
     return _render_ask_response(result, display_model, session_id=session_id, show_session_id=created)
 
 
+async def _handle_research_report_action(
+    *,
+    operation_id: str,
+    report_action: Literal[
+        "list_actions", "webpage", "infographic", "quiz", "flashcards", "audio_overview", "custom_app",
+    ],
+    output_dir: str,
+) -> list[TextContent]:
+    from ..domain import ArtifactResultData, ArtifactState
+    from ..services import (
+        artifact_exception_result,
+        artifact_from_local_path,
+        artifact_result,
+        artifact_save_failure_result,
+    )
+    from ..services.research_reports import resolve_research_report
+    from ..tools.research import (
+        _create_research_report_artifact,
+        _fetch_deep_research_immersive_report,
+        _format_research_report_actions,
+        _format_research_report_artifact,
+        _research_artifact_kind,
+        _research_report_actions_payload,
+    )
+
+    source, unavailable = await resolve_research_report(
+        chat_id=None,
+        operation_id=operation_id,
+        client_provider=get_gemini_client,
+        client_initializer=initialize_client,
+        fetch_report=_fetch_deep_research_immersive_report,
+    )
+    if source is None:
+        assert unavailable is not None
+        return domain_text(
+            unavailable,
+            domain_failure_text(unavailable)
+            if not unavailable.ok
+            else "No verified local report is available yet; call gemini_get_operation_result first.",
+            use_result_data=True,
+        )
+    if not source.account_matches():
+        return domain_text(
+            DomainResult.failure(DomainErrorCode.CAPABILITY_UNAVAILABLE, "Report account changed."),
+            "Report account changed.",
+            use_result_data=True,
+        )
+    if report_action == "list_actions":
+        payload = _research_report_actions_payload(source.output, source.chat_id)
+        if source.operation_id:
+            payload.update(operation_id=source.operation_id, report_source="verified_local_artifact")
+        result = DomainResult.success(payload, verification_status="research_artifact_verified")
+        return domain_text(result, _format_research_report_actions(payload), use_result_data=True)
+    chat_id = source.chat_id
+    try:
+        artifact = _create_research_report_artifact(
+            report_output=source.output,
+            artifact_type=report_action,
+            chat_id=chat_id,
+            output_dir=output_dir,
+        )
+        if source.operation_id:
+            artifact.update(operation_id=source.operation_id, report_source="verified_local_artifact")
+    except OSError as error:
+        data = ArtifactResultData(
+            state=ArtifactState.FAILED,
+            request_model=report_action,
+            effective_backend="MCP local renderer",
+            observed_backend="filesystem",
+            source_chat_id=chat_id,
+            media_type="research_report",
+        )
+        return domain_text(
+            artifact_save_failure_result(error, data, logger=logger, operation="gemini_research"),
+            "Research report artifact creation failed. Check the output directory and retry.",
+            use_result_data=True,
+        )
+    except Exception as error:
+        data = ArtifactResultData(
+            state=ArtifactState.FAILED,
+            request_model=report_action,
+            effective_backend="MCP local renderer",
+            source_chat_id=chat_id,
+            media_type="research_report",
+        )
+        return domain_text(
+            artifact_exception_result(error, data, logger=logger, operation="gemini_research"),
+            "Research report artifact creation failed.",
+            use_result_data=True,
+        )
+    if not source.account_matches():
+        return domain_text(
+            DomainResult.failure(DomainErrorCode.CAPABILITY_UNAVAILABLE, "Report account changed."),
+            "Report account changed.",
+            use_result_data=True,
+        )
+    typed_artifact = artifact_from_local_path(
+        _research_artifact_kind(artifact["path"]),
+        artifact["path"],
+        title=artifact["title"],
+        source_chat_id=chat_id,
+        request_model=report_action,
+        effective_backend="MCP local renderer",
+        observed_backend="filesystem",
+    )
+    data = ArtifactResultData(
+        state=typed_artifact.state,
+        artifacts=(typed_artifact,),
+        request_model=report_action,
+        effective_backend="MCP local renderer",
+        observed_backend="filesystem",
+        source_chat_id=chat_id,
+        media_type="research_report",
+    )
+    save_failures = ("post_write_verification",) if typed_artifact.state == ArtifactState.FAILED else ()
+    artifact_domain_result = artifact_result(data, save_failures=save_failures)
+    text = _format_research_report_artifact(artifact)
+    if typed_artifact.state == ArtifactState.FAILED:
+        text = f"Research report artifact could not be verified.\n\n{text}"
+    content = append_artifact_block([TextContent(type="text", text=text)], data.artifacts)
+    return attach_domain_result(content, artifact_domain_result, use_result_data=True)
+
+
 def register_lean_assist_tools(server: MCPServer) -> None:
     @server.tool(name="gemini_ask", annotations=MUTATES_REMOTE)
     @domain_error_boundary("gemini_ask", logger)
@@ -540,13 +679,19 @@ def register_lean_assist_tools(server: MCPServer) -> None:
         start_session: bool = False, session_id: str | None = None, recover_only: bool = False,
         timeout_seconds: int = 600, retain_chat: bool | None = None, delete_after_seconds: int | None = None,
         operation_id: str | None = None,
+        gem_id: str | None = None,
+        learning_mode: Literal[
+            "interactive_quiz", "quiz", "flashcards", "practice_test", "study_guide", "exam_prep",
+        ] | None = None,
     ) -> list[TextContent]:
-        """Ask Gemini Chat for an answer, web sources, writing or a named app.
+        """Ask Gemini Chat for an answer, web sources, writing, Gem, or guided learning.
 
-        Default to Flash and standard thinking. Describe the web or app use
+        Default to Flash (Hydrogen) and standard thinking. Describe web or app use
         in the prompt. Use inputs for up to 16 text, image, file or URL items
         with stable IDs. Use notebook_ids for background Notebook Chat, then
-        retrieve the result by operation_id. A plain question returns inline.
+        retrieve the result by operation_id. Pass gem_id (from `gemini-web-cli gems list`)
+        or learning_mode (interactive_quiz/quiz, flashcards, practice_test, study_guide)
+        for Gem or guided-learning requests on new chats or start_session=True.
         Set start_session to send the first turn and return a local session_id.
         Pass it on later turns to inherit the original model and thinking. If
         a turn is unverified, pass only session_id and recover_only to read it.
@@ -556,6 +701,12 @@ def register_lean_assist_tools(server: MCPServer) -> None:
         in_session = start_session or session_id is not None or recover_only
         if sum((bool(inputs), bool(notebook_ids), in_session)) > 1:
             return _reject_ask("Choose only one of inputs, notebook_ids, or a multi-turn session.")
+        if gem_id is not None and not gem_id.strip():
+            return _reject_ask("gem_id must not be blank when provided.")
+        if (gem_id is not None or learning_mode is not None) and (inputs or notebook_ids or recover_only):
+            return _reject_ask("gem_id and learning_mode apply to single-turn chats or start_session=True.")
+        if (gem_id is not None or learning_mode is not None) and session_id is not None:
+            return _reject_ask("gem_id and learning_mode are set when starting a session, not when continuing session_id.")
         if not notebook_ids and (operation_id is not None or timeout_seconds != 600):
             return _reject_ask("operation_id and a custom timeout_seconds require notebook_ids.")
         if start_session and session_id is not None:
@@ -575,6 +726,7 @@ def register_lean_assist_tools(server: MCPServer) -> None:
                 _compose_ask_message(prompt, context), session_id=session_id, model=model,
                 thinking_level=thinking_level, retain_chat=retain_chat,
                 delete_after_seconds=delete_after_seconds, recover_only=recover_only,
+                gem_id=gem_id, learning_mode=learning_mode,
             )
         if notebook_ids:
             return await _ask_notebook(
@@ -592,6 +744,7 @@ def register_lean_assist_tools(server: MCPServer) -> None:
         return await gemini_ask(
             prompt, context, model, thinking_level,
             retain_chat=bool(retain_chat), delete_after_seconds=delete_after_seconds,
+            gem_id=gem_id, learning_mode=learning_mode,
         )
 
     @server.tool(name="gemini_research", annotations=DESTRUCTIVE_REMOTE)
@@ -599,14 +752,33 @@ def register_lean_assist_tools(server: MCPServer) -> None:
         query: str = "", model: str = "flash", thinking_level: str = "standard",
         timeout_seconds: int = DEFAULT_RESEARCH_TIMEOUT_SECONDS, retain_chat: bool = False,
         delete_after_seconds: int | None = None, operation_id: str | None = None,
+        report_action: Literal[
+            "list_actions", "webpage", "infographic", "quiz", "flashcards", "audio_overview", "custom_app",
+        ] | None = None,
+        output_dir: str = "generated_media/research_artifacts",
     ) -> list[TextContent]:
-        """Start Deep Research in the background for a report from multiple sources.
+        """Start Deep Research in the background or derive artifacts from a ready report.
 
-        Keep the operation_id for status and verified report retrieval.
-        timeout_seconds bounds startup. An optional caller-generated op_ plus
-        32 lowercase hex digits allows idempotent submission. Reuse it only for
-        the original request. Set retain_chat to keep the remote conversation.
+        Pass query to start a new background Deep Research job, then retrieve the
+        verified report via gemini_get_operation_result(operation_id). Or pass
+        report_action with the ready research operation_id (and blank query) to
+        list actions or render a local webpage, infographic, quiz, flashcards,
+        audio_overview, or custom_app spec without repeating research.
         """
+        if report_action is not None:
+            if query.strip() or retain_chat or delete_after_seconds is not None:
+                return _reject_ask(
+                    "When report_action is set, pass operation_id of a completed research job and omit query."
+                )
+            if operation_id is None or not operation_id.strip():
+                return _reject_ask("report_action requires the operation_id of a completed research job.")
+            return await _handle_research_report_action(
+                operation_id=operation_id.strip(),
+                report_action=report_action,
+                output_dir=output_dir,
+            )
+        if output_dir != "generated_media/research_artifacts":
+            return _reject_ask("output_dir only applies when report_action is set.")
         return await gemini_research(
             query, model, thinking_level, timeout_seconds, retain_chat, delete_after_seconds,
             operation_id,

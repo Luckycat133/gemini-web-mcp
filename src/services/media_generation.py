@@ -17,21 +17,32 @@ from .model_policy import model_policy_scope
 IN_PROGRESS_CLEANUP_SECONDS = 1800
 MusicDuration = Literal["short", "standard"]
 MusicVocals = Literal["instrumental", "vocals", "auto"]
+MusicGenre = Literal[
+    "auto", "pop", "hip_hop", "rock", "kpop", "latin", "electronic", "rnb", "country",
+    "afrobeats", "reggae", "jazz_blues", "classical", "folk", "lofi", "acoustic", "cinematic", "ambient",
+]
+MUSIC_GENRES: tuple[str, ...] = (
+    "auto", "pop", "hip_hop", "rock", "kpop", "latin", "electronic", "rnb", "country",
+    "afrobeats", "reggae", "jazz_blues", "classical", "folk", "lofi", "acoustic", "cinematic", "ambient",
+)
 
 
 class MusicOptionArguments(TypedDict, total=False):
     music_duration: MusicDuration
     music_vocals: MusicVocals
+    music_genre: MusicGenre
 
 
 def music_option_arguments(
-    music_duration: MusicDuration | None, music_vocals: MusicVocals | None,
+    music_duration: MusicDuration | None, music_vocals: MusicVocals | None, music_genre: MusicGenre | None = None,
 ) -> MusicOptionArguments:
     options: MusicOptionArguments = {}
     if music_duration is not None:
         options["music_duration"] = music_duration
     if music_vocals is not None:
         options["music_vocals"] = music_vocals
+    if music_genre is not None:
+        options["music_genre"] = music_genre
     return options
 
 
@@ -58,38 +69,37 @@ def video_options_error(
     *, media_type: str, model: str | None, thinking_level: str, duration_seconds: int | None,
     delete_after_seconds: int | None, background: bool = True, aspect_ratio: str | None = None,
 ) -> str | None:
-    if normalize_model_alias(model) != OMNI_VIDEO_MODEL:
-        if media_type != "video":
-            if duration_seconds is not None or aspect_ratio is not None:
-                return "duration_seconds and aspect_ratio are only supported for video generation."
-            return None
-        if duration_seconds is not None and (type(duration_seconds) is not int or duration_seconds not in (10, 15)):
-            return "Gemini Web duration_seconds must be 10 or 15."
-        if aspect_ratio is not None and aspect_ratio not in ("16:9", "9:16"):
-            return "aspect_ratio must be '16:9' or '9:16'."
+    if normalize_model_alias(model) == OMNI_VIDEO_MODEL:
+        return "Paid Gemini API (gemini-omni-1.2-flash / GEMINI_API_KEY) is disabled; use Gemini Web."
+    if media_type == "image":
+        if duration_seconds is not None:
+            return "duration_seconds is only supported for video generation."
+        if aspect_ratio is not None and aspect_ratio not in ("16:9", "9:16", "1:1", "4:3", "3:4"):
+            return "aspect_ratio for images must be one of '16:9', '9:16', '1:1', '4:3', or '3:4'."
         return None
-    if media_type != "video" or not background:
-        return f"{OMNI_VIDEO_MODEL} requires background video generation."
-    if duration_seconds is not None and (type(duration_seconds) is not int or not 3 <= duration_seconds <= 15):
-        return "duration_seconds must be a whole number from 3 through 15."
-    if aspect_ratio is not None:
-        return "aspect_ratio is available for Gemini Web videos only."
-    if thinking_level != "standard":
-        return "The Gemini API video model does not accept a chat thinking level. Omit thinking_level."
-    if delete_after_seconds not in {None, 0}:
-        return "Delayed cleanup is available for Web chats only. Use retain_chat to keep the API interaction."
+    if media_type != "video":
+        if duration_seconds is not None or aspect_ratio is not None:
+            return "duration_seconds and aspect_ratio are only supported for video or image generation."
+        return None
+    if duration_seconds is not None and (type(duration_seconds) is not int or duration_seconds not in (10, 15)):
+        return "Gemini Web duration_seconds must be 10 or 15."
+    if aspect_ratio is not None and aspect_ratio not in ("16:9", "9:16"):
+        return "aspect_ratio for videos must be '16:9' or '9:16'."
     return None
 
 
 def music_options_error(
     *, media_type: str, music_duration: MusicDuration | None = None, music_vocals: MusicVocals | None = None,
+    music_genre: MusicGenre | None = None,
 ) -> str | None:
-    if media_type != "music" and (music_duration is not None or music_vocals is not None):
-        return "music_duration and music_vocals are only supported for music generation."
+    if media_type != "music" and (music_duration is not None or music_vocals is not None or music_genre is not None):
+        return "music_duration, music_vocals and music_genre are only supported for music generation."
     if music_duration is not None and music_duration not in ("short", "standard"):
         return "music_duration must be 'short' or 'standard'."
     if music_vocals is not None and music_vocals not in ("instrumental", "vocals", "auto"):
         return "music_vocals must be 'instrumental', 'vocals' or 'auto'."
+    if music_genre is not None and music_genre not in MUSIC_GENRES:
+        return f"music_genre must be one of {', '.join(MUSIC_GENRES)}."
     return None
 
 
@@ -229,6 +239,7 @@ async def generate_media_response(
     aspect_ratio: str | None = None,
     music_duration: MusicDuration | None = None,
     music_vocals: MusicVocals | None = None,
+    music_genre: MusicGenre | None = None,
     progress: MediaGenerationProgress | None = None,
     checkpoint: Callable[[Any], None] | None = None,
 ) -> Any:
@@ -278,15 +289,17 @@ async def generate_media_response(
 
     arguments = dict(arguments)
     transport = arguments.pop("web_media_transport", None)
-    if music_options_error(media_type=media_type, music_duration=music_duration, music_vocals=music_vocals):
+    if music_options_error(
+        media_type=media_type, music_duration=music_duration, music_vocals=music_vocals, music_genre=music_genre,
+    ):
         raise NativeMediaGenerationError("INVALID_ARGUMENT")
     if native_media_enabled(client, media_type, transport):
         return await generate_native_media_response(
             client, arguments=arguments, media_type=media_type, observe=observe,
             duration_seconds=duration_seconds, aspect_ratio=aspect_ratio,
-            **music_option_arguments(music_duration, music_vocals),
+            **music_option_arguments(music_duration, music_vocals, music_genre),
         )
-    if music_duration is not None or music_vocals is not None:
+    if music_duration is not None or music_vocals is not None or music_genre is not None:
         raise NativeMediaGenerationError("CAPABILITY_UNAVAILABLE")
 
     scope_factory = getattr(client, "video_generation_scope", None)

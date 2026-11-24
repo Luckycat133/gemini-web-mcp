@@ -6,7 +6,7 @@ metadata:
   author: Luckycat133
   project: gemini-web-mcp
   scope: development
-  version: "0.20.8"
+  version: "0.21.0"
 ---
 
 # Gemini Web MCP Development

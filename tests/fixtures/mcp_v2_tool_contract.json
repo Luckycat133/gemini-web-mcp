@@ -147,7 +147,7 @@
     "assist": [
       {
         "annotations_sha256": "99300d9e2937ba92c763822593cb3ba8ec634d1813f3ab37fad3d6d0432268f9",
-        "input_schema_sha256": "15aaf2a984692a305158ef12281451c52580cf0fc43b3928560e50d85461fef4",
+        "input_schema_sha256": "91f748d38e2588d1cd0223f3cdbd5290fa3effafb2ac134088c746119d116bb5",
         "name": "gemini_ask",
         "output_schema_sha256": "84e9d5528407ad517b353a8d9f2f0e49b9a1ec4102833659add114aaa147f729"
       },
@@ -205,19 +205,19 @@
     "function": [
       {
         "annotations_sha256": "99300d9e2937ba92c763822593cb3ba8ec634d1813f3ab37fad3d6d0432268f9",
-        "input_schema_sha256": "86fa2d201b551c99093138d49f1ff4ee3c88fbd3eb58a2b003ae3733f2a599d5",
+        "input_schema_sha256": "c81a207c1a9113e8dfb2746908f565e5f3919a325e9175ec2898faea1439ed36",
         "name": "gemini_ask",
         "output_schema_sha256": "416fee238f792f6f27540900ad7c315c5100645ff92de1f72a4254e26400bf9c"
       },
       {
         "annotations_sha256": "99300d9e2937ba92c763822593cb3ba8ec634d1813f3ab37fad3d6d0432268f9",
-        "input_schema_sha256": "ed2ea6a35d55b6291b0a3d6c2da1e5a4bf0c202c36c240c9df0f027aea599f06",
+        "input_schema_sha256": "8fdab34fd9c71509da1a49d46054e6c5a22e1aee7a60d7414a1bb2a378407e36",
         "name": "gemini_create_media",
         "output_schema_sha256": "84e9d5528407ad517b353a8d9f2f0e49b9a1ec4102833659add114aaa147f729"
       },
       {
         "annotations_sha256": "bbca3f90a8f37a2e09188309470b131134c395dbc4eccad15de06d2c2f94f06a",
-        "input_schema_sha256": "7095259187c8e529aa10c9b6e17c7746ef36cc625a873414b382777e63e1bfe8",
+        "input_schema_sha256": "ed219f6afcdf984ae38d8c13d41b82a07ebf42d24967f6c57cc51ce43000f837",
         "name": "gemini_get_operation_result",
         "output_schema_sha256": "84e9d5528407ad517b353a8d9f2f0e49b9a1ec4102833659add114aaa147f729"
       },
@@ -229,7 +229,7 @@
       },
       {
         "annotations_sha256": "bbca3f90a8f37a2e09188309470b131134c395dbc4eccad15de06d2c2f94f06a",
-        "input_schema_sha256": "c3afb391b2013d8f751d46c5a73ebd51f6d0d2bbd5aed990bf7b3f44375a7f83",
+        "input_schema_sha256": "4af8676da97d44a607778ff76bbf668a1ca3459f4088d8f310ae958fe4f9bd99",
         "name": "gemini_research",
         "output_schema_sha256": "bd69d9436ab099d0afa4f8308bfd0f380d880eab29ddc5bbfe0e49ae1799294e"
       },
@@ -267,7 +267,7 @@
       },
       {
         "annotations_sha256": "99300d9e2937ba92c763822593cb3ba8ec634d1813f3ab37fad3d6d0432268f9",
-        "input_schema_sha256": "9e1a2af69f3ee28cce5c663fc9b4f592a1e7686b7fe8a120e6cc277b4941aa34",
+        "input_schema_sha256": "e0c1983936df7864c0e100a407d44291c3fc280f42cc75669d27b24cfce6657c",
         "name": "gemini_generate_music",
         "output_schema_sha256": "84e9d5528407ad517b353a8d9f2f0e49b9a1ec4102833659add114aaa147f729"
       },
@@ -279,7 +279,7 @@
       },
       {
         "annotations_sha256": "bbca3f90a8f37a2e09188309470b131134c395dbc4eccad15de06d2c2f94f06a",
-        "input_schema_sha256": "61591794bb81cf085ed90193dd235969b5a58b903a21cef26efdf64f9c3f86ce",
+        "input_schema_sha256": "6589b2772f73d41c3b2a5c1102192000aeb76950c178a46b0e0c73864d5471d3",
         "name": "gemini_get_operation_result",
         "output_schema_sha256": "84e9d5528407ad517b353a8d9f2f0e49b9a1ec4102833659add114aaa147f729"
       },

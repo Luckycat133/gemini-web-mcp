@@ -6,6 +6,27 @@ Each minor iteration introduces a workflow; patch iterations group related corre
 
 ## [Unreleased]
 
+## [0.21.0] - 2026-11-25
+
+Live-overhaul reliability, native browser, lean-MCP capability parity, and companion CLI release (`0.21.0`, local working tree).
+
+### Added
+
+- Companion CLI `gemini-web-cli` (`src/cli.py`, `pyproject.toml`, `scripts/update_local_mcp.py`) exposing account inventory, models, quotas, Notebooks, Gems, Skills, Scheduled actions, Tasks, History, Chats, Preferences, Public Links, Library, and Cleanup in structured JSON without bloating the 6-tool MCP context.
+- 18 `music_genre` choices on `gemini_create_media` / `gemini_generate_music` (`native_media_browser.js` + `native_media_browser.py`), image `aspect_ratio` (`16:9`, `9:16`, `1:1`, `4:3`, `3:4`), `gem_id` & `learning_mode` on `gemini_ask`, and `report_action` on `gemini_research`.
+
+### Fixed
+
+- Worker cleanup durability (`src/operation_worker.py`): raised modality-specific `media_artifact_not_observed` poll budgets (12 polls / ~360s music, 15 polls / ~450s video), stopped `media_resume` from deleting active `partial` chats after one poll, and respected `saved.delete_after_seconds`.
+- Native browser composer reliability (`src/data/native_media_browser.js`, `src/infrastructure/native_media_browser.py`): check top-level `media_tool` before `more`, match mode-specific composer placeholders, fail fast (`INVALID_ARGUMENT`) on disabled video options (e.g. `15s + image_path`), relax `hasMusicControls()`, and surface verbatim error messages.
+- Media identity recovery (`src/services/media_jobs.py`) via `read_chat` when `rid`/`rcid` lagged behind `cid`.
+- Cookie refresh & hot-reload (`src/cookie_manager.py`, `src/client_manager.py`): added `__Secure-OSID`, `S`, `SNID`, purged `.cached_cookies_*.json` under explicit `GEMINI_COOKIE_PATH`, and reloaded browser cookies once if an initialized client becomes unauthenticated.
+- Raised `MAX_RESULT_WAIT_SECONDS` to `300` with modality defaults (`120`/`240`/`300`) and disabled paid `gemini-omni-1.2-flash` (`GEMINI_API_KEY`) route cleanly before dispatch.
+
+### Validation
+
+- Offline verification in `.worktrees/live-overhaul`: `ruff check src tests scripts` (0 errors), `mypy src scripts` (155 source files, 0 errors), `scripts/check_version_consistency.py` (`0.21.0`), `scripts/smoke_profiles.py`, `scripts/smoke_mcp_protocol.py`, `scripts/run_contract_checklist.py` (2,908 passed), and full offline `pytest -q` (5,160 passed).
+
 ## [0.20.8] - 2026-11-23
 
 Local workspace reliability & cleanup-leak patch on top of `0.20.7` (not a published release tag).

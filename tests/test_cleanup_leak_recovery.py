@@ -210,8 +210,13 @@ def test_run_worker_releases_media_identity_incomplete_partial(monkeypatch):
 def test_run_worker_releases_exhausted_media_resume_partial(monkeypatch):
     finalize = AsyncMock(return_value=CleanupObservation(state=CleanupState.COMPLETED, upstream_chat_id="c_1"))
     _set_worker_env(monkeypatch, finalize)
-    store = _WorkerStore(_media_record(state="partial", phase="media_readback_unverified"))
-    asyncio.run(_run_media_resume(store))
+    recover = AsyncMock()
+    monkeypatch.setattr(media_jobs, "recover_media_job", recover)
+    store = _WorkerStore(_media_record(state="partial", phase="media_readback_error"))
+    asyncio.run(run_worker(
+        {"operation_id": "op_media", "worker_token": "worker", "kind": "media_resume", "request": {}},
+        store=store, observation_seconds=14400, poll_seconds=0,
+    ))
     assert store.released is True
     assert store.updated_state == CleanupState.COMPLETED.value
 
@@ -509,8 +514,8 @@ def test_run_worker_caps_static_partial_polls_and_releases_cleanup(monkeypatch):
         {"operation_id": "op_media", "worker_token": "worker", "kind": "media", "request": {}},
         store=store, observation_seconds=14400, poll_seconds=30,
     ))
-    assert len(sleeps) == operation_worker._MAX_STATIC_PARTIAL_POLLS
-    assert recover.await_count == operation_worker._MAX_STATIC_PARTIAL_POLLS
+    assert len(sleeps) == operation_worker._MAX_MEDIA_ARTIFACT_POLLS["video"]
+    assert recover.await_count == operation_worker._MAX_MEDIA_ARTIFACT_POLLS["video"]
     assert store.released is True
     assert store.updated_state == CleanupState.COMPLETED.value
     finalize.assert_awaited_once()

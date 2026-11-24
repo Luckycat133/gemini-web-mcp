@@ -280,7 +280,10 @@ def test_gemini_ask_input_schema_is_deterministic():
 
     assert schema["type"] == "object"
     assert schema["required"] == ["prompt"]
-    assert set(schema["properties"]) == {"prompt", "context", "model", "thinking_level", "retain_chat", "delete_after_seconds"}
+    assert set(schema["properties"]) == {
+        "prompt", "context", "model", "thinking_level", "retain_chat", "delete_after_seconds",
+        "gem_id", "learning_mode",
+    }
     assert schema["properties"]["retain_chat"]["default"] is False
     assert schema["properties"]["model"]["default"] == "flash"
     assert schema["properties"]["thinking_level"]["default"] == "standard"

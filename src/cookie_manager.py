@@ -30,12 +30,18 @@ _GOOGLE_ACCOUNTS_COOKIE = "LSID"
 _GOOGLE_CHALLENGE_COOKIE = "GOOGLE_ABUSE_EXEMPTION"
 _GEMINI_HOST = "gemini.google.com"
 _GEMINI_SESSION_COOKIE = "OSID"
-_GEMINI_HOST_COOKIES = {_GEMINI_SESSION_COOKIE, "COMPASS", "_ga", "_ga_BF8Q35BMLM", "_ga_WC57KJ50ZZ", "_gcl_au"}
+_GEMINI_SECURE_SESSION_COOKIE = "__Secure-OSID"
+_GEMINI_HOST_COOKIES = {
+    _GEMINI_SESSION_COOKIE, _GEMINI_SECURE_SESSION_COOKIE,
+    "COMPASS", "_ga", "_ga_BF8Q35BMLM", "_ga_WC57KJ50ZZ", "_gcl_au",
+}
 
 
 def gemini_cookie_jar(cookies: dict[str, str]) -> dict[str, str] | Cookies:
     """Keep Google's sign-in handoff cookies restricted to the Accounts host."""
-    if not any(name in cookies for name in (_GOOGLE_ACCOUNTS_COOKIE, _GEMINI_SESSION_COOKIE, _GOOGLE_CHALLENGE_COOKIE)):
+    if not any(name in cookies for name in (
+        _GOOGLE_ACCOUNTS_COOKIE, _GEMINI_SESSION_COOKIE, _GEMINI_SECURE_SESSION_COOKIE, _GOOGLE_CHALLENGE_COOKIE,
+    )):
         return cookies
     jar = Cookies()
     for name, value in cookies.items():
@@ -225,8 +231,11 @@ class CookieManager:
             "_ga_BF8Q35BMLM",
             "_ga_WC57KJ50ZZ",
             "_gcl_au",
+            "S",
+            "SNID",
             _GOOGLE_ACCOUNTS_COOKIE,
             _GEMINI_SESSION_COOKIE,
+            _GEMINI_SECURE_SESSION_COOKIE,
         }
 
     @staticmethod
@@ -403,7 +412,7 @@ class CookieManager:
             if cookie.name == _GOOGLE_ACCOUNTS_COOKIE:
                 if cookie.domain.lower() != _GOOGLE_ACCOUNTS_HOST:
                     continue
-            elif cookie.name == _GEMINI_SESSION_COOKIE:
+            elif cookie.name in (_GEMINI_SESSION_COOKIE, _GEMINI_SECURE_SESSION_COOKIE):
                 if cookie.domain.lower() != _GEMINI_HOST:
                     continue
             elif cookie.name == _GOOGLE_CHALLENGE_COOKIE:

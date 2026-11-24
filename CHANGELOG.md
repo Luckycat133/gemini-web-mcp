@@ -5,9 +5,25 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses `0.x.y` pre-1.0 Semantic Versioning.
 
-Detailed per-build validation logs live in [docs/changelog.md](docs/changelog.md), and original published release tags (`v0.2.0`, `v0.2.1`, `v0.2.2`, mainline `v0.3.0`) and acceptance archives live in [docs/version-history.md](docs/version-history.md). Local `0.18.0`–`0.20.8` entries reflect the active working tree on branch `codex/gemini-tools-polish-20261101` (`pyproject.toml` at `0.20.8`); no new public tag is implied.
+Detailed per-build validation logs live in [docs/changelog.md](docs/changelog.md), and original published release tags (`v0.2.0`, `v0.2.1`, `v0.2.2`, mainline `v0.3.0`) and acceptance archives live in [docs/version-history.md](docs/version-history.md). Local `0.18.0`–`0.21.0` entries reflect the active working tree on branch `codex/gemini-tools-polish-20261101` (`pyproject.toml` at `0.21.0`); no new public tag is implied.
 
 ## [Unreleased]
+
+## [0.21.0] - 2026-11-25
+
+### Added
+
+- Added companion zero-context-tax JSON CLI `gemini-web-cli` (`src/cli.py`, registered in `pyproject.toml` & `scripts/update_local_mcp.py`) covering `doctor`, `models`, `quotas`, `inventory`, `public-links`, `library`, `notebooks`, `gems`, `skills`, `scheduled`, `tasks`, `history`, `chats`, `preferences`, and `cleanup`, auto-loading unset defaults from `~/.gemini/config/mcp_config.json`.
+- Added 18 canonical `music_genre` slugs (`auto`, `pop`, `hip_hop`, `rock`, `kpop`, `latin`, `electronic`, `rnb`, `country`, `afrobeats`, `reggae`, `jazz_blues`, `classical`, `folk`, `lofi`, `acoustic`, `cinematic`, `ambient`) across `gemini_create_media`, `gemini_generate_music`, native browser automation (`src/data/native_media_browser.js`, `src/infrastructure/native_media_browser.py`), and `music_options_error`.
+- Added image `aspect_ratio` support (`16:9`, `9:16`, `1:1`, `4:3`, `3:4`), `gem_id` & `learning_mode` on `gemini_ask`, and `report_action` (`list_actions`, `webpage`, `infographic`, `quiz`, `flashcards`, `audio_overview`, `custom_app`) on `gemini_research`.
+
+### Fixed
+
+- Separated `_MAX_MEDIA_ARTIFACT_POLLS` (`image`: 4, `music`: 12, `video`: 15) from `_STATIC_FAILURE_PHASES` and removed unconditional `partial` cleanup on `media_resume` in `src/operation_worker.py` so long-running music/video generations are not deleted before completion.
+- Updated `native_media_browser.js` and `native_media_browser.py`: added direct `media_tool` check in `open_tools_for` before hovering `more`, expanded `editors()` placeholders (`问问 Gemini`, `描述视频`, `描述要创作的音乐`, `描述任务`, `[role="textbox"]`), added fast `INVALID_ARGUMENT` rejection for disabled video controls (`video_option_target_disabled` / `video_option_menu_disabled`), relaxed `hasMusicControls()` to not require `Genre`/`流派` button presence, and forwarded signal messages into `NativeMediaObservation.error_message` / `NativeMediaGenerationError`.
+- Added `_recover_exact_chat_response()` in `src/services/media_jobs.py` to recover missing `rid`/`rcid` from single-turn `read_chat(cid, limit=10)` before reporting `media_identity_incomplete`.
+- Added `__Secure-OSID`, `S`, `SNID` cookie handling (`src/cookie_manager.py`), cache clearing when `GEMINI_COOKIE_PATH` is explicitly configured, and one-shot browser cookie hot-reload in `ClientManager.initialize()` (`src/client_manager.py`).
+- Raised `MAX_RESULT_WAIT_SECONDS` to `300` with modality-aware `wait_seconds` defaults (`120` image, `240` music, `300` video, `0` immediate) on `gemini_create_media`, and disabled paid `gemini-omni-1.2-flash` (`GEMINI_API_KEY`) route by default with `INVALID_ARGUMENT`.
 
 ## [0.20.8] - 2026-11-23
 

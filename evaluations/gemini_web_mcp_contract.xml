@@ -17,11 +17,11 @@
   </qa_pair>
   <qa_pair>
     <question>How can a caller explicitly request the latest Omni video model and a 15-second video?</question>
-    <answer>The default gemini_create_media video call uses the signed-in Gemini App with discovered Hydrogen, accepts duration_seconds=10 or 15 and aspect_ratio=16:9 or 9:16, and waits up to 120 seconds on the original operation by default. To select an exact independent API model ID, configure GEMINI_API_KEY for a billed project and explicitly pass model="gemini-omni-1.2-flash"; that API accepts 3–15 seconds. Recover the verified MP4 using the same operation_id and gemini_get_operation_result(wait_seconds=30), without re-submission. Chat selectors and route labels do not prove exact Web generator versions.</answer>
+    <answer>gemini_create_media(kind="video") uses the signed-in Gemini App with discovered Hydrogen, accepts duration_seconds=10 or 15 (10s only when image_path is attached) and aspect_ratio=16:9 or 9:16, and waits up to 300 seconds on the original operation by default (or 240s for music, 120s for images, or wait_seconds=0 for immediate handle). Paid gemini-omni-1.2-flash / GEMINI_API_KEY is disabled and rejected with INVALID_ARGUMENT. Recover the verified MP4 using the same operation_id and gemini_get_operation_result(wait_seconds=30), without re-submission. Chat selectors and route labels do not prove exact Web generator versions.</answer>
   </qa_pair>
   <qa_pair>
     <question>May a timed-out Gemini Omni API video start be repeated automatically, or deleted before saving its MP4?</question>
-    <answer>No. The original interaction ID, if observed, is used for recovery without another paid start. By default a completed interaction is deleted only after its local MP4 is verified. retain_chat=true keeps it.</answer>
+    <answer>No. Paid Gemini API (gemini-omni-1.2-flash / GEMINI_API_KEY) is disabled for new submissions, and legacy interactions are never replayed; any existing verified interaction deletes only after its local MP4 is verified unless retain_chat=true.</answer>
   </qa_pair>
   <qa_pair>
     <question>When Flash and Flash-Lite both appear in the runtime registry, may Flash be selected by a fuzzy match to Flash-Lite?</question>

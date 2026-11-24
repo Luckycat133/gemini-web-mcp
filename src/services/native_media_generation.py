@@ -23,7 +23,7 @@ from ..infrastructure.native_media_browser import run_native_media_browser
 from ..infrastructure.rpc_contracts import read_completed_empty_media_turn, read_completed_music_failure_turn
 from ..tools.utils import validate_optional_image_path
 from .client_timeouts import client_readback_scope
-from .media_generation import MusicDuration, MusicVocals, music_option_arguments, music_options_error
+from .media_generation import MusicDuration, MusicGenre, MusicVocals, music_option_arguments, music_options_error
 from .model_policy import ModelPolicyError, ModelSelection, account_model_tier, membership_restriction, model_policy_family
 
 _CHAT_ID = re.compile(r"c_[a-f0-9]{16}")
@@ -33,12 +33,13 @@ _MIN_PRE_SUBMIT_RETRY_BROWSER_SECONDS = 60.0
 
 
 class NativeMediaGenerationError(RuntimeError):
-    def __init__(self, code: str, *, submitted: bool = False, chat_id: str | None = None, stage: str | None = None):
-        super().__init__("Native media generation could not be verified.")
+    def __init__(self, code: str, *, submitted: bool = False, chat_id: str | None = None,
+                 stage: str | None = None, message: str | None = None):
+        super().__init__(message or "Native media generation could not be verified.")
         self.code, self.submitted, self.chat_id = code, submitted, chat_id
         self.stage = stage if stage in {
             "request", "open_composer", "open_tools", "media_tool", "media_intro", "video_reference", "video_options", "music_options", "video_duration", "video_aspect",
-            "music_duration", "music_vocals", "video_format", "edit_prompt", "model_selection", "thinking_level", "verify_composer", "send", "observe",
+            "music_duration", "music_vocals", "music_genre", "video_format", "edit_prompt", "model_selection", "thinking_level", "verify_composer", "send", "observe",
         } else None
 
 
@@ -162,8 +163,11 @@ async def generate_native_media_response(
     client: Any, *, arguments: dict[str, Any], media_type: str,
     observe: Callable[[Any], None], duration_seconds: int | None = None, aspect_ratio: str | None = None,
     music_duration: MusicDuration | None = None, music_vocals: MusicVocals | None = None,
+    music_genre: MusicGenre | None = None,
 ) -> Any:
-    if music_options_error(media_type=media_type, music_duration=music_duration, music_vocals=music_vocals):
+    if music_options_error(
+        media_type=media_type, music_duration=music_duration, music_vocals=music_vocals, music_genre=music_genre,
+    ):
         raise NativeMediaGenerationError("INVALID_ARGUMENT")
     timeout = float(arguments.get("timeout") or 600)
     deadline = time.monotonic() + timeout
@@ -245,7 +249,7 @@ async def generate_native_media_response(
         if "reference_image_path" not in parameters:
             raise NativeMediaGenerationError("CAPABILITY_UNAVAILABLE")
         options["reference_image_path"] = reference_image
-    for music_name, music_value in music_option_arguments(music_duration, music_vocals).items():
+    for music_name, music_value in music_option_arguments(music_duration, music_vocals, music_genre).items():
         if music_name not in parameters:
             raise NativeMediaGenerationError("CAPABILITY_UNAVAILABLE")
         options[music_name] = music_value
@@ -302,8 +306,13 @@ async def generate_native_media_response(
     if result.chat_id:
         await on_chat(result.chat_id)
     if (not result.submitted or not result.selected_model_verified or not result.chat_id or not account_matches()):
-        raise NativeMediaGenerationError(result.error_code or "READBACK_UNVERIFIED",
-                                         submitted=result.submitted, chat_id=result.chat_id, stage=result.stage)
+        raise NativeMediaGenerationError(
+            result.error_code or "READBACK_UNVERIFIED",
+            submitted=result.submitted,
+            chat_id=result.chat_id,
+            stage=result.stage,
+            message=getattr(result, "error_message", None),
+        )
     response = await readback(result.chat_id, max(0.1, min(readback_budget, deadline - time.monotonic())))
     if readback_rate_limited and account_matches():
         raise NativeMediaGenerationError("RATE_LIMITED", submitted=True, chat_id=result.chat_id, stage=result.stage)
@@ -312,6 +321,8 @@ async def generate_native_media_response(
     observe(response)
     if result.state != "ready" or not result.media:
         response.native_error_code = result.error_code
+        if getattr(result, "error_message", None):
+            response.native_error_message = result.error_message
         response.native_media_submitted = True
         response.native_model_selector_verified = True
         return response

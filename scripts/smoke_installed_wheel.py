@@ -22,6 +22,7 @@ EXPECTED_ENTRY_POINTS = {
     "gemini-mcp-assist": "src.surfaces.assist:main",
     "gemini-mcp-function": "src.surfaces.function:main",
     "gemini-mcp-account": "src.surfaces.account:main",
+    "gemini-web-cli": "src.cli:main",
 }
 SERVER_ENTRY_POINTS = ("gemini-mcp-server", "gemini-mcp-function", "gemini-mcp-account", "gemini-mcp-skill-server", "gemini-mcp-assist")
 

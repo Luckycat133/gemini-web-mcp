@@ -1,5 +1,5 @@
 async ({action, kind, model, model_token, prompt, url, offset, size, option, duration_seconds, aspect_ratio, thinking_level,
-        music_duration, music_vocals, music_tokens, reference_required, reference_token}) => {
+        music_duration, music_vocals, music_genre, music_tokens, reference_required, reference_token}) => {
     const gemini = "https://gemini.google.com";
     if (location.origin !== gemini || window !== window.top) return null;
     const atComposer = location.pathname === "/app" || location.pathname === "/app/";
@@ -39,9 +39,9 @@ async ({action, kind, model, model_token, prompt, url, offset, size, option, dur
         const label = name(triggers[0]);
         return /当前模式为|当前模型为|current mode|current model/i.test(label) ? label : null;
     };
-    const editors = () => matches('textarea, [contenteditable="true"]', el => {
+    const editors = () => matches('textarea, [contenteditable="true"], [role="textbox"]', el => {
         const label = name(el);
-        return /^(为 Gemini 输入提示|Ask Gemini|Enter a prompt for Gemini)$/i.test(label)
+        return /^(为 Gemini 输入提示|问问 Gemini|描述视频|描述要创作的音乐|描述任务|Ask Gemini|Enter a prompt for Gemini|Describe (?:your )?(?:video|music|task))/i.test(label)
             || el.classList.contains("ql-editor");
     });
     const editorText = el => (el instanceof HTMLTextAreaElement ? el.value : el.innerText).replace(/\r\n/g, "\n");
@@ -118,7 +118,30 @@ async ({action, kind, model, model_token, prompt, url, offset, size, option, dur
         return matching.length === 1 ? matching[0].filter(node => groups[videoSelection[key]].includes(name(node))) : [];
     };
     const hasVideoControls = () => ["duration", "aspect", "format"].every(key => videoButtons(key).length === 1);
-    const musicTitles = {duration: ["时长", "Duration"], vocals: ["人声", "Vocals", "Voice"]};
+    const musicTitles = {
+        duration: ["时长", "Duration"],
+        vocals: ["人声", "Vocals", "Voice"],
+        genre: ["流派", "Genre"],
+    };
+    const musicGenreAliases = {
+        pop: ["流行", "pop"],
+        hip_hop: ["嘻哈与说唱", "hip hop & rap", "hip-hop & rap", "hip hop and rap", "hip hop"],
+        rock: ["摇滚", "rock"],
+        kpop: ["韩国流行音乐", "k-pop", "kpop", "k pop"],
+        latin: ["拉丁", "latin"],
+        electronic: ["电子", "electronic"],
+        rnb: ["r&b", "r & b"],
+        country: ["乡村", "country"],
+        afrobeats: ["非洲节拍", "afrobeats"],
+        reggae: ["雷鬼", "reggae"],
+        jazz_blues: ["爵士与布鲁斯", "jazz & blues", "jazz and blues"],
+        classical: ["古典", "classical"],
+        folk: ["民谣", "folk"],
+        lofi: ["低保真", "lo-fi", "lofi", "lo fi"],
+        acoustic: ["原声", "acoustic"],
+        cinematic: ["电影配乐", "cinematic"],
+        ambient: ["氛围音乐", "ambient"],
+    };
     const musicLabelSuffix = (key, label) => {
         const separator = label.search(/[，,:：]/);
         return separator >= 0 && musicTitles[key]?.includes(norm(label.slice(0, separator)))
@@ -126,6 +149,7 @@ async ({action, kind, model, model_token, prompt, url, offset, size, option, dur
     };
     const musicChoice = (key, label) => {
         const text = norm(label.replace(/[,，]/g, " "));
+        const lower = text.toLowerCase();
         if (key === "duration") {
             if (["短版", "Short"].includes(text)) return "short";
             if (["标准", "Standard"].includes(text)) return "standard";
@@ -133,6 +157,11 @@ async ({action, kind, model, model_token, prompt, url, offset, size, option, dur
             if (["纯音乐", "Instrumental"].includes(text)) return "instrumental";
             if (["开启人声", "人声", "Vocals", "With vocals"].includes(text)) return "vocals";
             if (/^(自定义|Custom)(?:\s|$)/i.test(text) || text === "Auto") return "auto";
+        } else if (key === "genre") {
+            if (/^(自定义|Custom)(?:\s|$)/i.test(text) || lower === "auto") return "auto";
+            for (const [slug, names] of Object.entries(musicGenreAliases)) {
+                if (names.includes(lower)) return slug;
+            }
         }
         return null;
     };
@@ -140,16 +169,17 @@ async ({action, kind, model, model_token, prompt, url, offset, size, option, dur
         const label = name(el);
         return musicTitles[key]?.includes(label) || musicLabelSuffix(key, label) !== null || musicChoice(key, label) !== null;
     });
-    const musicSelected = {duration: music_duration, vocals: music_vocals};
+    const musicSelected = {duration: music_duration, vocals: music_vocals, genre: music_genre};
     const musicRadios = key => {
         const groups = Array.from(document.querySelectorAll('[role="menu"]')).filter(visible)
             .map(menu => Array.from(menu.querySelectorAll('[role="menuitemradio"]'))
                 .filter(node => visible(node) && node.closest('[role="menu"]') === menu))
             .filter(nodes => {
                 const choices = nodes.map(node => musicChoice(key, name(node)));
-                return choices.length >= 2 && choices.every(Boolean) && new Set(choices).size === choices.length
-                    && (key === "duration" ? choices.includes("short") && choices.includes("standard")
-                        : choices.includes("instrumental") && choices.includes("vocals"));
+                if (choices.length < 2 || !choices.every(Boolean) || new Set(choices).size !== choices.length) return false;
+                if (key === "duration") return choices.includes("short") && choices.includes("standard");
+                if (key === "vocals") return choices.includes("instrumental") && choices.includes("vocals");
+                return choices.includes("pop") && choices.includes("rock");
             });
         return groups.length === 1 ? groups[0].filter(node => musicChoice(key, name(node)) === musicSelected[key]) : [];
     };
@@ -166,9 +196,8 @@ async ({action, kind, model, model_token, prompt, url, offset, size, option, dur
         return choices.length > 0 && choices.every(choice => choice === musicSelected[key])
             ? `${name(button)}\n${text}` : null;
     };
-    const hasMusicControls = () => ["duration", "vocals"].every(key => musicButtons(key).length === 1)
-        && matches('button, [role="button"]', el => ["流派", "Genre"].includes(name(el))).length === 1;
-    const verifiedMusicControls = () => ["duration", "vocals"].every(key => !musicSelected[key]
+    const hasMusicControls = () => ["duration", "vocals"].every(key => musicButtons(key).length === 1);
+    const verifiedMusicControls = () => ["duration", "vocals", "genre"].every(key => !musicSelected[key]
         || (typeof music_tokens?.[key] === "string" && music_tokens[key] === musicToken(key)));
     const verifiedVideoControls = () => ["duration", "aspect"].every(key => {
         const buttons = videoButtons(key);
@@ -249,7 +278,8 @@ async ({action, kind, model, model_token, prompt, url, offset, size, option, dur
             if (!musicRefusal && !generationError && !quota && !capacity) return [];
             if (!seen.ids.has(el)) seen.ids.set(el, ++seen.next);
             return [{id: seen.ids.get(el), code: musicRefusal ? "ARTIFACT_NOT_RETURNED"
-                : generationError ? "UPSTREAM_REJECTED" : "UPSTREAM_LIMIT_EXCEEDED"}];
+                : generationError ? "UPSTREAM_REJECTED" : "UPSTREAM_LIMIT_EXCEEDED",
+                message: value.slice(0, 300)}];
         });
         return {media: media(), signals};
     }
@@ -340,6 +370,10 @@ async ({action, kind, model, model_token, prompt, url, offset, size, option, dur
         const radios = videoRadios(option);
         if (action === "video_option_open") return expanded === "true" && radios.length === 1;
         if (action === "video_option_target") return coordinate(radios.filter(usable));
+        if (action === "video_option_target_disabled") return radios.length === 1 && !usable(radios[0]);
+        if (action === "video_option_menu_disabled") {
+            return buttons.length === 1 && (Boolean(buttons[0].disabled) || buttons[0].getAttribute("aria-disabled") === "true");
+        }
         if (action === "video_option_checked") return radios.length === 1 && radios[0].getAttribute("aria-checked") === "true";
     }
     if (action === "mode") return coordinate(modeTriggers());

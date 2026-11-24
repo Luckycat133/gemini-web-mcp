@@ -28,7 +28,7 @@ Install the runtime skill for agents that operate the server:
 clawhub install gemini-web-mcp
 ```
 
-The Python package and Skills on this branch use `0.20.8`. Check the ClawHub listing for the version it distributes. To install the development branch's copy:
+The Python package and Skills on this branch use `0.21.0`. Check the ClawHub listing for the version it distributes. To install the development branch's copy:
 
 ```bash
 npx --yes skills@1.5.21 add \

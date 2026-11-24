@@ -348,7 +348,7 @@ class _Chrome:
             return self.intro_acknowledged
         if action.startswith("music_option_"):
             key = arg["option"]
-            wanted = arg["music_duration" if key == "duration" else "music_vocals"]
+            wanted = arg[{"duration": "music_duration", "vocals": "music_vocals", "genre": "music_genre"}[key]]
             if action == "music_option_target":
                 self.pending_music_option = key, wanted
                 return {"x": 31, "y": 50}
@@ -600,8 +600,8 @@ def test_native_media_verifies_model_after_input_and_observes_new_exact_chat(mon
     assert fixture.closed and fixture.actions.count("submit") == 1
     assert fixture.actions.index("inserted_prompt") < fixture.actions.index("selected_model") < fixture.actions.index("model_checked")
     assert fixture.actions.index("model_checked") < fixture.actions.index("send") < fixture.actions.index("submit")
-    assert ("more" in fixture.actions) == (kind == "music")
-    assert ("hover_more" in fixture.actions) == (kind == "music")
+    assert ("more" in fixture.actions) is False
+    assert ("hover_more" in fixture.actions) is False
     assert ("music_options" in fixture.actions) == (kind == "music")
     assert "thinking_target" not in fixture.actions
     if kind == "music":
@@ -1335,9 +1335,11 @@ def test_bundled_dom_script_identifies_reset_model_and_only_exact_response_rejec
     assert result["acceptedIntro"] == {"intro": {"x": 40, "y": 90}} and result["unknownIntro"] is None
     assert result["lateIntro"] == result["acceptedIntro"] and result["obscuredOption"] is None
     assert result["nestedMenu"] == {"x": 40, "y": 90} and result["checkedOption"] and result["ambiguousMenu"] is None
-    assert result["initial"] == [_ALERT]
-    assert result["subsequent"] == [_ALERT, {**_ALERT, "id": 2}]
-    assert result["music"] == [{"id": 3, "code": "ARTIFACT_NOT_RETURNED"}] and result["other"] == []
+    assert [{k: v for k, v in item.items() if k != "message"} for item in result["initial"]] == [_ALERT]
+    assert [{k: v for k, v in item.items() if k != "message"} for item in result["subsequent"]] == [_ALERT, {**_ALERT, "id": 2}]
+    assert [{k: v for k, v in item.items() if k != "message"} for item in result["music"]] == [{"id": 3, "code": "ARTIFACT_NOT_RETURNED"}]
+    assert all(isinstance(item.get("message"), str) and item["message"] for item in result["initial"] + result["subsequent"] + result["music"])
+    assert result["other"] == []
 
 
 def test_bundled_dom_script_exports_music_cover_mp4_only_from_native_response(native_media_dom):
@@ -1469,3 +1471,35 @@ def test_tool_selection_dom_proof_excludes_existing_disabled_or_ambiguous_choice
         "empty": True, "disabledSelectedChip": False, "selectedMusic": False,
         "nonempty": False, "ambiguous": False, "dialog": False,
     }
+
+
+def test_native_music_hovers_more_when_nested_and_supports_genre(monkeypatch):
+    fixture = _Chrome("music", _BLOB)
+    base_evaluate = fixture.evaluate
+
+    def evaluate_nested(action, arg):
+        if action == "media_tool" and "hover_more" not in fixture.actions:
+            return None
+        return base_evaluate(action, arg)
+
+    monkeypatch.setattr(fixture, "evaluate", evaluate_nested)
+    result = _submit(monkeypatch, fixture, music_duration="short", music_vocals="instrumental", music_genre="acoustic")
+    assert result.state == "ready" and result.submitted
+    assert "more" in fixture.actions and "hover_more" in fixture.actions
+    assert fixture.music_selected == {"duration": "short", "vocals": "instrumental", "genre": "acoustic"}
+
+
+def test_native_video_disabled_option_fails_fast_invalid_argument(monkeypatch):
+    fixture = _Chrome("video", _REMOTE)
+    base_evaluate = fixture.evaluate
+
+    def evaluate_disabled(action, arg):
+        if action == "video_option_target_disabled" and arg.get("option") == "duration":
+            return True
+        return base_evaluate(action, arg)
+
+    monkeypatch.setattr(fixture, "evaluate", evaluate_disabled)
+    result = _submit(monkeypatch, fixture, duration_seconds=15, timeout=30.0)
+    assert result.state == "unverified" and not result.submitted and result.error_code == "INVALID_ARGUMENT"
+    assert "disabled" in (result.error_message or "").lower()
+    assert "submit" not in fixture.actions

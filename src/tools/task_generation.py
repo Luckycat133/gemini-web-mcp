@@ -24,9 +24,10 @@ def register_task_generation_tools(mcp: MCPServer) -> None:
         """Start a background Task for explicit Task, ongoing work, progress or browser operation.
 
         Default to gemini_ask for Chat, writing, Notebook analysis and supported app
-        requests. Use exact notebook_ids from gemini_notebooks. Flash is default and
-        Argon is supported. Thinking accepts low/medium/high (standard/extended alias
-        low/high). Manage saved browser permissions with gemini_preferences.
+        requests. Use exact notebook_ids from `gemini-web-cli notebooks list`.
+        Discovered Web models: Hydrogen (flash default), Neon (pro), and Carbon.
+        Thinking accepts low/medium/high (standard/extended alias low/high). Manage
+        saved browser permissions with `gemini-web-cli preferences`.
         Use gemini_get_operation_status/result on the original handle. The worker
         verifies the answer and complete native file inventory before owned cleanup.
         retain_chat=true or an associated schedule protects the thread. Verify app
