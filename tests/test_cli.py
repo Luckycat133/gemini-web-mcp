@@ -96,3 +96,30 @@ def test_cli_main_doctor_and_failure_exit_codes(monkeypatch, capsys):
     assert exc_fail.value.code == 1
     out_fail = json.loads(capsys.readouterr().out)
     assert out_fail["ok"] is False and out_fail["error"]["code"] == "AUTH_REQUIRED"
+
+
+def test_cli_redirects_inner_stdout_to_stderr_and_unwraps_sdk_result(monkeypatch, capsys):
+    from mcp_types import CallToolResult, TextContent
+
+    monkeypatch.setenv("GEMINI_WEB_CLI_NO_CONFIG", "1")
+
+    def noisy_doctor(**_k):
+        print("noisy init message that must not hit stdout")
+        return {"overall_status": "ok", "checks": [], "browser_profiles": [], "recommendations": []}
+
+    monkeypatch.setattr(cli, "doctor_payload", noisy_doctor)
+    with pytest.raises(SystemExit) as exc_ok:
+        cli.main(["--compact", "doctor"])
+    assert exc_ok.value.code == 0
+    captured = capsys.readouterr()
+    parsed = json.loads(captured.out)
+    assert parsed["ok"] is True
+    assert "noisy init message" in captured.err
+
+    wrapped = CallToolResult(
+        content=[TextContent(type="text", text='{"a": 1, "items": ["x"]}')],
+        structuredContent={"result": [{"type": "text", "text": '{"a": 1, "items": ["x"]}'}]},
+        isError=False,
+    )
+    ok, data, _texts, error = cli._extract_domain_payload(wrapped)
+    assert ok is True and error is None and data == {"a": 1, "items": ["x"]}

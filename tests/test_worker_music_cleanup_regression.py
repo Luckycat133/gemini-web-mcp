@@ -238,3 +238,18 @@ def test_client_manager_hot_reloads_browser_cookies_once_when_session_unauthenti
     second = asyncio.run(manager.initialize())
     assert second is clients[1] and second.cookies["__Secure-1PSID"] == "psid_2"
     assert init_calls == 2
+
+
+def test_init_startup_infrastructure_tolerates_browser_cookie_rate_limit(monkeypatch):
+    from src import client_wrapper
+
+    monkeypatch.setattr(client_wrapper, "init_cookie_manager_integration", lambda: None)
+    monkeypatch.setattr(client_wrapper, "browser_cookie_auto_load_enabled", lambda: True)
+    monkeypatch.delenv("GEMINI_PSID", raising=False)
+    monkeypatch.setattr(
+        client_wrapper._client_manager,
+        "ensure_browser_cookie",
+        lambda: (_ for _ in ()).throw(client_manager.ClientRateLimited()),
+    )
+
+    client_wrapper.init_startup_infrastructure()

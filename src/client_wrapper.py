@@ -18,6 +18,7 @@ import anyio
 from .client_manager import (
     ClientAuthenticationRequired,
     ClientManager,
+    ClientRateLimited,
     browser_cookie_auto_load_enabled,
     get_configured_proxy,  # noqa: F401  (re-exported as public facade API)
     get_default_chat_retention_seconds,
@@ -622,6 +623,8 @@ def init_startup_infrastructure() -> None:
             _client_manager.ensure_browser_cookie()
         except ClientAuthenticationRequired as error:
             logger.warning("Browser cookie autoload unavailable reason=%s", error.auth_reason)
+        except ClientRateLimited:
+            logger.warning("Browser cookie autoload temporarily rate-limited; deferring to tool call")
 
 
 def ensure_web_cookie() -> None:

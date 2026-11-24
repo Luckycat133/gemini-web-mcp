@@ -1529,50 +1529,53 @@ def _register_account_inventory_tools(mcp: MCPServer, enabled_tool_names: set[st
         Supports capabilities, status, features, links, usage, library, notebooks, scheduled, modes, and models
         without mutating account data.
         """
-        if surface == "capabilities":
-            return await tool_functions["gemini_get_web_capabilities"](response_format=response_format)
-        if surface == "status":
-            return await tool_functions["gemini_inspect_account"](response_format=response_format)
-        if surface == "features":
-            return await tool_functions["gemini_probe_web_features"](surface=feature_surface, response_format=response_format)
-        if surface == "links":
-            return await tool_functions["gemini_list_public_links"](limit=limit, offset=offset, response_format=response_format)
-        if surface == "usage":
-            return await tool_functions["gemini_get_usage_limits"](scope=usage_scope, response_format=response_format)
-        if surface == "library":
-            return await tool_functions["gemini_list_library_capabilities"](limit=limit, offset=offset, response_format=response_format)
-        if surface == "notebooks":
-            return await tool_functions["gemini_notebooks"](
-                action=notebook_action,
-                notebook_id=notebook_id,
-                notebook_title=notebook_title,
-                limit=limit,
-                offset=offset,
-                locale=locale,
-                response_format=response_format,
-            )
-        if surface == "notebook_chats":
-            return await tool_functions["gemini_notebooks"](
-                action="chats",
-                notebook_id=notebook_id,
-                notebook_title=notebook_title,
-                limit=limit,
-                offset=offset,
-                locale=locale,
-                response_format=response_format,
-            )
-        if surface == "scheduled":
-            return await tool_functions["gemini_list_scheduled_actions"](
-                scope=scheduled_scope,
-                limit=limit,
-                offset=offset,
-                response_format=response_format,
-            )
-        if surface == "modes":
-            return await tool_functions["gemini_get_tool_mode_status"](limit=limit, offset=offset, response_format=response_format)
-        if surface == "models":
-            return await tool_functions["gemini_list_models"]()
-        return [TextContent(type="text", text=f"❌ 不支持的 account inventory surface: {surface}")]
+        try:
+            if surface == "capabilities":
+                return await tool_functions["gemini_get_web_capabilities"](response_format=response_format)
+            if surface == "status":
+                return await tool_functions["gemini_inspect_account"](response_format=response_format)
+            if surface == "features":
+                return await tool_functions["gemini_probe_web_features"](surface=feature_surface, response_format=response_format)
+            if surface == "links":
+                return await tool_functions["gemini_list_public_links"](limit=limit, offset=offset, response_format=response_format)
+            if surface == "usage":
+                return await tool_functions["gemini_get_usage_limits"](scope=usage_scope, response_format=response_format)
+            if surface == "library":
+                return await tool_functions["gemini_list_library_capabilities"](limit=limit, offset=offset, response_format=response_format)
+            if surface == "notebooks":
+                return await tool_functions["gemini_notebooks"](
+                    action=notebook_action,
+                    notebook_id=notebook_id,
+                    notebook_title=notebook_title,
+                    limit=limit,
+                    offset=offset,
+                    locale=locale,
+                    response_format=response_format,
+                )
+            if surface == "notebook_chats":
+                return await tool_functions["gemini_notebooks"](
+                    action="chats",
+                    notebook_id=notebook_id,
+                    notebook_title=notebook_title,
+                    limit=limit,
+                    offset=offset,
+                    locale=locale,
+                    response_format=response_format,
+                )
+            if surface == "scheduled":
+                return await tool_functions["gemini_list_scheduled_actions"](
+                    scope=scheduled_scope,
+                    limit=limit,
+                    offset=offset,
+                    response_format=response_format,
+                )
+            if surface == "modes":
+                return await tool_functions["gemini_get_tool_mode_status"](limit=limit, offset=offset, response_format=response_format)
+            if surface == "models":
+                return await tool_functions["gemini_list_models"]()
+            return [TextContent(type="text", text=f"❌ 不支持的 account inventory surface: {surface}")]
+        except Exception as e:
+            return exception_text(e, logger=logger, operation="gemini_account_inventory")
 
     @_tool("gemini_list_public_links", READS_PRIVATE_REMOTE)
     async def gemini_list_public_links(

@@ -24,6 +24,7 @@ Detailed per-build validation logs live in [docs/changelog.md](docs/changelog.md
 - Added `_recover_exact_chat_response()` in `src/services/media_jobs.py` to recover missing `rid`/`rcid` from single-turn `read_chat(cid, limit=10)` before reporting `media_identity_incomplete`.
 - Added `__Secure-OSID`, `S`, `SNID` cookie handling (`src/cookie_manager.py`), cache clearing when `GEMINI_COOKIE_PATH` is explicitly configured, and one-shot browser cookie hot-reload in `ClientManager.initialize()` (`src/client_manager.py`).
 - Raised `MAX_RESULT_WAIT_SECONDS` to `300` with modality-aware `wait_seconds` defaults (`120` image, `240` music, `300` video, `0` immediate) on `gemini_create_media`, and disabled paid `gemini-omni-1.2-flash` (`GEMINI_API_KEY`) route by default with `INVALID_ARGUMENT`.
+- Hardened `init_startup_infrastructure()` (`src/client_wrapper.py`) to tolerate `ClientRateLimited` on startup without crashing MCP servers, wrapped `gemini_account_inventory` (`src/tools/manage.py`) with structured `exception_text` error responses, and hardened `gemini-web-cli` (`src/cli.py`) with stdout->stderr isolation, SDK wrapper unwrapping, and a 900s `.cli_browser_session.json` session cache.
 
 ## [0.20.8] - 2026-11-23
 

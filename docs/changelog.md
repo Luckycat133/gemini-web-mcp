@@ -22,6 +22,7 @@ Live-overhaul reliability, native browser, lean-MCP capability parity, and compa
 - Media identity recovery (`src/services/media_jobs.py`) via `read_chat` when `rid`/`rcid` lagged behind `cid`.
 - Cookie refresh & hot-reload (`src/cookie_manager.py`, `src/client_manager.py`): added `__Secure-OSID`, `S`, `SNID`, purged `.cached_cookies_*.json` under explicit `GEMINI_COOKIE_PATH`, and reloaded browser cookies once if an initialized client becomes unauthenticated.
 - Raised `MAX_RESULT_WAIT_SECONDS` to `300` with modality defaults (`120`/`240`/`300`) and disabled paid `gemini-omni-1.2-flash` (`GEMINI_API_KEY`) route cleanly before dispatch.
+- Hardened `init_startup_infrastructure()` (`src/client_wrapper.py`) against startup `ClientRateLimited` crashes, wrapped `gemini_account_inventory` (`src/tools/manage.py`) with `exception_text`, and updated `gemini-web-cli` (`src/cli.py`) to guarantee pure JSON `stdout`, unwrap generic SDK `result` wrappers, and reuse a 900s verified browser session cache (`.cli_browser_session.json`).
 
 ### Validation
 

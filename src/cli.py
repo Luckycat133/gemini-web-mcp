@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-from contextlib import suppress
+from contextlib import redirect_stdout, suppress
 import json
 import os
 from pathlib import Path
 import sys
+import time
 from typing import Any
 
 from mcp import Client
@@ -65,6 +66,93 @@ def _parse_json_object(value: str) -> dict[str, Any]:
     return parsed
 
 
+_CLI_SESSION_TTL_SECONDS = 900.0
+
+
+def _session_cache_path() -> Path:
+    base = Path(os.environ.get("GEMINI_COOKIE_PATH") or (Path.home() / ".local/state/gemini-web-mcp/cookies")).expanduser()
+    return base / ".cli_browser_session.json"
+
+
+def _restore_cli_browser_session() -> dict[str, Any] | None:
+    if os.environ.get("GEMINI_WEB_CLI_NO_CONFIG") == "1" or os.environ.get("GEMINI_PSID"):
+        return None
+    cache_path = _session_cache_path()
+    if not cache_path.is_file():
+        return None
+    try:
+        payload = json.loads(cache_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    if not isinstance(payload, dict):
+        return None
+    verified_at = payload.get("verified_at")
+    cookies = payload.get("cookies")
+    source = payload.get("source")
+    if (
+        not isinstance(verified_at, (int, float))
+        or time.time() - float(verified_at) >= _CLI_SESSION_TTL_SECONDS
+        or not isinstance(cookies, dict)
+        or not isinstance(source, str)
+    ):
+        return None
+    psid = cookies.get("__Secure-1PSID")
+    if not isinstance(psid, str) or not psid:
+        return None
+    psidts = cookies.get("__Secure-1PSIDTS")
+    os.environ["GEMINI_PSID"] = psid
+    if isinstance(psidts, str) and psidts:
+        os.environ["GEMINI_PSIDTS"] = psidts
+    return {"psid": psid, "psidts": psidts if isinstance(psidts, str) else "", "source": source, "cookies": cookies}
+
+
+def _apply_restored_cookie_manager(restored: dict[str, Any] | None) -> None:
+    if not restored:
+        return
+    try:
+        from .cookie_manager import get_cookie_manager
+        get_cookie_manager().update_cookie(
+            restored["psid"],
+            restored["psidts"],
+            source=restored["source"],
+            extra_cookies=restored["cookies"],
+            notify=False,
+        )
+    except Exception:
+        pass
+
+
+def _save_cli_browser_session() -> None:
+    if os.environ.get("GEMINI_WEB_CLI_NO_CONFIG") == "1":
+        return
+    try:
+        from .cookie_manager import get_cookie_manager
+        cookie_data = get_cookie_manager().get_cookie()
+    except Exception:
+        return
+    if not cookie_data or not getattr(cookie_data, "psid", None):
+        return
+    source = str(getattr(cookie_data, "source", "") or "")
+    if not source.startswith("browser_"):
+        return
+    cookies = dict(getattr(cookie_data, "extra_cookies", None) or {})
+    cookies.setdefault("__Secure-1PSID", cookie_data.psid)
+    if getattr(cookie_data, "psidts", None):
+        cookies.setdefault("__Secure-1PSIDTS", cookie_data.psidts)
+    cache_path = _session_cache_path()
+    try:
+        cache_path.parent.mkdir(parents=True, exist_ok=True)
+        payload = json.dumps(
+            {"verified_at": time.time(), "source": source, "cookies": cookies},
+            ensure_ascii=False,
+        )
+        fd = os.open(cache_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(payload)
+    except OSError:
+        pass
+
+
 def _extract_domain_payload(result: CallToolResult) -> tuple[bool, Any, list[str], Any]:
     texts = [
         text
@@ -96,22 +184,36 @@ def _extract_domain_payload(result: CallToolResult) -> tuple[bool, Any, list[str
         if is_err:
             ok = False
         error = structured.get("error")
-        data = structured.get("data", structured if "ok" not in structured else None)
+        if set(structured) == {"result"} and isinstance(structured.get("result"), list):
+            if texts:
+                try:
+                    parsed_inner = json.loads(texts[-1])
+                except json.JSONDecodeError:
+                    parsed_inner = None
+                data: Any = parsed_inner if isinstance(parsed_inner, dict) else "\n\n".join(texts)
+            else:
+                data = None
+        else:
+            data = structured.get("data", structured if "ok" not in structured else None)
         return ok, data, texts, error
     return not is_err, None, texts, ({"message": "\n".join(texts)} if is_err else None)
 
 
 async def _call_account_tool(tool_name: str, arguments: dict[str, Any], *, command_label: str) -> dict[str, Any]:
+    restored = _restore_cli_browser_session()
     init_startup_infrastructure()
+    _apply_restored_cookie_manager(restored)
     server = build_server(full=True)
     clean_args = {key: value for key, value in arguments.items() if value is not None}
     try:
         async with Client(server, mode="auto", cache=None) as client:
             result = await client.call_tool(tool_name, clean_args)
     finally:
+        ok, data, texts, error = _extract_domain_payload(result) if "result" in locals() else (False, None, [], None)
+        if ok:
+            _save_cli_browser_session()
         with suppress(Exception):
             await reset_client_async()
-    ok, data, texts, error = _extract_domain_payload(result)
     return {
         "ok": ok,
         "command": command_label,
@@ -579,18 +681,19 @@ def run_cli(argv: list[str] | None = None) -> dict[str, Any]:
     args = parser.parse_args(argv)
     load_mcp_env_defaults()
     label = f"{args.command} {args.subcommand}" if getattr(args, "subcommand", None) else args.command
-    if args.command == "doctor":
-        payload = doctor_payload(browser=args.browser, validate_browser=args.validate_browser)
-        return {
-            "ok": payload.get("overall_status") != "error",
-            "command": label,
-            "tool": "gemini_doctor",
-            "data": payload,
-            "text": None,
-            "error": None,
-        }
-    tool_name, tool_args = _dispatch_spec(args)
-    return asyncio.run(_call_account_tool(tool_name, tool_args, command_label=label))
+    with redirect_stdout(sys.stderr):
+        if args.command == "doctor":
+            payload = doctor_payload(browser=args.browser, validate_browser=args.validate_browser)
+            return {
+                "ok": payload.get("overall_status") != "error",
+                "command": label,
+                "tool": "gemini_doctor",
+                "data": payload,
+                "text": None,
+                "error": None,
+            }
+        tool_name, tool_args = _dispatch_spec(args)
+        return asyncio.run(_call_account_tool(tool_name, tool_args, command_label=label))
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -600,19 +703,20 @@ def main(argv: list[str] | None = None) -> None:
     load_mcp_env_defaults()
     label = f"{args.command} {args.subcommand}" if getattr(args, "subcommand", None) else args.command
     try:
-        if args.command == "doctor":
-            payload = doctor_payload(browser=args.browser, validate_browser=args.validate_browser)
-            envelope: dict[str, Any] = {
-                "ok": payload.get("overall_status") != "error",
-                "command": label,
-                "tool": "gemini_doctor",
-                "data": payload,
-                "text": None,
-                "error": None,
-            }
-        else:
-            tool_name, tool_args = _dispatch_spec(args)
-            envelope = asyncio.run(_call_account_tool(tool_name, tool_args, command_label=label))
+        with redirect_stdout(sys.stderr):
+            if args.command == "doctor":
+                payload = doctor_payload(browser=args.browser, validate_browser=args.validate_browser)
+                envelope: dict[str, Any] = {
+                    "ok": payload.get("overall_status") != "error",
+                    "command": label,
+                    "tool": "gemini_doctor",
+                    "data": payload,
+                    "text": None,
+                    "error": None,
+                }
+            else:
+                tool_name, tool_args = _dispatch_spec(args)
+                envelope = asyncio.run(_call_account_tool(tool_name, tool_args, command_label=label))
     except Exception as exc:
         envelope = {
             "ok": False,
