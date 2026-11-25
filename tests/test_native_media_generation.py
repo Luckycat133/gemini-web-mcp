@@ -8,6 +8,9 @@ import subprocess
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 
+# monkeypatch asyncio.sleep 时用来让出控制权的原始实现（不能用 asyncio.sleep，会递归到自己）。
+_ORIGINAL_ASYNCIO_SLEEP = asyncio.sleep
+
 from gemini_webapi.exceptions import APIError
 from gemini_webapi.types import Candidate, ModelOutput
 import pytest
@@ -244,7 +247,10 @@ def test_native_generation_reads_original_ready_media_when_browser_player_stays_
         calls.append(kind)
         await on_chat(CID)
         try:
-            await asyncio.sleep(60)  # An unplayed native player need not load its bytes.
+            # An unplayed native player need not load its bytes.
+            # 用假 sleep 代替真实 60 秒等待：生产代码靠 asyncio.wait_for(..., timeout=timeout)
+            # 触发超时路径，被取消的等待会立刻结束，不用真等 60 秒拖慢整套 CI。
+            await _ORIGINAL_ASYNCIO_SLEEP(60)
         finally:
             closed.append(True)
 
