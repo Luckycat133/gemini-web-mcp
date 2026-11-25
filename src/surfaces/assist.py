@@ -676,7 +676,6 @@ def register_lean_assist_tools(server: MCPServer) -> None:
     async def ask(
         prompt: str = "", context: str | None = None, model: str | None = None,
         thinking_level: str | None = None, notebook_ids: list[str] | None = None,
-        inputs: list[UnderstandInput] | None = Field(default=None, max_length=MAX_UNDERSTAND_INPUTS),
         start_session: bool = False, session_id: str | None = None, recover_only: bool = False,
         timeout_seconds: int = 600, retain_chat: bool | None = None, delete_after_seconds: int | None = None,
         operation_id: str | None = None,
@@ -687,30 +686,30 @@ def register_lean_assist_tools(server: MCPServer) -> None:
             "interactive_quiz", "quiz", "flashcards", "practice_test", "study_guide", "exam_prep",
         ] | None = None,
     ) -> list[TextContent]:
-        """Ask Gemini Chat for an answer, web sources, writing, Gem, Canvas, or guided learning.
+        """Ask Gemini Chat for an answer, web sources, writing, Gem, Canvas, guided learning, or Notebook chat.
 
-        Default to Flash (Hydrogen) and standard thinking. Describe web or app use
-        in the prompt. Use inputs for up to 16 text, image, file or URL items
-        with stable IDs. Use notebook_ids for background Notebook Chat, then
-        retrieve the result by operation_id. Pass gem_id (from `gemini-web-cli gems list`),
-        canvas=True, or learning_mode (guided_learning/guided, canvas, interactive_quiz/quiz,
+        Default to 4 Hydrogen (flash) and standard thinking. Describe web or app use
+        in the prompt. For image/file/URL/mixed-input analysis, use gemini_understand.
+        Use notebook_ids for background Notebook Chat, then retrieve the result by
+        operation_id. Pass gem_id (from `gemini-web-cli gems list`), canvas=True,
+        or learning_mode (guided_learning/guided, canvas, interactive_quiz/quiz,
         flashcards, practice_test, study_guide) on new chats or start_session=True.
         Set start_session to send the first turn and return a local session_id.
         Pass it on later turns to inherit the original model and thinking. If
         a turn is unverified, pass only session_id and recover_only to read it.
-        Choose one of inputs, Notebook context or a multi-turn session. Timeout
-        and operation_id apply to Notebook Chat. Chats clean up by default.
+        Choose either Notebook context or a multi-turn session. Timeout and
+        operation_id apply to Notebook Chat. Chats clean up by default.
         """
         if canvas and learning_mode is not None and learning_mode != "canvas":
             return _reject_ask("Choose either canvas=True or learning_mode, not both.")
         if canvas:
             learning_mode = "canvas"
         in_session = start_session or session_id is not None or recover_only
-        if sum((bool(inputs), bool(notebook_ids), in_session)) > 1:
-            return _reject_ask("Choose only one of inputs, notebook_ids, or a multi-turn session.")
+        if notebook_ids and in_session:
+            return _reject_ask("Choose only one of notebook_ids or a multi-turn session.")
         if gem_id is not None and not gem_id.strip():
             return _reject_ask("gem_id must not be blank when provided.")
-        if (gem_id is not None or learning_mode is not None) and (inputs or notebook_ids or recover_only):
+        if (gem_id is not None or learning_mode is not None) and (notebook_ids or recover_only):
             return _reject_ask("gem_id and learning_mode apply to single-turn chats or start_session=True.")
         if (gem_id is not None or learning_mode is not None) and session_id is not None:
             return _reject_ask("gem_id and learning_mode are set when starting a session, not when continuing session_id.")
@@ -741,18 +740,39 @@ def register_lean_assist_tools(server: MCPServer) -> None:
                 notebook_ids=notebook_ids, timeout_seconds=timeout_seconds, retain_chat=bool(retain_chat),
                 delete_after_seconds=delete_after_seconds, operation_id=operation_id,
             )
-        if inputs:
-            result = await _understand_service.understand(UnderstandRequest(
-                task=_compose_ask_message(prompt, context), inputs=tuple(inputs), model=model,
-                thinking_level=thinking_level, cleanup_source="gemini_ask",
-                retain_chat=bool(retain_chat), delete_after_seconds=delete_after_seconds,
-            ))
-            return _render_understand_response(result)
         return await gemini_ask(
             prompt, context, model, thinking_level,
             retain_chat=bool(retain_chat), delete_after_seconds=delete_after_seconds,
             gem_id=gem_id, learning_mode=learning_mode,
         )
+
+    @server.tool(name="gemini_understand", annotations=MUTATES_REMOTE)
+    @domain_error_boundary("gemini_understand", logger)
+    async def understand_lean(
+        task: str,
+        inputs: list[UnderstandInput] = Field(max_length=MAX_UNDERSTAND_INPUTS),
+        model: str | None = None,
+        thinking_level: str = "standard",
+        retain_chat: bool = False,
+        delete_after_seconds: int | None = None,
+    ) -> list[TextContent]:
+        """Analyze up to 16 mixed inputs (images, files, URLs, or text) via Gemini Web.
+
+        Default to 4 Hydrogen and standard thinking. Give each input an id and
+        kind: text uses text, image/file uses path or HTTP(S) uri, and url uses url.
+        """
+        result = await _understand_service.understand(
+            UnderstandRequest(
+                task=task,
+                inputs=tuple(inputs),
+                model="flash" if model is None else model,
+                thinking_level=thinking_level,
+                cleanup_source="gemini_understand",
+                retain_chat=retain_chat,
+                delete_after_seconds=delete_after_seconds,
+            )
+        )
+        return _render_understand_response(result)
 
     @server.tool(name="gemini_research", annotations=DESTRUCTIVE_REMOTE)
     async def research(

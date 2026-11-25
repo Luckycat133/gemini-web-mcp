@@ -2,11 +2,11 @@
   <img src="docs/assets/gemini-web-mcp-banner.svg" alt="Gemini Web MCP" width="100%">
 </p>
 
-<h1 align="center">Gemini Web MCP Server (v0.21.0)</h1>
+<h1 align="center">Gemini Web MCP Server (v0.22.0)</h1>
 
 <p align="center">
   <a href="https://github.com/Luckycat133/gemini-web-mcp/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/Luckycat133/gemini-web-mcp/actions/workflows/ci.yml/badge.svg"></a>
-  <a href="https://github.com/Luckycat133/gemini-web-mcp/tree/codex/gemini-tools-polish-20261101/.agents/skills/gemini-web-mcp"><img alt="Codex Skill" src="https://img.shields.io/badge/Codex%20Skill-installable-0B6BFF"></a>
+  <a href="https://github.com/Luckycat133/gemini-web-mcp/tree/dev/.agents/skills/gemini-web-mcp"><img alt="Codex Skill" src="https://img.shields.io/badge/Codex%20Skill-installable-0B6BFF"></a>
   <a href="https://www.gnu.org/licenses/agpl-3.0.html"><img alt="License" src="https://img.shields.io/badge/License-AGPL--3.0--only-blue.svg"></a>
   <a href="docs/changelog.md"><img alt="Verified" src="https://img.shields.io/badge/tests-CI%20verified-1F8A70"></a>
 </p>
@@ -52,7 +52,7 @@
 
 ### 🎨 媒体生成
 - **图像**: 默认发现的 Hydrogen，保留显式可用聊天模型选择；图像生成器版本只依据实际上游证据，Pro redo 是后续网页操作
-- **视频** `gemini_create_media(kind="video")` 默认用发现的 Hydrogen 进入原生网页 composer／ProcessSession，填写提示后核验模型再发送一次。保留 10／15 秒与横／竖参数，当前网页无法提供时拒绝。完成以可验证的视频文件为准
+- **视频** `gemini_generate_video` 默认用发现的 Hydrogen 进入原生网页 composer／ProcessSession（Gemini Omni），填写提示后核验模型再发送一次。保留 10／15 秒与横／竖参数，当前网页无法提供时拒绝。完成以可验证的视频文件为准
 - **音乐**: 同样默认使用原生浏览器路线，产物可为带已验证音轨的 MP4，不保证 MP3。生成器版本以实际返回证据为准，不把单次成功外推为所有模型、时长和账号均可用
 
 原生音乐／视频需要 Chrome／Chromium；显式 `GEMINI_WEB_MEDIA_TRANSPORT=sdk` 保留 SDK 兼容路线，图片和付费 API 不受影响。授权安装版MCP测试已保存可用的Hydrogen／Neon视频与音乐，包括明确选择Low／Short／Instrumental的Neon音乐，并有独立文件QA和清理证据；其他请求仍有拒绝、乐谱或提交前错误，不外推全部模型、选项与提示均成功。恢复结果保留原操作及生成身份，逐包证据和限制见[当前诊断](docs/live-media-diagnosis-2026-11-22.md)。

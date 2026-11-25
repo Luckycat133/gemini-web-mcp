@@ -78,13 +78,22 @@ def test_neon_dispatches_the_exact_discovered_descriptor_for_chat_and_task(monke
     assert selection.fallback_reason is None
 
 
-@pytest.mark.parametrize("alias", ["argon", "4 Argon", "gemini-argon", "pro"])
+@pytest.mark.parametrize("alias", ["argon", "4 Argon", "gemini-argon"])
 def test_absent_legacy_model_refuses_without_dispatch_or_substitution(monkeypatch, alias):
     client = discovered_client()
     seen = observe_sdk_dispatch(monkeypatch)
     with pytest.raises(ModelPolicyError):
         invoke(client, alias)
     assert not seen
+
+
+def test_pro_alias_resolves_to_neon_when_legacy_pro_is_absent(monkeypatch):
+    client = discovered_client()
+    seen = observe_sdk_dispatch(monkeypatch)
+    replies = invoke(client, "pro")
+    assert len(seen) == 1
+    assert seen[0][0]["model"] is client._model_registry["797f3d0293f288ad"]
+    assert model_selection_from_response(replies[0]).effective_model == "gemini-neon"
 
 
 @pytest.mark.parametrize("default", [None, Model.UNSPECIFIED, "flash", "fast"])

@@ -286,18 +286,18 @@ async def run_image(
     output_root.mkdir(parents=True, exist_ok=True)
     operation_id = "op_" + secrets.token_hex(16)
     arguments: dict[str, Any] = {
-        "kind": "image",
         "prompt": prompt,
         "operation_id": operation_id,
         "model": model,
         "output_dir": str(output_root),
+        "wait_seconds": 0,
     }
     if filename:
         arguments["filename"] = filename
     async with _installed_client(profile="function", allow_live_account=True, server_command=server_command) as client:
         try:
             async with asyncio.timeout(720):
-                result = await client.call_tool("gemini_create_media", arguments)
+                result = await client.call_tool("gemini_generate_image", arguments)
         except TimeoutError as exc:
             raise OnboardingError(
                 f"Image start outcome is unverified; resume with operation_id={operation_id}"
@@ -354,7 +354,7 @@ async def run_image(
         return {
             "status": "ok",
             "mode": "live",
-            "media_tool": "gemini_create_media",
+            "media_tool": "gemini_generate_image",
             "operation_id": operation_id,
             "protocol_version": protocol_version,
             "server_version": server_version,

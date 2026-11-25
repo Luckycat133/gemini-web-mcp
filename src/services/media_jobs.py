@@ -493,22 +493,36 @@ async def execute_media_job(request: dict, *, operation_id: str, store: Any, wor
             record = store.get(operation_id) if hasattr(store, "get") else record
             if record is not None and not operation_account_matches(record):
                 return
-            try:
-                client = get_gemini_client()
-                await await_before_deadline(initialize_client(), timeout=MEDIA_READBACK_TIMEOUT_SECONDS)
-            except ClientAuthenticationRequired:
-                if (store.is_worker_owner(operation_id, worker_token)
-                        and (record is None or operation_account_matches(record))):
-                    if store.finish_worker(operation_id, worker_token=worker_token, state="failed",
-                                           phase="authentication_required", verification_status="auth_required_before_dispatch",
-                                           error_code="AUTH_REQUIRED"):
-                        store.release_cleanup(operation_id)
-                return
-            except asyncio.TimeoutError:
-                if (store.is_worker_owner(operation_id, worker_token)
-                        and (record is None or operation_account_matches(record))):
-                    _unknown(store, operation_id, worker_token, phase="media_initialize_timeout", code="TIMED_OUT")
-                return
+            for init_attempt in range(2):
+                try:
+                    client = get_gemini_client()
+                    await await_before_deadline(initialize_client(), timeout=MEDIA_READBACK_TIMEOUT_SECONDS)
+                    break
+                except ClientAuthenticationRequired as error:
+                    if init_attempt == 0:
+                        from .resilience import try_auto_refresh_auth
+
+                        if await try_auto_refresh_auth(error):
+                            continue
+                    if (store.is_worker_owner(operation_id, worker_token)
+                            and (record is None or operation_account_matches(record))):
+                        if store.finish_worker(operation_id, worker_token=worker_token, state="failed",
+                                               phase="authentication_required", verification_status="auth_required_before_dispatch",
+                                               error_code="AUTH_REQUIRED"):
+                            store.release_cleanup(operation_id)
+                    return
+                except asyncio.TimeoutError:
+                    if (store.is_worker_owner(operation_id, worker_token)
+                            and (record is None or operation_account_matches(record))):
+                        _unknown(store, operation_id, worker_token, phase="media_initialize_timeout", code="TIMED_OUT")
+                    return
+                except Exception as error:
+                    from .resilience import is_transient_error
+
+                    if init_attempt == 0 and is_transient_error(error) and not isinstance(error, TimeoutError):
+                        await asyncio.sleep(0.05)
+                        continue
+                    raise
             if not store.is_worker_owner(operation_id, worker_token) or (record is not None and not operation_account_matches(record)):
                 return
             timeout = media_timeout(media_type, request.get("timeout_seconds"))

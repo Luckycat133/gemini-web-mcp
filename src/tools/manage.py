@@ -2381,24 +2381,27 @@ def _register_model_tools(mcp: MCPServer, enabled_tool_names: set[str], tool_fun
     @_tool("gemini_list_models", READS_PRIVATE_REMOTE)
     async def gemini_list_models() -> list[TextContent]:
         """列出所有可用模型及其说明"""
-        aliases = """🤖 MCP 模型别名:
+        aliases = """🤖 MCP 模型别名 (Gemini 4):
 
-1. flash-lite / lite → Web UI 3.5 Flash-Lite (request name: Flash-Lite)
-   - 网页端极速模型
+1. flash / fast / hydrogen → gemini-4-hydrogen (4 Hydrogen, 默认)
+   - 日常对话、网页搜索、多模态理解与媒体默认路由
 
-2. flash / fast → gemini-3-flash
-   - 2026-09-26 网页端 3.8 Flash；fast 保留为兼容别名
+2. pro / neon → gemini-neon (4 Neon)
+   - 更深入的分析与推理；若账户仍存在 legacy gemini-pro 则按原注册表匹配
 
-3. pro → gemini-3-pro
-   - 网页端 3.1 Pro，是否可用取决于当前账户
+3. carbon → gemini-carbon (4 Carbon)
+   - 代码与复杂工程任务 (Ultra)
 
-4. thinking → gemini-3-flash-thinking
-   - 旧兼容别名；网页思考等级用 thinking_level=low/medium/high，standard/extended 兼容低/高
+4. auto / 自动 → gemini-自动
+   - 由 Gemini Web 自动匹配响应模型
 
-媒体规则:
-- 图像: Flash-Lite → Nano Banana 2 Lite；Flash / Pro → Nano Banana 2
-- 音乐: Lyria；网页公告为 3.5，MCP 结果未必标明实际版本
-- 视频: 当前普通聊天请求不等于 Gemini Omni 视频模式；需要验证实际视频产物
+5. flash-lite / lite → 仅限基础 Flash 额度耗尽时自动降级 (不可选思考强度)
+   - thinking_level 支持 low / medium / high（standard / extended 兼容映射到 low / high）
+
+当前媒体后端:
+- 图像/编辑: Nano Banana 2.1 / Nano Banana Pro (`gemini_generate_image`, `gemini_edit_image`)
+- 视频生成: Gemini Omni (`gemini_generate_video`，支持 10s/15s、16:9/9:16 及 10s 参考帧)
+- 音乐生成: Lyria 3.5 (`gemini_generate_music`，支持短版/标准、纯音乐/人声及 18 种流派)
 
 ---
 

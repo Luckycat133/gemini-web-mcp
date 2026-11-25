@@ -192,8 +192,8 @@ Use assist `gemini_research(action="status" | "result", operation_id=...)` or th
 Current routes:
 
 ```text
-function: gemini_create_media(kind="image", prompt=...)
-function: gemini_create_media(kind="edit_image", image_path=..., prompt=...)
+function: gemini_generate_image(prompt=...)
+function: gemini_edit_image(image_path=..., prompt=...)
 compact: create(prompt=..., type="image", image_path=<optional reference>)
 compact: edit(image_path=..., prompt=...)
 primary: gemini_generate_media(... media_type="image")
@@ -208,10 +208,7 @@ the saved image first, followed by any extra `image_paths`, then starts a new
 Gemini Web chat. Query each step by its own handle. Inspect the images to check
 that the references and requested edits are visible in the output.
 
-In the 2026-09-26 Gemini Web UI check, Flash-Lite used Nano Banana 2 Lite;
-Flash and Pro first passes used Nano Banana 2. The Pro redo was a separate Web
-action. Check the current UI and returned `observed_backend` before claiming an
-exact backend for a new run.
+In the latest Gemini Web UI, image generation uses **Nano Banana 2.1 / Nano Banana Pro**, video uses **Gemini Omni**, and music uses **Lyria 3.5**. Check returned `observed_backend` before claiming an exact backend tag in automated logs.
 
 The 2026-09-26 compact edit observation returned a remote image URI. Current compact image jobs save verified local artifacts through the shared media service. Retrieve the job by its original handle and inspect the saved output. The dated primary edit observation changed the requested mug color while preserving the cat and composition.
 
@@ -228,13 +225,14 @@ Process:
 Current routes:
 
 ```text
-function: gemini_create_media(kind="music", prompt=...)
-function: gemini_create_media(kind="video", prompt=...)
+function: gemini_generate_music(prompt=...)
+function: gemini_generate_video(prompt=...)
 compact: create(prompt=..., type="music")
 primary: gemini_generate_media(media_type="music")
 primary: gemini_generate_music
 compact: create(prompt=..., type="video")
 primary: gemini_generate_media(media_type="video")
+primary: gemini_generate_video
 independent browser control: https://gemini.google.com/videos when separately authorized
 ```
 
@@ -249,7 +247,7 @@ incomplete. Media calls return a durable operation handle by default; use it to 
 
 Current Web music/video default to the native browser composer and ProcessSession workflow, with the selected model verified after prompt entry and before one send. Set `GEMINI_WEB_MEDIA_TRANSPORT=sdk` only to explicitly select compatibility transport; do not switch routes to replay pending work. Images and paid API video are unaffected. Music may be an MP4 with an independently verified audio track; no MP3 output is guaranteed. On 2026-11-22, Hydrogen/Carbon music saved verified MP3/MP4 and completed cleanup through original-handle recovery. Neon refused one default-settings request, but a separate native browser control explicitly selecting Short and Instrumental produced a player; the first result does not establish lack of support. Native video success and live MCP acceptance of the new music controls remain unverified.
 
-When the user explicitly wants a short instrumental piece, pass `music_duration="short"` and `music_vocals="instrumental"` with the music prompt. Duration also accepts `standard`; vocals accepts `vocals` or `auto`. Omitted options remain `None` and preserve actual webpage defaults. Do not guess defaults from prompt style or menu order. These options apply to `gemini_create_media(kind="music")`, `gemini_generate_music`, `gemini_generate_media(media_type="music")` and compact `create(type="music")`. Verify explicit native selections before one send. Explicit SDK transport rejects these options before dispatch; do not silently drop them or replay an uncertain submission on another route. The current delivery includes these controls; individual generation refusals and timeouts remain separate from the browser control and require their own evidence.
+When the user explicitly wants a short instrumental piece, pass `music_duration="short"` and `music_vocals="instrumental"` with the music prompt to `gemini_generate_music`. Duration also accepts `standard`; vocals accepts `vocals` or `auto`. Omitted options remain `None` and preserve actual webpage defaults. Do not guess defaults from prompt style or menu order. Verify explicit native selections before one send. Explicit SDK transport rejects these options before dispatch; do not silently drop them or replay an uncertain submission on another route. The current delivery includes these controls; individual generation refusals and timeouts remain separate from the browser control and require their own evidence.
 
 In a later Web UI observation, selecting music while 3.8 Flash was active kept Flash selected and displayed duration, vocal and genre options; duration offered short and standard. Four chat models were listed and no Pro or Argon requirement was shown. No generation was submitted in that observation. An earlier Flash request produced a verified roughly 58-second MP3; a Pro/extended request also failed. These observations do not guarantee a future result. Music mode options and the chat model are separate choices.
 
@@ -257,9 +255,7 @@ For a full-length song or advanced arrangement, if the current Flash route expli
 
 A later authorized local test verified an MP4 video and separate JPEG preview through the primary video mode. A thumbnail alone is not a completed video. A subsequent compact test verified an MP4 video and separate preview; compact music also returned verified MP3 and MP4 artifacts. These are historical results; verify the current operation's actual Artifact before claiming completion.
 
-The function video tool defaults to discovered Hydrogen and enters the native Create video mode. Web `duration_seconds` accepts 10 or 15 and `aspect_ratio` accepts `16:9` or `9:16`. `gemini_create_media` waits up to 120 seconds by default on the original operation, with zero returning immediately; result recovery can also wait without resubmitting. Google identifies this mode as Gemini Omni 1.2 Flash in its current help. Account rollout determines access, and 15-second clips are rolling out to Ultra in Gemini Apps. Treat the exact Web version as unknown unless the response identifies it. [Gemini Apps video help](https://support.google.com/gemini/answer/16126339?hl=en)
-
-When the user chooses the paid Developer API route for an exact Omni 1.2 Flash request, pass `kind="video"` and `model="gemini-omni-1.2-flash"` to `gemini_create_media`. Configure `GEMINI_API_KEY` in the MCP server environment. Optional `duration_seconds` accepts integers from 3 to 15 and defaults to 10 seconds upstream. Supply at most one local reference through `image_path` and use default thinking. Recover the verified MP4 by the original handle. The worker deletes its API interaction after saving and verifying the video unless `retain_chat=true`. [Gemini Omni API guide](https://ai.google.dev/gemini-api/docs/omni)
+The dedicated `gemini_generate_video` tool defaults to discovered `4 Hydrogen` and enters the native Create video mode (**Gemini Omni**). Web `duration_seconds` accepts `10` or `15` (`10`s only when `image_path` is attached) and `aspect_ratio` accepts `16:9` or `9:16`. `gemini_generate_video` waits up to `300` seconds by default on the original operation, with `0` returning immediately; result recovery can also wait without resubmitting. Paid `gemini-omni-1.2-flash` / `GEMINI_API_KEY` is disabled and rejected with `INVALID_ARGUMENT`. [Gemini Apps video help](https://support.google.com/gemini/answer/16126339?hl=en)
 
 Preserve an explicitly requested model. Check a failed or interrupted operation before considering any new generation. The Cookie and paid API routes use separate credentials and quotas.
 

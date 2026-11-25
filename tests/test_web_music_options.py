@@ -44,8 +44,8 @@ def submit(monkeypatch):
 def test_music_options_are_optional_and_forwarded_by_every_registered_surface(primary, submit):
     async def run():
         surfaces = (
-            (function.mcp, "gemini_create_media", {"kind": "music", "wait_seconds": 0}),
-            (function.build_server(full=True), "gemini_generate_music", {}),
+            (function.mcp, "gemini_generate_music", {"wait_seconds": 0}),
+            (function.build_server(full=True), "gemini_generate_music", {"wait_seconds": 0}),
             (primary, "gemini_generate_media", {"media_type": "music"}),
             (primary, "gemini_generate_music", {}),
             (skill_server.mcp, "create", {"type": "music"}),
@@ -74,7 +74,6 @@ def test_music_options_are_optional_and_forwarded_by_every_registered_surface(pr
 def test_music_options_on_another_media_kind_fail_before_dispatch(primary, submit):
     async def run():
         surfaces = (
-            (function.mcp, "gemini_create_media", "kind"),
             (primary, "gemini_generate_media", "media_type"),
             (skill_server.mcp, "create", "type"),
         )

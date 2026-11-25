@@ -70,7 +70,8 @@ def test_gemini_web_mcp_contract_answers_match_static_manifest():
     assert account_tools["gemini_tasks"]["profile_annotations"]["gemini-mcp-account"] == {
         "read_only": True, "destructive": False,
     }
-    assert tools["gemini_create_media"]["availability"] == ["gemini-mcp-function"]
+    assert tools["gemini_generate_image"]["availability"] == ["gemini-mcp-function", "function-full"]
+    assert tools["gemini_understand"]["availability"] == ["gemini-mcp-function", "function-full"]
     assert tools["gemini_get_operation_status"]["read_only"] is True
     assert tools["gemini_get_operation_result"]["destructive"] is True
 

@@ -81,7 +81,7 @@ BUSINESS_PROFILES = {
 }
 BUSINESS_ONLY_TOOL_NAMES = {
     "gemini_ask", "gemini_understand", "gemini_understand_image", "gemini_research",
-    "gemini_create_media", "gemini_generate_image", "gemini_edit_image", "gemini_generate_video",
+    "gemini_generate_image", "gemini_edit_image", "gemini_generate_video",
     "gemini_run_task", "gemini_manage_chat", "gemini_tasks", "gemini_task_browser",
     "gemini_preferences", "gemini_skills", "gemini_manage_notebook", "gemini_cleanup",
 }

@@ -123,8 +123,8 @@ def test_web_video_options_have_primary_full_and_compact_parity(monkeypatch):
 
     async def run():
         for server, tool, extra in (
-            (function.mcp, "gemini_create_media", {"kind": "video", "wait_seconds": 0}),
-            (function.build_server(full=True), "gemini_generate_video", {}),
+            (function.mcp, "gemini_generate_video", {"wait_seconds": 0}),
+            (function.build_server(full=True), "gemini_generate_video", {"wait_seconds": 0}),
             (primary, "gemini_generate_media", {"media_type": "video"}),
             (skill_server.mcp, "create", {"type": "video"}),
         ):
@@ -210,7 +210,7 @@ def test_inline_wait_reads_the_original_media_handle_without_resubmitting(monkey
     monkeypatch.setattr(operations, "_service", lambda: service)
     present = Mock(return_value=[])
     monkeypatch.setattr(operations, "_present", present)
-    asyncio.run(function.gemini_create_media(kind="video", prompt="synthetic", wait_seconds=35))
+    asyncio.run(function.gemini_generate_video(prompt="synthetic", wait_seconds=35))
     submit.assert_awaited_once()
     get_result.assert_awaited_once_with(handle, wait_seconds=35)
     present.assert_called_once_with(waited, include_text=False)

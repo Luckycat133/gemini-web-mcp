@@ -198,7 +198,7 @@ TOOL_MANIFEST: list[dict[str, Any]] = [
     {
         "name": "gemini_generate_music",
         "group": "media",
-        "purpose": "Start music generation in the background by default; recover artifacts by operation handle. Exact Lyria version requires upstream evidence.",
+        "purpose": "Generate music or songs via Gemini Web's Create music composer (Lyria 3.5); supports duration, vocals, and genre controls.",
         "read_only": False,
         "destructive": False,
         "privacy": "sends_user_prompt",
@@ -587,7 +587,7 @@ TOOL_MANIFEST: list[dict[str, Any]] = [
     },
     {
         "name": "gemini_understand", "group": "files",
-        "purpose": "Analyze mixed explicit inputs on the broad function or assist surface.",
+        "purpose": "Analyze up to 16 mixed explicit inputs (images, files, URLs, or text) via Gemini Web.",
         "read_only": False, "destructive": False,
         "privacy": "sends_user_prompt_and_explicit_inputs", "pagination": False,
     },
@@ -598,29 +598,20 @@ TOOL_MANIFEST: list[dict[str, Any]] = [
         "privacy": "sends_user_prompt_and_cleans_unretained_chat", "pagination": False,
     },
     {
-        "name": "gemini_create_media", "group": "media",
-        "purpose": (
-            "Submit image generation, image editing, video or music and obtain one operation handle. "
-            "Images accept ordered local references or a verified saved image from an earlier operation."
-        ),
-        "read_only": False, "destructive": False,
-        "privacy": "sends_user_prompt_and_explicit_media_input", "pagination": False,
-    },
-    {
         "name": "gemini_generate_image", "group": "media",
-        "purpose": "Submit image generation with ordered references or edit a verified image from an earlier operation.",
+        "purpose": "Generate an image via Gemini Web (Nano Banana 2.1 / Nano Banana Pro) with optional aspect_ratio and reference image_paths.",
         "read_only": False, "destructive": False,
         "privacy": "sends_user_prompt_and_explicit_media_input", "pagination": False,
     },
     {
         "name": "gemini_edit_image", "group": "media",
-        "purpose": "Submit an edit to an explicit image on the broad function surface.",
+        "purpose": "Edit a local image or verified saved image (source_operation_id) via Gemini Web (Nano Banana 2.1 / Pro).",
         "read_only": False, "destructive": False,
         "privacy": "sends_user_prompt_and_explicit_media_input", "pagination": False,
     },
     {
         "name": "gemini_generate_video", "group": "media",
-        "purpose": "Submit video generation on the broad function surface.",
+        "purpose": "Generate a video via Gemini Web's Create video composer (Gemini Omni) with duration, aspect ratio, and optional 10s reference image.",
         "read_only": False, "destructive": False,
         "privacy": "sends_user_prompt_and_explicit_media_input", "pagination": False,
     },

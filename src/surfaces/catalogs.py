@@ -1,7 +1,9 @@
 """Default business catalogs and their explicit compatibility profiles."""
 
 FUNCTION_TOOLS = frozenset({
-    "gemini_ask", "gemini_research", "gemini_run_task", "gemini_create_media",
+    "gemini_ask", "gemini_understand",
+    "gemini_generate_image", "gemini_edit_image", "gemini_generate_video", "gemini_generate_music",
+    "gemini_research", "gemini_run_task",
     "gemini_get_operation_status", "gemini_get_operation_result",
 })
 ACCOUNT_TOOLS = frozenset({

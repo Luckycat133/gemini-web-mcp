@@ -212,40 +212,48 @@ class ChatService:
         if chat is not None:
             request_kwargs["chat"] = chat
         completed = False
-        retry_on_files_failure = bool(request.files)
         started_monotonic = asyncio.get_running_loop().time()
         def late_response(done: Any) -> None:
             if not done.cancelled() and done.exception() is None:
                 observer.observe(done.result())
             observer.fallback(immediate=True, delete_after_seconds=request.delete_after_seconds)
         try:
-            for attempt in range(2 if retry_on_files_failure else 1):
+            for attempt in range(2):
                 if attempt > 0:
                     chat = factory(client) if callable(factory) else None
                     if chat is not None:
                         request_kwargs["chat"] = chat
                     else:
                         request_kwargs.pop("chat", None)
-                with observe_cleanup_frames(observer.observe):
-                    with client_timeout_scope(client, CHAT_GENERATION_TIMEOUT_SECONDS), model_policy_scope("query", allow_fallback=True, requested_alias=normalized_model):
-                        response = await await_before_deadline(
-                            client.generate_content(**request_kwargs), timeout=CHAT_GENERATION_TIMEOUT_SECONDS,
-                            on_late=late_response,
-                        )
-                    observer.observe(response)
-                    if (attempt == 0 and retry_on_files_failure
-                            and is_generation_failure_reply(getattr(response, "text", None))
-                            and not extract_response_artifacts(response)):
-                        elapsed = asyncio.get_running_loop().time() - started_monotonic
-                        if CHAT_GENERATION_TIMEOUT_SECONDS - elapsed >= 25:
-                            try:
-                                if self._dependencies.account_key_provider() == owner:
-                                    await self._finalize_one_shot(response, request, expected_account=owner)
-                            except Exception:
-                                pass
-                            await asyncio.sleep(1.5)
+                try:
+                    with observe_cleanup_frames(observer.observe):
+                        with client_timeout_scope(client, CHAT_GENERATION_TIMEOUT_SECONDS), model_policy_scope("query", allow_fallback=True, requested_alias=normalized_model):
+                            response = await await_before_deadline(
+                                client.generate_content(**request_kwargs), timeout=CHAT_GENERATION_TIMEOUT_SECONDS,
+                                on_late=late_response,
+                            )
+                        observer.observe(response)
+                except Exception as error:
+                    if attempt == 0 and not observer.registered and not isinstance(error, TimeoutError):
+                        from .resilience import is_transient_error, try_auto_refresh_auth
+
+                        if is_transient_error(error) or await try_auto_refresh_auth(error):
+                            client = self._dependencies.client_provider()
+                            await asyncio.sleep(0.5)
                             continue
-                    break
+                    raise
+                if (attempt == 0 and is_generation_failure_reply(getattr(response, "text", None))
+                        and not extract_response_artifacts(response)):
+                    elapsed = asyncio.get_running_loop().time() - started_monotonic
+                    if CHAT_GENERATION_TIMEOUT_SECONDS - elapsed >= 25:
+                        try:
+                            if self._dependencies.account_key_provider() == owner:
+                                await self._finalize_one_shot(response, request, expected_account=owner)
+                        except Exception:
+                            pass
+                        await asyncio.sleep(0.5)
+                        continue
+                break
             if self._dependencies.account_key_provider() == owner:
                 scheduled = await self._finalize_one_shot(response, request, expected_account=owner)
             else:
@@ -325,10 +333,32 @@ class ChatService:
             observer.fallback(immediate=True, delete_after_seconds=request.delete_after_seconds)
 
         try:
+            for attempt in range(2):
+                if attempt > 0:
+                    responses.clear()
+                    known_responses.clear()
+                    collector = StreamTextAccumulator()
+                    chat = factory(client) if callable(factory) else None
+                    if chat is not None:
+                        request_kwargs["chat"] = chat
+                    else:
+                        request_kwargs.pop("chat", None)
+                try:
+                    with observe_cleanup_frames(observer.observe):
+                        with client_timeout_scope(client, CHAT_GENERATION_TIMEOUT_SECONDS), model_policy_scope("query", allow_fallback=True, requested_alias=normalized_model):
+                            await await_before_deadline(collect_stream(), timeout=CHAT_GENERATION_TIMEOUT_SECONDS,
+                                                        on_late=late_stream)
+                    break
+                except Exception as error:
+                    if attempt == 0 and not observer.registered and not responses and not isinstance(error, TimeoutError):
+                        from .resilience import is_transient_error, try_auto_refresh_auth
+
+                        if is_transient_error(error) or await try_auto_refresh_auth(error):
+                            client = self._dependencies.client_provider()
+                            await asyncio.sleep(0.5)
+                            continue
+                    raise
             with observe_cleanup_frames(observer.observe):
-                with client_timeout_scope(client, CHAT_GENERATION_TIMEOUT_SECONDS), model_policy_scope("query", allow_fallback=True, requested_alias=normalized_model):
-                    await await_before_deadline(collect_stream(), timeout=CHAT_GENERATION_TIMEOUT_SECONDS,
-                                                on_late=late_stream)
                 final_response = responses[-1] if responses else None
                 remote_chat_id = None
                 cleanup = CleanupObservation()
@@ -761,7 +791,19 @@ class ChatService:
 
     async def _prepare_client(self) -> Any:
         client = self._dependencies.client_provider()
-        await self._dependencies.client_initializer()
+        try:
+            await self._dependencies.client_initializer()
+        except Exception as error:
+            from .resilience import is_transient_error, try_auto_refresh_auth
+
+            if is_transient_error(error):
+                await asyncio.sleep(0.5)
+                client = self._dependencies.client_provider()
+                await self._dependencies.client_initializer()
+            elif not await try_auto_refresh_auth(error):
+                raise
+            else:
+                client = self._dependencies.client_provider()
         await self._dependencies.cleanup_due_remote_chats(client)
         return client
 
