@@ -8,9 +8,6 @@ import subprocess
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 
-# monkeypatch asyncio.sleep 时用来让出控制权的原始实现（不能用 asyncio.sleep，会递归到自己）。
-_ORIGINAL_ASYNCIO_SLEEP = asyncio.sleep
-
 from gemini_webapi.exceptions import APIError
 from gemini_webapi.types import Candidate, ModelOutput
 import pytest
@@ -24,6 +21,10 @@ from src.services.media_generation import generate_media_response, music_option_
 from src.services.media_storage import _save_generated_media
 from src.services.model_policy import ModelPolicyError, model_selection_from_response
 from tests.test_web_model_selection import discovered_client
+
+# monkeypatch asyncio.sleep 时用来让出控制权的原始实现。
+# 不能写 await asyncio.sleep(0)：被 monkeypatch 替换掉的就是全局 asyncio.sleep，会递归调用自己。
+_ORIGINAL_ASYNCIO_SLEEP = asyncio.sleep
 
 CID = "c_0123456789abcdef"
 RID = "r_synthetic_native"

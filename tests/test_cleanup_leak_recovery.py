@@ -19,16 +19,16 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
-# monkeypatch asyncio.sleep 时用来让出控制权的原始实现。
-# 不能写 await asyncio.sleep(0)：被 monkeypatch 替换掉的就是全局 asyncio.sleep，会递归调用自己。
-_ORIGINAL_ASYNCIO_SLEEP = asyncio.sleep
-
 from src.domain import CleanupObservation, CleanupState
 from src.infrastructure.cleanup_store import CleanupStore
 from src.infrastructure.operation_store import OperationRecord
 from src.operation_worker import run_worker
 from src.services import background
 from src.services import media_jobs
+
+# monkeypatch asyncio.sleep 时用来让出控制权的原始实现。
+# 不能写 await asyncio.sleep(0)：被 monkeypatch 替换掉的就是全局 asyncio.sleep，会递归调用自己。
+_ORIGINAL_ASYNCIO_SLEEP = asyncio.sleep
 
 
 # ---------------------------------------------------------------------------
