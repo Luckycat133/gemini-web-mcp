@@ -252,8 +252,26 @@ class ClientRateLimited(RuntimeError):
 
     code = "RATE_LIMITED"
 
-    def __init__(self) -> None:
-        super().__init__("Gemini temporarily limited requests; wait before retrying.")
+    def __init__(
+        self,
+        *,
+        retry_after_seconds: int | None = None,
+        reset_at: str | None = None,
+        reset_timestamp: float | None = None,
+        quota_window: str | None = None,
+    ) -> None:
+        self.retry_after_seconds = retry_after_seconds
+        self.reset_at = reset_at
+        self.reset_timestamp = reset_timestamp
+        self.quota_window = quota_window
+        message = "Gemini temporarily limited requests"
+        if reset_at:
+            message += f"; cooldown resets at {reset_at}"
+        elif retry_after_seconds:
+            message += f"; wait ~{retry_after_seconds}s"
+        else:
+            message += "; wait before retrying"
+        super().__init__(message + ".")
 
 
 def browser_cookie_auto_load_enabled() -> bool:
@@ -287,12 +305,26 @@ class ClientManager:
         self._retirement_tasks: set[asyncio.Task[None]] = set()
         self._browser_auth_lock = threading.Lock()
         self._browser_retry_at = 0.0
+        self._rate_limit_reset_timestamp = 0.0
         self.browser_auth_reason: str | None = None
 
     def _remember_rate_limit(self) -> None:
         self.browser_auth_reason = "BROWSER_COOKIE_RATE_LIMITED"
         # Reuse the existing local browser-probe debounce, not a fabricated Retry-After.
         self._browser_retry_at = time.monotonic() + 30
+        self._rate_limit_reset_timestamp = time.time() + 30
+
+    def _rate_limit_error(self) -> ClientRateLimited:
+        remaining = max(1, int(round(self._browser_retry_at - time.monotonic())))
+        reset_ts = self._rate_limit_reset_timestamp or (time.time() + remaining)
+        from datetime import datetime, timezone
+        reset_at = datetime.fromtimestamp(reset_ts, tz=timezone.utc).astimezone().isoformat(timespec="seconds")
+        return ClientRateLimited(
+            retry_after_seconds=remaining,
+            reset_at=reset_at,
+            reset_timestamp=reset_ts,
+            quota_window="browser_probe_cooldown",
+        )
 
     def is_rate_limited(self) -> bool:
         """Return True while the local browser-probe rate-limit cooldown is active."""
@@ -300,7 +332,7 @@ class ClientManager:
 
     def _check_rate_limit(self) -> None:
         if self.is_rate_limited():
-            raise ClientRateLimited()
+            raise self._rate_limit_error()
 
     def ensure_browser_cookie(self) -> None:
         """Bind a verified browser session when no credential is configured."""
@@ -341,11 +373,11 @@ class ClientManager:
             except Exception as error:
                 if classify_exception(error).error_code == "RATE_LIMITED":
                     self._remember_rate_limit()
-                    raise ClientRateLimited() from None
+                    raise self._rate_limit_error() from None
                 raise
             if discovery.reason == "BROWSER_COOKIE_RATE_LIMITED":
                 self._remember_rate_limit()
-                raise ClientRateLimited()
+                raise self._rate_limit_error()
             psid = discovery.cookies.get("__Secure-1PSID")
             if not psid:
                 self.browser_auth_reason = discovery.reason or "BROWSER_COOKIE_NOT_FOUND"

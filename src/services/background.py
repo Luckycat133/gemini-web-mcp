@@ -20,7 +20,7 @@ from ..domain import CleanupState
 from ..domain.operations import LongOperationData, operation_failure_code
 from ..domain.results import DomainErrorCode, DomainResult, DomainWarning, OperationState, result_from_exception
 from ..infrastructure.account_identity import (
-    current_account_key, omni_video_api_key, operation_account_matches, uses_omni_video_api,
+    current_account_key, operation_account_matches, uses_omni_video_api,
 )
 from ..infrastructure.operation_store import OperationRecord, OperationStore, RETENTION_SECONDS
 from ..tools.utils import validate_image_paths
@@ -206,14 +206,7 @@ async def submit_media(request: dict[str, Any], *, operation: str,
     if settings["effective_alias"] == "flash-lite" and (source_operation_id or len(image_paths or ()) > 1):
         return DomainResult.failure(DomainErrorCode.CAPABILITY_UNAVAILABLE,
                                     "Use Flash for multiple image references or editing a previous result.")
-    omni_job = False
-    if omni_job and not omni_video_api_key():
-        return DomainResult.failure(
-            DomainErrorCode.AUTH_REQUIRED, "The Gemini API video route requires GEMINI_API_KEY.",
-            suggested_action="Configure GEMINI_API_KEY for a project with Gemini API billing enabled.",
-            verification_status="credential_missing_before_dispatch",
-        )
-    if not omni_job and not current_account_key():
+    if not current_account_key():
         from ..client_manager import ClientAuthenticationRequired, ClientRateLimited
         from ..client_wrapper import ensure_web_cookie
 
@@ -227,7 +220,7 @@ async def submit_media(request: dict[str, Any], *, operation: str,
         if not operation_account_matches(record):
             return DomainResult.failure(DomainErrorCode.CAPABILITY_UNAVAILABLE, "Operation account could not be verified.",
                                         verification_status="account_mismatch_or_unbound")
-        if (record.operation != operation or record.media_type != media_type or uses_omni_video_api(record) != omni_job
+        if (record.operation != operation or record.media_type != media_type or uses_omni_video_api(record)
                 or record.source_operation_id != source_operation_id
                 or (source_artifact_id is not None and record.source_artifact_id != source_artifact_id)):
             return DomainResult.failure(DomainErrorCode.INVALID_ARGUMENT, "This handle belongs to a different operation.")
@@ -266,7 +259,7 @@ async def submit_media(request: dict[str, Any], *, operation: str,
         # The worker resolves lineage from its account-bound record.
         payload.pop("source_operation_id", None)
         payload.pop("source_artifact_id", None)
-        return await _dispatch(store, record, "omni_video" if omni_job else "media", payload)
+        return await _dispatch(store, record, "media", payload)
     except MediaSourceUnavailable as error:
         return DomainResult.failure(DomainErrorCode.CAPABILITY_UNAVAILABLE, str(error),
                                     verification_status="source_image_unavailable")

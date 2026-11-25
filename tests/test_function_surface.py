@@ -17,7 +17,9 @@ from src.surfaces import assist, function
 
 
 EXPECTED = {
-    "gemini_ask", "gemini_research", "gemini_run_task", "gemini_create_media",
+    "gemini_ask", "gemini_understand",
+    "gemini_generate_image", "gemini_edit_image", "gemini_generate_video", "gemini_generate_music",
+    "gemini_research", "gemini_run_task",
     "gemini_get_operation_status", "gemini_get_operation_result",
 }
 EXPECTED_FULL = {
@@ -40,7 +42,9 @@ def test_function_catalog_and_safety_annotations(full):
     assert set(tools) == (EXPECTED_FULL if full else EXPECTED)
     assert all((tool.input_schema.get("additionalProperties") is False) is (not full) for tool in tools.values())
     ask_properties = tools["gemini_ask"].input_schema["properties"]
-    assert ("start_session" in ask_properties and "inputs" in ask_properties) is (not full)
+    assert ("start_session" in ask_properties) is (not full)
+    assert "inputs" not in ask_properties
+    assert "inputs" in tools["gemini_understand"].input_schema["properties"]
     assert ask_properties["model"]["default"] == ("flash" if full else None)
     assert not {"web_search", "enable_tools", "tools_enabled", "enable_apps"} & ask_properties.keys()
     assert all(tool.annotations is not None for tool in tools.values())
@@ -49,15 +53,15 @@ def test_function_catalog_and_safety_annotations(full):
     assert tools["gemini_research"].annotations.destructive_hint is True
     assert tools["gemini_run_task"].annotations.destructive_hint is True
     assert tools["gemini_run_task"].input_schema["properties"]["model"]["default"] == "flash"
-    media_tool = tools["gemini_generate_video" if full else "gemini_create_media"]
-    assert media_tool.input_schema["properties"]["model"]["default"] == ("flash" if full else None)
-    assert "duration_seconds" in media_tool.input_schema["properties"]
-    assert "aspect_ratio" in media_tool.input_schema["properties"]
-    assert media_tool.input_schema["properties"]["thinking_level"]["default"] == "standard"
-    assert media_tool.annotations.read_only_hint is False
-    image_tool = tools["gemini_generate_image" if full else "gemini_create_media"]
-    assert {"image_paths", "source_operation_id", "source_artifact_id"} <= image_tool.input_schema["properties"].keys()
-    assert image_tool.annotations.read_only_hint is False
+    video_tool = tools["gemini_generate_video"]
+    assert video_tool.input_schema["properties"]["model"]["default"] is None
+    assert "duration_seconds" in video_tool.input_schema["properties"]
+    assert "aspect_ratio" in video_tool.input_schema["properties"]
+    assert video_tool.input_schema["properties"]["thinking_level"]["default"] == "standard"
+    assert video_tool.annotations.read_only_hint is False
+    edit_tool = tools["gemini_edit_image"]
+    assert {"image_path", "image_paths", "source_operation_id", "source_artifact_id"} <= edit_tool.input_schema["properties"].keys()
+    assert edit_tool.annotations.read_only_hint is False
     research_properties = tools["gemini_research"].input_schema["properties"]
     assert research_properties["thinking_level"]["default"] == "standard"
     assert ("include_text" in research_properties) is full
@@ -76,15 +80,15 @@ def test_creation_wrappers_submit_only_background_jobs(monkeypatch, tmp_path):
     async def run():
         async with Client(function.mcp, mode="auto", cache=None) as client:
             results = []
-            for kind, arguments in (
-                ("image", {"prompt": "image"}),
-                ("edit_image", {"prompt": "edit", "image_path": str(image)}),
-                ("video", {"prompt": "video"}),
-                ("video", {"prompt": "video", "model": "argon"}),
-                ("music", {"prompt": "music"}),
-                ("music", {"prompt": "music", "thinking_level": "extended"}),
+            for tool_name, arguments in (
+                ("gemini_generate_image", {"prompt": "image"}),
+                ("gemini_edit_image", {"prompt": "edit", "image_path": str(image)}),
+                ("gemini_generate_video", {"prompt": "video"}),
+                ("gemini_generate_video", {"prompt": "video", "model": "argon"}),
+                ("gemini_generate_music", {"prompt": "music"}),
+                ("gemini_generate_music", {"prompt": "music", "thinking_level": "extended"}),
             ):
-                results.append(await client.call_tool("gemini_create_media", {"kind": kind, **arguments}))
+                results.append(await client.call_tool(tool_name, arguments))
             return results
     responses = asyncio.run(run())
     assert submit.await_count == 6
@@ -100,21 +104,20 @@ def test_creation_wrappers_submit_only_background_jobs(monkeypatch, tmp_path):
     assert all(domain_result_from_call(result)["ok"] is True for result in responses)
 
 
-@pytest.mark.parametrize("arguments", [
-    {"kind": "image", "prompt": " ", "filename": "../bad"},
-    {"kind": "edit_image", "prompt": "edit"},
-    {"kind": "music", "prompt": "music", "image_path": "/tmp/image.png"},
-    {"kind": "video", "prompt": "video", "image_paths": ["/tmp/image.png"]},
-    {"kind": "edit_image", "prompt": "edit", "image_path": "/tmp/legacy.png", "image_paths": ["/tmp/image.png"]},
-    {"kind": "edit_image", "prompt": "edit", "source_artifact_id": "artifact_without_parent"},
-    {"kind": "image", "prompt": "image", "image_paths": []},
+@pytest.mark.parametrize(("tool_name", "arguments"), [
+    ("gemini_generate_image", {"prompt": " ", "filename": "../bad"}),
+    ("gemini_edit_image", {"prompt": "edit"}),
+    ("gemini_edit_image", {"prompt": "edit", "image_path": "/tmp/legacy.png", "image_paths": ["/tmp/image.png"]}),
+    ("gemini_edit_image", {"prompt": "edit", "source_artifact_id": "artifact_without_parent"}),
+    ("gemini_generate_image", {"prompt": "image", "image_paths": []}),
+    ("gemini_generate_video", {"prompt": "video", "image_path": "/tmp/frame.png", "duration_seconds": 15}),
 ])
-def test_invalid_creation_input_does_not_dispatch(monkeypatch, arguments):
+def test_invalid_creation_input_does_not_dispatch(monkeypatch, tool_name, arguments):
     submit = AsyncMock()
     monkeypatch.setattr(function, "submit_media", submit)
     async def run():
         async with Client(function.mcp, mode="auto", cache=None) as client:
-            return await client.call_tool("gemini_create_media", arguments)
+            return await client.call_tool(tool_name, arguments)
     result = asyncio.run(run())
     assert domain_result_from_call(result)["ok"] is False
     submit.assert_not_awaited()
@@ -140,8 +143,8 @@ def test_image_workflow_fields_reach_the_same_worker_from_each_tool_surface(monk
 
     async def run():
         for server, tool, extra in (
-            (function.mcp, "gemini_create_media", {"kind": "edit_image"}),
-            (function.build_server(full=True), "gemini_generate_image", {}),
+            (function.mcp, "gemini_edit_image", {}),
+            (function.build_server(full=True), "gemini_edit_image", {}),
             (primary, "gemini_generate_media", {"media_type": "image"}),
             (skill_server.mcp, "create", {"type": "image"}),
         ):
@@ -178,19 +181,19 @@ def test_function_catalog_over_real_stdio(tmp_path):
                                    env=environment, cwd=Path(__file__).resolve().parents[1])
     async def run():
         async with Client(stdio_client(params), mode="auto", cache=None) as client:
-            missing_key = await client.call_tool("gemini_create_media", {
-                "kind": "video", "prompt": "A raindrop on glass.", "model": "gemini-omni-1.2-flash",
+            missing_key = await client.call_tool("gemini_generate_video", {
+                "prompt": "A raindrop on glass.", "model": "gemini-omni-1.2-flash",
                 "duration_seconds": 15,
             })
-            invalid_duration = await client.call_tool("gemini_create_media", {
-                "kind": "video", "prompt": "A raindrop on glass.", "model": "gemini-omni-1.2-flash",
+            invalid_duration = await client.call_tool("gemini_generate_video", {
+                "prompt": "A raindrop on glass.", "model": "gemini-omni-1.2-flash",
                 "duration_seconds": 16,
             })
-            paid_model_wrong_kind = await client.call_tool("gemini_create_media", {
-                "kind": "image", "prompt": "A raindrop on glass.", "model": "gemini-omni-1.2-flash",
+            paid_model_wrong_kind = await client.call_tool("gemini_generate_image", {
+                "prompt": "A raindrop on glass.", "model": "gemini-omni-1.2-flash",
             })
-            invalid_image_sources = await client.call_tool("gemini_create_media", {
-                "kind": "edit_image", "prompt": "Edit an exact image.", "source_artifact_id": "no_parent",
+            invalid_image_sources = await client.call_tool("gemini_edit_image", {
+                "prompt": "Edit an exact image.", "source_artifact_id": "no_parent",
             })
             legacy_research_read = await client.call_tool("gemini_research", {
                 "query": "Original synthetic query", "operation_id": "op_" + "a" * 32, "action": "result",
@@ -258,7 +261,7 @@ def test_function_ask_keeps_plain_flash_and_observed_grounding(monkeypatch):
     assert (request.model, request.thinking_level, request.retain_chat) == ("flash", "standard", False)
 
 
-def test_function_ask_routes_mixed_inputs_and_retention_to_shared_understanding(monkeypatch, tmp_path):
+def test_function_understand_routes_mixed_inputs_and_retention_to_shared_understanding(monkeypatch, tmp_path):
     image = tmp_path / "input.png"
     image.write_bytes(b"fixture")
     generate = AsyncMock(return_value=DomainResult.success(
@@ -268,8 +271,8 @@ def test_function_ask_routes_mixed_inputs_and_retention_to_shared_understanding(
     monkeypatch.setattr(assist._chat_service, "generate", generate)
     async def run():
         async with Client(function.mcp, mode="auto", cache=None) as client:
-            return await client.call_tool("gemini_ask", {
-                "prompt": "Compare", "context": "Synthetic test",
+            return await client.call_tool("gemini_understand", {
+                "task": "Compare",
                 "inputs": [
                     {"id": "image", "kind": "image", "path": str(image)},
                     {"id": "note", "kind": "text", "text": "Synthetic note"},
@@ -284,7 +287,7 @@ def test_function_ask_routes_mixed_inputs_and_retention_to_shared_understanding(
     request = generate.await_args.args[0]
     assert request.files == (str(image.resolve()),)
     assert request.retain_chat and request.delete_after_seconds == 30
-    assert request.cleanup_source == "gemini_ask" and "Synthetic test" in request.message
+    assert request.cleanup_source == "gemini_understand" and "Compare" in request.message
 
 
 def test_function_ask_recovers_the_original_turn_only_for_its_owner(monkeypatch):
@@ -350,8 +353,6 @@ def test_function_ask_recovers_the_original_turn_only_for_its_owner(monkeypatch)
 
 @pytest.mark.parametrize("arguments", [
     {"prompt": "combined", "notebook_ids": ["notebooks/id"], "start_session": True},
-    {"prompt": "combined", "notebook_ids": ["notebooks/id"],
-     "inputs": [{"id": "note", "kind": "text", "text": "fixture"}]},
     {"prompt": "combined", "session_id": "sess_original", "model": "pro"},
     {"prompt": "replay", "session_id": "sess_original", "recover_only": True},
     {"recover_only": True},
@@ -361,10 +362,8 @@ def test_function_ask_rejects_conflicting_modes_before_dispatch(monkeypatch, arg
     from src.services import background
 
     service = AsyncMock(spec=ChatService)
-    understand = AsyncMock()
     notebook = AsyncMock()
     monkeypatch.setattr(assist, "_chat_service", service)
-    monkeypatch.setattr(assist._understand_service, "understand", understand)
     monkeypatch.setattr(background, "submit_notebook_chat", notebook)
     async def run():
         async with Client(function.mcp, mode="auto", cache=None) as client:
@@ -374,11 +373,10 @@ def test_function_ask_rejects_conflicting_modes_before_dispatch(monkeypatch, arg
     service.start_session.assert_not_awaited()
     service.send_session_stream.assert_not_awaited()
     service.generate_stream.assert_not_awaited()
-    understand.assert_not_awaited()
     notebook.assert_not_awaited()
 
 
-def test_function_create_media_uses_modality_wait_defaults_and_new_options(monkeypatch):
+def test_function_split_media_tools_use_modality_wait_defaults_and_options(monkeypatch):
     from src.tools import operations as op_tools
 
     submitted = []
@@ -408,14 +406,14 @@ def test_function_create_media_uses_modality_wait_defaults_and_new_options(monke
 
     async def run():
         async with Client(function.mcp, mode="auto", cache=None) as client:
-            await client.call_tool("gemini_create_media", {"kind": "image", "prompt": "landscape", "aspect_ratio": "16:9"})
-            await client.call_tool("gemini_create_media", {
-                "kind": "music", "prompt": "folk tune", "music_duration": "short", "music_genre": "acoustic",
+            await client.call_tool("gemini_generate_image", {"prompt": "landscape", "aspect_ratio": "16:9"})
+            await client.call_tool("gemini_generate_music", {
+                "prompt": "folk tune", "music_duration": "short", "music_genre": "acoustic",
             })
-            await client.call_tool("gemini_create_media", {"kind": "video", "prompt": "waves", "duration_seconds": 10})
-            await client.call_tool("gemini_create_media", {"kind": "music", "prompt": "async", "wait_seconds": 0})
-            rejected = await client.call_tool("gemini_create_media", {
-                "kind": "video", "prompt": "paid", "model": "gemini-omni-1.2-flash",
+            await client.call_tool("gemini_generate_video", {"prompt": "waves", "duration_seconds": 10})
+            await client.call_tool("gemini_generate_music", {"prompt": "async", "wait_seconds": 0})
+            rejected = await client.call_tool("gemini_generate_video", {
+                "prompt": "paid", "model": "gemini-omni-1.2-flash",
             })
             assert domain_result_from_call(rejected)["error"]["code"] == "INVALID_ARGUMENT"
 

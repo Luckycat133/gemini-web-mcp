@@ -4,7 +4,7 @@ The two six-tool catalogs are separate MCP entries. The connected server's tool 
 
 | Entry | Tools |
 |---|---|
-| `gemini-mcp-function` | `gemini_ask`, `gemini_run_task`, `gemini_research`, `gemini_create_media`, `gemini_get_operation_status`, `gemini_get_operation_result` |
+| `gemini-mcp-function` | `gemini_ask`, `gemini_understand`, `gemini_generate_image`, `gemini_edit_image`, `gemini_generate_video`, `gemini_generate_music`, `gemini_research`, `gemini_run_task`, `gemini_get_operation_status`, `gemini_get_operation_result` |
 | `gemini-mcp-account` | `gemini_history`, `gemini_manage_chat`, `gemini_delete_chat`, `gemini_notebooks`, `gemini_manage_notebook`, `gemini_tasks` |
 
 Select `GEMINI_TOOLS=function-full` or `GEMINI_TOOLS=account-full` on `gemini-mcp-server` for the corresponding prior 17-tool catalog. The safety map also describes tools exposed by these and other compatibility profiles. `gemini_cleanup` is restricted to MCP-owned ledger entries.

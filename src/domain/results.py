@@ -304,7 +304,20 @@ def result_from_exception(
     request_id = request_id or new_request_id()
     diagnostic_id = new_diagnostic_id()
     code, message, retryable, suggested_action, state = _classify_exception(error)
-    details = {"operation": operation}
+    details: dict[str, Any] = {"operation": operation}
+    if code == DomainErrorCode.RATE_LIMITED:
+        try:
+            from ..services.resilience import format_rate_limit_guidance, resolve_rate_limit_reset
+
+            reset_info = resolve_rate_limit_reset(error)
+            details.update({k: v for k, v in reset_info.items() if v is not None})
+            legacy_code = str(getattr(error, "code", "")).upper()
+            message, suggested_action = format_rate_limit_guidance(
+                reset_info,
+                capacity_only=(legacy_code == "UPSTREAM_LIMIT_EXCEEDED" and not reset_info),
+            )
+        except Exception:
+            pass
     if code == DomainErrorCode.AUTH_REQUIRED:
         for field in ("auth_reason", "browser_auth_reason"):
             reason = getattr(error, field, None)

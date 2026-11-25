@@ -46,13 +46,12 @@ mcp = MCPServer(
 # Gemini Web MCP Server (v{__version__})
 
 ## 可用模型
-- flash-lite → Web UI 3.5 Flash-Lite
-- flash / fast → Web UI Hydrogen（兼容默认）
-- pro / neon → Web UI Neon（更深入的分析）
-- carbon → Web UI Carbon（代码和复杂工作）
+- flash / fast / hydrogen → Web UI 4 Hydrogen（默认）
+- pro / neon → Web UI 4 Neon（更深入的分析）
+- carbon → Web UI 4 Carbon（代码和复杂工作）
 - auto / 自动 → 当前账号的自动 Chat 选择
-- thinking_level=low/medium/high；standard/extended 兼容低/高；Lite 仅在当前账号基础 Flash 额度耗尽时允许，思考强度不可选
-- thinking 保留为旧兼容别名
+- flash-lite / lite → 仅在当前账号基础 Flash 额度耗尽时允许，思考强度不可选
+- thinking_level=low/medium/high；standard/extended 兼容低/高
 
 ## 工具组（可配置）
 - model/chat: 只调用 Gemini 模型
@@ -67,13 +66,14 @@ mcp = MCPServer(
 Cookie 辅助工具始终可用，不依赖额外工具组。
 
 ## 主要功能
-- 💬 对话: 单次对话、多轮会话、Temporary chat、Gem 对话
-- 🎨 媒体生成: 图像、音乐；视频请求须以实际产物验证
--   图像: Flash-Lite → Nano Banana 2 Lite，Flash / Pro → Nano Banana 2
--   音乐为 Lyria；具体版本以可观察的上游证据为准
-- 🖼️ 参考图像: 媒体生成可附带图像输入
-- 📎 文件/URL 分析
-- 🔎 Deep Research
+- 💬 对话: 单次对话、多轮会话、Canvas、Guided Learning、Gem 与 Notebook 对话
+- 🎨 媒体生成: 均需验证本地产物文件
+-   图像/编辑: Nano Banana 2.1 / Nano Banana Pro
+-   视频生成: Gemini Omni
+-   音乐生成: Lyria 3.5
+- 🖼️ 参考图像: 图像/编辑/10s参考视频支持图片输入
+- 📎 多模态与文件/URL 分析
+- 🔎 Deep Research 与报告衍生导出
 
 ## 错误处理
 遇到问题时会自动提供解决方案和可使用的工具

@@ -14,6 +14,7 @@ EXPECTED_FILES = {
     Path("agents/openai.yaml"),
     Path("references/tool_surface.md"),
     Path("references/workflows.md"),
+    Path("references/prompting_guides.md"),
     Path("references/artifacts.md"),
     Path("references/operations.md"),
     Path("references/recovery.md"),
@@ -68,6 +69,7 @@ def test_project_skill_frontmatter_and_progressive_disclosure_are_complete() -> 
     assert set(reference_links) == {
         "references/tool_surface.md",
         "references/workflows.md",
+        "references/prompting_guides.md",
         "references/artifacts.md",
         "references/operations.md",
         "references/recovery.md",

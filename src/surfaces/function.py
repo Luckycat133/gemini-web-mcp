@@ -27,14 +27,17 @@ from .catalogs import FUNCTION_FULL_TOOLS
 
 logger = logging.getLogger(__name__)
 _INSTRUCTIONS = """
-Default to gemini_ask for Chat, including complex questions, current web,
-Notebook analysis, Gem prompts, interactive learning modes, and app requests.
-The Flash compatibility default prefers Hydrogen; explicit Neon and Carbon use
-exact discovered selectors and verified plan availability.
-Use gemini_create_media for Gemini Web image, edit_image, video, and music
-(including aspect_ratio for image/video and music_genre for music).
+Default to gemini_ask for Chat, web answers, Notebook analysis, Gem prompts,
+Canvas, and interactive learning modes; use gemini_understand for images,
+files, URLs, or mixed inputs (up to 16 items).
+Chat models prefer discovered Gemini 4 families: 4 Hydrogen (default), 4 Neon
+(pro / deeper analysis), 4 Carbon (coding and complex work), and Auto.
+Dedicated multimodal tools use the latest Gemini Web engines (default 4 Hydrogen):
+- gemini_generate_image / gemini_edit_image: Nano Banana 2.1 / Nano Banana Pro
+- gemini_generate_video: Gemini Omni (10s/15s, 16:9/9:16, optional 10s reference image)
+- gemini_generate_music: Lyria 3.5 (short/standard, instrumental/vocals/auto, 18 genres)
 Use gemini_research for Deep Research and report_action derivatives on ready
-research handles. Use gemini_run_task for explicit Task or ongoing browser work.
+research handles. Use gemini_run_task for explicit Task or browser workflows.
 Use the companion CLI `gemini-web-cli` for Notebooks, Gems, Skills, Scheduled
 Actions, Tasks, History, Preferences, Public Links, Quotas, and Cleanup.
 """
@@ -116,117 +119,133 @@ async def _submit(
     return domain_text(result, text, use_result_data=True)
 
 
-@domain_error_boundary("gemini_create_media", logger)
-async def gemini_create_media(
-    kind: Literal["image", "edit_image", "video", "music"], prompt: str,
-    model: str | None = None, thinking_level: str = "standard", image_path: str | None = None,
-    output_dir: str | None = None, filename: str | None = None, timeout_seconds: int | None = None,
-    retain_chat: bool = False, delete_after_seconds: int | None = None, operation_id: str | None = None,
-    duration_seconds: int | None = None,
+@domain_error_boundary("gemini_generate_image", logger)
+async def gemini_generate_image(
+    prompt: str,
     aspect_ratio: Literal["16:9", "9:16", "1:1", "4:3", "3:4"] | None = None,
-    image_paths: list[str] | None = None, source_operation_id: str | None = None,
-    source_artifact_id: str | None = None,
+    image_paths: list[str] | None = None,
+    model: str | None = None,
+    thinking_level: str = "standard",
+    output_dir: str | None = None,
+    filename: str | None = None,
     wait_seconds: int | None = None,
-    music_duration: MusicDuration | None = None,
-    music_vocals: MusicVocals | None = None,
-    music_genre: MusicGenre | None = None,
+    timeout_seconds: int | None = None,
+    retain_chat: bool = False,
+    delete_after_seconds: int | None = None,
+    operation_id: str | None = None,
 ) -> list[TextContent]:
-    """Generate image, image edit, video, or music via Gemini Web.
+    """Generate an image via Gemini Web (Nano Banana 2.1 / Nano Banana Pro).
 
-    Images and edits support image_paths, source_operation_id, source_artifact_id,
-    and aspect_ratio (16:9, 9:16, 1:1, 4:3, 3:4). Web videos accept duration_seconds
-    10 or 15 (10s only when image_path reference is attached) and aspect_ratio 16:9
-    or 9:16. Web music accepts music_duration (short, standard), music_vocals
-    (instrumental, vocals, auto), and music_genre (auto, pop, hip_hop, rock, kpop,
-    latin, electronic, rnb, country, afrobeats, reggae, jazz_blues, classical, folk,
-    lofi, acoustic, cinematic, ambient). wait_seconds defaults to 120s for images,
-    240s for music, and 300s for video (max 300s); pass 0 to return the operation
-    handle immediately without waiting.
+    Accepts optional ordered reference image_paths and aspect_ratio (16:9, 9:16,
+    1:1, 4:3, 3:4). Defaults to 4 Hydrogen and waits up to 120s for a verified
+    local file (pass wait_seconds=0 to return an operation handle immediately).
     """
-    if image_path is not None and kind not in {"edit_image", "video"}:
-        return _invalid_media("image_path is only available for edit_image or video.")
-    edit = kind == "edit_image"
     return await _submit(
-        prompt=prompt, media_type="image" if edit else kind, model=model, thinking_level=thinking_level,
-        image_path=image_path, output_dir=output_dir, filename=filename, timeout_seconds=timeout_seconds,
-        retain_chat=retain_chat, delete_after_seconds=delete_after_seconds, operation_id=operation_id,
-        operation="gemini_edit_image" if edit else f"gemini_generate_{kind}", edit=edit,
-        duration_seconds=duration_seconds, aspect_ratio=aspect_ratio,
-        image_paths=image_paths, source_operation_id=source_operation_id, source_artifact_id=source_artifact_id,
-        wait_seconds=wait_seconds,
-        music_duration=music_duration, music_vocals=music_vocals, music_genre=music_genre,
+        prompt=prompt, media_type="image", model=model, thinking_level=thinking_level,
+        image_path=None, output_dir=output_dir, filename=filename, timeout_seconds=timeout_seconds,
+        retain_chat=retain_chat, delete_after_seconds=delete_after_seconds,
+        operation_id=operation_id, operation="gemini_generate_image", edit=False,
+        aspect_ratio=aspect_ratio, image_paths=image_paths, wait_seconds=wait_seconds,
     )
 
 
-async def gemini_generate_image(
-    prompt: str, model: str = "flash", thinking_level: str = "standard", output_dir: str | None = None,
-    filename: str | None = None, timeout_seconds: int | None = None, retain_chat: bool = False,
-    delete_after_seconds: int | None = None, operation_id: str | None = None,
-    image_paths: list[str] | None = None, source_operation_id: str | None = None,
-    source_artifact_id: str | None = None,
-) -> list[TextContent]:
-    """Generate with ordered image_paths or edit a saved image in a new background job.
-
-    Pass source_operation_id and, if the operation has multiple images, source_artifact_id.
-    The saved image is attached first. Query the returned operation handle.
-    """
-    return await _submit(prompt=prompt, media_type="image", model=model, thinking_level=thinking_level,
-                         image_path=None, output_dir=output_dir, filename=filename, timeout_seconds=timeout_seconds,
-                         retain_chat=retain_chat, delete_after_seconds=delete_after_seconds,
-                         operation_id=operation_id, operation="gemini_generate_image", edit=False,
-                         image_paths=image_paths, source_operation_id=source_operation_id,
-                         source_artifact_id=source_artifact_id)
-
-
+@domain_error_boundary("gemini_edit_image", logger)
 async def gemini_edit_image(
-    image_path: str, prompt: str, model: str = "flash", thinking_level: str = "standard",
-    output_dir: str | None = None, filename: str | None = None, timeout_seconds: int | None = None,
-    retain_chat: bool = False, delete_after_seconds: int | None = None, operation_id: str | None = None,
+    prompt: str,
+    image_path: str | None = None,
+    image_paths: list[str] | None = None,
+    source_operation_id: str | None = None,
+    source_artifact_id: str | None = None,
+    aspect_ratio: Literal["16:9", "9:16", "1:1", "4:3", "3:4"] | None = None,
+    model: str | None = None,
+    thinking_level: str = "standard",
+    output_dir: str | None = None,
+    filename: str | None = None,
+    wait_seconds: int | None = None,
+    timeout_seconds: int | None = None,
+    retain_chat: bool = False,
+    delete_after_seconds: int | None = None,
+    operation_id: str | None = None,
 ) -> list[TextContent]:
-    """Submit an image edit in the background; query the returned operation handle."""
-    return await _submit(prompt=prompt, media_type="image", model=model, thinking_level=thinking_level,
-                         image_path=image_path, output_dir=output_dir, filename=filename, timeout_seconds=timeout_seconds,
-                         retain_chat=retain_chat, delete_after_seconds=delete_after_seconds,
-                         operation_id=operation_id, operation="gemini_edit_image", edit=True)
+    """Edit a local or previously generated image via Gemini Web (Nano Banana 2.1 / Pro).
 
-
-async def gemini_generate_video(
-    prompt: str, model: str = "flash", thinking_level: str = "standard", image_path: str | None = None,
-    output_dir: str | None = None, filename: str | None = None, timeout_seconds: int | None = None,
-    retain_chat: bool = False, delete_after_seconds: int | None = None, operation_id: str | None = None,
-    duration_seconds: int | None = None,
-    aspect_ratio: Literal["16:9", "9:16"] | None = None,
-) -> list[TextContent]:
-    """Generate a video in the background using the Gemini App's Create video mode.
-
-    Web videos accept 10 or 15 seconds (10s with reference image) and 16:9 or 9:16.
-    Poll the original operation_id for a verified MP4.
+    Requires image_path, ordered image_paths, or source_operation_id (+ optional
+    source_artifact_id). Supports aspect_ratio (16:9, 9:16, 1:1, 4:3, 3:4) and
+    waits up to 120s by default (pass wait_seconds=0 for an immediate handle).
     """
-    return await _submit(prompt=prompt, media_type="video", model=model, thinking_level=thinking_level,
-                         image_path=image_path, output_dir=output_dir, filename=filename, timeout_seconds=timeout_seconds,
-                         retain_chat=retain_chat, delete_after_seconds=delete_after_seconds,
-                         operation_id=operation_id, operation="gemini_generate_video", edit=False,
-                         duration_seconds=duration_seconds, aspect_ratio=aspect_ratio)
+    return await _submit(
+        prompt=prompt, media_type="image", model=model, thinking_level=thinking_level,
+        image_path=image_path, output_dir=output_dir, filename=filename, timeout_seconds=timeout_seconds,
+        retain_chat=retain_chat, delete_after_seconds=delete_after_seconds,
+        operation_id=operation_id, operation="gemini_edit_image", edit=True,
+        aspect_ratio=aspect_ratio, image_paths=image_paths,
+        source_operation_id=source_operation_id, source_artifact_id=source_artifact_id,
+        wait_seconds=wait_seconds,
+    )
 
 
+@domain_error_boundary("gemini_generate_video", logger)
+async def gemini_generate_video(
+    prompt: str,
+    duration_seconds: Literal[10, 15] | int | None = None,
+    aspect_ratio: Literal["16:9", "9:16"] | None = None,
+    image_path: str | None = None,
+    model: str | None = None,
+    thinking_level: str = "standard",
+    output_dir: str | None = None,
+    filename: str | None = None,
+    wait_seconds: int | None = None,
+    timeout_seconds: int | None = None,
+    retain_chat: bool = False,
+    delete_after_seconds: int | None = None,
+    operation_id: str | None = None,
+) -> list[TextContent]:
+    """Generate a video via Gemini Web's native Create video composer (Gemini Omni).
+
+    Accepts duration_seconds 10 or 15 (10s only when image_path reference frame
+    is attached) and aspect_ratio 16:9 or 9:16. Defaults to 4 Hydrogen and waits
+    up to 300s for a verified MP4 (pass wait_seconds=0 for an immediate handle).
+    """
+    return await _submit(
+        prompt=prompt, media_type="video", model=model, thinking_level=thinking_level,
+        image_path=image_path, output_dir=output_dir, filename=filename, timeout_seconds=timeout_seconds,
+        retain_chat=retain_chat, delete_after_seconds=delete_after_seconds,
+        operation_id=operation_id, operation="gemini_generate_video", edit=False,
+        duration_seconds=duration_seconds, aspect_ratio=aspect_ratio, wait_seconds=wait_seconds,
+    )
+
+
+@domain_error_boundary("gemini_generate_music", logger)
 async def gemini_generate_music(
-    prompt: str, model: str = "flash", thinking_level: str = "standard", output_dir: str | None = None,
-    filename: str | None = None, timeout_seconds: int | None = None, retain_chat: bool = False,
-    delete_after_seconds: int | None = None, operation_id: str | None = None,
+    prompt: str,
     music_duration: MusicDuration | None = None,
     music_vocals: MusicVocals | None = None,
     music_genre: MusicGenre | None = None,
+    model: str | None = None,
+    thinking_level: str = "standard",
+    output_dir: str | None = None,
+    filename: str | None = None,
+    wait_seconds: int | None = None,
+    timeout_seconds: int | None = None,
+    retain_chat: bool = False,
+    delete_after_seconds: int | None = None,
+    operation_id: str | None = None,
 ) -> list[TextContent]:
-    """Submit Web music in the background and query the returned operation handle.
+    """Generate music or songs via Gemini Web's native Create music composer (Lyria 3.5).
 
-    Choose music_duration (short, standard), music_vocals (instrumental,
-    vocals, auto), and music_genre to set the corresponding Gemini Web options.
+    Supports music_duration (short, standard), music_vocals (instrumental, vocals,
+    auto), and music_genre (auto, pop, hip_hop, rock, kpop, latin, electronic, rnb,
+    country, afrobeats, reggae, jazz_blues, classical, folk, lofi, acoustic,
+    cinematic, ambient). Defaults to 4 Hydrogen and waits up to 240s by default.
     """
-    return await _submit(prompt=prompt, media_type="music", model=model, thinking_level=thinking_level,
-                         image_path=None, output_dir=output_dir, filename=filename, timeout_seconds=timeout_seconds,
-                         retain_chat=retain_chat, delete_after_seconds=delete_after_seconds,
-                         operation_id=operation_id, operation="gemini_generate_music", edit=False,
-                         music_duration=music_duration, music_vocals=music_vocals, music_genre=music_genre)
+    return await _submit(
+        prompt=prompt, media_type="music", model=model, thinking_level=thinking_level,
+        image_path=None, output_dir=output_dir, filename=filename, timeout_seconds=timeout_seconds,
+        retain_chat=retain_chat, delete_after_seconds=delete_after_seconds,
+        operation_id=operation_id, operation="gemini_generate_music", edit=False,
+        music_duration=music_duration, music_vocals=music_vocals, music_genre=music_genre,
+        wait_seconds=wait_seconds,
+    )
 
 
 def build_server(*, full: bool = False) -> MCPServer:
@@ -249,10 +268,8 @@ def build_server(*, full: bool = False) -> MCPServer:
         register_research_tools(selected_tools(server, {
             "gemini_list_research_report_actions", "gemini_create_from_research_report",
         }))
-        for handler in (gemini_generate_image, gemini_edit_image, gemini_generate_video, gemini_generate_music):
-            server.tool(annotations=MUTATES_REMOTE)(handler)
-    else:
-        server.tool(annotations=MUTATES_REMOTE)(gemini_create_media)
+    for handler in (gemini_generate_image, gemini_edit_image, gemini_generate_video, gemini_generate_music):
+        server.tool(annotations=MUTATES_REMOTE)(handler)
     return server
 
 

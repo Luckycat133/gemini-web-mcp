@@ -6,6 +6,22 @@ Each minor iteration introduces a workflow; patch iterations group related corre
 
 ## [Unreleased]
 
+## [0.22.0] - 2026-11-25
+
+Single-purpose MCP tool split, Gemini 4 creative-model parity, transient auto-recovery, and rate-limit reset guidance (`0.22.0`).
+
+### Changed
+
+- Split `gemini-mcp-function` into 10 single-purpose MCP tools (`gemini_ask`, `gemini_understand`, `gemini_generate_image`, `gemini_edit_image`, `gemini_generate_video`, `gemini_generate_music`, `gemini_research`, `gemini_run_task`, `gemini_get_operation_status`, `gemini_get_operation_result`), moving multimodal inputs out of `gemini_ask` and retiring `gemini_create_media`.
+- Aligned Gemini 4 creative model naming (**Nano Banana 2.1 / Nano Banana Pro**, **Gemini Omni**, **Lyria 3.5**) and resolved `pro` -> discovered `4 Neon` when legacy `gemini-pro` is absent (`src/thinking_client.py`, `src/tools/manage.py`, `src/server.py`, `src/tools/manifest_data.py`).
+- Switched `OperationService.get_result` to adaptive local SQLite polling (`0.5s`/`1.0s`/`2.0s`) and removed duplicate ownership checks in `ChatService`.
+
+### Added
+
+- Automatic single-retry recovery (`src/services/resilience.py`) for pre-mutation transient network/transport errors, stateless generic failure replies, and silent Chrome cookie refresh on expired sessions.
+- Persistent quota reset snapshots (`quota_reset_snapshots` in `ModelPolicyStore`) and enriched `RATE_LIMITED` / `UPSTREAM_LIMIT_EXCEEDED` responses with `reset_at`, `reset_timestamp`, `retry_after_seconds`, `quota_window`, and scheduled-retry (`schedule` / `/schedule`) instructions.
+- Official Gemini 4 multimodal prompting guides (`references/prompting_guides.md`) and updated `SKILL.md` with explicit no-sensitive-word-list / no-pre-interception policy.
+
 ## [0.21.0] - 2026-11-25
 
 Live-overhaul reliability, native browser, lean-MCP capability parity, and companion CLI release (`0.21.0`, local working tree).

@@ -9,7 +9,7 @@
   </qa_pair>
   <qa_pair>
     <question>How should an agent combine two distinguishable synthetic image references, reconnect to retrieve the generated image, and then edit only its background?</question>
-    <answer>Use gemini_create_media(kind="image") with both local image_paths in prompt order. After reconnecting, use gemini_get_operation_status and gemini_get_operation_result with the original handle and confirm recovery sent no duplicate generation. Require the downloaded image container to match its signature and pass pixel decoding. Submit kind="edit_image" with source_operation_id and the selected source_artifact_id, then verify the new handle links to the parent operation and image. Keep unresolved image conversations protected if decoding fails. During live acceptance, inspect the decoded images to confirm both references contributed and the edit changed only the background.</answer>
+    <answer>Use gemini_generate_image with both local image_paths in prompt order. After reconnecting, use gemini_get_operation_status and gemini_get_operation_result with the original handle and confirm recovery sent no duplicate generation. Require the downloaded image container to match its signature and pass pixel decoding. Submit gemini_edit_image with source_operation_id and the selected source_artifact_id, then verify the new handle links to the parent operation and image. Keep unresolved image conversations protected if decoding fails. During live acceptance, inspect the decoded images to confirm both references contributed and the edit changed only the background.</answer>
   </qa_pair>
   <qa_pair>
     <question>How should a complete Gemini generation failure notice affect Chat or grounded search?</question>
@@ -17,7 +17,7 @@
   </qa_pair>
   <qa_pair>
     <question>How can a caller explicitly request the latest Omni video model and a 15-second video?</question>
-    <answer>gemini_create_media(kind="video") uses the signed-in Gemini App with discovered Hydrogen, accepts duration_seconds=10 or 15 (10s only when image_path is attached) and aspect_ratio=16:9 or 9:16, and waits up to 300 seconds on the original operation by default (or 240s for music, 120s for images, or wait_seconds=0 for immediate handle). Paid gemini-omni-1.2-flash / GEMINI_API_KEY is disabled and rejected with INVALID_ARGUMENT. Recover the verified MP4 using the same operation_id and gemini_get_operation_result(wait_seconds=30), without re-submission. Chat selectors and route labels do not prove exact Web generator versions.</answer>
+    <answer>gemini_generate_video uses the signed-in Gemini App with discovered Hydrogen, accepts duration_seconds=10 or 15 (10s only when image_path is attached) and aspect_ratio=16:9 or 9:16, and waits up to 300 seconds on the original operation by default (or 240s for music via gemini_generate_music, 120s for images via gemini_generate_image / gemini_edit_image, or wait_seconds=0 for immediate handle). Paid gemini-omni-1.2-flash / GEMINI_API_KEY is disabled and rejected with INVALID_ARGUMENT. Recover the verified MP4 using the same operation_id and gemini_get_operation_result(wait_seconds=30), without re-submission. Chat selectors and route labels do not prove exact Web generator versions.</answer>
   </qa_pair>
   <qa_pair>
     <question>May a timed-out Gemini Omni API video start be repeated automatically, or deleted before saving its MP4?</question>
@@ -345,7 +345,7 @@
   </qa_pair>
   <qa_pair>
     <question>How should an agent request short instrumental music without inventing webpage defaults?</question>
-    <answer>When the user explicitly requests short instrumental music, pass kind="music", music_duration="short" and music_vocals="instrumental" to gemini_create_media. Music duration also accepts standard, and vocals accepts vocals or auto. Leave unspecified options as None to preserve the webpage's actual defaults; do not infer a default from prompt wording or the first menu item. Verify explicit native selections before one send. Explicit SDK transport rejects these options before dispatch rather than silently ignoring them. A native Neon browser control with Short and Instrumental succeeded, but that does not by itself verify the new MCP options or every model combination.</answer>
+    <answer>When the user explicitly requests short instrumental music, pass music_duration="short" and music_vocals="instrumental" to gemini_generate_music. Music duration also accepts standard, and vocals accepts vocals or auto. Leave unspecified options as None to preserve the webpage's actual defaults; do not infer a default from prompt wording or the first menu item. Verify explicit native selections before one send. Explicit SDK transport rejects these options before dispatch rather than silently ignoring them. A native Neon browser control with Short and Instrumental succeeded, but that does not by itself verify the new MCP options or every model combination.</answer>
   </qa_pair>
   <qa_pair>
     <question>Does seeing a signed-in Gemini page prove native generation authentication works?</question>

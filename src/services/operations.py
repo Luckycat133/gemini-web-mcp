@@ -26,11 +26,18 @@ from .deadlines import await_before_deadline
 
 logger = logging.getLogger(__name__)
 MAX_RESULT_WAIT_SECONDS = 300
-_RESULT_WAIT_POLL_SECONDS = 2.0
-_RESULT_FAILURE_STATES = frozenset({"failed", "unavailable", "timed_out", "cancelled"})
 _TASK_INPUT_PHASES = frozenset({
     "task_input_required", "task_plan_review_required", "task_setup_required", "task_setup_input_required",
 })
+
+
+def _next_wait_poll_seconds(elapsed: float) -> float:
+    """Poll local SQLite faster for early finishes/fast-fails, then taper smoothly."""
+    if elapsed < 10.0:
+        return 0.5
+    if elapsed < 30.0:
+        return 1.0
+    return 2.0
 
 
 def _account_mismatch() -> DomainResult[Any]:
@@ -102,8 +109,10 @@ class OperationService:
         if wait_seconds == 0:
             return await self._read(operation_id, include_report=True)
         clock = asyncio.get_running_loop().time
-        deadline = clock() + wait_seconds
+        started = clock()
+        deadline = started + wait_seconds
         last_read: tuple[object, ...] | None = None
+        failure_states = {"failed", "unavailable", "timed_out", "cancelled"}
         while True:
             record, failure = self._load_operation(operation_id)
             if failure is not None:
@@ -115,7 +124,7 @@ class OperationService:
                            record.upstream_candidate_id, record.artifact_state, record.cleanup_state)
             saved = record.artifact_state == ArtifactState.LOCAL.value and record.cleanup_state != "not_scheduled"
             failed_answer_pending = record.phase in {"task_failed", "task_failure_saved"} and not saved
-            ready = ((record.state in _RESULT_FAILURE_STATES and not failed_answer_pending)
+            ready = ((record.state in failure_states and not failed_answer_pending)
                      or (record.state == "completed" and saved) or record.phase in _TASK_INPUT_PHASES)
             if (ready or not active) and last_read != observation and remaining > 0:
                 last_read = observation
@@ -131,7 +140,8 @@ class OperationService:
                             or data.input_required or data.needs_attention or data.setup_required
                             or not (data.worker_active or active)):
                         return result
-            remaining = deadline - clock()
+            now_mono = clock()
+            remaining = deadline - now_mono
             if remaining <= 0:
                 data = OperationReadData(
                     operation_id=record.operation_id, operation=record.operation, state=OperationState.PARTIAL,
@@ -141,7 +151,7 @@ class OperationService:
                     execution_mode={"gemini_run_task": "task", "gemini_notebook_chat": "chat"}.get(record.operation),
                 )
                 return DomainResult.success(data, operation_state=data.state, verification_status=data.verification_status)
-            await asyncio.sleep(min(_RESULT_WAIT_POLL_SECONDS, remaining))
+            await asyncio.sleep(min(_next_wait_poll_seconds(now_mono - started), remaining))
 
     def _load_operation(
         self, operation_id: str,
@@ -521,9 +531,27 @@ def _operation_failure_message(data: OperationReadData) -> str:
 
 def _operation_read_result(data: OperationReadData, *, warnings: tuple[DomainWarning, ...] = ()) -> DomainResult[OperationReadData]:
     if data.state in {OperationState.FAILED, OperationState.UNAVAILABLE, OperationState.TIMED_OUT, OperationState.CANCELLED}:
+        code = operation_failure_code(data.error_code)
+        message = _operation_failure_message(data)
+        suggested_action: str | None = None
+        details: dict[str, Any] = {}
+        if code == DomainErrorCode.RATE_LIMITED or data.error_code in {"RATE_LIMITED", "UPSTREAM_LIMIT_EXCEEDED"}:
+            try:
+                from .resilience import format_rate_limit_guidance, resolve_rate_limit_reset
+
+                reset_info = resolve_rate_limit_reset()
+                details.update({k: v for k, v in reset_info.items() if v is not None})
+                message, suggested_action = format_rate_limit_guidance(
+                    reset_info,
+                    capacity_only=(data.error_code == "UPSTREAM_LIMIT_EXCEEDED" and not reset_info),
+                )
+            except Exception:
+                pass
         return DomainResult.failure(
-            operation_failure_code(data.error_code), _operation_failure_message(data),
-            data=data, operation_state=data.state, verification_status=data.verification_status, warnings=warnings,
+            code, message,
+            data=data, suggested_action=suggested_action, operation_state=data.state,
+            verification_status=data.verification_status, warnings=warnings,
+            details=details or None,
         )
     return DomainResult.success(data, operation_state=data.state, verification_status=data.verification_status, warnings=warnings)
 

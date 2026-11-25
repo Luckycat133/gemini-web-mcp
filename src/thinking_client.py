@@ -553,6 +553,10 @@ class ThinkingLevelGeminiClient(GeminiClient):
             raise ValueError(f"Ambiguous discovered model: {name}")
         if canonical == "gemini-flash":
             return self._resolve_gemini_4_family(models, "hydrogen")
+        if canonical == "gemini-pro":
+            neon = self._gemini_4_family_models([model for model in models if model.is_available], "neon")
+            if neon:
+                return self._unique_discovered_model(neon, "neon")
         raise ValueError(f"Requested model is not available in the discovered registry: {name}")
 
     @staticmethod
@@ -660,6 +664,11 @@ class ThinkingLevelGeminiClient(GeminiClient):
     async def init(self, *args: Any, **kwargs: Any) -> None:
         await super().init(*args, **kwargs)
         self._install_thinking_transport()
+        from contextlib import suppress
+        from .services.resilience import persist_client_quota_snapshot
+
+        with suppress(Exception):
+            persist_client_quota_snapshot(self)
 
     async def generate_content(
         self,

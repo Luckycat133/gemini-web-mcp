@@ -9,6 +9,20 @@ Detailed per-build validation logs live in [docs/changelog.md](docs/changelog.md
 
 ## [Unreleased]
 
+## [0.22.0] - 2026-11-25
+
+### Changed
+
+- Split the overloaded `gemini-mcp-function` surface into 10 single-purpose tools (`gemini_ask`, `gemini_understand`, `gemini_generate_image`, `gemini_edit_image`, `gemini_generate_video`, `gemini_generate_music`, `gemini_research`, `gemini_run_task`, `gemini_get_operation_status`, `gemini_get_operation_result`), removing monolithic `gemini_create_media` and moving mixed-input understanding out of `gemini_ask` (`src/surfaces/catalogs.py`, `src/surfaces/function.py`, `src/surfaces/assist.py`).
+- Updated Gemini 4 routing and surface descriptions to current creative engines (**Nano Banana 2.1 / Nano Banana Pro** for image/edit, **Gemini Omni** for video, **Lyria 3.5** for music) with `pro` mapping to discovered `4 Neon` when legacy `gemini-pro` is absent (`src/thinking_client.py`, `src/tools/manage.py`, `src/server.py`, `src/tools/manifest_data.py`), and removed dead `omni_job=False` branches in `src/services/background.py`.
+- Replaced fixed 2s result-wait polling in `OperationService.get_result` (`src/services/operations.py`) with adaptive `0.5s`/`1.0s`/`2.0s` local SQLite polling and removed duplicate ownership checks in `src/services/chat.py`.
+
+### Added
+
+- Added `src/services/resilience.py` with automatic single-retry recovery for pre-mutation transient network/transport blips, stateless generic generation failure notices, and silent expired-cookie browser refresh (`try_auto_refresh_auth`), wired into `ChatService`, `ResearchService`, and `execute_media_job`.
+- Added persistent quota reset snapshots (`quota_reset_snapshots` in `src/infrastructure/model_policy_store.py`, populated in `ThinkingLevelGeminiClient.init`) and enriched `RATE_LIMITED` / `UPSTREAM_LIMIT_EXCEEDED` responses (`ClientRateLimited`, `result_from_exception`, `OperationService._operation_read_result`) with `reset_at`, `reset_timestamp`, `retry_after_seconds`, `quota_window`, and explicit scheduled-retry (`schedule` / `/schedule`) instructions.
+- Added official prompting blueprints (`references/prompting_guides.md`) and updated `SKILL.md` for Nano Banana 2.1/Pro, Gemini Omni, and Lyria 3.5 with explicit no-sensitive-word-list / no-pre-interception rules and scheduled rate-limit auto-retry guidance.
+
 ## [0.21.0] - 2026-11-25
 
 ### Added

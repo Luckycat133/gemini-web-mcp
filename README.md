@@ -2,7 +2,7 @@
   <img src="docs/assets/gemini-web-mcp-banner.svg" alt="Gemini Web MCP" width="100%">
 </p>
 
-<h1 align="center">Gemini Web MCP (v0.21.0)</h1>
+<h1 align="center">Gemini Web MCP (v0.22.0)</h1>
 
 <p align="center">
   An agent-first MCP Python SDK v2 gateway and skills for Gemini Web workflows.
@@ -10,7 +10,7 @@
 
 <p align="center">
   <a href="https://github.com/Luckycat133/gemini-web-mcp/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/Luckycat133/gemini-web-mcp/actions/workflows/ci.yml/badge.svg"></a>
-  <a href="https://github.com/Luckycat133/gemini-web-mcp/tree/codex/gemini-tools-polish-20261101/.agents/skills/gemini-web-mcp"><img alt="Codex Skill" src="https://img.shields.io/badge/Codex%20Skill-installable-0B6BFF"></a>
+  <a href="https://github.com/Luckycat133/gemini-web-mcp/tree/dev/.agents/skills/gemini-web-mcp"><img alt="Codex Skill" src="https://img.shields.io/badge/Codex%20Skill-installable-0B6BFF"></a>
   <a href="https://www.gnu.org/licenses/agpl-3.0.html"><img alt="License" src="https://img.shields.io/badge/License-AGPL--3.0--only-blue.svg"></a>
   <a href="docs/changelog.md"><img alt="Verified" src="https://img.shields.io/badge/tests-CI%20verified-1F8A70"></a>
 </p>
@@ -27,11 +27,11 @@
 
 Gemini Web MCP exposes Gemini Web capabilities to MCP-compatible clients such as Codex, Claude Desktop, VS Code MCP clients, and other agent runtimes.
 
-These instructions install the development source from [PR #39](https://github.com/Luckycat133/gemini-web-mcp/pull/39). The published [0.3.0 release](https://github.com/Luckycat133/gemini-web-mcp/releases/tag/v0.3.0) retains legacy entrypoints alongside newer ones and differs from this branch. The earlier [0.2.2 interface and storage history](docs/version-history.md#022---2026-10-25) remains documented. Read the [source integration notes](docs/source-update-integration.md) before switching an existing installation.
+Stable verified releases live on `main` (v0.22.0) and active development on `dev`. The historical [0.3.0 release](https://github.com/Luckycat133/gemini-web-mcp/releases/tag/v0.3.0) and earlier [0.2.2 interface and storage history](docs/version-history.md#022---2026-10-25) remain documented. Read the [source integration notes](docs/source-update-integration.md) before switching an existing installation.
 
-Configure `gemini-mcp-function` and `gemini-mcp-account` as separate MCP entries. Enable the six function tools for Chat, Task, media, Research and operation recovery. Enable the six account tools when a task calls for existing conversation history, chat management, Notebooks or native Task metadata. Either entry can run on its own. The earlier 17-tool catalogs are available through the explicit `function-full` and `account-full` profiles.
+Configure `gemini-mcp-function` and `gemini-mcp-account` as separate MCP entries. Enable the 10 single-purpose function tools (`gemini_ask`, `gemini_understand`, `gemini_generate_image`, `gemini_edit_image`, `gemini_generate_video`, `gemini_generate_music`, `gemini_research`, `gemini_run_task`, `gemini_get_operation_status`, `gemini_get_operation_result`) for Chat, Multimodal Understanding, Image/Edit (Nano Banana 2.1/Pro), Video (Gemini Omni), Music (Lyria 3.5), Deep Research, Task, and operation recovery. Enable the six account tools (or use zero-context `gemini-web-cli`) when a task calls for existing conversation history, chat management, Notebooks, or native Task metadata. Either entry can run on its own. The earlier 17-tool catalogs remain available through `function-full` and `account-full`.
 
-`gemini_ask` handles ordinary questions, current-web questions, mixed inputs, Canvas (`canvas=true`), guided learning modes (`guided_learning`, `canvas`, `interactive_quiz`, `flashcards`, `practice_test`, `study_guide`), Gem prompts (`gem_id`), and natural-language requests to available connected apps. Its `flash` compatibility default prefers discovered Hydrogen. Explicit Neon and Carbon selections use the current account registry. Explicit `notebook_ids` add NotebookLM/Gemini Notebook sources to a background Chat. `gemini_run_task` starts a separate Task workflow. Keep the original operation handle to read status and recover verified results.
+`gemini_ask` handles ordinary questions, current-web questions, Canvas (`canvas=true`), guided learning modes (`guided_learning`, `canvas`, `interactive_quiz`, `flashcards`, `practice_test`, `study_guide`), Gem prompts (`gem_id`), and natural-language requests to available connected apps. `gemini_understand` handles up to 16 mixed image, file, URL, and text inputs. `flash` / `hydrogen` routes to discovered `4 Hydrogen` by default, while `pro` / `neon` (`4 Neon`) and `carbon` (`4 Carbon`) select higher-tier Gemini 4 models. Explicit `notebook_ids` add NotebookLM/Gemini Notebook sources to a background Chat. `gemini_run_task` starts a separate Task workflow. Keep the original operation handle to read status and recover verified results.
 
 See [Notebook, Chat and Task workflows](docs/notebook-task-workflows.md) for examples, automatic cleanup and restart recovery. The default account surface includes bounded Task progress. The `account-full` profile provides Task schedules and explicit browser inputs. Verify external app changes by reading back their actual effects.
 
@@ -47,7 +47,7 @@ The supported runtime is `mcp>=2,<3` plus `mcp-types>=2,<3`. CI exercises both c
 
 ## Install The Runtime Skill
 
-The repository runtime Skill is `0.21.0`. Install the public listing from ClawHub (and verify its displayed version when publication state matters):
+The repository runtime Skill is `0.22.0`. Install the public listing from ClawHub (and verify its displayed version when publication state matters):
 
 ```bash
 clawhub install gemini-web-mcp

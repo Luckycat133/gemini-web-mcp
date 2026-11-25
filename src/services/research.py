@@ -670,16 +670,28 @@ async def _run_native_research_start(
             return False
         return True
 
-    obs = await run_native_research_browser(
-        query,
-        model_label,
-        cookies,
-        timeout=phase_timeout(timeout_seconds),
-        account_matches=lambda: bool(expected_account and current_account_key() == expected_account),
-        thinking_level=thinking_level,
-        on_chat=on_chat,
-        claim_confirmation=claim_confirm,
-    )
+    obs = None
+    for browser_attempt in range(2):
+        obs = await run_native_research_browser(
+            query,
+            model_label,
+            cookies,
+            timeout=phase_timeout(timeout_seconds),
+            account_matches=lambda: bool(expected_account and current_account_key() == expected_account),
+            thinking_level=thinking_level,
+            on_chat=on_chat,
+            claim_confirmation=claim_confirm,
+        )
+        if not (
+            browser_attempt == 0
+            and not obs.confirmed
+            and not start_attempted
+            and (obs.chat_id or observed_cid) is None
+            and obs.state == "unverified"
+            and obs.error_code == "TIMED_OUT"
+        ):
+            break
+    assert obs is not None
     cid = obs.chat_id or observed_cid
     chat_obj = SimpleNamespace(cid=cid, metadata=[cid]) if cid else None
     plan_obj = (
