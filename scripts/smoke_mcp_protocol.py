@@ -122,6 +122,9 @@ async def _handshake(
             elif "create" in actual_tools:
                 representative_name = "create"
                 representative_arguments = {"prompt": ""}
+            elif "ask" in actual_tools:
+                representative_name = "ask"
+                representative_arguments = {"prompt": ""}
             elif "gemini_ask" in actual_tools:
                 representative_name = "gemini_ask"
                 representative_arguments = {"prompt": ""}
@@ -153,7 +156,7 @@ async def _handshake(
         )
     if not isinstance(representative.structured_content, dict):
         raise RuntimeError(f"{command} did not return MCP v2 structured content in {mode} mode")
-    if representative_name in {"create", "gemini_ask", "gemini_cleanup", "gemini_tasks"}:
+    if representative_name in {"create", "ask", "gemini_ask", "gemini_cleanup", "gemini_tasks"}:
         domain = _structured_domain_result(representative.structured_content)
         error = domain.get("error") if domain else None
         expected_code = "AUTH_REQUIRED" if representative_name == "gemini_cleanup" else "INVALID_ARGUMENT"
