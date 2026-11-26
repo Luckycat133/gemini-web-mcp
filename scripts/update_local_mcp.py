@@ -42,7 +42,7 @@ def install_runtime(uv: str, wheel: Path, releases: Path, *, offline: bool) -> t
             env["GEMINI_COOKIE_PATH"] = str(Path(scratch) / "cookies")
             env["PATH"] = str(entrypoints) + os.pathsep + env.get("PATH", os.defpath)
             result = json.loads(run(str(entrypoints / "gemini-mcp-onboarding"), "preflight", env=env))
-            if result.get("status") != "ok" or result.get("enabled_tools") != 10:
+            if result.get("status") != "ok" or result.get("enabled_tools") != 8:
                 raise RuntimeError("The installed function server did not pass MCP preflight")
             run(str(entrypoints / "python"), str(ROOT / "scripts/smoke_mcp_protocol.py"), env=env)
         verified.write_text(digest + "\n", encoding="utf-8")

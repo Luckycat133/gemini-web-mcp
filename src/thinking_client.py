@@ -53,6 +53,9 @@ class WebRequestOptions:
     image_generation: bool = False
     image_aspect_ratio: str | None = None
     music_generation: bool = False
+    music_duration: str | None = None
+    music_vocals: str | None = None
+    music_genre: str | None = None
     media_option_ids: tuple[int, ...] = ()
     video_generation: bool = False
     video_duration_seconds: int | None = None
@@ -635,6 +638,49 @@ class ThinkingLevelGeminiClient(GeminiClient):
                     raise ModelPolicyError("The requested video option is unavailable in the current Web catalog.")
                 selected = [item for item in selected if item not in {choice.id for choice in group.options}]
                 selected.append(matches[0].id)
+            return tuple(dict.fromkeys(selected))
+        if mode == 21:
+            music_groups = catalog.by_mode.get(21, ())
+            _music_titles = {
+                (16, "short"): {"短版", "short"},
+                (16, "standard"): {"标准", "standard"},
+                (17, "instrumental"): {"纯音乐", "instrumental"},
+                (17, "vocals"): {"开启人声", "人声", "vocals", "with vocals"},
+                (17, "auto"): {"自定义", "auto", "custom"},
+                (18, "auto"): {"自定义", "auto", "custom"},
+                (18, "pop"): {"流行", "pop"},
+                (18, "hip_hop"): {"嘻哈与说唱", "hip hop & rap", "hip-hop & rap", "hip hop"},
+                (18, "rock"): {"摇滚", "rock"},
+                (18, "kpop"): {"韩国流行音乐", "k-pop", "kpop"},
+                (18, "latin"): {"拉丁", "latin"},
+                (18, "electronic"): {"电子", "electronic"},
+                (18, "rnb"): {"r&b", "r & b"},
+                (18, "country"): {"乡村", "country"},
+                (18, "afrobeats"): {"非洲节拍", "afrobeats"},
+                (18, "reggae"): {"雷鬼", "reggae"},
+                (18, "jazz_blues"): {"爵士与布鲁斯", "jazz & blues", "jazz and blues"},
+                (18, "classical"): {"古典", "classical"},
+                (18, "folk"): {"民谣", "folk"},
+                (18, "lofi"): {"低保真", "lo-fi", "lofi"},
+                (18, "acoustic"): {"原声", "acoustic"},
+                (18, "cinematic"): {"电影配乐", "cinematic"},
+                (18, "ambient"): {"氛围音乐", "ambient"},
+            }
+            for group_id, requested in ((16, options.music_duration), (17, options.music_vocals), (18, options.music_genre)):
+                if not requested:
+                    continue
+                groups = [group for group in music_groups if group.id == group_id and group.available]
+                if len(groups) != 1:
+                    continue
+                group = groups[0]
+                allowed = _music_titles.get((group_id, requested), {requested.lower()})
+                matches = [
+                    choice for choice in group.options
+                    if choice.available and choice.title.strip().lower() in allowed
+                ]
+                if len(matches) == 1:
+                    selected = [item for item in selected if item not in {choice.id for choice in group.options}]
+                    selected.append(matches[0].id)
         return tuple(dict.fromkeys(selected))
 
     def _parse_candidate(self, candidate_data: list[Any], cid: str, rid: str, rcid: str) -> Any:
@@ -826,9 +872,21 @@ class ThinkingLevelGeminiClient(GeminiClient):
             _web_request.reset(token)
 
     @contextmanager
-    def music_generation_scope(self) -> Iterator[None]:
+    def music_generation_scope(
+        self,
+        *,
+        music_duration: str | None = None,
+        music_vocals: str | None = None,
+        music_genre: str | None = None,
+    ) -> Iterator[None]:
         """Select the Web Create music tool independently of chat thinking."""
-        token = _web_request.set(replace(_web_request.get() or WebRequestOptions(), music_generation=True))
+        token = _web_request.set(replace(
+            _web_request.get() or WebRequestOptions(),
+            music_generation=True,
+            music_duration=music_duration,
+            music_vocals=music_vocals,
+            music_genre=music_genre,
+        ))
         try:
             yield
         finally:

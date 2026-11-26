@@ -80,6 +80,7 @@ BUSINESS_PROFILES = {
     "account-full": ACCOUNT_FULL_TOOLS,
 }
 BUSINESS_ONLY_TOOL_NAMES = {
+    "ask", "understand", "image", "video", "music", "research", "task", "operation",
     "gemini_ask", "gemini_understand", "gemini_understand_image", "gemini_research",
     "gemini_generate_image", "gemini_edit_image", "gemini_generate_video",
     "gemini_run_task", "gemini_manage_chat", "gemini_tasks", "gemini_task_browser",

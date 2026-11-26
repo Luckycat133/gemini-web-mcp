@@ -523,6 +523,12 @@ def _operation_failure_message(data: OperationReadData) -> str:
         "model_media_refusal_observed",
         "completed_music_notation_without_artifact_observed",
     }:
+        if data.media_type == "music" or data.operation == "gemini_generate_music":
+            return (
+                "Gemini Web replied without a media file (text only) for this music request. "
+                "Retry with a concise natural-language musical description (mood, instruments, genre, "
+                "tempo words) and avoid technical DAW/MIDI or bar-by-bar notation specs."
+            )
         return "Gemini Web replied without a media file and reported that direct media generation is unavailable for this turn."
     if data.verification_status in {"upstream_media_error_card_observed", "upstream_media_failure_reply_observed"}:
         return "Gemini Web returned an upstream media generation error card for this request."

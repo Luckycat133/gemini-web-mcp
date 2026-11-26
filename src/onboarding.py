@@ -219,7 +219,7 @@ async def run_preflight(*, server_command: str | None = None) -> dict[str, Any]:
         names = {tool.name for tool in listed.tools}
         if names != FUNCTION_TOOLS:
             raise OnboardingError("The function tool catalog did not match its public contract")
-        result = await client.call_tool("gemini_ask", {"prompt": ""})
+        result = await client.call_tool("ask", {"prompt": ""})
         protocol_version = client.protocol_version
         server_version = client.server_info.version if client.server_info else None
     if result.is_error or result.result_type != "complete":
@@ -232,7 +232,7 @@ async def run_preflight(*, server_command: str | None = None) -> dict[str, Any]:
         "status": "ok",
         "mode": "offline",
         "credentials_accessed": False,
-        "text_tool": "gemini_ask",
+        "text_tool": "ask",
         "profile": "function",
         "enabled_tools": len(names),
         "protocol_version": protocol_version,
@@ -248,7 +248,7 @@ async def run_chat(
     server_command: str | None = None,
 ) -> dict[str, Any]:
     result, protocol_version, server_version = await _call_installed_tool(
-        "gemini_ask",
+        "ask",
         {
             "prompt": prompt,
             "model": model,
@@ -266,7 +266,7 @@ async def run_chat(
     return {
         "status": "ok",
         "mode": "live",
-        "text_tool": "gemini_ask",
+        "text_tool": "ask",
         "protocol_version": protocol_version,
         "server_version": server_version,
         "text": _first_text(result),
@@ -278,17 +278,17 @@ async def run_image(
     prompt: str,
     *,
     output_dir: Path,
-    model: str,
-    filename: str | None,
+    model: str = "hydrogen",
+    filename: str | None = None,
     server_command: str | None = None,
 ) -> dict[str, Any]:
+    del model
     output_root = output_dir.expanduser().resolve()
     output_root.mkdir(parents=True, exist_ok=True)
     operation_id = "op_" + secrets.token_hex(16)
     arguments: dict[str, Any] = {
         "prompt": prompt,
         "operation_id": operation_id,
-        "model": model,
         "output_dir": str(output_root),
         "wait_seconds": 0,
     }
@@ -297,7 +297,7 @@ async def run_image(
     async with _installed_client(profile="function", allow_live_account=True, server_command=server_command) as client:
         try:
             async with asyncio.timeout(720):
-                result = await client.call_tool("gemini_generate_image", arguments)
+                result = await client.call_tool("image", arguments)
         except TimeoutError as exc:
             raise OnboardingError(
                 f"Image start outcome is unverified; resume with operation_id={operation_id}"
@@ -325,7 +325,7 @@ async def run_image(
             try:
                 async with asyncio.timeout(remaining):
                     result = await client.call_tool(
-                        "gemini_get_operation_result", {"operation_id": operation_id},
+                        "operation", {"operation_id": operation_id},
                     )
             except TimeoutError as exc:
                 raise OnboardingError(
@@ -354,7 +354,7 @@ async def run_image(
         return {
             "status": "ok",
             "mode": "live",
-            "media_tool": "gemini_generate_image",
+            "media_tool": "image",
             "operation_id": operation_id,
             "protocol_version": protocol_version,
             "server_version": server_version,
@@ -381,14 +381,14 @@ def _build_parser() -> argparse.ArgumentParser:
     chat = subparsers.add_parser("chat", help="Make an explicitly authorized live text call")
     chat.add_argument("--allow-live-account", action="store_true", required=True)
     chat.add_argument("--prompt", required=True)
-    chat.add_argument("--model", default="flash")
-    chat.add_argument("--thinking-level", choices=("low", "medium", "high", "standard", "extended"), default="standard")
+    chat.add_argument("--model", default="hydrogen")
+    chat.add_argument("--thinking-level", choices=("low", "medium", "high"), default="medium")
 
     image = subparsers.add_parser("image", help="Generate and independently verify a local image artifact")
     image.add_argument("--allow-live-account", action="store_true", required=True)
     image.add_argument("--prompt", required=True)
     image.add_argument("--output-dir", type=Path, required=True)
-    image.add_argument("--model", default="flash")
+    image.add_argument("--model", default="hydrogen")
     image.add_argument("--filename")
     return parser
 

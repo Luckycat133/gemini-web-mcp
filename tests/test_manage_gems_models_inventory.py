@@ -382,29 +382,31 @@ def test_manage_gems_happy_path_list(monkeypatch):
 
 
 def test_list_models_exception_returns_aliases_with_no_models(monkeypatch):
-    """list_models 抛异常 → models=None → 返回 aliases + '暂无运行时模型注册表'。"""
+    """list_models 抛异常 → models=None → 返回目录 + '暂无运行时模型注册表'。"""
     client = _ModelsClient(raise_exc=RuntimeError("boom"))
     _patch_seams(monkeypatch, client)
     mcp = _make_mcp()
     result = _run(_call(mcp, "gemini_list_models"))
     text = result[0].text
-    assert "MCP 模型别名" in text
+    assert "🤖 Gemini Web 模型目录" in text
+    assert "hydrogen" in text and "neon" in text and "carbon" in text
     assert "暂无运行时模型注册表" in text
 
 
 def test_list_models_no_list_models_attr_returns_no_models(monkeypatch):
-    """client 无 list_models 属性 → models=None → 返回 aliases + 暂无提示。"""
+    """client 无 list_models 属性 → models=None → 返回目录 + 暂无提示。"""
     client = _NoBatchClient()
     _patch_seams(monkeypatch, client)
     mcp = _make_mcp()
     result = _run(_call(mcp, "gemini_list_models"))
     text = result[0].text
-    assert "MCP 模型别名" in text
+    assert "🤖 Gemini Web 模型目录" in text
+    assert "hydrogen" in text and "auto" in text
     assert "暂无运行时模型注册表" in text
 
 
 def test_list_models_happy_path_renders_models(monkeypatch):
-    """client.list_models() 返回非空 → markdown 渲染每个模型的别名行。"""
+    """client.list_models() 返回非空 → markdown 渲染每个模型的目录行。"""
     m1 = _model("Flash Lite", "gemini-3-flash-lite", is_available=True, description="极速模型")
     m2 = _model("Pro", "gemini-3-pro", is_available=False, description="高级模型")
     client = _ModelsClient(models=[m1, m2])
@@ -412,7 +414,7 @@ def test_list_models_happy_path_renders_models(monkeypatch):
     mcp = _make_mcp()
     result = _run(_call(mcp, "gemini_list_models"))
     text = result[0].text
-    assert "MCP 模型别名" in text
+    assert "🤖 Gemini Web 模型目录" in text
     assert "- Flash Lite: gemini-3-flash-lite (可用)" in text
     assert "极速模型" in text
     assert "- Pro: gemini-3-pro (不可用)" in text
@@ -431,7 +433,7 @@ def test_account_inventory_surface_models_dispatches_to_list_models(monkeypatch)
     mcp = _make_mcp()
     result = _run(_call(mcp, "gemini_account_inventory", surface="models"))
     text = result[0].text
-    assert "MCP 模型别名" in text
+    assert "🤖 Gemini Web 模型目录" in text
     assert "暂无运行时模型注册表" in text
 
 

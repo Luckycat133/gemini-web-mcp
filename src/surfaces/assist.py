@@ -7,7 +7,9 @@ keeping a second copy of request construction, parsing, or persistence.
 """
 
 import logging
-from typing import Any, Literal, Optional
+from pathlib import Path
+from typing import Annotated, Any, Literal, Optional
+from urllib.parse import urlsplit
 
 from pydantic import Field
 
@@ -58,6 +60,7 @@ from ..services import (
     StartSessionRequest,
     UnderstandImageRequest,
     UnderstandInput,
+    UnderstandInputKind,
     UnderstandOperationData,
     UnderstandRequest,
     UnderstandService,
@@ -585,7 +588,7 @@ async def _handle_research_report_action(
             unavailable,
             domain_failure_text(unavailable)
             if not unavailable.ok
-            else "No verified local report is available yet; call gemini_get_operation_result first.",
+            else "No verified local report is available yet; fetch the completed operation result first.",
             use_result_data=True,
         )
     if not source.account_matches():
@@ -670,40 +673,63 @@ async def _handle_research_report_action(
     return attach_domain_result(content, artifact_domain_result, use_result_data=True)
 
 
-def register_lean_assist_tools(server: MCPServer) -> None:
-    @server.tool(name="gemini_ask", annotations=MUTATES_REMOTE)
-    @domain_error_boundary("gemini_ask", logger)
-    async def ask(
-        prompt: str = "", context: str | None = None, model: str | None = None,
-        thinking_level: str | None = None, notebook_ids: list[str] | None = None,
-        start_session: bool = False, session_id: str | None = None, recover_only: bool = False,
-        timeout_seconds: int = 600, retain_chat: bool | None = None, delete_after_seconds: int | None = None,
-        operation_id: str | None = None,
-        gem_id: str | None = None,
-        canvas: bool = False,
-        learning_mode: Literal[
-            "guided_learning", "guided", "canvas",
-            "interactive_quiz", "quiz", "flashcards", "practice_test", "study_guide", "exam_prep",
-        ] | None = None,
-    ) -> list[TextContent]:
-        """Ask Gemini Chat for an answer, web sources, writing, Gem, Canvas, guided learning, or Notebook chat.
+_LEAN_MODEL = Literal["hydrogen", "neon", "carbon", "auto"]
+_LEAN_THINKING = Literal["low", "medium", "high"]
+_IMAGE_EXTS = frozenset({".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp", ".heic", ".avif", ".svg"})
 
-        Default to 4 Hydrogen (flash) and standard thinking. Describe web or app use
-        in the prompt. For image/file/URL/mixed-input analysis, use gemini_understand.
-        Use notebook_ids for background Notebook Chat, then retrieve the result by
-        operation_id. Pass gem_id (from `gemini-web-cli gems list`), canvas=True,
-        or learning_mode (guided_learning/guided, canvas, interactive_quiz/quiz,
-        flashcards, practice_test, study_guide) on new chats or start_session=True.
-        Set start_session to send the first turn and return a local session_id.
-        Pass it on later turns to inherit the original model and thinking. If
-        a turn is unverified, pass only session_id and recover_only to read it.
-        Choose either Notebook context or a multi-turn session. Timeout and
-        operation_id apply to Notebook Chat. Chats clean up by default.
+
+def _normalize_understand_inputs(items: list[str | UnderstandInput]) -> tuple[UnderstandInput, ...]:
+    normalized: list[UnderstandInput] = []
+    for idx, item in enumerate(items, 1):
+        if isinstance(item, UnderstandInput):
+            normalized.append(item)
+            continue
+        raw = item.strip()
+        input_id = f"input_{idx}"
+        if raw.startswith(("http://", "https://")):
+            suffix = Path(urlsplit(raw).path).suffix.lower()
+            kind = UnderstandInputKind.IMAGE if suffix in _IMAGE_EXTS else UnderstandInputKind.URL
+            normalized.append(UnderstandInput(id=input_id, kind=kind, url=raw))
+        elif raw:
+            suffix = Path(raw).suffix.lower()
+            if suffix in _IMAGE_EXTS:
+                normalized.append(UnderstandInput(id=input_id, kind=UnderstandInputKind.IMAGE, path=raw))
+            elif "/" in raw or "\\" in raw or raw.startswith(("~", ".")) or Path(raw).expanduser().exists():
+                normalized.append(UnderstandInput(id=input_id, kind=UnderstandInputKind.FILE, path=raw))
+            else:
+                normalized.append(UnderstandInput(id=input_id, kind=UnderstandInputKind.TEXT, text=raw))
+        else:
+            normalized.append(UnderstandInput(id=input_id, kind=UnderstandInputKind.TEXT, text=""))
+    return tuple(normalized)
+
+
+def register_lean_assist_tools(server: MCPServer) -> None:
+    @server.tool(name="ask", annotations=MUTATES_REMOTE)
+    @domain_error_boundary("ask", logger)
+    async def ask(
+        prompt: str = "",
+        context: str | None = None,
+        model: _LEAN_MODEL | None = None,
+        thinking_level: _LEAN_THINKING | None = None,
+        gem_id: str | None = None,
+        learning_mode: Literal[
+            "guided_learning", "canvas", "quiz", "flashcards", "practice_test", "study_guide",
+        ] | None = None,
+        notebook_ids: list[str] | None = None,
+        start_session: bool = False,
+        session_id: str | None = None,
+        recover_only: bool = False,
+        timeout_seconds: int = 600,
+        retain_chat: bool | None = None,
+        delete_after_seconds: int | None = None,
+        operation_id: str | None = None,
+    ) -> list[TextContent]:
+        """Chat, web Q&A, Gem, Canvas, guided learning, multi-turn sessions, or Notebook analysis.
+
+        Defaults to model="hydrogen" and thinking_level="medium". For images/files/URLs use
+        `understand`; for background tasks use `task`. Pass `start_session=true` to open a session,
+        then pass only `session_id` to continue. Chats auto-clean unless `retain_chat=true`.
         """
-        if canvas and learning_mode is not None and learning_mode != "canvas":
-            return _reject_ask("Choose either canvas=True or learning_mode, not both.")
-        if canvas:
-            learning_mode = "canvas"
         in_session = start_session or session_id is not None or recover_only
         if notebook_ids and in_session:
             return _reject_ask("Choose only one of notebook_ids or a multi-turn session.")
@@ -725,75 +751,73 @@ def register_lean_assist_tools(server: MCPServer) -> None:
         elif not prompt.strip():
             return _reject_ask("prompt must not be blank.")
 
-        model = "flash" if model is None else model
-        thinking_level = "standard" if thinking_level is None else thinking_level
+        resolved_model = "hydrogen" if model is None else model
+        resolved_thinking = "medium" if thinking_level is None else thinking_level
         if in_session:
             return await _ask_session(
-                _compose_ask_message(prompt, context), session_id=session_id, model=model,
-                thinking_level=thinking_level, retain_chat=retain_chat,
+                _compose_ask_message(prompt, context), session_id=session_id, model=resolved_model,
+                thinking_level=resolved_thinking, retain_chat=retain_chat,
                 delete_after_seconds=delete_after_seconds, recover_only=recover_only,
                 gem_id=gem_id, learning_mode=learning_mode,
             )
         if notebook_ids:
             return await _ask_notebook(
-                _compose_ask_message(prompt, context), model=model, thinking_level=thinking_level,
+                _compose_ask_message(prompt, context), model=resolved_model, thinking_level=resolved_thinking,
                 notebook_ids=notebook_ids, timeout_seconds=timeout_seconds, retain_chat=bool(retain_chat),
                 delete_after_seconds=delete_after_seconds, operation_id=operation_id,
             )
         return await gemini_ask(
-            prompt, context, model, thinking_level,
+            prompt, context, resolved_model, resolved_thinking,
             retain_chat=bool(retain_chat), delete_after_seconds=delete_after_seconds,
             gem_id=gem_id, learning_mode=learning_mode,
         )
 
-    @server.tool(name="gemini_understand", annotations=MUTATES_REMOTE)
-    @domain_error_boundary("gemini_understand", logger)
+    @server.tool(name="understand", annotations=MUTATES_REMOTE)
+    @domain_error_boundary("understand", logger)
     async def understand_lean(
         task: str,
-        inputs: list[UnderstandInput] = Field(max_length=MAX_UNDERSTAND_INPUTS),
-        model: str | None = None,
-        thinking_level: str = "standard",
+        inputs: Annotated[list[str | UnderstandInput], Field(min_length=1, max_length=MAX_UNDERSTAND_INPUTS)],
+        model: _LEAN_MODEL = "hydrogen",
+        thinking_level: _LEAN_THINKING = "medium",
         retain_chat: bool = False,
-        delete_after_seconds: int | None = None,
     ) -> list[TextContent]:
-        """Analyze up to 16 mixed inputs (images, files, URLs, or text) via Gemini Web.
+        """Analyze images, local files, URLs, or text (up to 16 inputs).
 
-        Default to 4 Hydrogen and standard thinking. Give each input an id and
-        kind: text uses text, image/file uses path or HTTP(S) uri, and url uses url.
+        Accepts plain path/URL/text strings or `{id, kind, path|url|text}` objects.
+        Defaults to model="hydrogen" and thinking_level="medium".
         """
         result = await _understand_service.understand(
             UnderstandRequest(
                 task=task,
-                inputs=tuple(inputs),
-                model="flash" if model is None else model,
+                inputs=_normalize_understand_inputs(inputs),
+                model=model,
                 thinking_level=thinking_level,
                 cleanup_source="gemini_understand",
                 retain_chat=retain_chat,
-                delete_after_seconds=delete_after_seconds,
             )
         )
         return _render_understand_response(result)
 
-    @server.tool(name="gemini_research", annotations=DESTRUCTIVE_REMOTE)
+    @server.tool(name="research", annotations=DESTRUCTIVE_REMOTE)
     async def research(
-        query: str = "", model: str = "flash", thinking_level: str = "standard",
-        timeout_seconds: int = DEFAULT_RESEARCH_TIMEOUT_SECONDS, retain_chat: bool = False,
-        delete_after_seconds: int | None = None, operation_id: str | None = None,
+        query: str = "",
+        model: _LEAN_MODEL = "hydrogen",
+        thinking_level: _LEAN_THINKING = "medium",
+        operation_id: str | None = None,
         report_action: Literal[
             "list_actions", "webpage", "infographic", "quiz", "flashcards", "audio_overview", "custom_app",
         ] | None = None,
         output_dir: str = "generated_media/research_artifacts",
+        timeout_seconds: int = DEFAULT_RESEARCH_TIMEOUT_SECONDS,
+        retain_chat: bool = False,
     ) -> list[TextContent]:
-        """Start Deep Research in the background or derive artifacts from a ready report.
+        """Start Deep Research asynchronously or derive artifacts from a completed handle.
 
-        Pass query to start a new background Deep Research job, then retrieve the
-        verified report via gemini_get_operation_result(operation_id). Or pass
-        report_action with the ready research operation_id (and blank query) to
-        list actions or render a local webpage, infographic, quiz, flashcards,
-        audio_overview, or custom_app spec without repeating research.
+        Pass `query` to start research and poll via `operation(operation_id=...)`.
+        Pass `operation_id` + `report_action` (with blank query) to list or render local derivatives.
         """
         if report_action is not None:
-            if query.strip() or retain_chat or delete_after_seconds is not None:
+            if query.strip() or retain_chat:
                 return _reject_ask(
                     "When report_action is set, pass operation_id of a completed research job and omit query."
                 )
@@ -807,7 +831,7 @@ def register_lean_assist_tools(server: MCPServer) -> None:
         if output_dir != "generated_media/research_artifacts":
             return _reject_ask("output_dir only applies when report_action is set.")
         return await gemini_research(
-            query, model, thinking_level, timeout_seconds, retain_chat, delete_after_seconds,
+            query, model, thinking_level, timeout_seconds, retain_chat, None,
             operation_id,
         )
 

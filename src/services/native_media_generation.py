@@ -15,7 +15,7 @@ from typing import Any
 
 from ..constants import (
     gemini_4_model_family, is_generation_failure_reply, is_music_notation_reply,
-    is_music_tool_unavailable_reply, resolve_thinking_level_id,
+    is_music_text_blueprint_reply, is_music_tool_unavailable_reply, resolve_thinking_level_id,
 )
 from ..domain.results import classify_exception
 from ..infrastructure.account_identity import current_account_key
@@ -133,7 +133,8 @@ async def _verified_native_failure(client: Any, response: Any, chat_id: str, kin
     rcid = getattr(response, "rcid", None)
     if (not isinstance(text, str)
             or not (is_generation_failure_reply(text) or kind == "music" and (
-                is_music_tool_unavailable_reply(text) or is_music_notation_reply(text)))
+                is_music_tool_unavailable_reply(text) or is_music_text_blueprint_reply(text)
+                or is_music_notation_reply(text)))
             or any(getattr(response, name, ()) for name in ("images", "videos", "media"))
             or not isinstance(metadata, (list, tuple)) or len(metadata) < 2 or metadata[0] != chat_id
             or not isinstance(metadata[1], str) or not metadata[1].startswith("r_")

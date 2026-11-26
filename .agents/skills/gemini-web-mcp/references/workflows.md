@@ -18,8 +18,8 @@ Sources checked 2026-11-01: [Task workflows](https://support.google.com/gemini/a
 
 | Setting | What the caller should know |
 | --- | --- |
-| Model | Flash compatibility default prefers discovered Hydrogen. Explicit Neon/Carbon choices require the current account registry and verified plan. Old Argon/Pro are kept only when still discovered. Unsupported selections are refused without switching workflow or model. |
-| Thinking | Use `low` / `medium` / `high`; `standard` / `extended` remain low/high aliases. The client aligns request body and model header. Lite has no selectable level and remains a quota-gated quick Chat fallback. |
+| Model | Select among discovered live LLMs: `hydrogen` (default), `neon`, `carbon`, or `auto`. Compatibility profiles may accept legacy aliases if still discovered. Media generation selects its backend automatically. |
+| Thinking | `low` / `medium` (default) / `high`. Audio generation internally enforces `low` on native Web to avoid text-only blueprint replies. |
 | Notebook context | Supply exact discovered `notebook_ids` to either function Chat or Task. Adding a Notebook does not select Task. |
 | Retention | Use `retain_chat=true` only when the user wants the thread kept. Default cleanup follows verified answer saving. An associated Task schedule protects the owned thread. |
 | Browser preference | In `account-full`, use `gemini_preferences(action="get_browser")` to read the saved choice. Update with `set_browser`, `browser="automatic"` or `browser="remote_only"`, and the returned revision. Verify the saved value by read-back. |
@@ -38,10 +38,10 @@ For a user-requested Notebook source question, discover the exact Notebook ID wi
 
 Choose the execution mode by intent:
 
-- Ordinary source question: function `gemini_ask(prompt=..., notebook_ids=[...], timeout_seconds=600)` starts background ordinary chat (`execution_mode="chat"`). It does not enable Task. Without Notebook IDs, Ask keeps its ordinary direct-response path; its function-only `operation_id` requires Notebook IDs.
-- Delegated Task execution: function `gemini_run_task(prompt=..., notebook_ids=[...], timeout_seconds=600)` explicitly starts Task (`execution_mode="task"`). Notebook IDs are optional. This tool is annotated destructive because the prompt may request changes through connected apps; stay within the user's requested action.
+- Ordinary source question: `ask(prompt=..., notebook_ids=[...], timeout_seconds=600)` starts background ordinary chat (`execution_mode="chat"`). It does not enable Task. Without Notebook IDs, Ask keeps its ordinary direct-response path; its `operation_id` requires Notebook IDs.
+- Delegated Task execution: `task(prompt=..., notebook_ids=[...], timeout_seconds=600)` explicitly starts Task (`execution_mode="task"`). Notebook IDs are optional. This tool is annotated destructive because the prompt may request changes through connected apps; stay within the user's requested action.
 
-Notebook-backed Chat and Task return a persistent `operation_id`; ordinary Ask without Notebook IDs returns directly. Preserve a returned handle and use `gemini_get_operation_status` / `gemini_get_operation_result` rather than resubmitting. Status reads metadata only. The worker verifies the exact completed reply, saves and verifies its full local answer Artifact, then automatically cleans up the owned chat unless retention or an associated Task schedule protects it. Result retrieval can use that saved Artifact after restart. Unresolved work remains cleanup protected, and Notebook objects and sources are not temporary-chat cleanup targets. A completed text answer alone does not verify an external app mutation; read back the requested resource.
+Notebook-backed Chat and Task return a persistent `operation_id`; ordinary `ask` without Notebook IDs returns directly. Preserve a returned handle and use `operation(operation_id=..., status_only=true)` / `operation(operation_id=...)` rather than resubmitting. Status reads metadata only. The worker verifies the exact completed reply, saves and verifies its full local answer Artifact, then automatically cleans up the owned chat unless retention or an associated Task schedule protects it. Result retrieval can use that saved Artifact after restart. Unresolved work remains cleanup protected, and Notebook objects and sources are not temporary-chat cleanup targets. A completed text answer alone does not verify an external app mutation; read back the requested resource.
 
 For account management, default `gemini_tasks` exposes read-only `list`, `get` and `progress`. Task deletion uses `account-full` and requires the exact Task chat ID and independent absence verification. Resolve a fresh project target in `gemini_notebooks(source="gemini")` before calling `gemini_manage_chat(action="move_to_notebook", chat_id=..., notebook_id=...)`.
 

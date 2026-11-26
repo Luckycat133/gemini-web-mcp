@@ -19,28 +19,21 @@ from ..services.operations import MAX_RESULT_WAIT_SECONDS
 from ..services.media_inputs import image_workflow_options_error
 from ..services.media_storage import _valid_media_filename
 from ..tools.annotations import MUTATES_REMOTE
-from ..tools.task_generation import register_task_generation_tools
-from ..tools.operations import register_operation_tools
+from ..tools.task_generation import register_lean_task_tool, register_task_generation_tools
+from ..tools.operations import register_lean_operation_tool, register_operation_tools
 from ..tools.utils import validate_optional_image_path
 from .assist import register_assist_tools, register_lean_assist_tools
 from .catalogs import FUNCTION_FULL_TOOLS
 
 logger = logging.getLogger(__name__)
 _INSTRUCTIONS = """
-Default to gemini_ask for Chat, web answers, Notebook analysis, Gem prompts,
-Canvas, and interactive learning modes; use gemini_understand for images,
-files, URLs, or mixed inputs (up to 16 items).
-Chat models prefer discovered Gemini 4 families: 4 Hydrogen (default), 4 Neon
-(pro / deeper analysis), 4 Carbon (coding and complex work), and Auto.
-Dedicated multimodal tools use the latest Gemini Web engines (default 4 Hydrogen):
-- gemini_generate_image / gemini_edit_image: Nano Banana 2.1 / Nano Banana Pro
-- gemini_generate_video: Gemini Omni (10s/15s, 16:9/9:16, optional 10s reference image)
-- gemini_generate_music: Lyria 3.5 (short/standard, instrumental/vocals/auto, 18 genres)
-Use gemini_research for Deep Research and report_action derivatives on ready
-research handles. Use gemini_run_task for explicit Task or browser workflows.
-Use the companion CLI `gemini-web-cli` for Notebooks, Gems, Skills, Scheduled
-Actions, Tasks, History, Preferences, Public Links, Quotas, and Cleanup.
-"""
+Tools: `ask` (chat/web/Gem/Canvas/learning/Notebook), `understand` (analyze images/files/URLs),
+`image` (generate or edit via image_paths/source_operation_id), `video` (10s/15s, 16:9/9:16,
+optional 10s frame), `music` (duration/vocals/genre), `research` (Deep Research + derivatives),
+`task` (async browser/workflow tasks), `operation` (poll/fetch async handles).
+LLM models: `hydrogen` (default), `neon`, `carbon`, `auto`; thinking_level: `low`/`medium` (default)/`high`.
+Account admin (notebooks, gems, history, quotas, cleanup): `gemini-web-cli`.
+""".strip()
 
 
 def _invalid_media(message: str) -> list[TextContent]:
@@ -117,6 +110,90 @@ async def _submit(
             return _present(waited, include_text=False)
     text = f"Media operation handle: {handle}" if result.ok and handle else domain_failure_text(result)
     return domain_text(result, text, use_result_data=True)
+
+
+@domain_error_boundary("image", logger)
+async def image(
+    prompt: str,
+    aspect_ratio: Literal["16:9", "9:16", "1:1", "4:3", "3:4"] | None = None,
+    image_paths: list[str] | None = None,
+    source_operation_id: str | None = None,
+    source_artifact_id: str | None = None,
+    output_dir: str | None = None,
+    filename: str | None = None,
+    wait_seconds: int | None = None,
+    retain_chat: bool = False,
+    operation_id: str | None = None,
+) -> list[TextContent]:
+    """Generate a new image or edit/transform existing images.
+
+    Pass local `image_paths` (as edit sources or style/character references) or
+    `source_operation_id` (+ optional `source_artifact_id`) to iterate on a prior
+    generated image. Waits up to 120s by default (`wait_seconds=0` returns immediately).
+    """
+    is_op_edit = source_operation_id is not None
+    return await _submit(
+        prompt=prompt, media_type="image", model="hydrogen", thinking_level="standard",
+        image_path=None, output_dir=output_dir, filename=filename, timeout_seconds=None,
+        retain_chat=retain_chat, delete_after_seconds=None,
+        operation_id=operation_id,
+        operation="gemini_edit_image" if is_op_edit else "gemini_generate_image",
+        edit=is_op_edit, aspect_ratio=aspect_ratio, image_paths=image_paths,
+        source_operation_id=source_operation_id, source_artifact_id=source_artifact_id,
+        wait_seconds=wait_seconds,
+    )
+
+
+@domain_error_boundary("video", logger)
+async def video(
+    prompt: str,
+    duration_seconds: Literal[10, 15] | None = None,
+    aspect_ratio: Literal["16:9", "9:16"] | None = None,
+    image_path: str | None = None,
+    output_dir: str | None = None,
+    filename: str | None = None,
+    wait_seconds: int | None = None,
+    retain_chat: bool = False,
+    operation_id: str | None = None,
+) -> list[TextContent]:
+    """Generate a video (10s or 15s, 16:9 or 9:16).
+
+    Pass `image_path` for an optional first-frame reference (10s only).
+    Waits up to 300s by default (`wait_seconds=0` returns handle immediately).
+    """
+    return await _submit(
+        prompt=prompt, media_type="video", model="hydrogen", thinking_level="standard",
+        image_path=image_path, output_dir=output_dir, filename=filename, timeout_seconds=None,
+        retain_chat=retain_chat, delete_after_seconds=None,
+        operation_id=operation_id, operation="gemini_generate_video", edit=False,
+        duration_seconds=duration_seconds, aspect_ratio=aspect_ratio, wait_seconds=wait_seconds,
+    )
+
+
+@domain_error_boundary("music", logger)
+async def music(
+    prompt: str,
+    duration: MusicDuration | None = None,
+    vocals: MusicVocals | None = None,
+    genre: MusicGenre | None = None,
+    output_dir: str | None = None,
+    filename: str | None = None,
+    wait_seconds: int | None = None,
+    retain_chat: bool = False,
+    operation_id: str | None = None,
+) -> list[TextContent]:
+    """Generate music or songs (short/standard, instrumental/vocals/auto, 18 genres).
+
+    Waits up to 240s by default (`wait_seconds=0` returns handle immediately).
+    """
+    return await _submit(
+        prompt=prompt, media_type="music", model="hydrogen", thinking_level="low",
+        image_path=None, output_dir=output_dir, filename=filename, timeout_seconds=None,
+        retain_chat=retain_chat, delete_after_seconds=None,
+        operation_id=operation_id, operation="gemini_generate_music", edit=False,
+        music_duration=duration, music_vocals=vocals, music_genre=genre,
+        wait_seconds=wait_seconds,
+    )
 
 
 @domain_error_boundary("gemini_generate_image", logger)
@@ -253,22 +330,26 @@ def build_server(*, full: bool = False) -> MCPServer:
                        instructions=_INSTRUCTIONS, strict_arguments=not full)
     if full:
         from ..tools.chat import register_chat_tools
+        from ..tools.research import register_research_tools
 
         register_assist_tools(selected_tools(server, set(FUNCTION_FULL_TOOLS)), notebook_context=True)
         register_chat_tools(selected_tools(server, {
             "gemini_start_chat", "gemini_send_message", "gemini_list_sessions", "gemini_reset_session",
         }))
-    else:
-        register_lean_assist_tools(server)
-    register_operation_tools(server)
-    register_task_generation_tools(server)
-    if full:
-        from ..tools.research import register_research_tools
-
+        register_operation_tools(server)
+        register_task_generation_tools(server)
         register_research_tools(selected_tools(server, {
             "gemini_list_research_report_actions", "gemini_create_from_research_report",
         }))
-    for handler in (gemini_generate_image, gemini_edit_image, gemini_generate_video, gemini_generate_music):
+        handlers: tuple[Any, ...] = (
+            gemini_generate_image, gemini_edit_image, gemini_generate_video, gemini_generate_music,
+        )
+    else:
+        register_lean_assist_tools(server)
+        register_lean_operation_tool(server)
+        register_lean_task_tool(server)
+        handlers = (image, video, music)
+    for handler in handlers:
         server.tool(annotations=MUTATES_REMOTE)(handler)
     return server
 

@@ -151,7 +151,7 @@ def test_representative_profile_snapshots_are_explicit_and_exhaustive() -> None:
 
     assert FUNCTION_TOOLS == catalogs.FUNCTION_TOOLS
     assert ACCOUNT_TOOLS == catalogs.ACCOUNT_TOOLS
-    assert len(FUNCTION_TOOLS) == 10
+    assert len(FUNCTION_TOOLS) == 8
     assert len(ACCOUNT_TOOLS) == 6
     assert not FUNCTION_TOOLS & ACCOUNT_TOOLS
     assert FUNCTION_FULL_TOOLS == catalogs.FUNCTION_FULL_TOOLS
