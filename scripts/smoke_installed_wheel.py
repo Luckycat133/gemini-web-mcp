@@ -146,6 +146,8 @@ def _start_console_entrypoints() -> None:
 
 
 def _call_offline_text_tool() -> dict[str, Any]:
+    from src.surfaces.catalogs import FUNCTION_TOOLS
+
     environment = os.environ.copy()
     environment.pop("PYTHONPATH", None)
     for name in ("GEMINI_PSID", "GEMINI_PSIDTS", "GEMINI_PSIDCC", "GEMINI_API_KEY"):
@@ -175,7 +177,7 @@ def _call_offline_text_tool() -> dict[str, Any]:
     except json.JSONDecodeError as exc:
         raise RuntimeError(f"Onboarding preflight returned invalid JSON: {completed.stdout!r}") from exc
     if (payload.get("status") != "ok" or payload.get("text_tool") != "gemini_ask"
-            or payload.get("profile") != "function" or payload.get("enabled_tools") != 6):
+            or payload.get("profile") != "function" or payload.get("enabled_tools") != len(FUNCTION_TOOLS)):
         raise RuntimeError(f"Onboarding preflight did not call the expected text tool: {payload!r}")
     if payload.get("credentials_accessed") is not False or payload.get("mode") != "offline":
         raise RuntimeError(f"Onboarding preflight did not preserve its offline boundary: {payload!r}")
