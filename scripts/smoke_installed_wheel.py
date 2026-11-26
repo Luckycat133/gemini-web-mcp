@@ -176,7 +176,7 @@ def _call_offline_text_tool() -> dict[str, Any]:
         payload = json.loads(completed.stdout)
     except json.JSONDecodeError as exc:
         raise RuntimeError(f"Onboarding preflight returned invalid JSON: {completed.stdout!r}") from exc
-    if (payload.get("status") != "ok" or payload.get("text_tool") != "gemini_ask"
+    if (payload.get("status") != "ok" or payload.get("text_tool") != "ask"
             or payload.get("profile") != "function" or payload.get("enabled_tools") != len(FUNCTION_TOOLS)):
         raise RuntimeError(f"Onboarding preflight did not call the expected text tool: {payload!r}")
     if payload.get("credentials_accessed") is not False or payload.get("mode") != "offline":
