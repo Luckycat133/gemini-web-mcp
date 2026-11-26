@@ -9,7 +9,7 @@ from ..adapters import domain_error_boundary, domain_failure_text, domain_text, 
 from ..adapters.artifacts import omit_saved_preview
 from ..adapters.mcp_sdk import MCPServer, TextContent
 from ..client_wrapper import get_gemini_client, initialize_client, finalize_remote_chat_cleanup
-from ..domain import DomainResult
+from ..domain import DomainErrorCode, DomainResult
 from ..domain.operations import OperationReadData
 from ..infrastructure.operation_store import OperationStore
 from ..services.operations import MAX_RESULT_WAIT_SECONDS, OperationService
@@ -120,6 +120,33 @@ def register_operation_tools(mcp: MCPServer) -> None:
         wait_seconds waits on the original worker for up to 300 seconds without
         repeating generation. Zero returns the current result immediately.
         """
+        if wait_seconds:
+            return _present(await _service().get_result(operation_id, wait_seconds=wait_seconds), include_text=include_text)
+        return _present(await _service().get_result(operation_id), include_text=include_text)
+
+
+def register_lean_operation_tool(mcp: MCPServer) -> None:
+    @mcp.tool(name="operation", annotations=DESTRUCTIVE_REMOTE)
+    @domain_error_boundary("operation", logger)
+    async def operation(
+        operation_id: str,
+        wait_seconds: Annotated[int, Field(ge=0, le=MAX_RESULT_WAIT_SECONDS)] = 0,
+        status_only: bool = False,
+        include_text: bool = True,
+    ) -> list[TextContent]:
+        """Check status or recover verified outputs for a saved operation_id.
+
+        Never repeats generation. Use status_only=true for metadata status, or pass
+        wait_seconds (0-300) to wait for and download verified media/research/task artifacts.
+        """
+        if status_only and wait_seconds > 0:
+            invalid: DomainResult[OperationReadData] = DomainResult.failure(
+                DomainErrorCode.INVALID_ARGUMENT,
+                "status_only=true cannot be combined with wait_seconds > 0.",
+            )
+            return _present(invalid)
+        if status_only:
+            return _present(await _service().get_status(operation_id))
         if wait_seconds:
             return _present(await _service().get_result(operation_id, wait_seconds=wait_seconds), include_text=include_text)
         return _present(await _service().get_result(operation_id), include_text=include_text)

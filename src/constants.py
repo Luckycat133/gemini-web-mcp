@@ -45,6 +45,11 @@ _MUSIC_TOOL_UNAVAILABLE = re.compile(
     r"(?:files?|tracks?)(?: directly)?(?: here| right now)?(?:, as| because) "
     r"the (?:music|audio)[ -]generation tool (?:is(?: currently)? unavailable|"
     r"isn['’]t available(?: in this session| to run in this turn)?)\.(?:\s|$)|"
+    r"I['’]?m unable to (?:directly )?(?:generate|render|output|create)(?: or (?:output|render|stream))? "
+    r"(?:an? |the )?(?:playable )?(?:audio|music|sound) (?:files?|tracks?)(?: directly)?(?: in this (?:interface|session))?"
+    r",? because I don['’]t have access to (?:an? )?(?:music|audio)[ -]generation tool[^.]*(?:\.|\s|$)|"
+    r"I don['’]t have access to (?:an? )?(?:music|audio)[ -]generation tool"
+    r"(?: right now| in this session)?(?:[.,]|\s|$)|"
     r"I don['’]t have (?:a built-in |an active )?music[ -]generation tool"
     r"(?: available(?: right now| in this session)?)?"
     r"(?: to (?:render|output|generate) (?:an? |playable )?(?:audio|sound|music) (?:file|track) directly)?(?:[.,]|\s|$)|"
@@ -61,6 +66,11 @@ _MUSIC_CHINESE_SCORE_FALLBACK = re.compile(
     r"\A(?:我已经为你创作了一段舒缓的钢琴纯音乐。\s*"
     r"由于当前系统工具调用受限，暂时无法直接为你生成并导出音频文件，\s*但我为你编写了|"
     r"(?:由于)?(?:目前|当前)(?:系统)?(?:无法直接|暂时无法)(?:为你)?生成(?:并导出)?(?:音频|音乐))",
+)
+_MUSIC_TEXT_BLUEPRINT = re.compile(
+    r"(?:\bSuggested Track Blueprint\b|\bAI Music Generator Prompt\b|"
+    r"\bMIDI chord voicings\b|Suno,\s*Udio,\s*or\s*Stable Audio)",
+    re.IGNORECASE,
 )
 _RESEARCH_REFUSAL_REPLIES = frozenset({
     "我是一个语言模型，这超出了我的设计用途。",
@@ -116,6 +126,14 @@ def is_music_tool_unavailable_reply(text: object) -> bool:
     normalized = " ".join(text.split())
     return bool(_MUSIC_TOOL_UNAVAILABLE.match(normalized) or _MUSIC_SCORE_FALLBACK.match(normalized)
                 or _MUSIC_CHINESE_SCORE_FALLBACK.match(normalized))
+
+
+def is_music_text_blueprint_reply(text: object) -> bool:
+    """Recognize text-only DAW/MIDI prompt blueprints returned when music synthesis skipped."""
+    if not isinstance(text, str):
+        return False
+    normalized = " ".join(text.split())
+    return bool(_MUSIC_TEXT_BLUEPRINT.search(normalized))
 
 
 def is_image_tool_unavailable_reply(text: object) -> bool:
@@ -289,6 +307,17 @@ THINKING_MODE_IDS = {
     "gemini-pro": 3,
     "9d8ca3786ebdfbea": 3,
     "e6fa609c3fa255c0": 3,
+    "hydrogen": 1,
+    "4 hydrogen": 1,
+    "gemini-4-hydrogen": 1,
+    "neon": 3,
+    "4 neon": 3,
+    "gemini-neon": 3,
+    "797f3d0293f288ad": 3,
+    "carbon": 8,
+    "4 carbon": 8,
+    "gemini-carbon": 8,
+    "95a4c0abcba24364": 8,
 }
 
 class LearningModeConfig(TypedDict, total=False):

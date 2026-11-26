@@ -244,6 +244,13 @@ async ({action, kind, model, model_token, prompt, url, offset, size, option, dur
 
     if (action === "status") {
         const seen = window.__geminiNativeMediaNodes ||= {ids: new WeakMap(), next: 0};
+        const currentMedia = media();
+        const hasMusicOutput = document.querySelectorAll(musicOutputSelector).length > 0;
+        const isGenerating = Array.from(document.querySelectorAll('button, [role="button"], [role="progressbar"], [aria-busy="true"]'))
+            .some(node => visible(node) && (node.matches('[role="progressbar"], [aria-busy="true"]')
+                || /^(?:停止|停止生成|Stop(?:\s+(?:generating|response))?)/i.test(name(node))));
+        const musicStable = window.__geminiNativeMusicTextState ||= {text: "", polls: 0};
+        let observedMusicText = null;
         const signals = Array.from(document.querySelectorAll(`${responseSelector}, [role="alert"]`)).flatMap(el => {
             if (!visible(el) || el.querySelector("audio,video") || el.closest(userQuerySelector)) return [];
             const rawValue = norm(el.innerText);
@@ -259,12 +266,20 @@ async ({action, kind, model, model_token, prompt, url, offset, size, option, dur
                 }
                 return true;
             })();
+            const musicBlueprint = kind === "music" && el.matches(responseSelector) && !quotedStart
+                && !isGenerating && !hasMusicOutput && currentMedia.length === 0
+                && /\b(?:Suggested Track Blueprint|AI Music Generator Prompt|MIDI chord voicings)\b|Suno,\s*Udio,\s*or\s*Stable Audio/i.test(value);
+            if (kind === "music" && el.matches(responseSelector) && !quotedStart && !isGenerating && !hasMusicOutput && currentMedia.length === 0 && value.length >= 80) {
+                observedMusicText = value;
+            }
             const musicRefusal = kind === "music" && el.matches(responseSelector) && !quotedStart
-                && (/^I don['’]t have (?:a built-in |an active )?(?:audio|music)[ -]generation tool(?: available(?: right now| in this session)?)?(?: to (?:render|output|generate) (?:an? |playable )?(?:audio|sound|music) (?:file|track) directly)?(?:[.,]|\s|$)/i.test(value)
+                && (/^I don['’]t have (?:access to )?(?:a built-in |an active |an? )?(?:audio|music)[ -]generation tool(?: available(?: right now| in this session)?)?(?: to (?:render|output|generate) (?:an? |playable )?(?:audio|sound|music) (?:file|track) directly)?(?:[.,]|\s|$)/i.test(value)
+                    || /^I['’]?m unable to (?:directly )?(?:generate|render|output|create)(?: or (?:output|render|stream))? (?:an? |the )?(?:playable )?(?:audio|music|sound) (?:files?|tracks?)(?: directly)?(?: in this (?:interface|session))?(?:,? because I don['’]t have access to (?:an? )?(?:music|audio)[ -]generation tool)?[^.]*(?:\.|\s|$)/i.test(value)
                     || /^I (?:can['’]t|cannot) (?:directly )?(?:generate|render|output|create)(?: or (?:output|render|stream))? (?:an? |the )?(?:playable )?(?:audio|music|sound) (?:files?|tracks?)(?: directly)?(?: here| right now)?(?:, as| because) the (?:music|audio)[ -]generation tool (?:is(?: currently)? unavailable|isn['’]t available(?: in this session| to run in this turn)?)\.(?:\s|$)/i.test(value)
                     || /^No (?:audio|music)[ -]generation tool is (?:currently )?(?:active|available)(?: in this session)?(?:, so I (?:can['’]t|cannot) (?:render|generate|output) (?:a )?(?:playable )?(?:audio|music) (?:track|file) directly)?(?:[.,]|\s|$)/i.test(value)
                     || /^Since direct (?:audio|music) generation isn['’]t available right now\b/i.test(value)
-                    || /^(?:由于)?(?:目前|当前)(?:系统)?(?:无法直接|暂时无法)(?:为你)?生成(?:并导出)?(?:音频|音乐)/u.test(value));
+                    || /^(?:由于)?(?:目前|当前)(?:系统)?(?:无法直接|暂时无法)(?:为你)?生成(?:并导出)?(?:音频|音乐)/u.test(value)
+                    || musicBlueprint);
             const generationError = el.matches(responseSelector) && !quotedStart
                 && (/(?:^|\n)I seem to be encountering an error\.(?:\s|$)/i.test(value)
                     || /(?:^|\n)I encountered an error doing what you asked\. Could you try again\?(?:\s|$)/i.test(value)
@@ -284,7 +299,21 @@ async ({action, kind, model, model_token, prompt, url, offset, size, option, dur
                 : generationError ? "UPSTREAM_REJECTED" : "UPSTREAM_LIMIT_EXCEEDED",
                 message: value.slice(0, 300)}];
         });
-        return {media: media(), signals};
+        if (!signals.length && observedMusicText) {
+            if (musicStable.text === observedMusicText) {
+                musicStable.polls += 1;
+            } else {
+                musicStable.text = observedMusicText;
+                musicStable.polls = 1;
+            }
+            if (musicStable.polls >= 15) {
+                signals.push({id: ++seen.next, code: "ARTIFACT_NOT_RETURNED", message: observedMusicText.slice(0, 300)});
+            }
+        } else if (!observedMusicText) {
+            musicStable.text = "";
+            musicStable.polls = 0;
+        }
+        return {media: currentMedia, signals};
     }
 
     if (action === "load_blob") {

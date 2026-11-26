@@ -122,20 +122,27 @@ def test_web_video_options_have_primary_full_and_compact_parity(monkeypatch):
     register_media_tools(primary)
 
     async def run():
-        for server, tool, extra in (
-            (function.mcp, "gemini_generate_video", {"wait_seconds": 0}),
-            (function.build_server(full=True), "gemini_generate_video", {"wait_seconds": 0}),
-            (primary, "gemini_generate_media", {"media_type": "video"}),
-            (skill_server.mcp, "create", {"type": "video"}),
+        for server, tool, extra, send_model in (
+            (function.mcp, "video", {"wait_seconds": 0}, False),
+            (function.build_server(full=True), "gemini_generate_video", {"wait_seconds": 0}, True),
+            (primary, "gemini_generate_media", {"media_type": "video"}, True),
+            (skill_server.mcp, "create", {"type": "video"}, True),
         ):
             async with Client(server, mode="auto", cache=None) as client:
                 registered = {item.name: item for item in (await client.list_tools()).tools}[tool]
                 assert registered.annotations.read_only_hint is False
                 assert {"duration_seconds", "aspect_ratio"} <= registered.input_schema["properties"].keys()
-                response = await client.call_tool(tool, {
-                    "prompt": "A synthetic video", "model": "hydrogen", "duration_seconds": 15,
-                    "aspect_ratio": "9:16", **extra,
-                })
+                payload = {
+                    "prompt": "A synthetic video",
+                    "duration_seconds": 15,
+                    "aspect_ratio": "9:16",
+                    **extra,
+                }
+                if send_model:
+                    payload["model"] = "hydrogen"
+                else:
+                    assert "model" not in registered.input_schema["properties"]
+                response = await client.call_tool(tool, payload)
                 assert domain_result_from_call(response)["data"]["operation_id"] == handle
 
     asyncio.run(run())

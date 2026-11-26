@@ -1591,7 +1591,7 @@ def test_model_listing_prefers_runtime_registry(monkeypatch):
         manage_tools.register_manage_tools(mcp)
         result = await mcp.call_tool("gemini_list_models", {})
         text = _tool_text(result)
-        assert "MCP 模型别名" in text
+        assert "🤖 Gemini Web 模型目录" in text
         assert "Pro: gemini-3-pro (可用)" in text
         assert "High capability model" in text
 
@@ -2004,13 +2004,14 @@ def test_tool_manifest_and_annotations_expose_agent_safety_metadata():
         )
         chat_payload = json.loads(_tool_text(chat_scope_result))
         assert chat_payload["scope"] == "chat"
-        assert chat_payload["groups"] == {"core": 8}
+        assert chat_payload["groups"] == {"core": 9}
         assert {item["name"] for item in chat_payload["tools"]} >= {
             "gemini_chat",
             "gemini_chat_stream",
             "gemini_start_chat",
             "gemini_send_message",
             "gemini_ask",
+            "ask",
         }
         assert any(item["name"] == "current_pro_generation" for item in chat_payload["workflows"])
 

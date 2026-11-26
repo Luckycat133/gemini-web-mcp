@@ -43,8 +43,25 @@ def submit(monkeypatch):
 
 def test_music_options_are_optional_and_forwarded_by_every_registered_surface(primary, submit):
     async def run():
+        async with Client(function.mcp, mode="auto", cache=None) as client:
+            lean = {item.name: item for item in (await client.list_tools()).tools}["music"]
+            assert lean.annotations == MUTATES_REMOTE
+            for field, internal in (("duration", "music_duration"), ("vocals", "music_vocals")):
+                assert field not in lean.input_schema.get("required", ())
+                assert {"enum": _ENUMS[internal], "type": "string"} in lean.input_schema["properties"][field]["anyOf"]
+            for lean_opts, expected in (
+                ({"duration": "short", "vocals": "instrumental"}, _MUSIC_OPTIONS),
+                ({"vocals": "auto"}, {"music_vocals": "auto"}),
+                ({}, {}),
+            ):
+                response = await client.call_tool("music", {"prompt": _PROMPT, "wait_seconds": 0, **lean_opts})
+                result = domain_result_from_call(response)
+                assert result["ok"] and result["data"]["operation_id"] == _HANDLE
+                request = submit.await_args.args[0]
+                assert request["media_type"] == "music"
+                assert {field: request[field] for field in _ENUMS if field in request} == expected
+
         surfaces = (
-            (function.mcp, "gemini_generate_music", {"wait_seconds": 0}),
             (function.build_server(full=True), "gemini_generate_music", {"wait_seconds": 0}),
             (primary, "gemini_generate_media", {"media_type": "music"}),
             (primary, "gemini_generate_music", {}),

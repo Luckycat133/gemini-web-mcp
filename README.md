@@ -2,7 +2,7 @@
   <img src="docs/assets/gemini-web-mcp-banner.svg" alt="Gemini Web MCP" width="100%">
 </p>
 
-<h1 align="center">Gemini Web MCP (v0.22.0)</h1>
+<h1 align="center">Gemini Web MCP (v0.23.0)</h1>
 
 <p align="center">
   An agent-first MCP Python SDK v2 gateway and skills for Gemini Web workflows.
@@ -27,11 +27,11 @@
 
 Gemini Web MCP exposes Gemini Web capabilities to MCP-compatible clients such as Codex, Claude Desktop, VS Code MCP clients, and other agent runtimes.
 
-Stable verified releases live on `main` (v0.22.0) and active development on `dev`. The historical [0.3.0 release](https://github.com/Luckycat133/gemini-web-mcp/releases/tag/v0.3.0) and earlier [0.2.2 interface and storage history](docs/version-history.md#022---2026-10-25) remain documented. Read the [source integration notes](docs/source-update-integration.md) before switching an existing installation.
+Stable verified releases live on `main` (v0.23.0) and active development on `dev`. The historical [0.3.0 release](https://github.com/Luckycat133/gemini-web-mcp/releases/tag/v0.3.0) and earlier [0.2.2 interface and storage history](docs/version-history.md#022---2026-10-25) remain documented. Read the [source integration notes](docs/source-update-integration.md) before switching an existing installation.
 
-Configure `gemini-mcp-function` and `gemini-mcp-account` as separate MCP entries. Enable the 10 single-purpose function tools (`gemini_ask`, `gemini_understand`, `gemini_generate_image`, `gemini_edit_image`, `gemini_generate_video`, `gemini_generate_music`, `gemini_research`, `gemini_run_task`, `gemini_get_operation_status`, `gemini_get_operation_result`) for Chat, Multimodal Understanding, Image/Edit (Nano Banana 2.1/Pro), Video (Gemini Omni), Music (Lyria 3.5), Deep Research, Task, and operation recovery. Enable the six account tools (or use zero-context `gemini-web-cli`) when a task calls for existing conversation history, chat management, Notebooks, or native Task metadata. Either entry can run on its own. The earlier 17-tool catalogs remain available through `function-full` and `account-full`.
+Configure `gemini-mcp-function` and `gemini-mcp-account` as separate MCP entries. Enable the 8 unprefixed function tools (`ask`, `understand`, `image`, `video`, `music`, `research`, `task`, `operation`) for Chat, Multimodal Understanding, Image generation/editing, Video, Music, Deep Research, Task, and async handle recovery. Enable the six account tools (or use zero-context `gemini-web-cli`) when a task calls for existing conversation history, chat management, Notebooks, or native Task metadata. Either entry can run on its own. Compatibility catalogs remain available through `function-full` and `account-full`.
 
-`gemini_ask` handles ordinary questions, current-web questions, Canvas (`canvas=true`), guided learning modes (`guided_learning`, `canvas`, `interactive_quiz`, `flashcards`, `practice_test`, `study_guide`), Gem prompts (`gem_id`), and natural-language requests to available connected apps. `gemini_understand` handles up to 16 mixed image, file, URL, and text inputs. `flash` / `hydrogen` routes to discovered `4 Hydrogen` by default, while `pro` / `neon` (`4 Neon`) and `carbon` (`4 Carbon`) select higher-tier Gemini 4 models. Explicit `notebook_ids` add NotebookLM/Gemini Notebook sources to a background Chat. `gemini_run_task` starts a separate Task workflow. Keep the original operation handle to read status and recover verified results.
+`ask` handles ordinary questions, current-web questions, guided learning (`guided_learning`, `canvas`, `quiz`, `flashcards`, `practice_test`, `study_guide`), Gem prompts (`gem_id`), multi-turn sessions (`start_session`/`session_id`), and Notebook Q&A (`notebook_ids`), defaulting to discovered `hydrogen` (`4 Hydrogen`) with `medium` thinking (`low`/`medium`/`high`; selectable LLMs: `hydrogen`, `neon`, `carbon`, `auto`). `understand` accepts plain paths, URLs, text strings, or typed objects (up to 16 inputs). `task` starts background browser/workflow execution, and `operation` polls status or fetches verified results/artifacts.
 
 See [Notebook, Chat and Task workflows](docs/notebook-task-workflows.md) for examples, automatic cleanup and restart recovery. The default account surface includes bounded Task progress. The `account-full` profile provides Task schedules and explicit browser inputs. Verify external app changes by reading back their actual effects.
 
@@ -47,7 +47,7 @@ The supported runtime is `mcp>=2,<3` plus `mcp-types>=2,<3`. CI exercises both c
 
 ## Install The Runtime Skill
 
-The repository runtime Skill is `0.22.0`. Install the public listing from ClawHub (and verify its displayed version when publication state matters):
+The repository runtime Skill is `0.23.0`. Install the public listing from ClawHub (and verify its displayed version when publication state matters):
 
 ```bash
 clawhub install gemini-web-mcp

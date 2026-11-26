@@ -2,9 +2,9 @@
 name: gemini-web-mcp
 description: "Use this skill when an agent should extend itself with Gemini Web: get a second opinion, search current web sources, understand images/files/URLs, run Deep Research, generate image/video/music artifacts, edit images, delegate ongoing workflows or operate websites through Gemini Task, or explicitly work with Gemini account data. Route by user intent to single-purpose tools instead of loading every tool. This skill is the compatibility router; prefer the focused gemini-assist skill when only assistance and understanding are needed. Do not use for repository implementation, tests, CI, packaging, or releases—use gemini-web-mcp-development instead."
 license: MIT-0
-compatibility: "Requires Python 3.11+ and a connected Gemini Web MCP server. The function server exposes 10 single-purpose tools (`gemini_ask`, `gemini_understand`, `gemini_generate_image`, `gemini_edit_image`, `gemini_generate_video`, `gemini_generate_music`, `gemini_research`, `gemini_run_task`, `gemini_get_operation_status`, `gemini_get_operation_result`); the separate account server handles explicit account work. Assist and compact compatibility servers remain supported. Media completion requires verified artifacts, and availability depends on the account and upstream service. Live calls require Gemini Web account Cookies."
+compatibility: "Requires Python 3.11+ and a connected Gemini Web MCP server. The default function server exposes 8 unprefixed tools (`ask`, `understand`, `image`, `video`, `music`, `research`, `task`, `operation`); the separate account server handles explicit account work. Assist, full (`GEMINI_TOOLS=function-full` / `account-full`), and compact compatibility servers remain supported. Media completion requires verified artifacts. Live calls require Gemini Web account Cookies."
 metadata:
-  version: "0.22.0"
+  version: "0.23.0"
   openclaw:
     emoji: "♊️"
     homepage: https://github.com/Luckycat133/gemini-web-mcp
@@ -37,49 +37,42 @@ metadata:
 
 Use this Skill to complete the user's task with Gemini, not to tour the Gemini tool surface.
 
-The product priority is:
-
 ```text
 1. Agent assistance and multimodal understanding
 2. Generated artifacts
 3. Explicit Gemini account management
 ```
 
-Choose the MCP entry that serves the user's next step. For a task that spans both entries, use each only when its tools are needed.
-
 ## Choose the Capability Lane
 
-| User intent | Preferred route | What success means |
+| User intent | Preferred route (`gemini-mcp-function`) | What success means |
 | --- | --- | --- |
-| Second opinion, search, Gem, Canvas, learning mode, or multi-turn chat | `gemini_ask` with optional `gem_id`, `canvas`, `learning_mode`, or `start_session`/`session_id` | usable grounded answer incorporated into the task |
-| Understand images, files, URLs, or mixed inputs (up to 16) | `gemini_understand` (`task`, `inputs`) | analyzed inputs acknowledged in verified output |
-| Ask about an existing Notebook's sources | `gemini-web-cli notebooks list` or account `gemini_notebooks`, then `gemini_ask(notebook_ids=...)` | original background chat handle yields a verified full-answer Artifact |
-| Delegate a workflow needing Task execution or browser operation | `gemini_run_task` | original Task handle yields the requested result |
-| Deep Research & report derivatives | `gemini_research`, then `report_action` on ready `operation_id` | verified report or local quiz/infographic/webpage/flashcards/audio_overview/custom_app |
-| Generate images (`Nano Banana 2.1 / Nano Banana Pro`) | `gemini_generate_image` (`aspect_ratio`, optional `image_paths`, `wait_seconds=120`) | verified local image inspected via `read_file` |
-| Edit local or saved images (`Nano Banana 2.1 / Pro`) | `gemini_edit_image` (`image_path` / `image_paths` / `source_operation_id`, `wait_seconds=120`) | verified edited image matching requested delta |
-| Generate video (`Gemini Omni`) | `gemini_generate_video` (`duration_seconds` `10`/`15`, `aspect_ratio` `16:9`/`9:16`, optional `10`s `image_path`, `wait_seconds=300`) | verified MP4 inspected via `ffprobe` |
-| Generate music/songs (`Lyria 3.5`) | `gemini_generate_music` (`music_duration`, `music_vocals`, `music_genre`, `wait_seconds=240`) | verified playable MP4/MP3 inspected via `ffprobe` |
-| Account history, Notebooks, Gems, Skills, Schedules, Quotas, Cleanup | `~/.local/bin/gemini-web-cli` (zero MCP context tax) or `gemini-mcp-account` | requested data or verified read-back |
+| Second opinion, search, Gem, Canvas, learning, multi-turn chat, or Notebook Q&A | `ask` (`model`: `hydrogen`/`neon`/`carbon`/`auto`; `thinking_level`: `low`/`medium`/`high`; optional `gem_id`, `learning_mode`, `start_session`/`session_id`, `notebook_ids`) | grounded answer incorporated into task |
+| Understand images, local files, URLs, or mixed inputs (up to 16) | `understand` (`task`, `inputs` accepting plain paths/URLs/text strings or typed objects) | all inputs acknowledged in verified analysis |
+| Delegate ongoing / multi-step / browser-app Task workflows | `task` (optional `notebook_ids`, `input_id`/`input_option_id`) | original handle yields verified Task result |
+| Deep Research & report derivatives | `research` (`query`, then `report_action` on ready `operation_id`) | verified report or local webpage/infographic/quiz/flashcards/audio_overview/custom_app |
+| Generate new images or edit/transform existing images | `image` (`aspect_ratio`, optional `image_paths` / `source_operation_id`, `wait_seconds=120`) | verified local image inspected via `read_file` |
+| Generate video | `video` (`duration_seconds` `10`/`15`, `aspect_ratio` `16:9`/`9:16`, optional `10`s `image_path`, `wait_seconds=300`) | verified MP4 inspected via `ffprobe` |
+| Generate music or songs | `music` (`duration` `short`/`standard`, `vocals`, `genre`, `wait_seconds=240`) | verified playable MP3/MP4 inspected via `ffprobe` |
+| Check or fetch async results (`research`, `task`, `image`, `video`, `music`, notebook chat) | `operation` (`operation_id`, `status_only` or `wait_seconds` `0..300`) | verified status, artifact, or report without duplicate work |
+| Account history, Notebooks, Gems, Skills, Schedules, Quotas, Cleanup | `gemini-web-cli` (zero MCP context tax) or `gemini-mcp-account` | requested data or verified read-back |
 
-- **Latest models (`Default` Ultra)**:
-  - Default `flash` / `hydrogen` (and omitted media `model=None`) selects **4 Hydrogen**; `pro` / `neon` selects **4 Neon** (`更深入的分析`); `carbon` selects **4 Carbon** (`代码和复杂工作`). Paid `model="gemini-omni-1.2-flash"` / `GEMINI_API_KEY` is disabled (`INVALID_ARGUMENT`).
-  - Creative engines: **Nano Banana 2.1 / Pro** (Image/Edit), **Gemini Omni** (Video), **Lyria 3.5** (Music).
-- **Never substitute built-in generators**: always call the Gemini Web MCP generation tools when asked for Gemini Web media.
-- **Official Prompting Guides**: Before drafting complex media prompts, load [prompting_guides.md](references/prompting_guides.md) (Nano Banana 2.1 6-part sentences + positive framing + quoted text; Gemini Omni 7-part director's brief + native audio + verb physics; Lyria 3.5 6-part arrangement/timestamps + UI options).
-- **No Sensitive-Word Pre-Interception**: Do **not** pre-screen or block prompts locally using any sensitive-word list. Pass prompts directly; only if upstream returns `UPSTREAM_REJECTED` should you adapt wording and retry.
+## Models, Thinking & Prompting
 
-## Standard Workflow & Default Surface
+- **LLMs (Chat / Understand / Research / Task)**: `hydrogen` (default — fast general & multimodal), `neon` (deeper analysis/reasoning), `carbon` (coding & complex work), `auto` (Gemini Web auto-routing). Default `thinking_level` is `medium` (`low` / `medium` / `high`).
+- **Multimodal generation (`image`, `video`, `music`)**: backend engines are selected and managed automatically by Gemini Web — no hidden engine parameters needed.
+- **Prompting Guides**: Load [prompting_guides.md](references/prompting_guides.md) before drafting complex media prompts. Keep `music` prompts focused on natural musical descriptions (mood, instrumentation, genre, tempo feel) and avoid DAW/MIDI/bar-by-bar specs that can cause text-only replies.
+- **No Sensitive-Word Pre-Interception**: Do **not** pre-screen or block prompts locally using any sensitive-word list. Send the prompt as requested; if upstream returns `UPSTREAM_REJECTED`, rephrase and retry.
 
-Configure `gemini-mcp-function` and `gemini-mcp-account` as separate MCP entries (`10` function tools and `6` account tools, or use `gemini-web-cli`). Do **not** call the manifest before every known workflow; call `gemini_get_tool_manifest` or `account(action="manifest")` only on discovery/recovery gaps.
+## Workflow, Artifacts & Resilience
 
-For generation, pass that file or URI to the next relevant tool rather than stopping at a file path, and verify every saved image (`read_file`) or MP4/MP3 (`ffprobe`). [Artifacts & handoff](references/artifacts.md)
+Connect `gemini-mcp-function` (8 tools) and optionally `gemini-mcp-account` (6 tools, or prefer `gemini-web-cli`). Do **not** call the manifest before every known workflow; call `gemini_get_tool_manifest` or `account(action="manifest")` only on discovery/recovery gaps.
 
-## Long Operations, Auto-Recovery & Rate Limits
+When generating media, pass that file or URI to the next relevant tool rather than stopping at a file path, and verify every saved image (`read_file`) or audio/video (`ffprobe`). See [artifacts.md](references/artifacts.md).
 
-Image, video, music and Deep Research start in the background by default (`wait_seconds` defaults: `120`s image/edit, `240`s music, `300`s video; pass `0` for immediate parallel handles). Recover timed-out operations via `gemini_get_operation_result` using the same `operation_id` — never duplicate a timed-out job. Cancellation is not available. Load [operations.md](references/operations.md) and [workflows.md](references/workflows.md) for recovery and mode settings.
+Image, video, music and Deep Research start in the background by default; `wait_seconds=0` returns an `operation_id` immediately for parallel work. Recover timed-out operations via `operation(operation_id=...)` — never resubmit a running handle. Cancellation is not available. See [operations.md](references/operations.md) and [workflows.md](references/workflows.md).
 
-- Transient transport blips and expired browser Chrome cookies auto-recover internally before failing.
-- When `RATE_LIMITED` / `UPSTREAM_LIMIT_EXCEEDED` is returned, inspect `meta.details.reset_at` / `retry_after_seconds` (or `gemini-web-cli quotas`). **Do not tight-loop retry** — set a one-shot timer (`schedule` tool / `/schedule` with `DurationSeconds = retry_after_seconds + 60`, or `~600`s for traffic spikes) to retry automatically after reset.
+- Transient transport blips and expired browser Cookies auto-recover before failing.
+- On `RATE_LIMITED` / `UPSTREAM_LIMIT_EXCEEDED`, inspect `meta.details.reset_at` / `retry_after_seconds` (or `gemini-web-cli quotas`). **Do not tight-loop retry** — wait until after reset or defer a single retry using your host environment's scheduling/timer capability if available.
 
-The Skill supplies routing instructions; an MCP server must also be connected. For account setup, cleanup rules, or troubleshooting, see [tool_surface.md](references/tool_surface.md) and [recovery.md](references/recovery.md).
+The Skill supplies routing instructions; an MCP server must also be connected. See [tool_surface.md](references/tool_surface.md) and [recovery.md](references/recovery.md) for troubleshooting and compatibility profiles (`gemini-assist`, `function-full`, `account-full`).

@@ -15,7 +15,7 @@ from typing import Any
 
 from ..constants import (
     is_generation_failure_reply, is_image_tool_unavailable_reply, is_music_notation_reply,
-    is_music_tool_unavailable_reply, resolve_media_request,
+    is_music_text_blueprint_reply, is_music_tool_unavailable_reply, resolve_media_request,
 )
 from ..client_manager import ClientAuthenticationRequired
 from ..domain import ArtifactKind, ArtifactState, result_from_exception
@@ -286,7 +286,9 @@ async def _save_response(
         _unknown(store, record.operation_id, token, phase="media_identity_incomplete")
         return
     text = getattr(response, "text", None)
-    new_no_tool = record.media_type == "music" and is_music_tool_unavailable_reply(text)
+    new_no_tool = record.media_type == "music" and (
+        is_music_tool_unavailable_reply(text) or is_music_text_blueprint_reply(text)
+    )
     image_no_tool = record.media_type == "image" and is_image_tool_unavailable_reply(text)
     music_notation = record.media_type == "music" and is_music_notation_reply(text)
     generation_failure = is_generation_failure_reply(text)

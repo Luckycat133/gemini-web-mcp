@@ -2381,27 +2381,24 @@ def _register_model_tools(mcp: MCPServer, enabled_tool_names: set[str], tool_fun
     @_tool("gemini_list_models", READS_PRIVATE_REMOTE)
     async def gemini_list_models() -> list[TextContent]:
         """列出所有可用模型及其说明"""
-        aliases = """🤖 MCP 模型别名 (Gemini 4):
+        aliases = """🤖 Gemini Web 模型目录:
 
-1. flash / fast / hydrogen → gemini-4-hydrogen (4 Hydrogen, 默认)
-   - 日常对话、网页搜索、多模态理解与媒体默认路由
+1. hydrogen → gemini-4-hydrogen (4 Hydrogen, 默认)
+   - 日常对话、网页检索、多模态理解与分析
 
-2. pro / neon → gemini-neon (4 Neon)
-   - 更深入的分析与推理；若账户仍存在 legacy gemini-pro 则按原注册表匹配
+2. neon → gemini-neon (4 Neon)
+   - 更深入的分析与复杂推理
 
 3. carbon → gemini-carbon (4 Carbon)
-   - 代码与复杂工程任务 (Ultra)
+   - 代码与高复杂度工程工作
 
-4. auto / 自动 → gemini-自动
+4. auto → gemini-自动
    - 由 Gemini Web 自动匹配响应模型
 
-5. flash-lite / lite → 仅限基础 Flash 额度耗尽时自动降级 (不可选思考强度)
-   - thinking_level 支持 low / medium / high（standard / extended 兼容映射到 low / high）
+5. thinking_level 思考强度: low / medium (默认) / high
 
-当前媒体后端:
-- 图像/编辑: Nano Banana 2.1 / Nano Banana Pro (`gemini_generate_image`, `gemini_edit_image`)
-- 视频生成: Gemini Omni (`gemini_generate_video`，支持 10s/15s、16:9/9:16 及 10s 参考帧)
-- 音乐生成: Lyria 3.5 (`gemini_generate_music`，支持短版/标准、纯音乐/人声及 18 种流派)
+多模态与异步工具:
+- `image` (文生图与图像编辑)、`video` (视频生成)、`music` (音乐生成)、`understand` (图像/文件/URL 理解)、`research`、`task`、`operation`
 
 ---
 

@@ -268,21 +268,22 @@ def format_rate_limit_guidance(
             f"Quota resets at {reset_at} (~{retry_after}s remaining)."
         )
         suggested_action = (
-            f"Do not retry in a tight loop. Schedule a one-shot timer or scheduled task "
-            f"(e.g. `schedule` tool / `/schedule` with DurationSeconds={delay}) to retry "
-            f"automatically after {reset_at}."
+            f"Do not retry in a tight loop. Wait until after {reset_at} (~{delay}s including safety "
+            "margin), or schedule a single deferred retry using your host environment's scheduling or "
+            "timer capability if available."
         )
         return message, suggested_action
     if capacity_only:
         message = "Gemini Web reported that the generation quota or capacity limit was temporarily reached due to high traffic."
         suggested_action = (
-            "Do not retry in a tight loop. Schedule a one-shot timer (`schedule` tool / `/schedule` "
-            f"with DurationSeconds={_RATE_LIMIT_DEFAULT_CAPACITY_WAIT_SECONDS}) to retry in ~10 minutes."
+            "Do not retry in a tight loop. Wait ~10 minutes before retrying, or schedule a single "
+            "deferred retry using your host environment's scheduling or timer capability if available."
         )
         return message, suggested_action
     message = "The upstream service temporarily limited requests; exact reset time was not reported."
     suggested_action = (
-        "Check `gemini-web-cli quotas` for account window status and schedule a one-shot timer "
-        "(`schedule` tool / `/schedule` with DurationSeconds=600) instead of tight-loop retrying."
+        "Check `gemini-web-cli quotas` for account window status and wait (~10 minutes) or schedule "
+        "a single deferred retry using your host environment's scheduling or timer capability instead "
+        "of tight-loop retrying."
     )
     return message, suggested_action

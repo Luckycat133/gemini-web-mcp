@@ -4,10 +4,10 @@ The two six-tool catalogs are separate MCP entries. The connected server's tool 
 
 | Entry | Tools |
 |---|---|
-| `gemini-mcp-function` | `gemini_ask`, `gemini_understand`, `gemini_generate_image`, `gemini_edit_image`, `gemini_generate_video`, `gemini_generate_music`, `gemini_research`, `gemini_run_task`, `gemini_get_operation_status`, `gemini_get_operation_result` |
+| `gemini-mcp-function` | `ask`, `understand`, `image`, `video`, `music`, `research`, `task`, `operation` |
 | `gemini-mcp-account` | `gemini_history`, `gemini_manage_chat`, `gemini_delete_chat`, `gemini_notebooks`, `gemini_manage_notebook`, `gemini_tasks` |
 
-Select `GEMINI_TOOLS=function-full` or `GEMINI_TOOLS=account-full` on `gemini-mcp-server` for the corresponding prior 17-tool catalog. The safety map also describes tools exposed by these and other compatibility profiles. `gemini_cleanup` is restricted to MCP-owned ledger entries.
+Select `GEMINI_TOOLS=function-full` or `GEMINI_TOOLS=account-full` on `gemini-mcp-server` for the corresponding compatibility 17-tool catalog (`gemini_ask`, `gemini_understand_image`, `gemini_understand`, `gemini_generate_image`, `gemini_edit_image`, `gemini_generate_video`, `gemini_generate_music`, `gemini_get_operation_status`, `gemini_get_operation_result`, `gemini_run_task`, etc.). The safety map also describes tools exposed by these compatibility profiles. `gemini_cleanup` is restricted to MCP-owned ledger entries.
 
 On the account surface, `gemini_history` defaults to compact metadata with pagination. Text reads are explicit and bounded. `gemini_manage_chat` renames, pins, unpins or moves one exact chat and verifies the change with fresh read-back. `mutation_sent=true, changed=null` is unverified. `gemini_delete_chat` remains destructive and separate. `gemini_notebooks` defaults to source-picker metadata. For a move, resolve the exact `notebook_id` in the `source="gemini"` project view and call `gemini_manage_chat(action="move_to_notebook", ...)`.
 
@@ -29,9 +29,9 @@ In `account-full`, `gemini_preferences` manages saved browser/action preferences
 
 | Tool | Group | Purpose |
 |---|---|---|
+| `task` / `gemini_run_task` | tasks | Send user-requested Task and explicit Notebook context; connected-app requests may mutate data (`sends_user_requested_task_and_explicit_notebook_context`) |
+| `operation` / `gemini_get_operation_result` | function | Recover the verified result and complete owned-chat cleanup when applicable |
 | `gemini_reset_session` | core | Clear one MCP/Gemini session and its configured remote-chat lifecycle; never changes agent memory or agent instructions |
-| `gemini_run_task` | tasks | Send user-requested Task and explicit Notebook context; connected-app requests may mutate data (`sends_user_requested_task_and_explicit_notebook_context`) |
-| `gemini_get_operation_result` | function | Recover the verified result and complete owned-chat cleanup when applicable |
 | `gemini_tasks` | `account-full` | Task metadata, bounded progress, schedules, and exact rename/pin/unpin/delete with read-back |
 | `gemini_task_browser` | `account-full` | Verified screenshot, conditional frame read or explicit one-shot input |
 | `gemini_cleanup` | `account-full` | Clean MCP-owned ledger entries under the requested scope |
