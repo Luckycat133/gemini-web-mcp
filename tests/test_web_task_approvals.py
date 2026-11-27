@@ -328,6 +328,7 @@ def test_web_watcher_is_started_and_stopped_by_server_lifespan(watcher, monkeypa
 
 @pytest.mark.parametrize("register", [web_tasks.register_web_task_reads, web_tasks.register_web_task_tools])
 def test_task_progress_surfaces_native_delete_approval_even_without_activity(register, monkeypatch):
+    monkeypatch.setenv("GEMINI_TASK_AUTO_APPROVE", "true")
     monkeypatch.setenv("GEMINI_TASK_WEB_APPROVALS", "true")
     latest = AsyncMock(return_value=_turn(kind="delete"))
     service = TaskProgressService(AsyncMock(), AsyncMock(), latest, lambda: "synthetic-owner")
