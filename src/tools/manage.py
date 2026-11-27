@@ -1684,11 +1684,30 @@ def _register_account_inventory_tools(mcp: MCPServer, enabled_tool_names: set[st
                     }
                 )
 
-            payload = {"scope": scope, "count": len(results), "results": results}
+            usage_info: dict[str, Any] | None = None
+            try:
+                from ..services.quota import format_quota_markdown, parse_usage_info_bodies
+                from gemini_webapi.constants import GRPC
+                from gemini_webapi.types import RPCData
+
+                usage_resp = await client._batch_execute(
+                    [RPCData(rpcid=GRPC.GET_USAGE_INFO, payload="[]")],
+                    source_path="/usage",
+                )
+                usage_bodies = list(client._parse_rpc_results(usage_resp.text, GRPC.GET_USAGE_INFO))
+                usage_info = parse_usage_info_bodies(usage_bodies)
+            except Exception:
+                usage_info = None
+
+            payload: dict[str, Any] = {"scope": scope, "count": len(results), "results": results}
+            if usage_info is not None:
+                payload["usage_info"] = usage_info
             if response_format == "json":
                 return _json_response(payload)
 
             lines = ["## Gemini 用量限额", f"范围: {scope}"]
+            if usage_info is not None:
+                lines.extend(["", format_quota_markdown(usage_info)])
             for result in results:
                 lines.extend(["", f"### {result['name']}"])
                 if not result["entries"]:
@@ -2398,7 +2417,7 @@ def _register_model_tools(mcp: MCPServer, enabled_tool_names: set[str], tool_fun
 5. thinking_level 思考强度: low / medium (默认) / high
 
 多模态与异步工具:
-- `image` (文生图与图像编辑)、`video` (视频生成)、`music` (音乐生成)、`understand` (图像/文件/URL 理解)、`research`、`task`、`operation`
+- `ask-gemini` (对话与图像/文件/URL 多模态分析)、`generate-image`、`generate-video`、`generate-music`、`run-research`、`run-task`、`get-operation`、`check-quota`
 
 ---
 

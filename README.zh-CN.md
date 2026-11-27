@@ -2,7 +2,7 @@
   <img src="docs/assets/gemini-web-mcp-banner.svg" alt="Gemini Web MCP" width="100%">
 </p>
 
-<h1 align="center">Gemini Web MCP Server (v0.23.0)</h1>
+<h1 align="center">Gemini Web MCP Server (v0.24.0)</h1>
 
 <p align="center">
   <a href="https://github.com/Luckycat133/gemini-web-mcp/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/Luckycat133/gemini-web-mcp/actions/workflows/ci.yml/badge.svg"></a>
@@ -33,11 +33,11 @@
 
 本文安装示例使用 [PR #39](https://github.com/Luckycat133/gemini-web-mcp/pull/39) 的开发分支。已发布的[0.3.0](https://github.com/Luckycat133/gemini-web-mcp/releases/tag/v0.3.0)仍同时保留旧版与新版入口，与本分支存在差异；较早的[0.2.2接口与存储历史](docs/version-history.md#022---2026-10-25)继续保留。切换已有安装前请先阅读[源码集成说明](docs/source-update-integration.md)。
 
-将 `gemini-mcp-function` 和 `gemini-mcp-account` 配成两个独立的 MCP 入口，各有 6 个工具。问答、Task、媒体、研究及操作结果用功能面。查历史、改名、置顶、移动或删除已有对话，以及管理 Notebook、查看已有 Task，用账号面。客户端可以只启用其中一个。原先各 17 个工具的目录可通过 `function-full` 和 `account-full` 显式加载。
+统一只暴露两个命令入口：`gemini-web-mcp`（8 个动宾结构 MCP 工具：`ask-gemini`、`generate-image`、`generate-video`、`generate-music`、`run-research`、`run-task`、`get-operation`、`check-quota`）与 `gemini-web-cli`（账号、历史、Notebook、Task 与清理管理 CLI）。
 
-`gemini_ask(notebook_ids=[...])` 基于 Notebook 来源启动后台普通聊天，`gemini_run_task` 则启动独立 Task。保留 `operation_id`，用状态工具查进度、用结果工具取回经核验的完整产物。结果恢复可能触发自有对话自动清理，所以两者使用独立工具。Task 文件附件也须保存并校验，才会释放清理保护。已保存的结果可跨进程读取。
+`ask-gemini` 支持纯文本、多模态 `inputs`（图片/文件/URL/文本）及基于 Notebook 来源的聊天；`run-task` 启动后台 Task（默认自动批准交互式确认卡片）。长耗时工具均支持通过 MCP `notifications/progress` 上报等待进度，并在等待超时后返回可恢复的 `operation_id`，通过 `get-operation` 无重复重发地查询状态与完整产物。`check-quota` 直接调用 `GET_USAGE_INFO` 返回 5 小时与每周额度剩余/总量、百分比与重置时间。
 
-`gemini_notebooks` 默认返回来源目录，`source="gemini"` 可查看项目。默认 `gemini_tasks` 只读元数据和进度。Task 计划、显式浏览器输入、原生 Skills 和持久偏好按需使用 `account-full`。设置读回仅证明偏好已保存。详见 [Notebook、聊天与 Task 工作流](docs/notebook-task-workflows.md)和[网页版功能实测矩阵](docs/web-feature-coverage.md)。
+默认 `gemini-web-cli` 提供历史、Notebook、Task、额度与清理等本地管理能力；兼容旧目录可通过 `GEMINI_TOOLS=... python -m src.server` 显式启动。详见 [Notebook、聊天与 Task 工作流](docs/notebook-task-workflows.md)和[网页版功能实测矩阵](docs/web-feature-coverage.md)。
 
 ### 🤖 模型支持
 - **flash** / **fast** → 兼容默认，优先当前账号发现的 Hydrogen
@@ -109,7 +109,7 @@ ClawHub 上的运行 skill 包按 MIT-0 分发；MCP 服务器源码和仓库开
 uvx --from git+https://github.com/Luckycat133/gemini-web-mcp@codex/gemini-tools-polish-20261101 gemini-mcp-onboarding
 ```
 
-这条命令会在隔离环境中安装开发分支源码，启动 `gemini-mcp-function`，核对 6 个功能工具，并用空 `gemini_ask` 的结构化 `INVALID_ARGUMENT` 响应验证连接。预检不读取 Gemini Cookie，也不向 Gemini 发请求。需要固定版本时，把 `@` 后的分支名换成已审核的 commit SHA。
+这条命令会在隔离环境中安装源码，启动 `gemini-web-mcp`，核对 8 个动宾结构 MCP 工具，并用空 `ask-gemini` 的结构化 `INVALID_ARGUMENT` 响应验证连接。预检不读取 Gemini Cookie，也不向 Gemini 发请求。需要固定版本时，把 `@` 后的分支名换成已审核的 commit SHA。
 
 ### 1. 使用已有 Chrome 会话
 
@@ -130,7 +130,7 @@ Chrome 已登录 [Gemini](https://gemini.google.com) 时，使用下面带 `[all
       "args": [
         "--from",
         "gemini-mcp-server[all] @ git+https://github.com/Luckycat133/gemini-web-mcp@codex/gemini-tools-polish-20261101",
-        "gemini-mcp-function"
+        "gemini-web-mcp"
       ]
     }
   }
@@ -165,26 +165,20 @@ GEMINI_TOOLS=core python -m src.server
 # 完整维护/验证工具面
 GEMINI_TOOLS=all python -m src.server
 
-# 默认功能面（6 个工具）
-gemini-mcp-function
+# 默认统一 MCP 服务（8 个动宾结构工具）
+gemini-web-mcp
 
-# 对话和账号管理面（6 个工具，按需连接）
-gemini-mcp-account
+# 本地管理与预检 CLI
+gemini-web-cli --help
 
-# 兼容原先各 17 个工具的目录
-GEMINI_TOOLS=function-full gemini-mcp-server
-GEMINI_TOOLS=account-full gemini-mcp-server
-
-# 未设置 GEMINI_TOOLS 的主入口同样使用功能面
-gemini-mcp-server
-
-# 安装后的低 token facade 入口
-gemini-mcp-skill-server
+# 兼容显式启动其他旧目录
+GEMINI_TOOLS=function-full python -m src.server
+GEMINI_TOOLS=account-full python -m src.server
 ```
 
 ---
 
-媒体统一用 `gemini_create_media`，通过 `kind` 选择生成图片、编辑图片、视频或音乐。省略媒体 `model` 时选择当前账号发现的 Hydrogen，显式 Neon／Carbon 等可用选择保留。默认 `wait_seconds=120` 等待同一后台操作，设为 0 立即返回句柄；后续用同一 `operation_id` 查状态和取结果，`gemini_get_operation_result(wait_seconds=30)` 不重发生成。网页视频支持 10／15 秒和横／竖画幅。当前模型与后端证据边界见[模型指南](docs/models.md)。旧媒体工具和报告派生留在 `function-full`。定时任务、Gems 和按账本处理自有聊天的 `gemini_cleanup` 留在 `account-full`。原主服务的显式兼容工具组、assist 和 compact 入口继续可用。
+媒体生成与编辑统一按类型拆分为 `generate-image`（支持 `source_operation_id` 编辑续接与多参考图）、`generate-video` 和 `generate-music`；长耗时工具默认内联等待并返回 `notifications/progress` 进度心跳，超时后返回持久化 `operation_id` 供 `get-operation` 无重发检索。当前模型与后端证据边界见[模型指南](docs/models.md)。
 
 ## 📦 环境变量
 
@@ -217,7 +211,7 @@ gemini-mcp-skill-server
 | `prompts` | 本地提示词库存取 | 可选附加能力 | 低 |
 | `all` | `core` + `manage` | 完整维护/验证工具面 | 高 |
 
-日常问答和生成连接 `gemini-mcp-function`，对话和账号管理连接 `gemini-mcp-account`。表中的工具组用于显式兼容配置或维护验证。需要旧四工具 facade 时使用 `gemini-mcp-skill-server`。
+日常 MCP 使用统一连接 `gemini-web-mcp`，账号/历史/Notebook/清理管理使用 `gemini-web-cli`；上表中的工具组仅供 `GEMINI_TOOLS=... python -m src.server` 显式兼容或维护验证使用。
 
 ---
 

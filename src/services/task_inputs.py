@@ -10,7 +10,7 @@ from typing import Any
 
 from ..domain import DomainErrorCode, DomainResult, DomainWarning, LongOperationData
 from ..infrastructure.account_identity import operation_account_matches
-from ..infrastructure.task_confirmation import one_time_browser_option
+from ..infrastructure.task_confirmation import one_time_browser_option, select_auto_approve_option
 from .deadlines import await_before_deadline
 
 TASK_INPUT_INITIALIZE_SECONDS = 60.0
@@ -18,7 +18,7 @@ TASK_INPUT_READ_SECONDS = 60.0
 
 
 def task_auto_approve_enabled() -> bool:
-    return os.environ.get("GEMINI_TASK_AUTO_APPROVE", "").strip().lower() == "true"
+    return os.environ.get("GEMINI_TASK_AUTO_APPROVE", "true").strip().lower() not in {"false", "0", "no", "off"}
 
 
 def input_handle(record: Any) -> str:
@@ -82,13 +82,13 @@ async def submit_task_input(request: dict[str, Any], *, operation_id: str) -> Do
 
 
 async def auto_approve_task_input(store: Any, record: Any, turn: dict[str, Any], *, worker_token: str) -> None:
-    """Allow the observed browser-use permission once on the worker's current turn."""
+    """Auto-approve an observed interactive confirmation card on the worker's current turn."""
     if (turn.get("input_required") is not True or turn.get("setup_card_present")
             or (turn.get("chat_id"), turn.get("rid"), turn.get("rcid")) != (
                 record.upstream_chat_id, record.upstream_response_id, record.upstream_candidate_id)
             or not operation_account_matches(record)):
         return
-    allow = one_time_browser_option(turn)
+    allow = select_auto_approve_option(turn) or one_time_browser_option(turn)
     if allow is None:
         return
     await _dispatch_task_input(

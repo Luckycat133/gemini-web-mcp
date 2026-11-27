@@ -16,10 +16,76 @@ _BROWSER_PERMISSION_TITLES = frozenset({"browser", "browser permission", "浏览
 _BROWSER_ALLOW_ONCE = frozenset({"allow", "allow once", "允许", "允许一次", "允許", "允許一次"})
 _BROWSER_ALWAYS_ALLOW = frozenset({"always allow", "始终允许", "一律允許"})
 _BROWSER_DENY = frozenset({"deny", "do not allow", "don't allow", "不允许", "拒绝", "不允許", "拒絕"})
+_CARD_DENY_LABELS = frozenset({
+    "deny", "do not allow", "don't allow", "cancel", "reject", "no", "decline", "skip", "stop",
+    "不允许", "拒绝", "取消", "否", "不允許", "拒絕",
+})
+_CARD_AFFIRM_PRIORITY = (
+    frozenset({"allow once", "允许一次", "允許一次"}),
+    frozenset({"allow", "允许", "允許"}),
+    frozenset({"confirm", "确认", "確認", "确定"}),
+    frozenset({"continue", "proceed", "继续", "繼續"}),
+    frozenset({"approve", "批准", "同意", "accept"}),
+    frozenset({"yes", "ok", "run", "submit", "authorize", "grant", "delete", "send", "create", "update", "是", "执行", "授权", "提交"}),
+    _BROWSER_ALWAYS_ALLOW,
+)
 
 
 def _permission_label(value: str) -> str:
     return " ".join(value.casefold().replace("’", "'").split())
+
+
+def select_auto_approve_option(turn: dict[str, Any]) -> dict[str, str] | None:
+    """Select the safest affirmative action from any verified interactive confirmation card."""
+    browser_choice = one_time_browser_option(turn)
+    if browser_choice is not None:
+        return browser_choice
+    card = turn.get("input_card")
+    options = turn.get("input_options")
+    if (
+        not isinstance(card, dict)
+        or card.get("unsupported")
+        or card.get("browser_permission_card") is True
+        or not isinstance(options, list)
+        or not options
+    ):
+        return None
+    replies = card.get("replies")
+    if not isinstance(replies, list) or len(replies) != len(options):
+        return None
+
+    non_deny: list[tuple[dict[str, Any], dict[str, Any], str]] = []
+    saw_deny = False
+    for option, reply in zip(options, replies, strict=True):
+        if not isinstance(option, dict) or not isinstance(reply, dict):
+            continue
+        label = _permission_label(str(option.get("label") or ""))
+        opt_id = option.get("input_option_id")
+        prompt = option.get("prompt")
+        if not isinstance(opt_id, str) or not opt_id or not isinstance(prompt, str) or not prompt:
+            continue
+        if label in _CARD_DENY_LABELS:
+            saw_deny = True
+            continue
+        non_deny.append((option, reply, label))
+
+    if not non_deny:
+        return None
+
+    for priority_group in _CARD_AFFIRM_PRIORITY:
+        matches = [entry for entry in non_deny if entry[2] in priority_group]
+        if matches:
+            # Prefer slot 7 (one-time / secondary confirm) over slot 6 if both match the same tier.
+            matches.sort(key=lambda entry: (0 if (entry[1].get("action_path") or [9])[0] == 7 else 1))
+            chosen = matches[0][0]
+            return {"input_option_id": chosen["input_option_id"], "prompt": chosen["prompt"]}
+
+    if saw_deny:
+        slot7 = [entry for entry in non_deny if (entry[1].get("action_path") or [None])[0] == 7]
+        chosen = (slot7[0] if slot7 else non_deny[0])[0]
+        return {"input_option_id": chosen["input_option_id"], "prompt": chosen["prompt"]}
+
+    return None
 
 
 def one_time_browser_option(turn: dict[str, Any]) -> dict[str, str] | None:

@@ -84,7 +84,7 @@ def test_task_status_marks_pending_input_and_shows_background_setting(monkeypatc
         monkeypatch.setattr(operation_service, "OperationService", lambda *args: Service())
         content = asyncio.run(session(action="operation_status", session_id="op_test"))[0]
     assert "🚩 The Task requires input" in content.text
-    assert ("🚩 Background approval is enabled" in content.text) is enabled
+    assert ("🚩 Background auto-approval is enabled" in content.text) is enabled
     assert content.meta["domain_result"]["data"]["input_required"] is True
 
 

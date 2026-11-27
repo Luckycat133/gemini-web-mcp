@@ -6,6 +6,17 @@ Each minor iteration introduces a workflow; patch iterations group related corre
 
 ## [Unreleased]
 
+## [0.24.0] - 2026-11-27
+
+Unified `gemini-web-mcp` entrypoint, 8 verb-object MCP tools, `ask-gemini` multimodal merge, `check-quota` (5h & weekly credits), MCP progress heartbeats, and default-on Task auto-approval across interactive cards (`0.24.0`).
+
+### Changed
+
+- Unified `[project.scripts]` to `gemini-web-mcp` and `gemini-web-cli`, purging legacy `gemini-mcp-*` entrypoints (`pyproject.toml`, `scripts/update_local_mcp.py`, `src/onboarding.py`).
+- Renamed tools to 8 verb-object identifiers (`ask-gemini`, `generate-image`, `generate-video`, `generate-music`, `run-research`, `run-task`, `get-operation`, `check-quota`), merged `understand` into `ask-gemini(inputs=...)`, streamlined `ask-gemini` / `generate-*` parameters, and wired MCP `notifications/progress` + default wait loops into `run-task` and `run-research`.
+- Added `check-quota` backed by `GRPC.GET_USAGE_INFO` (`src/services/quota.py`) reporting both exact remaining/total credits and usage percentages for 5h and weekly windows.
+- Enabled Task confirmation auto-approval by default for all interactive cards and tasks regardless of origin (`src/services/task_inputs.py`, `src/infrastructure/task_confirmation.py`, `src/services/web_task_approvals.py`, `src/data/task_card_approval.js`).
+
 ## [0.23.0] - 2026-11-26
 
 Lean 8-tool unprefixed MCP surface, live Gemini 4 + `medium` thinking defaults, IDE-agnostic rate-limit guidance, music synthesis failure fixes, and ~49% schema token reduction (`0.23.0`).

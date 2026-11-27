@@ -205,51 +205,51 @@
     "function": [
       {
         "annotations_sha256": "99300d9e2937ba92c763822593cb3ba8ec634d1813f3ab37fad3d6d0432268f9",
-        "input_schema_sha256": "2da24dac282fa3c01172329108b9e4fc393fae1b7a8b9a15761badf93162ffee",
-        "name": "ask",
-        "output_schema_sha256": "84e9d5528407ad517b353a8d9f2f0e49b9a1ec4102833659add114aaa147f729"
+        "input_schema_sha256": "6c27a9d88cc075f43b899884d7a5c997b944cc592f10212c351d30461dc9f6db",
+        "name": "ask-gemini",
+        "output_schema_sha256": "3ec3fa52366887650d1303844135e83923afe5067e4f192b55c46b18a2ea425d"
+      },
+      {
+        "annotations_sha256": "139076388a98d13d07bb3df5c31e17088f4e37e0af35e2d89a7d5b112ee0e214",
+        "input_schema_sha256": "99334726611ccf58a148b0814696bfa6fe08c1b2d027e946beccf5a74331c9aa",
+        "name": "check-quota",
+        "output_schema_sha256": "b0e0beb7ab67b68735b362a79d372259099fb6bc1dd3e881c1086fd8e335de77"
       },
       {
         "annotations_sha256": "99300d9e2937ba92c763822593cb3ba8ec634d1813f3ab37fad3d6d0432268f9",
-        "input_schema_sha256": "f6ef4a29894ef46bcfac80959a8a706075de8832b8c98fe3c575a39f97321469",
-        "name": "image",
-        "output_schema_sha256": "84e9d5528407ad517b353a8d9f2f0e49b9a1ec4102833659add114aaa147f729"
+        "input_schema_sha256": "aa0ad52f26b5655775d6eebdf2e2f7027d0862bf7b208bcdac66ea7c4bc62bf6",
+        "name": "generate-image",
+        "output_schema_sha256": "fe2661d319292b9e43a18e8462cc57b8617ec398107861f24f757e0a2a145d28"
       },
       {
         "annotations_sha256": "99300d9e2937ba92c763822593cb3ba8ec634d1813f3ab37fad3d6d0432268f9",
-        "input_schema_sha256": "8fe75f901d94d52e88e76e114ccbec5e77c526c536e88361549b5fa28152a199",
-        "name": "music",
-        "output_schema_sha256": "84e9d5528407ad517b353a8d9f2f0e49b9a1ec4102833659add114aaa147f729"
+        "input_schema_sha256": "c5c672bc15d8ba9b47e800eb32cbc7504ce62a50b1c530d8dc84141f50285f30",
+        "name": "generate-music",
+        "output_schema_sha256": "cbedf28da01d17424ed9e4f6695b8180cf68420b3dc747ba0360699b64ab3310"
+      },
+      {
+        "annotations_sha256": "99300d9e2937ba92c763822593cb3ba8ec634d1813f3ab37fad3d6d0432268f9",
+        "input_schema_sha256": "53a676d10b5d9466300fac5a7c7959c3a84c8c644bf5fafe21c07248841919e9",
+        "name": "generate-video",
+        "output_schema_sha256": "71c05dbb66358c1ffcaa14e4f4a6c5ea321c59ce1e7c07b94cf4922ab8e64ab6"
       },
       {
         "annotations_sha256": "bbca3f90a8f37a2e09188309470b131134c395dbc4eccad15de06d2c2f94f06a",
         "input_schema_sha256": "da2530b8e83bb5435774eeb2b005607d6113ddc4c04e91e8c051e5766660cfc8",
-        "name": "operation",
-        "output_schema_sha256": "84e9d5528407ad517b353a8d9f2f0e49b9a1ec4102833659add114aaa147f729"
+        "name": "get-operation",
+        "output_schema_sha256": "1ad1c722fa430a2b43c63336d88771aa17cc35414c1ea11daff4a6a41daabe97"
       },
       {
         "annotations_sha256": "bbca3f90a8f37a2e09188309470b131134c395dbc4eccad15de06d2c2f94f06a",
-        "input_schema_sha256": "d6681631ccca0807ae376eb2f4fda4f7e7ed30f864163d0066f681c60fbdd536",
-        "name": "research",
-        "output_schema_sha256": "84e9d5528407ad517b353a8d9f2f0e49b9a1ec4102833659add114aaa147f729"
+        "input_schema_sha256": "ee516ff68bc653905dda8cda9983dec81d6034f5201316a21c2a3dcf8ea7528e",
+        "name": "run-research",
+        "output_schema_sha256": "fbd7b84c21f912c9258a0fad38d83478b9577a87ecb1741f6b577620d157bd82"
       },
       {
         "annotations_sha256": "bbca3f90a8f37a2e09188309470b131134c395dbc4eccad15de06d2c2f94f06a",
-        "input_schema_sha256": "f71d9465fb9e3fe3e3020bb5b59fe4652d23915058e3656ad02e534052d30cc6",
-        "name": "task",
-        "output_schema_sha256": "84e9d5528407ad517b353a8d9f2f0e49b9a1ec4102833659add114aaa147f729"
-      },
-      {
-        "annotations_sha256": "99300d9e2937ba92c763822593cb3ba8ec634d1813f3ab37fad3d6d0432268f9",
-        "input_schema_sha256": "3143fb2a8a6e58dbbcc42aadf400f20703db84693c586916d242d435a7dda0ff",
-        "name": "understand",
-        "output_schema_sha256": "df9e34207d2c409217e33be6ab7cadac76a3098a56f7bedd95d935e145234659"
-      },
-      {
-        "annotations_sha256": "99300d9e2937ba92c763822593cb3ba8ec634d1813f3ab37fad3d6d0432268f9",
-        "input_schema_sha256": "beb95befcedff8f1ca88923c88c05e85d9de77e10926426df2141e90ad32db91",
-        "name": "video",
-        "output_schema_sha256": "84e9d5528407ad517b353a8d9f2f0e49b9a1ec4102833659add114aaa147f729"
+        "input_schema_sha256": "9ea8c16e7f1bb8af46ea81592f7824eea977afa353f13be6d61240839fd4fb2c",
+        "name": "run-task",
+        "output_schema_sha256": "ab97b9bf376d198a9abb6cedff5e809494d27d1496378eb8aca5eb20ef57d6b3"
       }
     ],
     "function-full": [

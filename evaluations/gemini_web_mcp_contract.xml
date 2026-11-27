@@ -9,7 +9,7 @@
   </qa_pair>
   <qa_pair>
     <question>How should an agent combine two distinguishable synthetic image references, reconnect to retrieve the generated image, and then edit only its background?</question>
-    <answer>Use image (or gemini_generate_image on function-full) with both local image_paths in prompt order. After reconnecting, use operation (or gemini_get_operation_status and gemini_get_operation_result) with the original handle and confirm recovery sent no duplicate generation. Require the downloaded image container to match its signature and pass pixel decoding. Submit image (or gemini_edit_image) with source_operation_id and the selected source_artifact_id, then verify the new handle links to the parent operation and image. Keep unresolved image conversations protected if decoding fails. During live acceptance, inspect the decoded images to confirm both references contributed and the edit changed only the background.</answer>
+    <answer>Use generate-image (or gemini_generate_image on function-full) with both local image_paths in prompt order. After reconnecting, use get-operation (or gemini_get_operation_status and gemini_get_operation_result) with the original handle and confirm recovery sent no duplicate generation. Require the downloaded image container to match its signature and pass pixel decoding. Submit generate-image (or gemini_edit_image) with source_operation_id and the selected source_artifact_id, then verify the new handle links to the parent operation and image. Keep unresolved image conversations protected if decoding fails. During live acceptance, inspect the decoded images to confirm both references contributed and the edit changed only the background.</answer>
   </qa_pair>
   <qa_pair>
     <question>How should a complete Gemini generation failure notice affect Chat or grounded search?</question>
@@ -17,7 +17,7 @@
   </qa_pair>
   <qa_pair>
     <question>How can a caller explicitly request the latest Omni video model and a 15-second video?</question>
-    <answer>video (or gemini_generate_video on function-full) uses the signed-in Gemini App with discovered Hydrogen, accepts duration_seconds=10 or 15 (10s only when image_path is attached) and aspect_ratio=16:9 or 9:16, and waits up to 300 seconds on the original operation by default (or 240s for music, 120s for image, or wait_seconds=0 for immediate handle). Paid gemini-omni-1.2-flash / GEMINI_API_KEY is disabled and rejected with INVALID_ARGUMENT. Recover the verified MP4 using the same operation_id and operation(operation_id=..., wait_seconds=30), without re-submission. Chat selectors and route labels do not prove exact Web generator versions.</answer>
+    <answer>generate-video (or gemini_generate_video on function-full) uses the signed-in Gemini App with discovered Hydrogen, accepts duration_seconds=10 or 15 (10s only when image_path is attached) and aspect_ratio=16:9 or 9:16, and waits up to 300 seconds on the original operation by default (or 240s for generate-music, 120s for generate-image, or wait_seconds=0 for immediate handle). Paid gemini-omni-1.2-flash / GEMINI_API_KEY is disabled and rejected with INVALID_ARGUMENT. Recover the verified MP4 using the same operation_id and get-operation(operation_id=..., wait_seconds=30), without re-submission. Chat selectors and route labels do not prove exact Web generator versions.</answer>
   </qa_pair>
   <qa_pair>
     <question>May a timed-out Gemini Omni API video start be repeated automatically, or deleted before saving its MP4?</question>

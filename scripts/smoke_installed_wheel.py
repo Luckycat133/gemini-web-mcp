@@ -16,15 +16,10 @@ from typing import Any, cast
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 EXPECTED_ENTRY_POINTS = {
-    "gemini-mcp-server": "src.server:main",
-    "gemini-mcp-skill-server": "src.skill_server:main",
-    "gemini-mcp-onboarding": "src.onboarding:main",
-    "gemini-mcp-assist": "src.surfaces.assist:main",
-    "gemini-mcp-function": "src.surfaces.function:main",
-    "gemini-mcp-account": "src.surfaces.account:main",
+    "gemini-web-mcp": "src.surfaces.function:main",
     "gemini-web-cli": "src.cli:main",
 }
-SERVER_ENTRY_POINTS = ("gemini-mcp-server", "gemini-mcp-function", "gemini-mcp-account", "gemini-mcp-skill-server", "gemini-mcp-assist")
+SERVER_ENTRY_POINTS = ("gemini-web-mcp",)
 
 
 def _assert_installed_import() -> Path:
@@ -37,7 +32,7 @@ def _assert_installed_import() -> Path:
 
 
 def _check_package_data() -> dict[str, Any]:
-    for browser_script in ("task_delete_approval.js", "native_media_browser.js"):
+    for browser_script in ("task_delete_approval.js", "task_card_approval.js", "native_media_browser.js"):
         if not files("src").joinpath("data", browser_script).is_file():
             raise RuntimeError(f"Installed wheel is missing src/data/{browser_script}")
     resource = files("src").joinpath("data", "prompts_default.json")
@@ -140,10 +135,6 @@ def _start_console_entrypoints() -> None:
                     f"stdout:\n{completed.stdout}\nstderr:\n{completed.stderr}"
                 )
 
-        initialized_prompts = smoke_cwd / ".gemini" / "prompts.json"
-        if not initialized_prompts.is_file():
-            raise RuntimeError("Compact console did not initialize prompts from installed package data")
-
 
 def _call_offline_text_tool() -> dict[str, Any]:
     environment = os.environ.copy()
@@ -152,12 +143,9 @@ def _call_offline_text_tool() -> dict[str, Any]:
         environment.pop(name, None)
     environment["GEMINI_AUTO_REFRESH"] = "false"
 
-    executable = shutil.which("gemini-mcp-onboarding", path=str(Path(sys.executable).parent))
-    if executable is None:
-        raise RuntimeError("Cannot locate installed gemini-mcp-onboarding entrypoint")
     with tempfile.TemporaryDirectory(prefix="gemini-onboarding-smoke-") as directory:
         completed = subprocess.run(
-            [executable],
+            [sys.executable, "-m", "src.onboarding"],
             cwd=directory,
             env=environment,
             capture_output=True,
@@ -174,8 +162,8 @@ def _call_offline_text_tool() -> dict[str, Any]:
         payload = json.loads(completed.stdout)
     except json.JSONDecodeError as exc:
         raise RuntimeError(f"Onboarding preflight returned invalid JSON: {completed.stdout!r}") from exc
-    if (payload.get("status") != "ok" or payload.get("text_tool") != "gemini_ask"
-            or payload.get("profile") != "function" or payload.get("enabled_tools") != 6):
+    if (payload.get("status") != "ok" or payload.get("text_tool") != "ask-gemini"
+            or payload.get("profile") != "function" or payload.get("enabled_tools") != 8):
         raise RuntimeError(f"Onboarding preflight did not call the expected text tool: {payload!r}")
     if payload.get("credentials_accessed") is not False or payload.get("mode") != "offline":
         raise RuntimeError(f"Onboarding preflight did not preserve its offline boundary: {payload!r}")

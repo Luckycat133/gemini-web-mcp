@@ -161,6 +161,7 @@ def test_server_shutdown_steps_share_one_total_deadline(monkeypatch):
 
     from src.services import task_browser_sessions
 
+    monkeypatch.setenv("GEMINI_TASK_WEB_APPROVALS", "false")
     monkeypatch.setattr(task_browser_sessions, "close_task_browser_sessions", close_browser_sessions)
     monkeypatch.setattr(cw, "asyncio", AsyncioClock())
     monkeypatch.setattr(cw, "_await_shutdown_step", checked_step)

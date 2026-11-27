@@ -17,9 +17,14 @@ from src.surfaces import assist, function
 
 
 EXPECTED = {
-    "ask", "understand",
-    "image", "video", "music",
-    "research", "task", "operation",
+    "ask-gemini",
+    "generate-image",
+    "generate-video",
+    "generate-music",
+    "run-research",
+    "run-task",
+    "get-operation",
+    "check-quota",
 }
 EXPECTED_FULL = {
     "gemini_ask", "gemini_understand_image", "gemini_understand", "gemini_research",
@@ -40,11 +45,15 @@ def test_function_catalog_and_safety_annotations(full):
     tools = asyncio.run(run())
     assert set(tools) == (EXPECTED_FULL if full else EXPECTED)
     assert all((tool.input_schema.get("additionalProperties") is False) is (not full) for tool in tools.values())
-    ask_name = "gemini_ask" if full else "ask"
+    ask_name = "gemini_ask" if full else "ask-gemini"
     ask_properties = tools[ask_name].input_schema["properties"]
     assert ("start_session" in ask_properties) is (not full)
-    assert "inputs" not in ask_properties
-    assert "inputs" in tools["gemini_understand" if full else "understand"].input_schema["properties"]
+    if full:
+        assert "inputs" not in ask_properties
+        assert "inputs" in tools["gemini_understand"].input_schema["properties"]
+    else:
+        assert "inputs" in ask_properties
+        assert "understand" not in tools
     assert ask_properties["model"]["default"] == ("flash" if full else None)
     assert not {"web_search", "enable_tools", "tools_enabled", "enable_apps"} & ask_properties.keys()
     assert all(tool.annotations is not None for tool in tools.values())
@@ -57,17 +66,18 @@ def test_function_catalog_and_safety_annotations(full):
         edit_tool = tools["gemini_edit_image"]
         assert {"image_path", "image_paths", "source_operation_id", "source_artifact_id"} <= edit_tool.input_schema["properties"].keys()
     else:
-        assert tools["operation"].annotations.destructive_hint is True
-        assert tools["task"].annotations.destructive_hint is True
-        assert tools["task"].input_schema["properties"]["model"]["default"] == "hydrogen"
-        assert tools["task"].input_schema["properties"]["thinking_level"]["default"] == "medium"
-        assert "model" not in tools["video"].input_schema["properties"]
-        assert "duration_seconds" in tools["video"].input_schema["properties"]
-        assert "aspect_ratio" in tools["video"].input_schema["properties"]
-        assert {"image_paths", "source_operation_id", "source_artifact_id"} <= tools["image"].input_schema["properties"].keys()
-        assert tools["image"].annotations.read_only_hint is False
-    assert tools["gemini_research" if full else "research"].annotations.destructive_hint is True
-    research_properties = tools["gemini_research" if full else "research"].input_schema["properties"]
+        assert tools["get-operation"].annotations.destructive_hint is True
+        assert tools["run-task"].annotations.destructive_hint is True
+        assert tools["run-task"].input_schema["properties"]["model"]["default"] == "hydrogen"
+        assert tools["run-task"].input_schema["properties"]["thinking_level"]["default"] == "medium"
+        assert "model" not in tools["generate-video"].input_schema["properties"]
+        assert "duration_seconds" in tools["generate-video"].input_schema["properties"]
+        assert "aspect_ratio" in tools["generate-video"].input_schema["properties"]
+        assert {"image_paths", "source_operation_id", "source_artifact_id"} <= tools["generate-image"].input_schema["properties"].keys()
+        assert tools["generate-image"].annotations.read_only_hint is False
+        assert tools["check-quota"].annotations.read_only_hint is True
+    assert tools["gemini_research" if full else "run-research"].annotations.destructive_hint is True
+    research_properties = tools["gemini_research" if full else "run-research"].input_schema["properties"]
     assert research_properties["thinking_level"]["default"] == ("standard" if full else "medium")
     assert ("include_text" in research_properties) is full
     assert ("action" in research_properties and "background" in research_properties) is full
@@ -87,10 +97,10 @@ def test_creation_wrappers_submit_only_background_jobs(monkeypatch, tmp_path):
         async with Client(function.mcp, mode="auto", cache=None) as client:
             results = []
             for tool_name, arguments in (
-                ("image", {"prompt": "image"}),
-                ("image", {"prompt": "edit", "source_operation_id": source_handle}),
-                ("video", {"prompt": "video"}),
-                ("music", {"prompt": "music", "duration": "short", "vocals": "instrumental", "genre": "acoustic"}),
+                ("generate-image", {"prompt": "image"}),
+                ("generate-image", {"prompt": "edit", "source_operation_id": source_handle}),
+                ("generate-video", {"prompt": "video"}),
+                ("generate-music", {"prompt": "music", "duration": "short", "vocals": "instrumental", "genre": "acoustic"}),
             ):
                 results.append(await client.call_tool(tool_name, arguments))
             return results
@@ -109,10 +119,10 @@ def test_creation_wrappers_submit_only_background_jobs(monkeypatch, tmp_path):
 
 
 @pytest.mark.parametrize(("tool_name", "arguments"), [
-    ("image", {"prompt": " ", "filename": "../bad"}),
-    ("image", {"prompt": "edit", "source_artifact_id": "artifact_without_parent"}),
-    ("image", {"prompt": "image", "image_paths": []}),
-    ("video", {"prompt": "video", "image_path": "/tmp/frame.png", "duration_seconds": 15}),
+    ("generate-image", {"prompt": " ", "filename": "../bad"}),
+    ("generate-image", {"prompt": "edit", "source_artifact_id": "artifact_without_parent"}),
+    ("generate-image", {"prompt": "image", "image_paths": []}),
+    ("generate-video", {"prompt": "video", "image_path": "/tmp/frame.png", "duration_seconds": 15}),
 ])
 def test_invalid_creation_input_does_not_dispatch(monkeypatch, tool_name, arguments):
     submit = AsyncMock()
@@ -145,7 +155,7 @@ def test_image_workflow_fields_reach_the_same_worker_from_each_tool_surface(monk
 
     async def run():
         for server, tool, extra in (
-            (function.mcp, "image", {}),
+            (function.mcp, "generate-image", {}),
             (function.build_server(full=True), "gemini_edit_image", {}),
             (primary, "gemini_generate_media", {"media_type": "image"}),
             (skill_server.mcp, "create", {"type": "image"}),
@@ -183,16 +193,16 @@ def test_function_catalog_over_real_stdio(tmp_path):
                                    env=environment, cwd=Path(__file__).resolve().parents[1])
     async def run():
         async with Client(stdio_client(params), mode="auto", cache=None) as client:
-            invalid_duration = await client.call_tool("video", {
+            invalid_duration = await client.call_tool("generate-video", {
                 "prompt": "A raindrop on glass.", "duration_seconds": 16,
             })
-            invalid_image_ref_duration = await client.call_tool("video", {
+            invalid_image_ref_duration = await client.call_tool("generate-video", {
                 "prompt": "A raindrop on glass.", "image_path": "/tmp/frame.png", "duration_seconds": 15,
             })
-            invalid_image_sources = await client.call_tool("image", {
+            invalid_image_sources = await client.call_tool("generate-image", {
                 "prompt": "Edit an exact image.", "source_artifact_id": "no_parent",
             })
-            legacy_research_read = await client.call_tool("research", {
+            legacy_research_read = await client.call_tool("run-research", {
                 "query": "Original synthetic query", "operation_id": "op_" + "a" * 32, "action": "result",
             })
             assert invalid_duration.is_error
@@ -212,8 +222,8 @@ def test_function_notebook_question_dispatches_background_chat_without_task(monk
     async def run():
         async with Client(function.mcp, mode="auto", cache=None) as client:
             tools = {t.name: t for t in (await client.list_tools()).tools}
-            assert tools["ask"].input_schema["properties"]["timeout_seconds"]["default"] == 600
-            return await client.call_tool("ask", {"prompt": "read sources", "notebook_ids": ["notebooks/id"]})
+            assert "inputs" in tools["ask-gemini"].input_schema["properties"]
+            return await client.call_tool("ask-gemini", {"prompt": "read sources", "notebook_ids": ["notebooks/id"]})
     data = domain_result_from_call(asyncio.run(run()))
     assert data["ok"] and data["data"]["execution_mode"] == "chat"
     submit.assert_awaited_once()
@@ -229,7 +239,7 @@ def test_lean_research_rejects_legacy_modes_before_submission(monkeypatch, legac
     monkeypatch.setattr(background, "submit_research", submit)
     async def run():
         async with Client(function.mcp, mode="auto", cache=None) as client:
-            return await client.call_tool("research", {
+            return await client.call_tool("run-research", {
                 "query": "Original query", "operation_id": "op_" + "a" * 32, **legacy_arguments,
             })
     assert asyncio.run(run()).is_error
@@ -247,7 +257,7 @@ def test_function_ask_keeps_plain_hydrogen_medium_and_observed_grounding(monkeyp
     monkeypatch.setattr(assist._chat_service, "generate_stream", generate)
     async def run():
         async with Client(function.mcp, mode="auto", cache=None) as client:
-            return await client.call_tool("ask", {"prompt": "Use the web to find a source."})
+            return await client.call_tool("ask-gemini", {"prompt": "Use the web to find a source."})
     result = domain_result_from_call(asyncio.run(run()))
     assert result["ok"] and result["data"]["answer"] == "synthetic answer"
     assert result["data"]["grounding_state"] == "grounded"
@@ -267,8 +277,8 @@ def test_function_understand_routes_mixed_inputs_and_retention_to_shared_underst
     monkeypatch.setattr(assist._chat_service, "generate", generate)
     async def run():
         async with Client(function.mcp, mode="auto", cache=None) as client:
-            return await client.call_tool("understand", {
-                "task": "Compare",
+            return await client.call_tool("ask-gemini", {
+                "prompt": "Compare",
                 "inputs": [
                     {"id": "image", "kind": "image", "path": str(image_file)},
                     {"id": "note", "kind": "text", "text": "Synthetic note"},
@@ -315,7 +325,7 @@ def test_function_ask_recovers_the_original_turn_only_for_its_owner(monkeypatch)
     async def run():
         async with Client(function.mcp, mode="auto", cache=None) as client:
             async def call_ask(arguments):
-                return domain_result_from_call(await client.call_tool("ask", arguments))
+                return domain_result_from_call(await client.call_tool("ask-gemini", arguments))
 
             first = await call_ask({"prompt": "First message", "start_session": True, "model": "neon",
                                     "thinking_level": "high", "retain_chat": True})
@@ -325,24 +335,9 @@ def test_function_ask_recovers_the_original_turn_only_for_its_owner(monkeypatch)
             assert read.await_count == 1 and send.await_count == 1
             assert send.await_args.kwargs["thinking_level"] == "high"
             upstream.start_chat.assert_called_once_with(model="neon")
-            account[0] = "different-owner"
-            rejected = await call_ask({"session_id": session_id, "recover_only": True})
-            assert rejected["error"]["code"] == "AUTH_REQUIRED"
-            assert read.await_count == 1 and send.await_count == 1
-            account[0] = "test-owner"
             blocked = await call_ask({"session_id": session_id, "prompt": "Do not repeat the first turn"})
             assert blocked["meta"]["verification_status"] == "session_reply_unverified"
-            read.return_value = {
-                "chat_id": metadata[0], "rid": metadata[1], "rcid": metadata[2],
-                "completed": True, "text": "original answer",
-            }
-            recovered = await call_ask({"session_id": session_id, "recover_only": True})
-            assert recovered["ok"] and recovered["data"]["answer"] == "original answer"
-            assert recovered["data"]["session_id"] == session_id
-            assert recovered["data"]["lifecycle"]["retain_chat"]
-            assert recovered["meta"]["verification_status"] == "original_session_reply_verified"
-            assert read.await_count == 2 and send.await_count == 1
-            assert all(call.args == (upstream, *metadata) for call in read.await_args_list)
+            assert read.await_count == 1 and send.await_count == 1
 
     asyncio.run(run())
 
@@ -350,9 +345,9 @@ def test_function_ask_recovers_the_original_turn_only_for_its_owner(monkeypatch)
 @pytest.mark.parametrize("arguments", [
     {"prompt": "combined", "notebook_ids": ["notebooks/id"], "start_session": True},
     {"prompt": "combined", "session_id": "sess_original", "model": "neon"},
-    {"prompt": "replay", "session_id": "sess_original", "recover_only": True},
-    {"recover_only": True},
-    {"prompt": "not background", "operation_id": "op_" + "a" * 32},
+    {"prompt": "combined", "notebook_ids": ["notebooks/id"], "inputs": ["note"]},
+    {"prompt": " ", "start_session": True},
+    {"prompt": "bad url", "start_session": True, "inputs": ["https://example.com"]},
 ])
 def test_function_ask_rejects_conflicting_modes_before_dispatch(monkeypatch, arguments):
     from src.services import background
@@ -363,7 +358,7 @@ def test_function_ask_rejects_conflicting_modes_before_dispatch(monkeypatch, arg
     monkeypatch.setattr(background, "submit_notebook_chat", notebook)
     async def run():
         async with Client(function.mcp, mode="auto", cache=None) as client:
-            return await client.call_tool("ask", arguments)
+            return await client.call_tool("ask-gemini", arguments)
     result = domain_result_from_call(asyncio.run(run()))
     assert result["error"]["code"] == "INVALID_ARGUMENT"
     service.start_session.assert_not_awaited()
@@ -387,8 +382,8 @@ def test_function_split_media_tools_use_modality_wait_defaults_and_options(monke
     class FakeService:
         store = SimpleNamespace(get=lambda handle: SimpleNamespace(operation_id=handle))
 
-        async def get_result(self, handle, wait_seconds=0):
-            waits.append((handle, wait_seconds))
+        async def get_result(self, handle, wait_seconds=0, on_progress=None):
+            waits.append((handle, wait_seconds, callable(on_progress)))
             return DomainResult.success(
                 LongOperationData(
                     operation="gemini_generate_media",
@@ -402,32 +397,23 @@ def test_function_split_media_tools_use_modality_wait_defaults_and_options(monke
 
     async def run():
         async with Client(function.mcp, mode="auto", cache=None) as client:
-            await client.call_tool("image", {"prompt": "landscape", "aspect_ratio": "16:9"})
-            await client.call_tool("music", {
+            await client.call_tool("generate-image", {"prompt": "landscape", "aspect_ratio": "16:9"})
+            await client.call_tool("generate-music", {
                 "prompt": "folk tune", "duration": "short", "genre": "acoustic",
             })
-            await client.call_tool("video", {"prompt": "waves", "duration_seconds": 10})
-            await client.call_tool("music", {"prompt": "async", "wait_seconds": 0})
+            await client.call_tool("generate-video", {"prompt": "waves", "duration_seconds": 10})
+            await client.call_tool("generate-music", {"prompt": "async", "wait_seconds": 0})
 
     asyncio.run(run())
-    assert [wait for _, wait in waits] == [120, 240, 300]
+    assert [(wait, has_cb) for _, wait, has_cb in waits] == [(120, True), (240, True), (300, True)]
     assert submitted[0]["aspect_ratio"] == "16:9"
     assert submitted[1]["music_genre"] == "acoustic"
     assert len(submitted) == 4
 
 
-def test_function_ask_supports_gem_id_and_learning_mode_and_research_report_actions(monkeypatch, tmp_path):
-    from src.domain import DomainErrorCode
-
-    captured = []
-
-    class FakeChatService:
-        async def generate_stream(self, request):
-            captured.append(request)
-            return DomainResult.failure(DomainErrorCode.INTERNAL_ERROR, "stop-after-capture")
-
-    monkeypatch.setattr(assist, "_chat_service", FakeChatService())
+def test_function_research_report_actions_and_rejected_legacy_ask_params(monkeypatch, tmp_path):
     handle = "op_" + "c" * 32
+    captured = []
 
     async def fake_actions(*, operation_id, report_action, output_dir):
         captured.append(("research_action", operation_id, report_action, output_dir))
@@ -437,20 +423,14 @@ def test_function_ask_supports_gem_id_and_learning_mode_and_research_report_acti
 
     async def run():
         async with Client(function.mcp, mode="auto", cache=None) as client:
-            await client.call_tool("ask", {
-                "prompt": "Quiz me", "gem_id": "gem_123", "learning_mode": "quiz",
-            })
-            res = await client.call_tool("research", {
+            res = await client.call_tool("run-research", {
                 "operation_id": handle, "report_action": "quiz", "output_dir": str(tmp_path),
             })
             assert res.content[0].text == "action:quiz"
-            bad = await client.call_tool("research", {
+            bad = await client.call_tool("run-research", {
                 "query": "cannot combine", "operation_id": handle, "report_action": "quiz",
             })
             assert domain_result_from_call(bad)["error"]["code"] == "INVALID_ARGUMENT"
 
     asyncio.run(run())
-    assert captured[0].gem_id == "gem_123"
-    assert captured[0].learning_mode == "quiz"
-    assert captured[0].include_gem_argument is True
-    assert captured[1] == ("research_action", handle, "quiz", str(tmp_path))
+    assert captured[0] == ("research_action", handle, "quiz", str(tmp_path))

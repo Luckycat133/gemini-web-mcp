@@ -1043,7 +1043,9 @@ def test_background_observer_replies_once_to_each_new_browser_permission_card(st
 @pytest.mark.parametrize("reason", ["disabled", "persistent", "local", "clarification", "setup", "different_turn",
                                    "changed_account", "wrong_action_path", "shared_reply", "missing_deny", "thread_scope"])
 def test_background_keeps_unsupported_or_unverified_cards_waiting(store, monkeypatch, reason):
-    if reason != "disabled":
+    if reason == "disabled":
+        monkeypatch.setenv("GEMINI_TASK_AUTO_APPROVE", "false")
+    else:
         monkeypatch.setenv("GEMINI_TASK_AUTO_APPROVE", "true")
     record = _make_record(store)
     _install_execute_doubles(monkeypatch, TaskClient(raise_on_generate=True), _metadata(5))

@@ -12,7 +12,6 @@ import argparse
 import asyncio
 import json
 import os
-import secrets
 import shutil
 import sys
 import tempfile
@@ -46,13 +45,13 @@ def _resolve_server_command(command: str | None = None) -> str:
             return resolved
         raise OnboardingError(f"Cannot locate MCP server command {command!r}")
 
-    beside_python = Path(sys.executable).parent / "gemini-mcp-function"
+    beside_python = Path(sys.executable).parent / "gemini-web-mcp"
     if beside_python.is_file():
         return str(beside_python)
-    resolved = shutil.which("gemini-mcp-function")
+    resolved = shutil.which("gemini-web-mcp")
     if resolved:
         return resolved
-    raise OnboardingError("Cannot locate the installed gemini-mcp-function entrypoint")
+    raise OnboardingError("Cannot locate the installed gemini-web-mcp entrypoint")
 
 
 def _server_environment(*, profile: str, allow_live_account: bool) -> dict[str, str]:
@@ -219,7 +218,7 @@ async def run_preflight(*, server_command: str | None = None) -> dict[str, Any]:
         names = {tool.name for tool in listed.tools}
         if names != FUNCTION_TOOLS:
             raise OnboardingError("The function tool catalog did not match its public contract")
-        result = await client.call_tool("ask", {"prompt": ""})
+        result = await client.call_tool("ask-gemini", {"prompt": ""})
         protocol_version = client.protocol_version
         server_version = client.server_info.version if client.server_info else None
     if result.is_error or result.result_type != "complete":
@@ -232,7 +231,7 @@ async def run_preflight(*, server_command: str | None = None) -> dict[str, Any]:
         "status": "ok",
         "mode": "offline",
         "credentials_accessed": False,
-        "text_tool": "ask",
+        "text_tool": "ask-gemini",
         "profile": "function",
         "enabled_tools": len(names),
         "protocol_version": protocol_version,
@@ -248,7 +247,7 @@ async def run_chat(
     server_command: str | None = None,
 ) -> dict[str, Any]:
     result, protocol_version, server_version = await _call_installed_tool(
-        "ask",
+        "ask-gemini",
         {
             "prompt": prompt,
             "model": model,
@@ -266,7 +265,7 @@ async def run_chat(
     return {
         "status": "ok",
         "mode": "live",
-        "text_tool": "ask",
+        "text_tool": "ask-gemini",
         "protocol_version": protocol_version,
         "server_version": server_version,
         "text": _first_text(result),
@@ -285,10 +284,8 @@ async def run_image(
     del model
     output_root = output_dir.expanduser().resolve()
     output_root.mkdir(parents=True, exist_ok=True)
-    operation_id = "op_" + secrets.token_hex(16)
     arguments: dict[str, Any] = {
         "prompt": prompt,
-        "operation_id": operation_id,
         "output_dir": str(output_root),
         "wait_seconds": 0,
     }
@@ -297,26 +294,22 @@ async def run_image(
     async with _installed_client(profile="function", allow_live_account=True, server_command=server_command) as client:
         try:
             async with asyncio.timeout(720):
-                result = await client.call_tool("image", arguments)
+                result = await client.call_tool("generate-image", arguments)
         except TimeoutError as exc:
-            raise OnboardingError(
-                f"Image start outcome is unverified; resume with operation_id={operation_id}"
-            ) from exc
+            raise OnboardingError("Image start outcome is unverified") from exc
         except Exception as exc:
-            raise OnboardingError(
-                f"Image start outcome is unverified ({type(exc).__name__}); operation_id={operation_id}"
-            ) from exc
+            raise OnboardingError(f"Image start outcome is unverified ({type(exc).__name__})") from exc
         protocol_version = client.protocol_version
         server_version = client.server_info.version if client.server_info is not None else None
         domain_result = domain_result_from_call(result)
         if result.is_error or domain_result.get("ok") is not True:
             error = domain_result.get("error")
             code = error.get("code") if isinstance(error, Mapping) else "UNKNOWN"
-            raise OnboardingError(f"Image generation could not be started: {code}; operation_id={operation_id}")
+            raise OnboardingError(f"Image generation could not be started: {code}")
         start_data = domain_result.get("data")
-        returned_id = start_data.get("operation_id") if isinstance(start_data, Mapping) else None
-        if returned_id != operation_id:
-            raise OnboardingError(f"Image operation handle was not confirmed; operation_id={operation_id}")
+        operation_id = start_data.get("operation_id") if isinstance(start_data, Mapping) else None
+        if not isinstance(operation_id, str) or not operation_id:
+            raise OnboardingError("Image operation handle was not returned")
         deadline = time.monotonic() + 720
         while True:
             remaining = deadline - time.monotonic()
@@ -325,7 +318,7 @@ async def run_image(
             try:
                 async with asyncio.timeout(remaining):
                     result = await client.call_tool(
-                        "operation", {"operation_id": operation_id},
+                        "get-operation", {"operation_id": operation_id},
                     )
             except TimeoutError as exc:
                 raise OnboardingError(
@@ -354,7 +347,7 @@ async def run_image(
         return {
             "status": "ok",
             "mode": "live",
-            "media_tool": "image",
+            "media_tool": "generate-image",
             "operation_id": operation_id,
             "protocol_version": protocol_version,
             "server_version": server_version,
@@ -373,7 +366,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--server-command",
-        help="Override the sibling gemini-mcp-function entrypoint (primarily for verification)",
+        help="Override the sibling gemini-web-mcp entrypoint (primarily for verification)",
     )
     subparsers = parser.add_subparsers(dest="action")
     subparsers.add_parser("preflight", help="Call a static text tool without Gemini credentials")

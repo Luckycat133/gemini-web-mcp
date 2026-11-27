@@ -6,7 +6,7 @@ command = "uvx"
 args = [
   "--from",
   "git+https://github.com/Luckycat133/gemini-web-mcp@codex/gemini-tools-polish-20261101",
-  "gemini-mcp-function",
+  "gemini-web-mcp",
 ]
 env_vars = ["GEMINI_PSID", "GEMINI_PSIDTS", "GEMINI_PSIDCC"]
 startup_timeout_sec = 60

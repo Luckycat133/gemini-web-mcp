@@ -2011,7 +2011,7 @@ def test_tool_manifest_and_annotations_expose_agent_safety_metadata():
             "gemini_start_chat",
             "gemini_send_message",
             "gemini_ask",
-            "ask",
+            "ask-gemini",
         }
         assert any(item["name"] == "current_pro_generation" for item in chat_payload["workflows"])
 

@@ -1,6 +1,6 @@
 [project]
 name = "gemini-mcp-server"
-version = "0.23.0"
+version = "0.24.0"
 description = "MCP server for Gemini Web API reverse engineering"
 requires-python = ">=3.11"
 readme = "README.md"
@@ -41,12 +41,7 @@ dev = [
 ]
 
 [project.scripts]
-gemini-mcp-server = "src.server:main"
-gemini-mcp-skill-server = "src.skill_server:main"
-gemini-mcp-onboarding = "src.onboarding:main"
-gemini-mcp-assist = "src.surfaces.assist:main"
-gemini-mcp-function = "src.surfaces.function:main"
-gemini-mcp-account = "src.surfaces.account:main"
+gemini-web-mcp = "src.surfaces.function:main"
 gemini-web-cli = "src.cli:main"
 
 [build-system]
