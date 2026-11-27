@@ -112,7 +112,7 @@ def test_creation_wrappers_submit_only_background_jobs(monkeypatch, tmp_path):
         "gemini_generate_image", "gemini_edit_image", "gemini_generate_video", "gemini_generate_music",
     ]
     assert [call.args[0]["model"] for call in submit.await_args_list] == ["hydrogen"] * 4
-    assert submit.await_args_list[3].args[0]["thinking_level"] == "low"
+    assert submit.await_args_list[3].args[0]["thinking_level"] == "standard"
     assert submit.await_args_list[3].args[0]["music_genre"] == "acoustic"
     assert all(handle in result.content[0].text for result in responses)
     assert all(domain_result_from_call(result)["ok"] is True for result in responses)

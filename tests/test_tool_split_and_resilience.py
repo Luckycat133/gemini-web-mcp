@@ -480,3 +480,29 @@ def test_operation_service_get_result_invokes_on_progress_callback(tmp_path, mon
     res = asyncio.run(svc.get_result("op_prog_1", wait_seconds=1, on_progress=on_progress))
     assert res.ok and res.data is not None and res.data.report == "Done."
     assert any("finished" in msg for _, _, msg in progress_events)
+
+
+def test_lean_generate_music_uses_standard_native_thinking_level(monkeypatch):
+    captured: list[dict] = []
+
+    async def fake_submit(**kwargs):
+        captured.append(kwargs)
+        return function.domain_text(
+            DomainResult.failure(DomainErrorCode.INTERNAL_ERROR, "stop-after-capture"),
+            "stop-after-capture",
+        )
+
+    monkeypatch.setattr(function, "_submit", fake_submit)
+
+    async def run():
+        async with Client(function.mcp, mode="auto", cache=None) as client:
+            return await client.call_tool(
+                "generate-music",
+                {"prompt": "Calm guitar melody", "duration": "short", "vocals": "instrumental"},
+            )
+
+    asyncio.run(run())
+    assert len(captured) == 1
+    assert captured[0]["thinking_level"] == "standard"
+    assert captured[0]["music_duration"] == "short"
+    assert captured[0]["music_vocals"] == "instrumental"

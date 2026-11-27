@@ -203,7 +203,7 @@ async def generate_music(
     Waits up to 240s with progress updates (`wait_seconds=0` returns handle; resume via `get-operation`).
     """
     return await _submit(
-        prompt=prompt, media_type="music", model="hydrogen", thinking_level="low",
+        prompt=prompt, media_type="music", model="hydrogen", thinking_level="standard",
         image_path=None, output_dir=output_dir, filename=filename, timeout_seconds=None,
         retain_chat=retain_chat, delete_after_seconds=None,
         operation_id=None, operation="gemini_generate_music", edit=False,
