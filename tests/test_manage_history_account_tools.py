@@ -647,8 +647,8 @@ def test_get_usage_limits_no_batch_execute_short_circuits(monkeypatch):
 
 
 def test_get_usage_limits_scope_all_calls_two_probes(monkeypatch):
-    """scope=all → probe_names=[usage_quota, usage_model_state]，2 次 _batch_execute。"""
-    client = _FakeBatchClient(responses=["r1", "r2"])
+    """scope=all → probe_names=[usage_quota, usage_model_state] + GET_USAGE_INFO。"""
+    client = _FakeBatchClient(responses=["r1", "r2", "r3"])
     _patch_seams(monkeypatch, client)
     monkeypatch.setattr(manage_tools, "_extract_rpc_bodies",
                         lambda _t, _r: [[[["key1", "ok", "free", None, 100, 80]]]])
@@ -659,7 +659,7 @@ def test_get_usage_limits_scope_all_calls_two_probes(monkeypatch):
     assert payload["count"] == 2
     assert payload["results"][0]["name"] == "usage_quota"
     assert payload["results"][1]["name"] == "usage_model_state"
-    assert client.call_count == 2
+    assert client.call_count == 3
 
 
 def test_get_usage_limits_scope_quota_calls_one_probe(monkeypatch):

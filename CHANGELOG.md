@@ -9,6 +9,15 @@ Detailed per-build validation logs live in [docs/changelog.md](docs/changelog.md
 
 ## [Unreleased]
 
+## [0.24.0] - 2026-11-27
+
+### Changed
+
+- Unified the package CLI surface to `gemini-web-mcp` (MCP server) and `gemini-web-cli` (account admin companion), retiring redundant legacy entrypoints (`gemini-mcp-function`, `gemini-mcp-account`, `gemini-mcp-server`, `gemini-mcp-assist`, `gemini-mcp-skill-server`, `gemini-mcp-onboarding`) from `[project.scripts]` and cleaning stale symlinks on deploy (`pyproject.toml`, `scripts/update_local_mcp.py`, `src/onboarding.py`, `src/surfaces/function.py`).
+- Adopted 8 consistent verb-object tool names (`ask-gemini`, `generate-image`, `generate-video`, `generate-music`, `run-research`, `run-task`, `get-operation`, `check-quota`), merged `understand` into `ask-gemini` (`inputs` up to 16 local images/files/URLs/text, also attaching local files in multi-turn sessions), removed low-frequency `learning_mode`/`gem_id`/`operation_id` clutter from generation & chat tools, and added MCP `notifications/progress` heartbeats plus default waits to `run-research` & `run-task`.
+- Added `check-quota` (`src/services/quota.py`) querying `GRPC.GET_USAGE_INFO` (`/usage`) to return exact 5-hour and weekly remaining/total credits, percentages, and reset timestamps, and surfaced the same 5h/weekly breakdown in `gemini_get_usage_limits` / `gemini-web-cli quotas`.
+- Enabled automatic Task confirmation approval by default across both MCP-started and Web-created Tasks (`task_auto_approve_enabled()` / `web_task_approvals_enabled()` default `True`) and generalized interactive card recognition + Chrome DOM click fallback (`src/infrastructure/task_confirmation.py`, `src/services/web_task_approvals.py`, `src/data/task_card_approval.js`).
+
 ## [0.23.0] - 2026-11-26
 
 ### Changed

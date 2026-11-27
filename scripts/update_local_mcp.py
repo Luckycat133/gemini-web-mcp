@@ -14,7 +14,15 @@ import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-COMMANDS = ("gemini-mcp-function", "gemini-mcp-account", "gemini-mcp-server", "gemini-web-cli")
+COMMANDS = ("gemini-web-mcp", "gemini-web-cli")
+LEGACY_COMMANDS = (
+    "gemini-mcp-function",
+    "gemini-mcp-account",
+    "gemini-mcp-server",
+    "gemini-mcp-assist",
+    "gemini-mcp-skill-server",
+    "gemini-mcp-onboarding",
+)
 
 
 def run(*args: str, env: dict[str, str] | None = None) -> str:
@@ -41,9 +49,9 @@ def install_runtime(uv: str, wheel: Path, releases: Path, *, offline: bool) -> t
         with tempfile.TemporaryDirectory(prefix="gemini-update-preflight-") as scratch:
             env["GEMINI_COOKIE_PATH"] = str(Path(scratch) / "cookies")
             env["PATH"] = str(entrypoints) + os.pathsep + env.get("PATH", os.defpath)
-            result = json.loads(run(str(entrypoints / "gemini-mcp-onboarding"), "preflight", env=env))
-            if result.get("status") != "ok" or result.get("enabled_tools") != 8:
-                raise RuntimeError("The installed function server did not pass MCP preflight")
+            result = json.loads(run(str(entrypoints / "python"), "-m", "src.onboarding", "preflight", env=env))
+            if result.get("status") != "ok" or result.get("enabled_tools") != 8 or result.get("text_tool") != "ask-gemini":
+                raise RuntimeError("The installed gemini-web-mcp server did not pass MCP preflight")
             run(str(entrypoints / "python"), str(ROOT / "scripts/smoke_mcp_protocol.py"), env=env)
         verified.write_text(digest + "\n", encoding="utf-8")
     except BaseException:
@@ -97,6 +105,12 @@ def main() -> None:
             link = commands / name
             if not os.path.lexists(link):
                 link.symlink_to(current / "bin" / name)
+        for legacy in LEGACY_COMMANDS:
+            link = commands / legacy
+            if os.path.islink(link):
+                resolved = str(link.readlink())
+                if "gemini-web-mcp" in resolved:
+                    link.unlink()
         print(json.dumps({"status": "ok", "wheel_sha256": digest, "commands": str(commands), "runtime": str(runtime)}))
 
 

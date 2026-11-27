@@ -12,6 +12,7 @@ from copy import deepcopy
 from typing import Any, TypeVar
 
 from mcp.server import MCPServer as SDKMCPServer
+from mcp.server.mcpserver import Context
 from mcp.server.mcpserver.exceptions import ToolError
 from mcp_types import CallToolResult, Icon, ImageContent, InputRequiredResult, TextContent, Tool, ToolAnnotations
 
@@ -145,8 +146,37 @@ class MCPServer(SDKMCPServer):
 
 
 __all__ = [
+    "Context",
     "MCPServer",
     "TextContent",
     "ImageContent",
     "ToolAnnotations",
+    "make_progress_callback",
+    "report_tool_progress",
 ]
+
+
+async def report_tool_progress(
+    ctx: Context | None,
+    progress: float,
+    total: float | None = None,
+    message: str | None = None,
+) -> None:
+    """Emit an MCP notifications/progress update when supported by the client."""
+    if ctx is None:
+        return
+    try:
+        await ctx.report_progress(progress=progress, total=total, message=message)
+    except Exception:
+        pass
+
+
+def make_progress_callback(ctx: Context | None):
+    """Return a wait-loop progress reporter bound to one MCP tool Context."""
+    if ctx is None:
+        return None
+
+    async def _notify(progress: float, total: float, message: str) -> None:
+        await report_tool_progress(ctx, progress, total, message)
+
+    return _notify

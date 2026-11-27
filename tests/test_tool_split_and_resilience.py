@@ -49,20 +49,27 @@ def test_split_function_catalog_has_8_unprefixed_lean_tools_and_lower_token_budg
 
     tools = asyncio.run(run())
     assert set(tools) == {
-        "ask",
-        "understand",
-        "image",
-        "video",
-        "music",
-        "research",
-        "task",
-        "operation",
+        "ask-gemini",
+        "generate-image",
+        "generate-video",
+        "generate-music",
+        "run-research",
+        "run-task",
+        "get-operation",
+        "check-quota",
     }
     assert not any(name.startswith("gemini_") for name in tools)
-    assert "model" not in tools["image"].input_schema["properties"]
-    assert "thinking_level" not in tools["image"].input_schema["properties"]
-    assert "model" not in tools["video"].input_schema["properties"]
-    assert "model" not in tools["music"].input_schema["properties"]
+    assert all("-" in name for name in tools)
+    assert "understand" not in tools
+    assert "inputs" in tools["ask-gemini"].input_schema["properties"]
+    assert "learning_mode" not in tools["ask-gemini"].input_schema["properties"]
+    assert "gem_id" not in tools["ask-gemini"].input_schema["properties"]
+    assert all("ctx" not in tool.input_schema["properties"] for tool in tools.values())
+    assert "model" not in tools["generate-image"].input_schema["properties"]
+    assert "thinking_level" not in tools["generate-image"].input_schema["properties"]
+    assert "operation_id" not in tools["generate-image"].input_schema["properties"]
+    assert "model" not in tools["generate-video"].input_schema["properties"]
+    assert "model" not in tools["generate-music"].input_schema["properties"]
     assert "Nano Banana" not in (function.mcp.instructions or "")
     assert "Lyria" not in (function.mcp.instructions or "")
     assert "Gemini Omni" not in (function.mcp.instructions or "")
@@ -236,14 +243,16 @@ def test_lean_ask_rejects_legacy_pro_flash_and_standard_and_defaults_to_hydrogen
                 {"prompt": "hi", "model": "pro"},
                 {"prompt": "hi", "model": "flash"},
                 {"prompt": "hi", "thinking_level": "standard"},
+                {"prompt": "hi", "learning_mode": "quiz"},
+                {"prompt": "hi", "gem_id": "gem_1"},
             ):
-                rejected = await client.call_tool("ask", bad_args)
+                rejected = await client.call_tool("ask-gemini", bad_args)
                 assert rejected.is_error
 
     asyncio.run(run())
 
 
-def test_lean_understand_accepts_plain_string_paths_urls_and_text(monkeypatch, tmp_path):
+def test_lean_ask_gemini_inputs_accepts_plain_string_paths_urls_and_text(monkeypatch, tmp_path):
     img = tmp_path / "pic.jpg"
     img.write_bytes(b"jpg-bytes")
     captured = []
@@ -257,8 +266,8 @@ def test_lean_understand_accepts_plain_string_paths_urls_and_text(monkeypatch, t
 
     async def run():
         async with Client(function.mcp, mode="auto", cache=None) as client:
-            await client.call_tool("understand", {
-                "task": "Summarize",
+            await client.call_tool("ask-gemini", {
+                "prompt": "Summarize",
                 "inputs": [str(img), "https://example.com/page", "Plain inline note"],
             })
 
@@ -285,8 +294,10 @@ def test_lean_operation_handles_status_only_and_rejects_wait_combination(monkeyp
                 error=None, warnings=(), meta=SimpleNamespace(operation_state=OperationState.RUNNING, request_id="r", diagnostic_id=None, requested_backend=None, effective_backend=None, verification_status="worker_active", details=None),
             )
 
-        async def get_result(self, operation_id, wait_seconds=0):
-            calls.append(("result", operation_id, wait_seconds))
+        async def get_result(self, operation_id, wait_seconds=0, on_progress=None):
+            calls.append(("result", operation_id, wait_seconds, callable(on_progress)))
+            if on_progress is not None:
+                await on_progress(0.5, float(wait_seconds), "waiting")
             return SimpleNamespace(
                 ok=True,
                 data=OperationReadData(operation_id, "gemini_research", OperationState.COMPLETED, False, True, "report_observed", "Done."),
@@ -297,13 +308,13 @@ def test_lean_operation_handles_status_only_and_rejects_wait_combination(monkeyp
 
     async def run():
         async with Client(function.mcp, mode="auto", cache=None) as client:
-            await client.call_tool("operation", {"operation_id": "op_123", "status_only": True})
-            await client.call_tool("operation", {"operation_id": "op_123", "wait_seconds": 15})
-            bad = await client.call_tool("operation", {"operation_id": "op_123", "status_only": True, "wait_seconds": 5})
+            await client.call_tool("get-operation", {"operation_id": "op_123", "status_only": True})
+            await client.call_tool("get-operation", {"operation_id": "op_123", "wait_seconds": 15})
+            bad = await client.call_tool("get-operation", {"operation_id": "op_123", "status_only": True, "wait_seconds": 5})
             return bad
 
     bad = asyncio.run(run())
-    assert calls == [("status", "op_123"), ("result", "op_123", 15)]
+    assert calls == [("status", "op_123"), ("result", "op_123", 15, True)]
     assert "INVALID_ARGUMENT" in bad.content[0].text
 
 
@@ -345,3 +356,127 @@ def test_music_refusal_blueprint_detection_and_mode21_companion_options():
     assert client._media_companion_options(
         WebRequestOptions(music_generation=True, music_duration="short", music_vocals="instrumental", music_genre="ambient")
     ) == (42, 26, 68)
+
+
+def test_check_quota_tool_formats_exact_5h_and_weekly_credits_and_reset_times(monkeypatch):
+    from gemini_webapi.constants import GRPC
+
+    rpc_calls = []
+
+    class FakeQuotaClient:
+        async def _batch_execute(self, reqs, *, source_path="/"):
+            rpc_calls.append(([(r.rpcid, r.payload) for r in reqs], source_path))
+            return SimpleNamespace(text="mock-rpc-body")
+
+        def _parse_rpc_results(self, _text, rpcid):
+            assert rpcid == GRPC.GET_USAGE_INFO
+            return [[
+                3,
+                [
+                    [46135, 0.04, 1, [[1795762431, 0]], None, None, 48000],
+                    [891892, 0.07831884, 2, [[1796136831, 0]], None, None, 967680],
+                ],
+                False,
+            ]]
+
+    monkeypatch.setattr(function, "initialize_client", AsyncMock())
+    monkeypatch.setattr(function, "get_gemini_client", lambda: FakeQuotaClient())
+
+    async def run():
+        async with Client(function.mcp, mode="auto", cache=None) as client:
+            return await client.call_tool("check-quota", {})
+
+    res = asyncio.run(run())
+    assert rpc_calls == [([(GRPC.GET_USAGE_INFO, "[]")], "/usage")]
+    text = res.content[0].text
+    assert "ULTRA" in text
+    assert "46,135 / 48,000 credits remaining" in text
+    assert "891,892 / 967,680 credits remaining" in text
+    assert "4% used" in text
+    assert "7.8% used" in text
+
+
+def test_task_auto_approval_defaults_on_and_honors_explicit_opt_out(monkeypatch):
+    from src.services.task_inputs import task_auto_approve_enabled
+    from src.services.web_task_approvals import web_task_approvals_enabled
+
+    monkeypatch.delenv("GEMINI_TASK_AUTO_APPROVE", raising=False)
+    monkeypatch.delenv("GEMINI_TASK_WEB_APPROVALS", raising=False)
+    assert task_auto_approve_enabled() is True
+    assert web_task_approvals_enabled() is True
+
+    monkeypatch.setenv("GEMINI_TASK_AUTO_APPROVE", "false")
+    monkeypatch.setenv("GEMINI_TASK_WEB_APPROVALS", "0")
+    assert task_auto_approve_enabled() is False
+    assert web_task_approvals_enabled() is False
+
+
+def test_select_auto_approve_option_handles_generic_cards_and_keeps_browser_guard():
+    from src.infrastructure.task_confirmation import select_auto_approve_option
+
+    generic_turn = {
+        "input_options": [
+            {"input_option_id": "opt_deny", "label": "取消", "prompt": "deny"},
+            {"input_option_id": "opt_allow", "label": "继续执行", "prompt": "allow"},
+        ],
+        "input_card": {
+            "requires_option_id": True,
+            "replies": [
+                {"input_option_id": "opt_deny", "action_path": [8, 0], "prompt": "deny"},
+                {"input_option_id": "opt_allow", "action_path": [7, 0], "prompt": "allow"},
+            ],
+        },
+    }
+    assert select_auto_approve_option(generic_turn) == {
+        "input_option_id": "opt_allow",
+        "prompt": "allow",
+    }
+
+    tampered_browser_turn = {
+        "input_options": [{"input_option_id": "opt_1", "label": "始终允许"}],
+        "input_card": {
+            "requires_option_id": True,
+            "browser_permission_card": True,
+            "replies": [{"input_option_id": "opt_1", "prompt": "always"}],
+        },
+    }
+    assert select_auto_approve_option(tampered_browser_turn) is None
+
+
+def test_operation_service_get_result_invokes_on_progress_callback(tmp_path, monkeypatch):
+    from src.infrastructure.operation_store import OperationStore
+    from src.services.operations import OperationService
+
+    monkeypatch.setenv("GEMINI_PSID", "test-psid")
+
+    ticks = iter([1000.0, 1000.1, 1000.2, 1000.3, 1000.4])
+    store = OperationStore(tmp_path / "ops.sqlite3", clock=lambda: next(ticks, 1000.4))
+    store.create("op_prog_1", "gemini_research")
+    svc = OperationService(
+        store,
+        client_provider=lambda: None,
+        client_initializer=AsyncMock(),
+        finalize_chat_cleanup=AsyncMock(),
+    )
+
+    reads = 0
+
+    async def fake_read(op_id: str, *, include_report: bool):
+        nonlocal reads
+        reads += 1
+        assert op_id == "op_prog_1" and include_report is True
+        return DomainResult.success(
+            OperationReadData(op_id, "gemini_research", OperationState.COMPLETED, False, True, "report_observed", "Done."),
+            operation_state=OperationState.COMPLETED,
+            verification_status="report_observed",
+        )
+
+    svc._read = fake_read  # type: ignore[method-assign]
+    progress_events: list[tuple[float, float, str]] = []
+
+    async def on_progress(progress: float, total: float, message: str) -> None:
+        progress_events.append((progress, total, message))
+
+    res = asyncio.run(svc.get_result("op_prog_1", wait_seconds=1, on_progress=on_progress))
+    assert res.ok and res.data is not None and res.data.report == "Done."
+    assert any("finished" in msg for _, _, msg in progress_events)

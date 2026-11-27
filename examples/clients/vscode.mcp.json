@@ -20,7 +20,7 @@
       "args": [
         "--from",
         "git+https://github.com/Luckycat133/gemini-web-mcp@codex/gemini-tools-polish-20261101",
-        "gemini-mcp-function"
+        "gemini-web-mcp"
       ],
       "env": {
         "GEMINI_PSID": "${input:gemini-psid}",

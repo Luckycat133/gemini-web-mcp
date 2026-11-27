@@ -5,7 +5,7 @@ from typing import Annotated
 
 from pydantic import Field
 
-from ..adapters import domain_error_boundary, domain_failure_text, domain_text, append_artifact_block
+from ..adapters import Context, domain_error_boundary, domain_failure_text, domain_text, append_artifact_block, make_progress_callback
 from ..adapters.artifacts import omit_saved_preview
 from ..adapters.mcp_sdk import MCPServer, TextContent
 from ..client_wrapper import get_gemini_client, initialize_client, finalize_remote_chat_cleanup
@@ -37,7 +37,7 @@ def _present(result: DomainResult[OperationReadData], *, include_text: bool = Tr
         text = domain_failure_text(result) + "\n" + text
     if task_operation:
         if data.operation == "gemini_run_task" and task_auto_approve_enabled():
-            text += "\n🚩 Background approval is enabled for supported one-time browser permission cards."
+            text += "\n🚩 Background auto-approval is enabled for supported interactive confirmation cards."
         answer = data.task_response or data.answer
         if data.setup_required:
             app = f" ({data.setup_app_name})" if data.setup_app_name else ""
@@ -126,13 +126,14 @@ def register_operation_tools(mcp: MCPServer) -> None:
 
 
 def register_lean_operation_tool(mcp: MCPServer) -> None:
-    @mcp.tool(name="operation", annotations=DESTRUCTIVE_REMOTE)
-    @domain_error_boundary("operation", logger)
-    async def operation(
+    @mcp.tool(name="get-operation", annotations=DESTRUCTIVE_REMOTE)
+    @domain_error_boundary("get-operation", logger)
+    async def get_operation(
         operation_id: str,
         wait_seconds: Annotated[int, Field(ge=0, le=MAX_RESULT_WAIT_SECONDS)] = 0,
         status_only: bool = False,
         include_text: bool = True,
+        ctx: Context | None = None,
     ) -> list[TextContent]:
         """Check status or recover verified outputs for a saved operation_id.
 
@@ -148,5 +149,12 @@ def register_lean_operation_tool(mcp: MCPServer) -> None:
         if status_only:
             return _present(await _service().get_status(operation_id))
         if wait_seconds:
-            return _present(await _service().get_result(operation_id, wait_seconds=wait_seconds), include_text=include_text)
+            progress_cb = make_progress_callback(ctx)
+            service = _service()
+            result = await (
+                service.get_result(operation_id, wait_seconds=wait_seconds, on_progress=progress_cb)
+                if progress_cb is not None
+                else service.get_result(operation_id, wait_seconds=wait_seconds)
+            )
+            return _present(result, include_text=include_text)
         return _present(await _service().get_result(operation_id), include_text=include_text)

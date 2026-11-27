@@ -123,7 +123,7 @@ def test_web_video_options_have_primary_full_and_compact_parity(monkeypatch):
 
     async def run():
         for server, tool, extra, send_model in (
-            (function.mcp, "video", {"wait_seconds": 0}, False),
+            (function.mcp, "generate-video", {"wait_seconds": 0}, False),
             (function.build_server(full=True), "gemini_generate_video", {"wait_seconds": 0}, True),
             (primary, "gemini_generate_media", {"media_type": "video"}, True),
             (skill_server.mcp, "create", {"type": "video"}, True),

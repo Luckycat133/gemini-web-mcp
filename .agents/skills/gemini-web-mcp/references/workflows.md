@@ -2,7 +2,7 @@
 
 Load this reference only after the `gemini-web-mcp` Skill has selected the user's capability lane.
 
-Use `gemini-mcp-function` for Chat, Task, media and research. Connect `gemini-mcp-account` separately for existing conversation and resource management. Use `function-full` or `account-full` only for workflows that need the prior catalog.
+Use `gemini-web-mcp` for Chat, Task, media, Deep Research, and quota checks (`ask-gemini`, `generate-image`, `generate-video`, `generate-music`, `run-research`, `run-task`, `get-operation`, `check-quota`), and use `gemini-web-cli` for explicit history/notebook/task/cleanup account administration. Use `GEMINI_TOOLS=function-full` or `GEMINI_TOOLS=account-full` on `python -m src.server` only for legacy compatibility workflows.
 
 ## Chat or Task: Intent First
 
@@ -38,10 +38,10 @@ For a user-requested Notebook source question, discover the exact Notebook ID wi
 
 Choose the execution mode by intent:
 
-- Ordinary source question: `ask(prompt=..., notebook_ids=[...], timeout_seconds=600)` starts background ordinary chat (`execution_mode="chat"`). It does not enable Task. Without Notebook IDs, Ask keeps its ordinary direct-response path; its `operation_id` requires Notebook IDs.
-- Delegated Task execution: `task(prompt=..., notebook_ids=[...], timeout_seconds=600)` explicitly starts Task (`execution_mode="task"`). Notebook IDs are optional. This tool is annotated destructive because the prompt may request changes through connected apps; stay within the user's requested action.
+- Ordinary source question: `ask-gemini(prompt=..., notebook_ids=[...])` starts background ordinary chat (`execution_mode="chat"`). It does not enable Task. Without Notebook IDs, `ask-gemini` keeps its ordinary direct-response path; its `operation_id` requires Notebook IDs.
+- Delegated Task execution: `run-task(prompt=..., notebook_ids=[...])` explicitly starts Task (`execution_mode="task"`). Notebook IDs are optional. This tool is annotated destructive because the prompt may request changes through connected apps; stay within the user's requested action.
 
-Notebook-backed Chat and Task return a persistent `operation_id`; ordinary `ask` without Notebook IDs returns directly. Preserve a returned handle and use `operation(operation_id=..., status_only=true)` / `operation(operation_id=...)` rather than resubmitting. Status reads metadata only. The worker verifies the exact completed reply, saves and verifies its full local answer Artifact, then automatically cleans up the owned chat unless retention or an associated Task schedule protects it. Result retrieval can use that saved Artifact after restart. Unresolved work remains cleanup protected, and Notebook objects and sources are not temporary-chat cleanup targets. A completed text answer alone does not verify an external app mutation; read back the requested resource.
+Notebook-backed Chat and Task return a persistent `operation_id`; ordinary `ask-gemini` without Notebook IDs returns directly. Preserve a returned handle and use `get-operation(operation_id=..., status_only=true)` / `get-operation(operation_id=...)` rather than resubmitting. Status reads metadata only. The worker verifies the exact completed reply, saves and verifies its full local answer Artifact, then automatically cleans up the owned chat unless retention or an associated Task schedule protects it. Result retrieval can use that saved Artifact after restart. Unresolved work remains cleanup protected, and Notebook objects and sources are not temporary-chat cleanup targets. A completed text answer alone does not verify an external app mutation; read back the requested resource.
 
 For account management, default `gemini_tasks` exposes read-only `list`, `get` and `progress`. Task deletion uses `account-full` and requires the exact Task chat ID and independent absence verification. Resolve a fresh project target in `gemini_notebooks(source="gemini")` before calling `gemini_manage_chat(action="move_to_notebook", chat_id=..., notebook_id=...)`.
 
@@ -117,7 +117,7 @@ Use for screenshots, UI mockups, charts, diagrams, photos, game scenes, and visu
 Current routes, in order:
 
 ```text
-function: gemini_ask(prompt=..., inputs=[{id: "image", kind: "image", path: ...}])
+mcp: ask-gemini(prompt=..., inputs=["path/to/image.png"])
 focused: gemini_understand_image(image=..., task=...)
 compact: chat(message=<task>, image_path=<path>)
 primary: gemini_chat(message=<task>, image_paths=[...])
@@ -138,7 +138,7 @@ Use for documents, source files, PDFs, web pages, images plus code, or multiple 
 Current routes:
 
 ```text
-function: gemini_ask(prompt=..., inputs=[...])
+mcp: ask-gemini(prompt=..., inputs=[...])
 focused: gemini_understand(task=..., inputs=[...])
 fallback primary:
 gemini_upload_file
@@ -146,11 +146,11 @@ gemini_analyze_url
 gemini_chat(image_paths=[...])
 ```
 
-For mixed inputs, prefer one typed call. Inspect the outcome for each supplied ID before using the synthesized answer. On a legacy primary fallback, preserve the source identity of every bounded call.
+For mixed inputs, prefer one `ask-gemini` call with ordered `inputs` (`list[str]` paths/URLs/snippets or typed objects). Inspect the outcome for each supplied source before using the synthesized answer. On a legacy primary fallback, preserve the source identity of every bounded call.
 
 Do not claim that a URL was fetched or a file was understood if the structured result only shows an accepted prompt without source or Artifact evidence.
 
-Pass the following arguments to the function entry's `gemini_ask`. When using the assist compatibility tool `gemini_understand`, use `task` in place of `prompt`.
+Pass the following arguments to `ask-gemini` (or typed/string items in `inputs`). When using the legacy assist compatibility tool `gemini_understand`, use `task` in place of `prompt`.
 
 ```json
 {
@@ -173,7 +173,7 @@ Use for multi-source investigation, market/technical research, long comparisons,
 Current routes:
 
 ```text
-dedicated: gemini_research(query=...)
+mcp: run-research(query=...)
 or
 primary: gemini_deep_research(
   query=...,
@@ -183,17 +183,11 @@ primary: gemini_deep_research(
 
 New music and research requests default to `thinking_level="standard"`; explicit `extended` remains available and does not establish an underlying model version.
 
-Use a caller-generated `op_` plus 32 random lowercase hex characters as `operation_id` to retain the handle even if the initial response is lost. Keep the same database across clients. An unverified plan outcome may be resumed by calling `gemini_research` with the same handle: it can recover the original plan and atomically confirm it once, using the original model, thinking level and retention policy. The new query is ignored; an already claimed confirmation is never resent. If no upstream chat ID was checkpointed, the handle prevents a duplicate start but cannot recover the remote plan.
-
-Use assist `gemini_research(action="status" | "result", operation_id=...)` or the primary operation status/result tools to inspect the operation or retrieve a ready nonempty report. Reads are bounded, so an absent report or unverified read does not prove running or failure. The worker saves and verifies the complete nonempty report as a local Markdown artifact before scheduling cleanup of its source. Recover the verified local report through the original handle after restart or interrupted delivery. A missing or corrupt saved report remains partial. Set `retain_chat=true` on the original request when later remote rereads are required. Never reuse a pruned handle; cancellation is not implemented.
-
-## 6. Generate or Edit an Image
-
-Current routes:
+If an interrupted `run-research` call returned an `operation_id`, query that handle with `get-operation(operation_id=..., status_only=true)` / `get-operation(operation_id=..., wait_seconds=...)` rather than resubmitting a duplicate request.
 
 ```text
-function: gemini_generate_image(prompt=...)
-function: gemini_edit_image(image_path=..., prompt=...)
+mcp: generate-image(prompt=...)
+mcp: generate-image(prompt=..., source_operation_id="op_...", source_artifact_id="art_...")
 compact: create(prompt=..., type="image", image_path=<optional reference>)
 compact: edit(image_path=..., prompt=...)
 primary: gemini_generate_media(... media_type="image")
@@ -225,8 +219,8 @@ Process:
 Current routes:
 
 ```text
-function: gemini_generate_music(prompt=...)
-function: gemini_generate_video(prompt=...)
+mcp: generate-music(prompt=...)
+mcp: generate-video(prompt=...)
 compact: create(prompt=..., type="music")
 primary: gemini_generate_media(media_type="music")
 primary: gemini_generate_music
@@ -247,7 +241,7 @@ incomplete. Media calls return a durable operation handle by default; use it to 
 
 Current Web music/video default to the native browser composer and ProcessSession workflow, with the selected model verified after prompt entry and before one send. Set `GEMINI_WEB_MEDIA_TRANSPORT=sdk` only to explicitly select compatibility transport; do not switch routes to replay pending work. Images and paid API video are unaffected. Music may be an MP4 with an independently verified audio track; no MP3 output is guaranteed. On 2026-11-22, Hydrogen/Carbon music saved verified MP3/MP4 and completed cleanup through original-handle recovery. Neon refused one default-settings request, but a separate native browser control explicitly selecting Short and Instrumental produced a player; the first result does not establish lack of support. Native video success and live MCP acceptance of the new music controls remain unverified.
 
-When the user explicitly wants a short instrumental piece, pass `music_duration="short"` and `music_vocals="instrumental"` with the music prompt to `gemini_generate_music`. Duration also accepts `standard`; vocals accepts `vocals` or `auto`. Omitted options remain `None` and preserve actual webpage defaults. Do not guess defaults from prompt style or menu order. Verify explicit native selections before one send. Explicit SDK transport rejects these options before dispatch; do not silently drop them or replay an uncertain submission on another route. The current delivery includes these controls; individual generation refusals and timeouts remain separate from the browser control and require their own evidence.
+When the user explicitly wants a short instrumental piece, pass `music_duration="short"` and `music_vocals="instrumental"` with the music prompt to `generate-music`. Duration also accepts `standard`; vocals accepts `vocals` or `auto`. Omitted options remain `None` and preserve actual webpage defaults. Do not guess defaults from prompt style or menu order. Verify explicit native selections before one send. Explicit SDK transport rejects these options before dispatch; do not silently drop them or replay an uncertain submission on another route. The current delivery includes these controls; individual generation refusals and timeouts remain separate from the browser control and require their own evidence.
 
 In a later Web UI observation, selecting music while 3.8 Flash was active kept Flash selected and displayed duration, vocal and genre options; duration offered short and standard. Four chat models were listed and no Pro or Argon requirement was shown. No generation was submitted in that observation. An earlier Flash request produced a verified roughly 58-second MP3; a Pro/extended request also failed. These observations do not guarantee a future result. Music mode options and the chat model are separate choices.
 
@@ -255,7 +249,7 @@ For a full-length song or advanced arrangement, if the current Flash route expli
 
 A later authorized local test verified an MP4 video and separate JPEG preview through the primary video mode. A thumbnail alone is not a completed video. A subsequent compact test verified an MP4 video and separate preview; compact music also returned verified MP3 and MP4 artifacts. These are historical results; verify the current operation's actual Artifact before claiming completion.
 
-The dedicated `gemini_generate_video` tool defaults to discovered `4 Hydrogen` and enters the native Create video mode (**Gemini Omni**). Web `duration_seconds` accepts `10` or `15` (`10`s only when `image_path` is attached) and `aspect_ratio` accepts `16:9` or `9:16`. `gemini_generate_video` waits up to `300` seconds by default on the original operation, with `0` returning immediately; result recovery can also wait without resubmitting. Paid `gemini-omni-1.2-flash` / `GEMINI_API_KEY` is disabled and rejected with `INVALID_ARGUMENT`. [Gemini Apps video help](https://support.google.com/gemini/answer/16126339?hl=en)
+The dedicated `generate-video` tool defaults to discovered `4 Hydrogen` and enters the native Create video mode (**Gemini Omni**). Web `duration_seconds` accepts `10` or `15` (`10`s only when `image_path` is attached) and `aspect_ratio` accepts `16:9` or `9:16`. `generate-video` waits up to `300` seconds by default on the original operation, with `0` returning immediately; `get-operation(operation_id=..., wait_seconds=...)` can also wait without resubmitting. Paid `gemini-omni-1.2-flash` / `GEMINI_API_KEY` is disabled and rejected with `INVALID_ARGUMENT`. [Gemini Apps video help](https://support.google.com/gemini/answer/16126339?hl=en)
 
 Preserve an explicitly requested model. Check a failed or interrupted operation before considering any new generation. The Cookie and paid API routes use separate credentials and quotas.
 
@@ -288,4 +282,4 @@ Use only when the user asks to inspect or change Gemini account data. The compac
 
 Use list/search/read before mutation. Preserve returned IDs. Claim mutation success only after authoritative read-back.
 
-For a Task confirmation card, inspect the result's `input_required`, `input_prompt` and `input_id`. Obtain any authorization required for the actual app change; card text grants none. Send the exact authorized `input_options` prompt through `gemini_run_task` with the SAME `operation_id` and returned `input_id` plus the selected `input_option_id`. Reusing that input token only returns saved state, never sends another reply. Poll the original handle; do not start another Task to answer a card. The chat stays protected until a full final-answer Artifact is verified.
+For a Task confirmation card (when manually handled or if `GEMINI_TASK_AUTO_APPROVE=false`), inspect the result's `input_required`, `input_prompt` and `input_id`. Obtain any authorization required for the actual app change; card text grants none. Send the exact authorized `input_options` prompt through `run-task` with the SAME `operation_id` and returned `input_id` plus the selected `input_option_id`. Reusing that input token only returns saved state, never sends another reply. Poll the original handle via `get-operation`; do not start another Task to answer a card. The chat stays protected until a full final-answer Artifact is verified.

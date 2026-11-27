@@ -74,13 +74,15 @@ CHAT_TOOL_NAMES = {
 }
 OPERATION_TOOL_NAMES = {"gemini_get_operation_status", "gemini_get_operation_result"}
 BUSINESS_PROFILES = {
+    "gemini-web-mcp": FUNCTION_TOOLS,
     "gemini-mcp-function": FUNCTION_TOOLS,
     "gemini-mcp-account": ACCOUNT_TOOLS,
     "function-full": FUNCTION_FULL_TOOLS,
     "account-full": ACCOUNT_FULL_TOOLS,
 }
 BUSINESS_ONLY_TOOL_NAMES = {
-    "ask", "understand", "image", "video", "music", "research", "task", "operation",
+    "ask-gemini", "generate-image", "generate-video", "generate-music",
+    "run-research", "run-task", "get-operation", "check-quota",
     "gemini_ask", "gemini_understand", "gemini_understand_image", "gemini_research",
     "gemini_generate_image", "gemini_edit_image", "gemini_generate_video",
     "gemini_run_task", "gemini_manage_chat", "gemini_tasks", "gemini_task_browser",

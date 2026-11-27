@@ -36,14 +36,14 @@ def test_preflight_calls_real_offline_text_tool_over_stdio(monkeypatch, tmp_path
         seen.append(kwargs["env"])
         return parameters(**kwargs)
     monkeypatch.setattr(onboarding, "StdioServerParameters", capture)
-    command = Path(sys.executable).parent / "gemini-mcp-function"
+    command = Path(sys.executable).parent / "gemini-web-mcp"
 
     payload = asyncio.run(run_preflight(server_command=str(command)))
 
     assert payload["status"] == "ok"
     assert payload["mode"] == "offline"
     assert payload["credentials_accessed"] is False
-    assert payload["text_tool"] == "ask"
+    assert payload["text_tool"] == "ask-gemini"
     assert payload["profile"] == "function"
     assert payload["enabled_tools"] == 8
     assert seen[0]["GEMINI_OPERATION_DB_PATH"] != str(user_operations)
@@ -164,7 +164,7 @@ def test_image_onboarding_polls_same_background_handle_and_verifies_file(monkeyp
 
     async def fake_call(name, arguments, **_kwargs):
         calls.append((name, dict(arguments)))
-        if name == "image":
+        if name == "generate-image":
             data = {"state": "accepted", "operation_id": "op_" + "a" * 32}
         elif len(calls) == 2:
             data = {"state": "running", "operation_id": arguments["operation_id"]}
@@ -186,12 +186,11 @@ def test_image_onboarding_polls_same_background_handle_and_verifies_file(monkeyp
         yield SimpleNamespace(call_tool=call, protocol_version="v", server_info=SimpleNamespace(version="server"))
 
     monkeypatch.setattr(onboarding, "_installed_client", fake_client)
-    monkeypatch.setattr(onboarding.secrets, "token_hex", lambda _n: "a" * 32)
     monkeypatch.setattr(onboarding.asyncio, "sleep", no_wait)
     result = asyncio.run(onboarding.run_image("prompt", output_dir=tmp_path, model="hydrogen", filename=None))
     assert result["artifacts"][0]["local_path"] == str(image.resolve())
-    assert result["media_tool"] == "image"
-    assert [name for name, _ in calls] == ["image", "operation", "operation"]
+    assert result["media_tool"] == "generate-image"
+    assert [name for name, _ in calls] == ["generate-image", "get-operation", "get-operation"]
     assert calls[0][1]["wait_seconds"] == 0
     assert calls[1][1] == calls[2][1] == {"operation_id": result["operation_id"]}
 
@@ -218,7 +217,6 @@ def test_image_onboarding_never_resubmits_failed_background_operation(monkeypatc
         yield SimpleNamespace(call_tool=call, protocol_version="v", server_info=SimpleNamespace(version="server"))
 
     monkeypatch.setattr(onboarding, "_installed_client", fake_client)
-    monkeypatch.setattr(onboarding.secrets, "token_hex", lambda _n: "b" * 32)
     with pytest.raises(OnboardingError, match=operation_id):
         asyncio.run(onboarding.run_image("prompt", output_dir=tmp_path, model="hydrogen", filename=None))
-    assert calls == ["image", "operation"]
+    assert calls == ["generate-image", "get-operation"]

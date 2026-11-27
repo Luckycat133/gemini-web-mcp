@@ -15,19 +15,12 @@ from typing import Any
 from mcp import Client, StdioServerParameters, stdio_client
 
 if __package__:
-    from .smoke_profiles import (
-        ACCOUNT_FULL_TOOLS, ACCOUNT_TOOLS, ASSIST_TOOLS, COMPACT_TOOLS,
-        FUNCTION_FULL_TOOLS, FUNCTION_TOOLS, PRIMARY_PROFILE_TOOLS,
-    )
+    from .smoke_profiles import ACCOUNT_TOOLS, ASSIST_TOOLS, FUNCTION_TOOLS
 else:
     from smoke_profiles import (  # type: ignore[import-not-found,no-redef]
-        ACCOUNT_FULL_TOOLS,
         ACCOUNT_TOOLS,
         ASSIST_TOOLS,
-        COMPACT_TOOLS,
-        FUNCTION_FULL_TOOLS,
         FUNCTION_TOOLS,
-        PRIMARY_PROFILE_TOOLS,
     )
 
 ASSIST_SERVER_NAME = "gemini_assist_mcp"
@@ -122,6 +115,9 @@ async def _handshake(
             elif "create" in actual_tools:
                 representative_name = "create"
                 representative_arguments = {"prompt": ""}
+            elif "ask-gemini" in actual_tools:
+                representative_name = "ask-gemini"
+                representative_arguments = {"prompt": ""}
             elif "ask" in actual_tools:
                 representative_name = "ask"
                 representative_arguments = {"prompt": ""}
@@ -156,7 +152,7 @@ async def _handshake(
         )
     if not isinstance(representative.structured_content, dict):
         raise RuntimeError(f"{command} did not return MCP v2 structured content in {mode} mode")
-    if representative_name in {"create", "ask", "gemini_ask", "gemini_cleanup", "gemini_tasks"}:
+    if representative_name in {"create", "ask-gemini", "ask", "gemini_ask", "gemini_cleanup", "gemini_tasks"}:
         domain = _structured_domain_result(representative.structured_content)
         error = domain.get("error") if domain else None
         expected_code = "AUTH_REQUIRED" if representative_name == "gemini_cleanup" else "INVALID_ARGUMENT"
@@ -233,73 +229,30 @@ async def _assist_handshake(
 
 
 async def _run(
-    primary_command: str,
-    compact_command: str,
-    assist_command: str,
-    profile: str,
-    function_command: str = "gemini-mcp-function",
-    account_command: str = "gemini-mcp-account",
+    function_command: str = "gemini-web-mcp",
 ) -> list[dict[str, object]]:
     with tempfile.TemporaryDirectory(prefix="gemini-protocol-smoke-") as directory:
         cwd = Path(directory)
         results = []
         for mode in ("auto", "legacy"):
-            results.extend(
-                [
-                    await _handshake(
-                        primary_command,
-                        profile=profile,
-                        expected_tools=PRIMARY_PROFILE_TOOLS[profile],
-                        cwd=cwd,
-                        mode=mode,
-                    ),
-                    await _handshake(
-                        compact_command,
-                        profile=profile,
-                        expected_tools=COMPACT_TOOLS,
-                        cwd=cwd,
-                        mode=mode,
-                    ),
-                    await _assist_handshake(
-                        assist_command,
-                        profile=profile,
-                        cwd=cwd,
-                        mode=mode,
-                    ),
-                    await _handshake(
-                        function_command, profile="account-full", expected_tools=FUNCTION_TOOLS, cwd=cwd, mode=mode,
-                    ),
-                    await _handshake(
-                        account_command, profile="function-full", expected_tools=ACCOUNT_TOOLS, cwd=cwd, mode=mode,
-                    ),
-                    await _handshake(
-                        primary_command, profile=None, expected_tools=FUNCTION_TOOLS, cwd=cwd, mode=mode,
-                    ),
-                    await _handshake(
-                        primary_command, profile="function-full", expected_tools=FUNCTION_FULL_TOOLS, cwd=cwd, mode=mode,
-                    ),
-                    await _handshake(
-                        primary_command, profile="account-full", expected_tools=ACCOUNT_FULL_TOOLS, cwd=cwd, mode=mode,
-                    ),
-                ]
+            results.append(
+                await _handshake(
+                    function_command,
+                    profile="account-full",
+                    expected_tools=FUNCTION_TOOLS,
+                    cwd=cwd,
+                    mode=mode,
+                )
             )
         return results
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--primary-command", default="gemini-mcp-server")
-    parser.add_argument("--compact-command", default="gemini-mcp-skill-server")
-    parser.add_argument("--assist-command", default="gemini-mcp-assist")
-    parser.add_argument("--function-command", default="gemini-mcp-function")
-    parser.add_argument("--account-command", default="gemini-mcp-account")
-    parser.add_argument("--profile", choices=sorted(PRIMARY_PROFILE_TOOLS), default="model")
+    parser.add_argument("--function-command", default="gemini-web-mcp")
     args = parser.parse_args()
 
-    results = asyncio.run(
-        _run(args.primary_command, args.compact_command, args.assist_command, args.profile,
-             args.function_command, args.account_command)
-    )
+    results = asyncio.run(_run(args.function_command))
     print(json.dumps({"handshakes": results, "status": "ok"}, sort_keys=True))
 
 

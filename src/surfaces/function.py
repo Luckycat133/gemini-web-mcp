@@ -6,9 +6,18 @@ import logging
 from typing import Any, Literal
 
 from .. import __version__
-from ..adapters import MCPServer, TextContent, domain_error_boundary, domain_failure_text, domain_text
+from ..adapters import (
+    Context,
+    MCPServer,
+    TextContent,
+    domain_error_boundary,
+    domain_failure_text,
+    domain_text,
+    make_progress_callback,
+    report_tool_progress,
+)
 from ..adapters.registration import selected_tools
-from ..client_wrapper import init_startup_infrastructure, server_lifespan
+from ..client_wrapper import get_gemini_client, init_startup_infrastructure, initialize_client, server_lifespan
 from ..constants import OMNI_VIDEO_MODEL, normalize_model_alias
 from ..domain import DomainErrorCode, DomainResult
 from ..services.background import submit_media
@@ -18,7 +27,8 @@ from ..services.media_generation import (
 from ..services.operations import MAX_RESULT_WAIT_SECONDS
 from ..services.media_inputs import image_workflow_options_error
 from ..services.media_storage import _valid_media_filename
-from ..tools.annotations import MUTATES_REMOTE
+from ..services.quota import fetch_initialized_quota_summary, format_quota_markdown
+from ..tools.annotations import MUTATES_REMOTE, READS_PRIVATE_REMOTE
 from ..tools.task_generation import register_lean_task_tool, register_task_generation_tools
 from ..tools.operations import register_lean_operation_tool, register_operation_tools
 from ..tools.utils import validate_optional_image_path
@@ -27,12 +37,11 @@ from .catalogs import FUNCTION_FULL_TOOLS
 
 logger = logging.getLogger(__name__)
 _INSTRUCTIONS = """
-Tools: `ask` (chat/web/Gem/Canvas/learning/Notebook), `understand` (analyze images/files/URLs),
-`image` (generate or edit via image_paths/source_operation_id), `video` (10s/15s, 16:9/9:16,
-optional 10s frame), `music` (duration/vocals/genre), `research` (Deep Research + derivatives),
-`task` (async browser/workflow tasks), `operation` (poll/fetch async handles).
-LLM models: `hydrogen` (default), `neon`, `carbon`, `auto`; thinking_level: `low`/`medium` (default)/`high`.
-Account admin (notebooks, gems, history, quotas, cleanup): `gemini-web-cli`.
+Tools: `ask-gemini` (chat, multi-turn sessions, Notebooks, and `inputs` up to 16 images/files/URLs),
+`generate-image` (create or edit via image_paths/source_operation_id), `generate-video` (10s/15s, 16:9/9:16),
+`generate-music` (duration/vocals/genre), `run-research`, `run-task`, `get-operation`, `check-quota`.
+Models: `hydrogen` (default), `neon`, `carbon`, `auto`; thinking_level: `low`/`medium` (default)/`high`.
+Account admin (history, notebooks, skills, cleanup): `gemini-web-cli`.
 """.strip()
 
 
@@ -51,6 +60,7 @@ async def _submit(
     wait_seconds: int | None = 0,
     music_duration: MusicDuration | None = None, music_vocals: MusicVocals | None = None,
     music_genre: MusicGenre | None = None,
+    ctx: Context | None = None,
 ) -> list[TextContent]:
     if not prompt.strip():
         return _invalid_media("prompt must not be blank.")
@@ -106,14 +116,19 @@ async def _submit(
         service = _service()
         store = getattr(service, "store", None)
         if store is not None and store.get(handle) is not None:
-            waited = await service.get_result(handle, wait_seconds=resolved_wait)
+            progress_cb = make_progress_callback(ctx)
+            waited = await (
+                service.get_result(handle, wait_seconds=resolved_wait, on_progress=progress_cb)
+                if progress_cb is not None
+                else service.get_result(handle, wait_seconds=resolved_wait)
+            )
             return _present(waited, include_text=False)
     text = f"Media operation handle: {handle}" if result.ok and handle else domain_failure_text(result)
     return domain_text(result, text, use_result_data=True)
 
 
-@domain_error_boundary("image", logger)
-async def image(
+@domain_error_boundary("generate-image", logger)
+async def generate_image(
     prompt: str,
     aspect_ratio: Literal["16:9", "9:16", "1:1", "4:3", "3:4"] | None = None,
     image_paths: list[str] | None = None,
@@ -123,29 +138,30 @@ async def image(
     filename: str | None = None,
     wait_seconds: int | None = None,
     retain_chat: bool = False,
-    operation_id: str | None = None,
+    ctx: Context | None = None,
 ) -> list[TextContent]:
     """Generate a new image or edit/transform existing images.
 
-    Pass local `image_paths` (as edit sources or style/character references) or
+    Pass local `image_paths` (edit sources or style/character references) or
     `source_operation_id` (+ optional `source_artifact_id`) to iterate on a prior
-    generated image. Waits up to 120s by default (`wait_seconds=0` returns immediately).
+    generated image. Waits up to 120s with progress updates (`wait_seconds=0`
+    returns handle immediately; resume via `get-operation`).
     """
     is_op_edit = source_operation_id is not None
     return await _submit(
         prompt=prompt, media_type="image", model="hydrogen", thinking_level="standard",
         image_path=None, output_dir=output_dir, filename=filename, timeout_seconds=None,
         retain_chat=retain_chat, delete_after_seconds=None,
-        operation_id=operation_id,
+        operation_id=None,
         operation="gemini_edit_image" if is_op_edit else "gemini_generate_image",
         edit=is_op_edit, aspect_ratio=aspect_ratio, image_paths=image_paths,
         source_operation_id=source_operation_id, source_artifact_id=source_artifact_id,
-        wait_seconds=wait_seconds,
+        wait_seconds=wait_seconds, ctx=ctx,
     )
 
 
-@domain_error_boundary("video", logger)
-async def video(
+@domain_error_boundary("generate-video", logger)
+async def generate_video(
     prompt: str,
     duration_seconds: Literal[10, 15] | None = None,
     aspect_ratio: Literal["16:9", "9:16"] | None = None,
@@ -154,24 +170,24 @@ async def video(
     filename: str | None = None,
     wait_seconds: int | None = None,
     retain_chat: bool = False,
-    operation_id: str | None = None,
+    ctx: Context | None = None,
 ) -> list[TextContent]:
     """Generate a video (10s or 15s, 16:9 or 9:16).
 
     Pass `image_path` for an optional first-frame reference (10s only).
-    Waits up to 300s by default (`wait_seconds=0` returns handle immediately).
+    Waits up to 300s with progress updates (`wait_seconds=0` returns handle; resume via `get-operation`).
     """
     return await _submit(
         prompt=prompt, media_type="video", model="hydrogen", thinking_level="standard",
         image_path=image_path, output_dir=output_dir, filename=filename, timeout_seconds=None,
         retain_chat=retain_chat, delete_after_seconds=None,
-        operation_id=operation_id, operation="gemini_generate_video", edit=False,
-        duration_seconds=duration_seconds, aspect_ratio=aspect_ratio, wait_seconds=wait_seconds,
+        operation_id=None, operation="gemini_generate_video", edit=False,
+        duration_seconds=duration_seconds, aspect_ratio=aspect_ratio, wait_seconds=wait_seconds, ctx=ctx,
     )
 
 
-@domain_error_boundary("music", logger)
-async def music(
+@domain_error_boundary("generate-music", logger)
+async def generate_music(
     prompt: str,
     duration: MusicDuration | None = None,
     vocals: MusicVocals | None = None,
@@ -180,20 +196,30 @@ async def music(
     filename: str | None = None,
     wait_seconds: int | None = None,
     retain_chat: bool = False,
-    operation_id: str | None = None,
+    ctx: Context | None = None,
 ) -> list[TextContent]:
     """Generate music or songs (short/standard, instrumental/vocals/auto, 18 genres).
 
-    Waits up to 240s by default (`wait_seconds=0` returns handle immediately).
+    Waits up to 240s with progress updates (`wait_seconds=0` returns handle; resume via `get-operation`).
     """
     return await _submit(
         prompt=prompt, media_type="music", model="hydrogen", thinking_level="low",
         image_path=None, output_dir=output_dir, filename=filename, timeout_seconds=None,
         retain_chat=retain_chat, delete_after_seconds=None,
-        operation_id=operation_id, operation="gemini_generate_music", edit=False,
+        operation_id=None, operation="gemini_generate_music", edit=False,
         music_duration=duration, music_vocals=vocals, music_genre=genre,
-        wait_seconds=wait_seconds,
+        wait_seconds=wait_seconds, ctx=ctx,
     )
+
+
+@domain_error_boundary("check-quota", logger)
+async def check_quota(ctx: Context | None = None) -> list[TextContent]:
+    """Check Gemini Web 5-hour and weekly quota limits, remaining credits, and reset times."""
+    await report_tool_progress(ctx, 0.0, 1.0, "Fetching Gemini Web quota...")
+    result = await fetch_initialized_quota_summary(get_gemini_client, initialize_client)
+    await report_tool_progress(ctx, 1.0, 1.0, "Completed")
+    text = format_quota_markdown(result.data) if result.ok and result.data is not None else domain_failure_text(result)
+    return domain_text(result, text, use_result_data=True)
 
 
 @domain_error_boundary("gemini_generate_image", logger)
@@ -326,7 +352,7 @@ async def gemini_generate_music(
 
 
 def build_server(*, full: bool = False) -> MCPServer:
-    server = MCPServer(name="Gemini functions", version=__version__, lifespan=server_lifespan,
+    server = MCPServer(name="gemini-web-mcp", version=__version__, lifespan=server_lifespan,
                        instructions=_INSTRUCTIONS, strict_arguments=not full)
     if full:
         from ..tools.chat import register_chat_tools
@@ -341,16 +367,22 @@ def build_server(*, full: bool = False) -> MCPServer:
         register_research_tools(selected_tools(server, {
             "gemini_list_research_report_actions", "gemini_create_from_research_report",
         }))
-        handlers: tuple[Any, ...] = (
+        for full_handler in (
             gemini_generate_image, gemini_edit_image, gemini_generate_video, gemini_generate_music,
-        )
+        ):
+            server.tool(annotations=MUTATES_REMOTE)(full_handler)
     else:
         register_lean_assist_tools(server)
         register_lean_operation_tool(server)
         register_lean_task_tool(server)
-        handlers = (image, video, music)
-    for handler in handlers:
-        server.tool(annotations=MUTATES_REMOTE)(handler)
+        lean_handlers: tuple[tuple[str, Any], ...] = (
+            ("generate-image", generate_image),
+            ("generate-video", generate_video),
+            ("generate-music", generate_music),
+        )
+        for tool_name, lean_handler in lean_handlers:
+            server.tool(name=tool_name, annotations=MUTATES_REMOTE)(lean_handler)
+        server.tool(name="check-quota", annotations=READS_PRIVATE_REMOTE)(check_quota)
     return server
 
 
@@ -359,7 +391,7 @@ mcp = build_server()
 
 def main(*, full: bool = False) -> None:
     logging.basicConfig(level=logging.INFO)
-    logger.info("Starting Gemini functions (v%s)", __version__)
+    logger.info("Starting gemini-web-mcp (v%s)", __version__)
     init_startup_infrastructure()
     (build_server(full=True) if full else mcp).run()
 

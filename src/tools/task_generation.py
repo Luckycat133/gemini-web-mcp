@@ -1,11 +1,14 @@
 """Thin function adapter for asynchronous Gemini Task execution."""
 
 import logging
-from typing import Literal
+from typing import Annotated, Literal
 
-from ..adapters import domain_error_boundary, domain_failure_text, domain_text
+from pydantic import Field
+
+from ..adapters import Context, domain_error_boundary, domain_failure_text, domain_text, make_progress_callback
 from ..adapters.mcp_sdk import MCPServer, TextContent
 from ..services.background import submit_task
+from ..services.operations import MAX_RESULT_WAIT_SECONDS
 from .annotations import DESTRUCTIVE_REMOTE
 
 logger = logging.getLogger(__name__)
@@ -15,9 +18,9 @@ _THINKING = Literal["low", "medium", "high"]
 
 
 def register_lean_task_tool(mcp: MCPServer) -> None:
-    @mcp.tool(name="task", annotations=DESTRUCTIVE_REMOTE)
-    @domain_error_boundary("task", logger)
-    async def task(
+    @mcp.tool(name="run-task", annotations=DESTRUCTIVE_REMOTE)
+    @domain_error_boundary("run-task", logger)
+    async def run_task(
         prompt: str,
         model: _MODEL = "hydrogen",
         thinking_level: _THINKING = "medium",
@@ -25,14 +28,17 @@ def register_lean_task_tool(mcp: MCPServer) -> None:
         operation_id: str | None = None,
         input_id: str | None = None,
         input_option_id: str | None = None,
+        wait_seconds: Annotated[int, Field(ge=0, le=MAX_RESULT_WAIT_SECONDS)] = 240,
         timeout_seconds: int = 600,
         retain_chat: bool = False,
+        ctx: Context | None = None,
     ) -> list[TextContent]:
-        """Start or reply to an asynchronous Gemini Task (browser/app workflow).
+        """Start or reply to a Gemini Task and wait for completion with progress updates.
 
-        Use `ask` for chat or Q&A; use `task` for multi-step background tasks and
-        poll via `operation(operation_id=...)`. For input_required, resend with original
-        operation_id, input_id, input_option_id, and user-authorized prompt.
+        Use `ask-gemini` for Q&A or multimodal file/URL analysis; use `run-task` for
+        multi-step background browser/app tasks. Waits up to 240s by default (`wait_seconds=0`
+        returns a handle immediately) and resumes via `get-operation`. For `input_required`,
+        resend with original `operation_id`, `input_id`, `input_option_id`, and prompt.
         """
         result = await submit_task({
             "prompt": prompt, "model": model, "thinking_level": thinking_level,
@@ -41,6 +47,19 @@ def register_lean_task_tool(mcp: MCPServer) -> None:
             "input_id": input_id, "input_option_id": input_option_id,
         }, operation_id=operation_id)
         handle = result.data.operation_id if result.data is not None else None
+        if result.ok and handle and wait_seconds > 0:
+            from .operations import _present, _service
+
+            service = _service()
+            store = getattr(service, "store", None)
+            if store is not None and store.get(handle) is not None:
+                progress_cb = make_progress_callback(ctx)
+                waited = await (
+                    service.get_result(handle, wait_seconds=wait_seconds, on_progress=progress_cb)
+                    if progress_cb is not None
+                    else service.get_result(handle, wait_seconds=wait_seconds)
+                )
+                return _present(waited, include_text=True)
         text = f"Task accepted. Operation handle: {handle}" if result.ok else domain_failure_text(result)
         return domain_text(result, text, use_result_data=True)
 

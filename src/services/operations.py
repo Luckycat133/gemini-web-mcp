@@ -99,7 +99,13 @@ class OperationService:
     async def get_status(self, operation_id: str) -> DomainResult[OperationReadData]:
         return await self._read(operation_id, include_report=False)
 
-    async def get_result(self, operation_id: str, *, wait_seconds: int = 0) -> DomainResult[OperationReadData]:
+    async def get_result(
+        self,
+        operation_id: str,
+        *,
+        wait_seconds: int = 0,
+        on_progress: Callable[[float, float, str], Awaitable[None]] | None = None,
+    ) -> DomainResult[OperationReadData]:
         """Wait on the original worker's checkpoints without submitting new work."""
         from .background import worker_active
 
@@ -139,6 +145,11 @@ class OperationService:
                     if (not result.ok or data is None or data.state == OperationState.COMPLETED
                             or data.input_required or data.needs_attention or data.setup_required
                             or not (data.worker_active or active)):
+                        if on_progress is not None:
+                            try:
+                                await on_progress(float(wait_seconds), float(wait_seconds), f"{record.operation}: finished")
+                            except Exception:
+                                pass
                         return result
             now_mono = clock()
             remaining = deadline - now_mono
@@ -151,6 +162,15 @@ class OperationService:
                     execution_mode={"gemini_run_task": "task", "gemini_notebook_chat": "chat"}.get(record.operation),
                 )
                 return DomainResult.success(data, operation_state=data.state, verification_status=data.verification_status)
+            if on_progress is not None:
+                try:
+                    await on_progress(
+                        max(0.0, now_mono - started),
+                        float(wait_seconds),
+                        f"{record.operation}: {record.phase or record.state}",
+                    )
+                except Exception:
+                    pass
             await asyncio.sleep(min(_next_wait_poll_seconds(now_mono - started), remaining))
 
     def _load_operation(

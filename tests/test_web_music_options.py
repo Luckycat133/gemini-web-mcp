@@ -44,7 +44,7 @@ def submit(monkeypatch):
 def test_music_options_are_optional_and_forwarded_by_every_registered_surface(primary, submit):
     async def run():
         async with Client(function.mcp, mode="auto", cache=None) as client:
-            lean = {item.name: item for item in (await client.list_tools()).tools}["music"]
+            lean = {item.name: item for item in (await client.list_tools()).tools}["generate-music"]
             assert lean.annotations == MUTATES_REMOTE
             for field, internal in (("duration", "music_duration"), ("vocals", "music_vocals")):
                 assert field not in lean.input_schema.get("required", ())
@@ -54,7 +54,7 @@ def test_music_options_are_optional_and_forwarded_by_every_registered_surface(pr
                 ({"vocals": "auto"}, {"music_vocals": "auto"}),
                 ({}, {}),
             ):
-                response = await client.call_tool("music", {"prompt": _PROMPT, "wait_seconds": 0, **lean_opts})
+                response = await client.call_tool("generate-music", {"prompt": _PROMPT, "wait_seconds": 0, **lean_opts})
                 result = domain_result_from_call(response)
                 assert result["ok"] and result["data"]["operation_id"] == _HANDLE
                 request = submit.await_args.args[0]

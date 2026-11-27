@@ -201,9 +201,14 @@ ASSIST_TOOLS = frozenset(
 )
 
 FUNCTION_TOOLS = frozenset({
-    "ask", "understand",
-    "image", "video", "music",
-    "research", "task", "operation",
+    "ask-gemini",
+    "generate-image",
+    "generate-video",
+    "generate-music",
+    "run-research",
+    "run-task",
+    "get-operation",
+    "check-quota",
 })
 ACCOUNT_TOOLS = frozenset({
     "gemini_history", "gemini_manage_chat", "gemini_delete_chat",

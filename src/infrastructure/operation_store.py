@@ -342,7 +342,7 @@ class OperationStore:
                               (*_account_parameters(account), chat_id, title_digest)).fetchone() is not None
 
     def claim_web_task_approval(self, account: str, chat_id: str, response_id: str, candidate_id: str,
-                                *, title_digest: str | None = None) -> bool:
+                                *, title_digest: str | None = None, allow_owned: bool = False) -> bool:
         """Claim the card and any one-use deletion rule without taking cleanup ownership."""
         owner = current_account_key()
         if not owner or not account_matches(account, owner):
@@ -353,16 +353,16 @@ class OperationStore:
                 return False
             owned = db.execute("""SELECT operation_id FROM operations WHERE account_key IN (?,?) AND upstream_chat_id=?
                                   AND operation='gemini_run_task' LIMIT 1""", (*scope, chat_id)).fetchone()
-            if title_digest is None and owned is not None:
+            if not allow_owned and title_digest is None and owned is not None:
+                return False
+            if db.execute("""SELECT 1 FROM task_inputs AS input JOIN operations AS op USING (operation_id)
+                             WHERE input.account_key IN (?,?) AND op.upstream_chat_id=? AND input.previous_response_id=?
+                               AND input.previous_candidate_id=? LIMIT 1""",
+                          (*scope, chat_id, response_id, candidate_id)).fetchone():
                 return False
             if title_digest is not None:
                 if db.execute("SELECT 1 FROM web_task_delete_claims WHERE account_key IN (?,?) AND chat_id=? AND title_digest=?",
                               (*scope, chat_id, title_digest)).fetchone():
-                    return False
-                if db.execute("""SELECT 1 FROM task_inputs AS input JOIN operations AS op USING (operation_id)
-                                 WHERE input.account_key IN (?,?) AND op.upstream_chat_id=? AND input.previous_response_id=?
-                                   AND input.previous_candidate_id=? LIMIT 1""",
-                              (*scope, chat_id, response_id, candidate_id)).fetchone():
                     return False
             if db.execute("""SELECT 1 FROM web_task_approval_claims WHERE account_key IN (?,?) AND chat_id=?
                              AND response_id=? AND candidate_id=?""", (*scope, chat_id, response_id, candidate_id)).fetchone():

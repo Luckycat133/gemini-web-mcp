@@ -19,6 +19,7 @@ from ..infrastructure.task_confirmation import (
     native_confirmation_card,
     one_time_browser_option,
     parse_confirmation_replies,
+    select_auto_approve_option,
 )
 from ..infrastructure.task_approval_browser import run_task_approval_browser
 from ..infrastructure.task_setup import parse_app_setup_card
@@ -33,8 +34,10 @@ _DELETE_RULES_ENV = "GEMINI_TASK_GOOGLE_TASKS_DELETE_RULES"
 
 
 def web_task_approvals_enabled() -> bool:
-    return (task_auto_approve_enabled()
-            and os.environ.get("GEMINI_TASK_WEB_APPROVALS", "").strip().lower() == "true")
+    return (
+        task_auto_approve_enabled()
+        and os.environ.get("GEMINI_TASK_WEB_APPROVALS", "true").strip().lower() not in {"false", "0", "no", "off"}
+    )
 
 
 @dataclass(frozen=True)
@@ -104,6 +107,10 @@ def _browser_option(confirmation: dict[str, Any]) -> dict[str, str] | None:
     return option
 
 
+def _card_option(confirmation: dict[str, Any]) -> dict[str, str] | None:
+    return select_auto_approve_option(confirmation) or one_time_browser_option(confirmation)
+
+
 def pending_web_task_card(payload: Any) -> PendingWebTaskCard | None:
     if (not isinstance(payload, dict) or payload.get("latest_verified") is not True
             or type(payload.get("upstream_status")) is not int
@@ -126,16 +133,25 @@ def pending_web_task_card(payload: Any) -> PendingWebTaskCard | None:
     confirmation = parse_confirmation_replies(native, chat_id=chat_id, response_id=rid, candidate_id=candidate[0])
     url = "https://gemini.google.com/app/" + quote(chat_id.removeprefix("c_"), safe="")
     delete_title = None
-    if _browser_option(confirmation) is not None:
+    auto_enabled = web_task_approvals_enabled()
+    if one_time_browser_option(confirmation) is not None:
         notice = TaskPendingApproval("browser", "Allow browser use for this step", "browser_grant_available", url)
     elif (len(native) > 2 and native[1] == "Google Tasks" and isinstance(native[2], str)
           and re.search(r"删除任务|刪除工作|\bdelete tasks?\b", native[2], flags=re.IGNORECASE)):
         delete_title = _delete_title(native, candidate, confirmation)
         configured = delete_title is not None and (chat_id, delete_title) in _delete_rules()
-        state = "browser_approval_configured" if configured and web_task_approvals_enabled() else "native_review_required"
-        notice = TaskPendingApproval("google_tasks_delete", "Delete a Google Tasks item", state, url)
+        state_label = (
+            "browser_approval_configured"
+            if (configured or auto_enabled) and delete_title is not None
+            else ("auto_approval_available" if auto_enabled else "native_review_required")
+        )
+        notice = TaskPendingApproval("google_tasks_delete", "Delete a Google Tasks item", state_label, url)
+    elif _card_option(confirmation) is not None:
+        state_label = "auto_approval_available" if auto_enabled else "native_review_required"
+        notice = TaskPendingApproval("confirmation", "Auto-approve interactive confirmation card", state_label, url)
     else:
-        notice = TaskPendingApproval("confirmation", "Review the native approval card", "native_review_required", url)
+        state_label = "auto_approval_available" if auto_enabled else "native_review_required"
+        notice = TaskPendingApproval("confirmation", "Review the native approval card", state_label, url)
     return PendingWebTaskCard(chat_id, rid, candidate[0], confirmation, notice, delete_title)
 
 
@@ -143,7 +159,7 @@ async def _approve_web_task_browser(client: Any, store: OperationStore, owner: s
     from ..thinking_client import mutation_scope
 
     chat_id = card.chat_id
-    option = _browser_option(card.confirmation)
+    option = _card_option(card.confirmation)
     if option is None or current_account_key() != owner:
         return
     identity = (chat_id, card.response_id, card.candidate_id)
@@ -152,7 +168,7 @@ async def _approve_web_task_browser(client: Any, store: OperationStore, owner: s
     latest = pending_web_task_card(await fetch_task_progress_turn(client, chat_id))
     if latest != card or not web_task_approvals_enabled() or current_account_key() != owner:
         return
-    if not store.claim_web_task_approval(owner, *identity):
+    if not store.claim_web_task_approval(owner, *identity, allow_owned=True):
         return
     reply = next(item for item in card.confirmation["input_card"]["replies"]
                  if item["input_option_id"] == option["input_option_id"])
@@ -163,7 +179,7 @@ async def _approve_web_task_browser(client: Any, store: OperationStore, owner: s
             if current_account_key() != owner:
                 return
             await await_before_deadline(client.generate_content(
-                prompt=option["prompt"], model="flash", chat=client.start_chat(metadata=list(identity)),
+                prompt=option["prompt"], model="hydrogen", chat=client.start_chat(metadata=list(identity)),
             ), timeout=60)
         observed = await fetch_task_progress_turn(client, chat_id)
         verified = (current_account_key() == owner and isinstance(observed, dict)
@@ -233,6 +249,56 @@ async def _approve_google_tasks_delete(client: Any, store: OperationStore, owner
             store.finish_web_task_approval(owner, *identity, continuation_verified=verified)
 
 
+async def _approve_web_task_dom_card(client: Any, store: OperationStore, owner: str, card: PendingWebTaskCard) -> None:
+    from ..client_manager import get_extra_cookies
+
+    cookies = get_extra_cookies()
+    browser_psid = cookies.get("__Secure-1PSID")
+    env_psid = os.environ.get("GEMINI_PSID")
+    if not browser_psid or (env_psid and browser_psid != env_psid):
+        return
+    identity = (card.chat_id, card.response_id, card.candidate_id)
+    claimed = False
+    verified = False
+
+    async def before_execute() -> bool:
+        nonlocal claimed
+        latest = pending_web_task_card(await fetch_task_progress_turn(client, card.chat_id))
+        if (latest != card or current_account_key() != owner or not web_task_approvals_enabled()
+                or (env_psid and os.environ.get("GEMINI_PSID") != browser_psid)):
+            return False
+        claimed = store.claim_web_task_approval(owner, *identity, allow_owned=True)
+        return claimed
+
+    try:
+        browser_script = files("src").joinpath("data", "task_card_approval.js").read_text(encoding="utf-8")
+        outcome = await run_task_approval_browser(
+            card.summary.url, cookies, browser_script,
+            {"taskId": card.chat_id.removeprefix("c_"), "responseId": card.response_id},
+            before_execute=before_execute, timeout=60,
+        )
+        status = outcome.get("status")
+        if claimed and status in ("not_matched", "skipped"):
+            store.finish_web_task_approval(owner, *identity, continuation_verified=False)
+            return
+        if not claimed or status != "activated":
+            return
+        for delay in (0, 1, 3):
+            if delay:
+                await asyncio.sleep(delay)
+            if current_account_key() != owner:
+                return
+            latest_turn = await fetch_task_progress_turn(client, card.chat_id)
+            if (current_account_key() == owner and isinstance(latest_turn, dict) and latest_turn.get("chat_id") == card.chat_id
+                    and latest_turn.get("latest_verified") is True and isinstance(latest_turn.get("response_id"), str)
+                    and latest_turn["response_id"] != card.response_id):
+                verified = True
+                break
+    finally:
+        if claimed:
+            store.finish_web_task_approval(owner, *identity, continuation_verified=verified)
+
+
 class WebTaskApprovalWatcher:
     """Bounded Task discovery, with one page per maintenance pass."""
 
@@ -258,17 +324,19 @@ class WebTaskApprovalWatcher:
             chat_id = task["chat_id"]
             if task.get("upstream_status") != TASK_STATUS_INPUT_REQUIRED:
                 continue
-            owned = store.has_owned_task_chat(owner, chat_id)
-            if owned and chat_id not in configured_chats:
-                continue
+            store.has_owned_task_chat(owner, chat_id)
             try:
                 card = pending_web_task_card(await fetch_task_progress_turn(client, chat_id))
                 if card is None or card.chat_id != chat_id or current_account_key() != owner:
                     continue
-                if card.summary.kind == "google_tasks_delete" and chat_id in configured_chats:
-                    await _approve_google_tasks_delete(client, store, owner, card)
-                elif not owned:
+                if card.summary.kind == "google_tasks_delete" and configured_chats:
+                    if chat_id in configured_chats:
+                        await _approve_google_tasks_delete(client, store, owner, card)
+                    continue
+                if _card_option(card.confirmation) is not None:
                     await _approve_web_task_browser(client, store, owner, card)
+                else:
+                    await _approve_web_task_dom_card(client, store, owner, card)
             except Exception as error:
                 logger.warning("Web Task approval remains unverified error_type=%s", type(error).__name__)
 

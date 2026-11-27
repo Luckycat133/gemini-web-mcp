@@ -26,7 +26,7 @@ def _assert_function_server(server: dict) -> None:
     if "type" in server:
         assert server["type"] == "stdio"
     assert server["command"] == "uvx"
-    assert server["args"] == ["--from", CANONICAL_GIT_SOURCE, "gemini-mcp-function"]
+    assert server["args"] == ["--from", CANONICAL_GIT_SOURCE, "gemini-web-mcp"]
     assert "GEMINI_TOOLS" not in server["env"]
     assert server["env"]["GEMINI_AUTO_REFRESH"] == "false"
 
@@ -47,7 +47,7 @@ def test_codex_configuration_parses_and_forwards_host_secrets() -> None:
     server = payload["mcp_servers"]["gemini"]
 
     assert server["command"] == "uvx"
-    assert server["args"] == ["--from", CANONICAL_GIT_SOURCE, "gemini-mcp-function"]
+    assert server["args"] == ["--from", CANONICAL_GIT_SOURCE, "gemini-web-mcp"]
     assert server["env"] == {"GEMINI_AUTO_REFRESH": "false"}
     assert server["env_vars"] == ["GEMINI_PSID", "GEMINI_PSIDTS", "GEMINI_PSIDCC"]
     assert server["startup_timeout_sec"] == 60

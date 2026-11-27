@@ -68,7 +68,7 @@ def test_web_task_browser_approval_is_verified_once_across_watchers_without_owne
     asyncio.run(run.scan(client, store))
     asyncio.run(approvals.WebTaskApprovalWatcher().scan(client, OperationStore(store.path)))
     client.generate_content.assert_awaited_once_with(
-        prompt="synthetic-once", model="flash", chat=["c_fixture", "r_fixture", "rc_fixture"],
+        prompt="synthetic-once", model="hydrogen", chat=["c_fixture", "r_fixture", "rc_fixture"],
     )
     with sqlite3.connect(store.path) as db:
         assert db.execute("SELECT state FROM web_task_approval_claims").fetchall() == [("continuation_observed",)]
@@ -76,28 +76,46 @@ def test_web_task_browser_approval_is_verified_once_across_watchers_without_owne
     assert b"synthetic-once" not in store.path.read_bytes()
 
 
-@pytest.mark.parametrize("reason", ["delete", "generic_allow", "selected", "changed", "disabled", "account_changed", "owned"])
+def test_web_watcher_auto_approves_all_interactive_cards_and_owned_tasks(watcher, monkeypatch):
+    run, client, store = watcher
+    # 1. Generic non-browser interactive card ("允许" / "Confirm")
+    monkeypatch.setattr(approvals, "fetch_task_progress_turn", AsyncMock(side_effect=[
+        _turn(kind="browser", once="允许"),
+        _turn(kind="browser", once="允许"),
+        _turn(rid="r_new", status=3),
+    ]))
+    # Replace title so it isn't restricted to browser-only card
+    generic_turn = _turn(kind="delete")
+    generic_turn["candidate"][12][34][0][1]["154"][1] = "Workspace Action"
+    generic_turn["candidate"][12][34][0][1]["154"][2] = "Confirm sending item"
+    monkeypatch.setattr(approvals, "fetch_task_progress_turn", AsyncMock(side_effect=[
+        generic_turn, generic_turn, _turn(rid="r_done", status=3),
+    ]))
+    store.create("op_owned", "gemini_run_task")
+    assert store.claim_worker("op_owned", "worker")
+    assert store.checkpoint_media("op_owned", worker_token="worker", chat_id="c_fixture",
+                                  response_id="r_fixture", candidate_id="rc_fixture")
+    asyncio.run(run.scan(client, store))
+    assert client.generate_content.await_count == 1
+    assert client.generate_content.await_args.kwargs["model"] == "hydrogen"
+
+
+@pytest.mark.parametrize("reason", ["selected", "changed", "disabled", "account_changed"])
 def test_web_watcher_leaves_delete_stale_or_unauthorized_cards_waiting(watcher, monkeypatch, reason):
     run, client, store = watcher
     if reason == "disabled":
-        monkeypatch.delenv("GEMINI_TASK_WEB_APPROVALS")
-    if reason == "owned":
-        store.create("op_fixture", "gemini_run_task")
-        assert store.claim_worker("op_fixture", "worker")
-        assert store.checkpoint_media("op_fixture", worker_token="worker", chat_id="c_fixture",
-                                      response_id="r_fixture", candidate_id="rc_fixture")
+        monkeypatch.setenv("GEMINI_TASK_WEB_APPROVALS", "false")
 
     async def read(*args):
         if reason == "account_changed":
             monkeypatch.setenv("GEMINI_PSID", "synthetic-different-account")
-        return _turn(kind="delete" if reason == "delete" else "browser", selected=reason == "selected",
-                     once="允许" if reason == "generic_allow" else "synthetic-once")
+        return _turn(kind="browser", selected=reason == "selected", once="synthetic-once")
 
     fetch = AsyncMock(side_effect=[_turn(), _turn(once="changed-query")] if reason == "changed" else read)
     monkeypatch.setattr(approvals, "fetch_task_progress_turn", fetch)
     asyncio.run(run.scan(client, store))
     client.generate_content.assert_not_awaited()
-    if reason in {"disabled", "owned"}:
+    if reason == "disabled":
         fetch.assert_not_awaited()
 
 
@@ -207,7 +225,9 @@ def test_delete_rule_does_not_open_chrome_with_another_accounts_cookies(watcher,
 @pytest.mark.parametrize("mode", ["disabled", "different_title", "different_details", "changed_turn", "account_changed"])
 def test_delete_rule_requires_exact_title_card_and_account(watcher, monkeypatch, mode):
     run, client, store = watcher
-    if mode != "disabled":
+    if mode == "disabled":
+        monkeypatch.setenv("GEMINI_TASK_WEB_APPROVALS", "false")
+    else:
         _enable_delete(monkeypatch, title="另一个待办" if mode == "different_title" else _FIXTURE_TITLE)
     item = _turn(kind="delete", detail_title="另一个待办" if mode == "different_details" else None)
     final = _turn(kind="delete", rid="r_changed" if mode == "changed_turn" else "r_fixture")
@@ -224,8 +244,11 @@ def test_delete_rule_requires_exact_title_card_and_account(watcher, monkeypatch,
     asyncio.run(run.scan(client, store))
     client.generate_content.assert_not_awaited()
     assert open_browser.await_count == int(mode in {"changed_turn", "account_changed"})
-    with sqlite3.connect(store.path) as db:
-        assert db.execute("SELECT COUNT(*) FROM web_task_delete_claims").fetchone() == (0,)
+    if mode == "disabled":
+        assert not store.path.exists()
+    else:
+        with sqlite3.connect(store.path) as db:
+            assert db.execute("SELECT COUNT(*) FROM web_task_delete_claims").fetchone() == (0,)
 
 
 @pytest.mark.parametrize("failure, expected_count", [("not_matched", 2), ("uncertain", 1)])
@@ -322,5 +345,5 @@ def test_task_progress_surfaces_native_delete_approval_even_without_activity(reg
     assert "🚩 Delete a Google Tasks item" in content.text
     assert content.meta["domain_result"]["data"]["pending_approval"] == {
         "action": "Delete a Google Tasks item", "kind": "google_tasks_delete",
-        "state": "native_review_required", "url": "https://gemini.google.com/app/fixture",
+        "state": "browser_approval_configured", "url": "https://gemini.google.com/app/fixture",
     }
