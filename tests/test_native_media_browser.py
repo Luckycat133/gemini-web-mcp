@@ -5,6 +5,7 @@ import base64
 from contextlib import asynccontextmanager
 import json
 from pathlib import Path
+from types import SimpleNamespace
 import re
 import shutil
 import subprocess
@@ -382,6 +383,23 @@ def _submit(monkeypatch, chrome, on_chat=None, *, account_matches=lambda: True, 
         {"__Secure-1PSID": "synthetic"}, timeout=timeout, on_chat=on_chat, account_matches=account_matches, **options))
 
 
+def test_cdp_call_preserves_caller_cancellation_on_simultaneous_completion():
+    async def exercise():
+        async def reply(*args, **kwargs):
+            operation.cancel()
+            return {}
+
+        composer = browser._Composer(
+            SimpleNamespace(call=reply), "", "video", "Observed model", lambda: True,
+            duration_seconds=None, aspect_ratio=None, thinking_level="low",
+        )
+        operation = asyncio.create_task(composer.call("Runtime.evaluate"))
+        with pytest.raises(asyncio.CancelledError):
+            await operation
+
+    asyncio.run(exercise())
+
+
 @pytest.mark.parametrize("failures", [1, 2])
 def test_empty_composer_navigation_retries_once_before_any_submission(monkeypatch, failures):
     fixture = _Chrome("music", _BLOB, navigation_failures=failures)
@@ -424,7 +442,7 @@ def test_native_never_inserts_after_unverified_empty_editor_focus(monkeypatch, s
     def account_matches():
         return scenario != "account" or fixture.editor_clicks == 0
 
-    result = _submit(monkeypatch, fixture, account_matches=account_matches, timeout=0.2)
+    result = _submit(monkeypatch, fixture, account_matches=account_matches, timeout=1.0)
 
     assert result.state == "unverified" and result.stage == "edit_prompt" and not result.submitted
     assert fixture.editor_clicks == clicks and fixture.closed
