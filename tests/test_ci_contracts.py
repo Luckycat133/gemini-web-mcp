@@ -222,7 +222,7 @@ def test_ci_workflow_has_separate_diagnostic_offline_gates() -> None:
         "python scripts/package_release.py --outdir dist",
         "python scripts/check_version_consistency.py --artifacts-dir dist",
         "-m pip check",
-        'uvx --from "$GITHUB_WORKSPACE"/dist/*.whl gemini-mcp-onboarding',
+        'uvx --from "$GITHUB_WORKSPACE"/dist/*.whl gemini-web-cli --version',
     ):
         assert command in workflow
     assert workflow.count("cache: pip") == 7
@@ -243,14 +243,19 @@ def test_ci_pins_reference_skill_validator_and_checks_single_public_sources() ->
     ) in workflow
 
 
-def test_ci_and_release_pin_uv_and_smoke_the_one_command_onboarding() -> None:
+def test_ci_and_release_pin_uv_and_smoke_the_installed_unified_cli() -> None:
     ci_workflow = CI_WORKFLOW.read_text(encoding="utf-8")
     release_workflow = RELEASE_WORKFLOW.read_text(encoding="utf-8")
 
     for workflow in (ci_workflow, release_workflow):
         assert SETUP_UV_SHA in workflow
-        assert workflow.count('uvx --from "$GITHUB_WORKSPACE"/dist/*.whl gemini-mcp-onboarding') == 1
+        assert workflow.count('uvx --from "$GITHUB_WORKSPACE"/dist/*.whl gemini-web-cli --version') == 1
         assert "working-directory: ${{ runner.temp }}" in workflow
+        assert "scripts/smoke_installed_wheel.py" in workflow
+        assert "scripts/smoke_mcp_protocol.py" in workflow
+        assert "smoke_mcp_protocol.py --profile" not in workflow
+        assert "gemini-mcp-onboarding" not in workflow
+        assert 'GEMINI_TASK_WEB_APPROVALS: "false"' in workflow
 
 
 def test_live_canary_is_opt_in_offline_separated_and_reports_drift_to_one_issue() -> None:
