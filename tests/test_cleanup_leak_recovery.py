@@ -26,6 +26,10 @@ from src.operation_worker import run_worker
 from src.services import background
 from src.services import media_jobs
 
+# monkeypatch asyncio.sleep 时用来让出控制权的原始实现。
+# 不能写 await asyncio.sleep(0)：被 monkeypatch 替换掉的就是全局 asyncio.sleep，会递归调用自己。
+_ORIGINAL_ASYNCIO_SLEEP = asyncio.sleep
+
 
 # ---------------------------------------------------------------------------
 # CleanupStore.schedule: delete_at tightening
@@ -112,8 +116,12 @@ class _WorkerStore:
     def bind_worker(self, *_args):
         return True
 
-    def heartbeat_worker(self, *_args):
-        return True
+    def heartbeat_worker(self, _operation_id, worker_token):
+        # 真实 store 的 heartbeat_worker 是一次 UPDATE：行还在（worker_token 匹配）才返回 True，
+        # retire_worker 把 worker_token 置 NULL 之后 UPDATE 影响 0 行 -> 返回 False，心跳退出。
+        # 这里原来永远返回 True，_heartbeat 的 while 因此永不结束，asyncio.run 会等心跳任务退出，
+        # 21 个用例每次各等满 10 秒 sleep，整文件要跑 3 分多钟，并拖垮 CI 的全量套件。
+        return self.token == worker_token
 
     def get(self, _operation_id):
         return self.record
@@ -481,7 +489,12 @@ def test_run_worker_breaks_immediately_on_media_identity_incomplete(monkeypatch)
     sleeps = []
 
     async def fake_sleep(seconds):
-        sleeps.append(seconds)
+        # 只记录轮询用的 sleep（心跳保活的 10 秒不计入）；并且必须 await 让出控制权，
+        # 否则 _heartbeat 的 while 变成忙等死循环，heartbeat.cancel() 无效，用例会挂死。
+        # 注意不能用 asyncio.sleep(0)：被替换的就是全局 asyncio.sleep，会递归调用自己。
+        if seconds != 10:
+            sleeps.append(seconds)
+        await _ORIGINAL_ASYNCIO_SLEEP(0)
 
     monkeypatch.setattr(operation_worker.asyncio, "sleep", fake_sleep)
     store = _WorkerStore(_media_record(state="partial", phase="media_identity_incomplete"))
@@ -506,7 +519,15 @@ def test_run_worker_caps_static_partial_polls_and_releases_cleanup(monkeypatch):
     sleeps = []
 
     async def fake_sleep(seconds):
-        sleeps.append(seconds)
+        # 只记录轮询用的 sleep：_heartbeat 也用 asyncio.sleep(10)，那是心跳保活，
+        # 不是本用例要断言的轮询间隔。
+        if seconds != 10:
+            sleeps.append(seconds)
+        # 必须真正让出控制权：monkeypatch 换掉的是整个 asyncio.sleep，不 await 的话
+        # _heartbeat 的 while 变成忙等死循环，finally 里 heartbeat.cancel() 对它无效，
+        # asyncio.run 退出会一直等这个 task —— 整个用例挂死。
+        # 注意不能用 asyncio.sleep(0)：被替换的就是全局 asyncio.sleep，会递归调用自己。
+        await _ORIGINAL_ASYNCIO_SLEEP(0)
 
     monkeypatch.setattr(operation_worker.asyncio, "sleep", fake_sleep)
     store = _WorkerStore(_media_record(state="partial", phase="media_artifact_not_observed"))

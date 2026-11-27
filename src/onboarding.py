@@ -63,6 +63,8 @@ def _server_environment(*, profile: str, allow_live_account: bool) -> dict[str, 
         for name in COOKIE_ENVIRONMENT_NAMES:
             environment.pop(name, None)
         environment["GEMINI_AUTO_REFRESH"] = "false"
+        environment["GEMINI_TASK_AUTO_APPROVE"] = "false"
+        environment["GEMINI_TASK_WEB_APPROVALS"] = "false"
         environment["GEMINI_BROWSER_AUTO_LOAD"] = "false"
     return environment
 

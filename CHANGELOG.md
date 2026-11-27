@@ -9,6 +9,13 @@ Detailed per-build validation logs live in [docs/changelog.md](docs/changelog.md
 
 ## [Unreleased]
 
+## [0.24.1] - 2026-11-27
+
+### Fixed
+
+- Verify the installed unified CLI and current MCP stdio surface instead of invoking removed entrypoints and unsupported smoke flags.
+- Keep browser auto-approval disabled during offline checks and prevent test doubles from stalling the asyncio event loop.
+
 ## [0.24.0] - 2026-11-27
 
 ### Changed

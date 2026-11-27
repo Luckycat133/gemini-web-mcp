@@ -113,7 +113,10 @@ async def read_native_media_response(
         return None
     media_read = getattr(client, "read_chat_for_media", None)
     read = media_read if callable(media_read) else client.read_chat
-    history = await asyncio.wait_for(read(chat_id), timeout=timeout)
+    # Keep the timeout in the caller task: a child wait_for can swallow cancel
+    # if the read completes at the same time on Python 3.11.
+    async with asyncio.timeout(timeout):
+        history = await read(chat_id)
     output = _exact_new_chat_response(history, chat_id)
     if output is None:
         return None
@@ -142,15 +145,13 @@ async def _verified_native_failure(client: Any, response: Any, chat_id: str, kin
         return False
     try:
         with client_readback_scope(client):
-            proof = await asyncio.wait_for(
-                read_completed_empty_media_turn(client, chat_id, metadata[1], rcid, text), timeout=timeout,
-            )
+            async with asyncio.timeout(timeout):
+                proof = await read_completed_empty_media_turn(client, chat_id, metadata[1], rcid, text)
             if proof.status == "rejected" and proof.reject_code == 429:
                 raise NativeMediaGenerationError("RATE_LIMITED", submitted=True, chat_id=chat_id)
             if proof.status != "success" and kind == "music" and is_music_tool_unavailable_reply(text):
-                proof = await asyncio.wait_for(
-                    read_completed_music_failure_turn(client, chat_id, metadata[1], rcid, text), timeout=timeout,
-                )
+                async with asyncio.timeout(timeout):
+                    proof = await read_completed_music_failure_turn(client, chat_id, metadata[1], rcid, text)
                 if proof.status == "rejected" and proof.reject_code == 429:
                     raise NativeMediaGenerationError("RATE_LIMITED", submitted=True, chat_id=chat_id)
     except Exception as error:

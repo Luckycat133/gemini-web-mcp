@@ -22,6 +22,10 @@ from src.services.media_storage import _save_generated_media
 from src.services.model_policy import ModelPolicyError, model_selection_from_response
 from tests.test_web_model_selection import discovered_client
 
+# monkeypatch asyncio.sleep 时用来让出控制权的原始实现。
+# 不能写 await asyncio.sleep(0)：被 monkeypatch 替换掉的就是全局 asyncio.sleep，会递归调用自己。
+_ORIGINAL_ASYNCIO_SLEEP = asyncio.sleep
+
 CID = "c_0123456789abcdef"
 RID = "r_synthetic_native"
 RCID = "rc_synthetic_native"
@@ -244,7 +248,10 @@ def test_native_generation_reads_original_ready_media_when_browser_player_stays_
         calls.append(kind)
         await on_chat(CID)
         try:
-            await asyncio.sleep(60)  # An unplayed native player need not load its bytes.
+            # An unplayed native player need not load its bytes.
+            # 用假 sleep 代替真实 60 秒等待：生产代码靠 asyncio.wait_for(..., timeout=timeout)
+            # 触发超时路径，被取消的等待会立刻结束，不用真等 60 秒拖慢整套 CI。
+            await _ORIGINAL_ASYNCIO_SLEEP(60)
         finally:
             closed.append(True)
 
@@ -410,6 +417,20 @@ def test_verified_native_failure_ends_only_local_browser_observer_without_anothe
     assert not response.media and not response.videos
     rpc.assert_awaited_once()
     send.assert_not_awaited()
+
+
+def test_native_history_read_preserves_cancellation_when_readback_completes():
+    async def exercise():
+        async def read_history(_chat_id):
+            operation.cancel()
+            return SimpleNamespace(turns=[])
+
+        client = SimpleNamespace(read_chat=read_history)
+        operation = asyncio.create_task(native.read_native_media_response(client, CID, "video"))
+        with pytest.raises(asyncio.CancelledError):
+            await operation
+
+    asyncio.run(exercise())
 
 
 @pytest.mark.parametrize("change", ["pending", "uri", "opaque", "identity"])

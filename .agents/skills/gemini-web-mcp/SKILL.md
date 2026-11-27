@@ -4,7 +4,7 @@ description: "Use this skill when an agent should extend itself with Gemini Web:
 license: MIT-0
 compatibility: "Requires Python 3.11+ and a connected `gemini-web-mcp` server. The unified server exposes 8 verb-object tools (`ask-gemini`, `generate-image`, `generate-video`, `generate-music`, `run-research`, `run-task`, `get-operation`, `check-quota`); `gemini-web-cli` handles account administration. Full compatibility catalogs (`function-full` / `account-full`) remain supported internally. Media completion requires verified artifacts. Live calls require Gemini Web account Cookies."
 metadata:
-  version: "0.24.0"
+  version: "0.24.1"
   openclaw:
     emoji: "♊️"
     homepage: https://github.com/Luckycat133/gemini-web-mcp

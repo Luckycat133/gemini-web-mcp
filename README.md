@@ -2,7 +2,7 @@
   <img src="docs/assets/gemini-web-mcp-banner.svg" alt="Gemini Web MCP" width="100%">
 </p>
 
-<h1 align="center">Gemini Web MCP (v0.24.0)</h1>
+<h1 align="center">Gemini Web MCP (v0.24.1)</h1>
 
 <p align="center">
   An agent-first MCP Python SDK v2 gateway and skills for Gemini Web workflows.
@@ -27,7 +27,7 @@
 
 Gemini Web MCP exposes Gemini Web capabilities to MCP-compatible clients such as Codex, Claude Desktop, VS Code MCP clients, and other agent runtimes.
 
-Stable verified releases live on `main` (v0.24.0) and active development on `dev`. The historical [0.3.0 release](https://github.com/Luckycat133/gemini-web-mcp/releases/tag/v0.3.0) and earlier [0.2.2 interface and storage history](docs/version-history.md#022---2026-10-25) remain documented. Read the [source integration notes](docs/source-update-integration.md) before switching an existing installation.
+Stable verified releases live on `main` (v0.24.1) and active development on `dev`. The historical [0.3.0 release](https://github.com/Luckycat133/gemini-web-mcp/releases/tag/v0.3.0) and earlier [0.2.2 interface and storage history](docs/version-history.md#022---2026-10-25) remain documented. Read the [source integration notes](docs/source-update-integration.md) before switching an existing installation.
 
 Configure the unified `gemini-web-mcp` entrypoint alongside companion `gemini-web-cli`. Enable the 8 verb-object MCP tools (`ask-gemini`, `generate-image`, `generate-video`, `generate-music`, `run-research`, `run-task`, `get-operation`, `check-quota`) for Chat & multimodal input analysis (`inputs`), Image generation/editing, Video, Music, Deep Research, Task (with default-on auto-approval across confirmation cards), async handle recovery, and live 5h/weekly credit quota inspection. Account administration (chat history, Notebooks, Skills, cleanup) uses zero-context `gemini-web-cli`. Compatibility catalogs remain available via `--full` / `function-full` and `account-full`.
 
@@ -47,7 +47,7 @@ The supported runtime is `mcp>=2,<3` plus `mcp-types>=2,<3`. CI exercises both c
 
 ## Install The Runtime Skill
 
-The repository runtime Skill is `0.24.0`. Install the public listing from ClawHub (and verify its displayed version when publication state matters):
+The repository runtime Skill is `0.24.1`. Install the public listing from ClawHub (and verify its displayed version when publication state matters):
 
 ```bash
 clawhub install gemini-web-mcp

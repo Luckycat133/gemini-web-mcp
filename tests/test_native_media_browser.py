@@ -5,6 +5,7 @@ import base64
 from contextlib import asynccontextmanager
 import json
 from pathlib import Path
+from types import SimpleNamespace
 import re
 import shutil
 import subprocess
@@ -382,6 +383,23 @@ def _submit(monkeypatch, chrome, on_chat=None, *, account_matches=lambda: True, 
         {"__Secure-1PSID": "synthetic"}, timeout=timeout, on_chat=on_chat, account_matches=account_matches, **options))
 
 
+def test_cdp_call_preserves_caller_cancellation_on_simultaneous_completion():
+    async def exercise():
+        async def reply(*args, **kwargs):
+            operation.cancel()
+            return {}
+
+        composer = browser._Composer(
+            SimpleNamespace(call=reply), "", "video", "Observed model", lambda: True,
+            duration_seconds=None, aspect_ratio=None, thinking_level="low",
+        )
+        operation = asyncio.create_task(composer.call("Runtime.evaluate"))
+        with pytest.raises(asyncio.CancelledError):
+            await operation
+
+    asyncio.run(exercise())
+
+
 @pytest.mark.parametrize("failures", [1, 2])
 def test_empty_composer_navigation_retries_once_before_any_submission(monkeypatch, failures):
     fixture = _Chrome("music", _BLOB, navigation_failures=failures)
@@ -424,7 +442,7 @@ def test_native_never_inserts_after_unverified_empty_editor_focus(monkeypatch, s
     def account_matches():
         return scenario != "account" or fixture.editor_clicks == 0
 
-    result = _submit(monkeypatch, fixture, account_matches=account_matches, timeout=0.2)
+    result = _submit(monkeypatch, fixture, account_matches=account_matches, timeout=1.0)
 
     assert result.state == "unverified" and result.stage == "edit_prompt" and not result.submitted
     assert fixture.editor_clicks == clicks and fixture.closed
@@ -450,6 +468,7 @@ def test_model_resetting_explicit_music_options_prevents_submission(monkeypatch)
 
 def test_native_model_menu_must_close_before_reopening_and_before_dispatch(monkeypatch):
     monkeypatch.setattr(browser, "_POLL_INTERVAL", 0)
+
     fixture = _Chrome("music", _BLOB, slow_model_menu=True)
     result = _submit(monkeypatch, fixture)
     assert result.state == "ready"
@@ -738,7 +757,12 @@ def test_native_click_moves_pointer_before_pressing_and_releasing(monkeypatch):
 def test_only_a_known_tooltip_can_be_cleared_with_a_pointer_move(monkeypatch, reference_image, obstruction):
     fixture = _Chrome("video", _REMOTE)
     fixture.format_obstruction = obstruction
-    monkeypatch.setattr(browser, "_POLL_INTERVAL", 0)
+    # 不能设成 0：那会让轮询变成纯忙等，asyncio 的定时器推进拿不到机会，
+    # asyncio.timeout 的取消无法生效，等待超时的路径会一直挂着（obstruction=dialog
+    # 那个变体在 0 的时候会挂死 60 秒以上）。同文件其它用例都用 0.001。
+    monkeypatch.setattr(browser, "_POLL_INTERVAL", 0.001)
+
+
     result = _submit(monkeypatch, fixture, timeout=0.15, reference_image_path=str(reference_image))
     assert fixture.reference_paths == [str(reference_image)]
     assert "tooltip_dismiss" in fixture.actions
@@ -754,6 +778,7 @@ def test_only_a_known_tooltip_can_be_cleared_with_a_pointer_move(monkeypatch, re
 
 def test_video_intro_keeps_the_open_aspect_menu_and_waits_for_close_before_reopening(monkeypatch):
     monkeypatch.setattr(browser, "_POLL_INTERVAL", 0)
+
     fixture = _Chrome("video", _REMOTE, late_video_intro=True, slow_video_menu=True)
     result = _submit(monkeypatch, fixture)
     assert result.state == "ready" and fixture.actions.count("submit") == 1

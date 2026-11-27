@@ -114,8 +114,10 @@ class _Composer:
 
     async def call(self, method: str, params: dict[str, Any] | None = None, *, page: bool = False) -> dict[str, Any]:
         self.require_account()
-        value = await asyncio.wait_for(self.pipe.call(method, params, session=self.session if page else None),
-                                       _NAVIGATION_TIMEOUT if method == "Page.navigate" else _CDP_TIMEOUT)
+        # Do not spawn a wait_for child here: on 3.11 its completion can
+        # swallow the outer composer or focus deadline.
+        async with asyncio.timeout(_NAVIGATION_TIMEOUT if method == "Page.navigate" else _CDP_TIMEOUT):
+            value = await self.pipe.call(method, params, session=self.session if page else None)
         self.require_account()
         return value
 
@@ -173,7 +175,8 @@ class _Composer:
         if self.world is None:
             assert self.session is not None and self.frame_url is not None
             self.require_account()
-            self.world = await asyncio.wait_for(_ready_context(self.pipe, self.frame_url, self.session), _CDP_TIMEOUT)
+            async with asyncio.timeout(_CDP_TIMEOUT):
+                self.world = await _ready_context(self.pipe, self.frame_url, self.session)
             self.require_account()
 
     async def evaluate(self, action: str, **values: Any) -> Any:
@@ -510,7 +513,8 @@ async def _observe_generation(composer: _Composer, attempt: _Attempt, baseline: 
             if attempt.chat_id is None:
                 attempt.chat_id = identity
                 if on_chat is not None:
-                    await asyncio.wait_for(on_chat(identity), _CDP_TIMEOUT)
+                    async with asyncio.timeout(_CDP_TIMEOUT):
+                        await on_chat(identity)
                     composer.require_account()
             elif attempt.chat_id != identity:
                 raise TaskApprovalBrowserUnavailable("The native media conversation changed.")

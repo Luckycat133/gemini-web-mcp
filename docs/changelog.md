@@ -6,6 +6,10 @@ Each minor iteration introduces a workflow; patch iterations group related corre
 
 ## [Unreleased]
 
+## [0.24.1] - 2026-11-27
+
+- Repair offline test scheduling and verify the installed unified CLI/MCP contracts in CI and releases.
+
 ## [0.24.0] - 2026-11-27
 
 Unified `gemini-web-mcp` entrypoint, 8 verb-object MCP tools, `ask-gemini` multimodal merge, `check-quota` (5h & weekly credits), MCP progress heartbeats, and default-on Task auto-approval across interactive cards (`0.24.0`).
