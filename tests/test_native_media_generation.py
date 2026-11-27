@@ -419,6 +419,20 @@ def test_verified_native_failure_ends_only_local_browser_observer_without_anothe
     send.assert_not_awaited()
 
 
+def test_native_history_read_preserves_cancellation_when_readback_completes():
+    async def exercise():
+        async def read_history(_chat_id):
+            operation.cancel()
+            return SimpleNamespace(turns=[])
+
+        client = SimpleNamespace(read_chat=read_history)
+        operation = asyncio.create_task(native.read_native_media_response(client, CID, "video"))
+        with pytest.raises(asyncio.CancelledError):
+            await operation
+
+    asyncio.run(exercise())
+
+
 @pytest.mark.parametrize("change", ["pending", "uri", "opaque", "identity"])
 def test_unverified_native_failure_keeps_observing_original_submission(setup, monkeypatch, change):
     client, history = setup
