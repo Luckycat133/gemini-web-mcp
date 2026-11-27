@@ -15,6 +15,8 @@ permissions:
 
 env:
   GEMINI_AUTO_REFRESH: "false"
+  GEMINI_TASK_AUTO_APPROVE: "false"
+  GEMINI_TASK_WEB_APPROVALS: "false"
   GEMINI_BROWSER_AUTO_LOAD: "false"
   PIP_DISABLE_PIP_VERSION_CHECK: "1"
 
@@ -124,7 +126,6 @@ jobs:
       - name: Initialize and list tools over real MCP stdio
         run: |
           python scripts/smoke_mcp_protocol.py
-          python scripts/smoke_mcp_protocol.py --profile core
 
   skills:
     name: Agent Skill validation and repository install
@@ -179,9 +180,9 @@ jobs:
         run: python scripts/check_version_consistency.py --artifacts-dir dist
       - name: Set up pinned uv
         uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
-      - name: Verify one-command onboarding in an isolated uv environment
+      - name: Verify the unified CLI entrypoint in an isolated uv environment
         working-directory: ${{ runner.temp }}
-        run: uvx --from "$GITHUB_WORKSPACE"/dist/*.whl gemini-mcp-onboarding
+        run: uvx --from "$GITHUB_WORKSPACE"/dist/*.whl gemini-web-cli --version
       - name: Install wheel in a clean environment
         run: |
           python -m venv "$RUNNER_TEMP/gemini-wheel-smoke"

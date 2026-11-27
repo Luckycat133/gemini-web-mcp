@@ -50,6 +50,8 @@ def _safe_environment(profile: str | None, state_directory: Path | None = None) 
     for name in ("GEMINI_PSID", "GEMINI_PSIDTS", "GEMINI_PSIDCC", "GEMINI_API_KEY"):
         environment.pop(name, None)
     environment["GEMINI_AUTO_REFRESH"] = "false"
+    environment["GEMINI_TASK_AUTO_APPROVE"] = "false"
+    environment["GEMINI_TASK_WEB_APPROVALS"] = "false"
     environment["GEMINI_BROWSER_AUTO_LOAD"] = "false"
     if profile is None:
         environment.pop("GEMINI_TOOLS", None)
@@ -238,7 +240,7 @@ async def _run(
             results.append(
                 await _handshake(
                     function_command,
-                    profile="account-full",
+                    profile=None,
                     expected_tools=FUNCTION_TOOLS,
                     cwd=cwd,
                     mode=mode,

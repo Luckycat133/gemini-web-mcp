@@ -6,16 +6,14 @@ Read for protocol, tool, artifact, account, packaging or release changes. Docume
 
 - `python -m venv .venv && . .venv/bin/activate`: create and enter a local virtual environment.
 - `pip install -e ".[all,dev]"`: install the package with optional browser/image support and maintained development gates.
-- `gemini-mcp-function` runs the default six-tool function surface. `gemini-mcp-server` with no `GEMINI_TOOLS` selects the same catalog.
-- `gemini-mcp-account` runs the independent six-tool surface for explicitly requested account work.
-- Set `GEMINI_TOOLS=function-full` or `GEMINI_TOOLS=account-full` on `gemini-mcp-server` to verify either prior 17-tool catalog.
+- `gemini-web-mcp` runs the unified eight-tool function surface. `gemini-web-cli` handles explicit account work.
 - `GEMINI_TOOLS=core python -m src.server` or `GEMINI_TOOLS=all python -m src.server`: exercise explicitly selected legacy compatibility profiles.
-- `gemini-mcp-onboarding`: start the installed stdio server and call an auth-free text tool; live chat/image subcommands require `--allow-live-account`.
+- `python -m src.onboarding`: start the installed stdio server and call an auth-free text tool; live chat/image subcommands require `--allow-live-account`.
 - `python -m ruff check src tests scripts && python -m mypy src scripts`: run the maintained static correctness gates.
 - `python -m pytest -q`: run the complete offline test suite.
 - `python scripts/run_contract_checklist.py`: run the targeted architecture/distribution contract gate.
 - `python scripts/smoke_profiles.py && python scripts/smoke_mcp_protocol.py`: verify exact representative tool surfaces and both modern/legacy stdio list/call paths without live Gemini calls.
-- `python scripts/package_release.py --outdir dist`: build wheel/sdist/skill assets; package CI must also run the built wheel through one isolated `uvx ... gemini-mcp-onboarding` command.
+- `python scripts/package_release.py --outdir dist`: build wheel/sdist/skill assets; package CI verifies the unified CLI with isolated `uvx ... gemini-web-cli --version`, then runs the installed stdio and onboarding checks outside the source tree.
 - `python scripts/run_live_canary.py --output /tmp/gemini-web-canary.json`: verify the refusal/report path without network access; live execution additionally requires the explicit flag, two opt-in variables, and a dedicated test account.
 - `mcp dev src/server.py`: inspect the server with MCP Inspector after installing `mcp[cli]`.
 

@@ -105,6 +105,8 @@ def _start_console_entrypoints() -> None:
     for name in ("GEMINI_PSID", "GEMINI_PSIDTS", "GEMINI_PSIDCC", "GEMINI_API_KEY"):
         environment.pop(name, None)
     environment["GEMINI_AUTO_REFRESH"] = "false"
+    environment["GEMINI_TASK_AUTO_APPROVE"] = "false"
+    environment["GEMINI_TASK_WEB_APPROVALS"] = "false"
     environment["GEMINI_BROWSER_AUTO_LOAD"] = "false"
     environment["GEMINI_TOOLS"] = "model"
 
@@ -142,6 +144,8 @@ def _call_offline_text_tool() -> dict[str, Any]:
     for name in ("GEMINI_PSID", "GEMINI_PSIDTS", "GEMINI_PSIDCC", "GEMINI_API_KEY"):
         environment.pop(name, None)
     environment["GEMINI_AUTO_REFRESH"] = "false"
+    environment["GEMINI_TASK_AUTO_APPROVE"] = "false"
+    environment["GEMINI_TASK_WEB_APPROVALS"] = "false"
 
     with tempfile.TemporaryDirectory(prefix="gemini-onboarding-smoke-") as directory:
         completed = subprocess.run(
