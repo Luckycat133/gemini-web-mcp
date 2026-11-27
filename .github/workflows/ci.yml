@@ -198,7 +198,6 @@ jobs:
         run: |
           cd "$RUNNER_TEMP"
           "$RUNNER_TEMP/gemini-wheel-smoke/bin/python" "$GITHUB_WORKSPACE/scripts/smoke_mcp_protocol.py"
-          "$RUNNER_TEMP/gemini-wheel-smoke/bin/python" "$GITHUB_WORKSPACE/scripts/smoke_mcp_protocol.py" --profile core
       - name: Upload verified distributions for inspection
         uses: actions/upload-artifact@v7
         with:

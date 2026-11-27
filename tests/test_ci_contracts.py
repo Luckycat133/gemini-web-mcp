@@ -253,7 +253,7 @@ def test_ci_and_release_pin_uv_and_smoke_the_installed_unified_cli() -> None:
         assert "working-directory: ${{ runner.temp }}" in workflow
         assert "scripts/smoke_installed_wheel.py" in workflow
         assert "scripts/smoke_mcp_protocol.py" in workflow
-        assert "smoke_mcp_protocol.py --profile" not in workflow
+        assert not re.search(r"smoke_mcp_protocol\.py[^\n]*--profile\b", workflow)
         assert "gemini-mcp-onboarding" not in workflow
         assert 'GEMINI_TASK_WEB_APPROVALS: "false"' in workflow
 
