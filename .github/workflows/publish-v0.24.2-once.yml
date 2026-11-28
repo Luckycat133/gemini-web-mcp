@@ -1,0 +1,138 @@
+name: Publish Gemini Web MCP v0.24.2 once
+
+on:
+  push:
+    branches: ["dots/release-v0.24.2-once"]
+    paths: [".github/workflows/publish-v0.24.2-once.yml"]
+
+permissions: {}
+
+env:
+  RELEASE_TAG: v0.24.2
+  RELEASE_TARGET: "ceb5596542cfdbe955073133306d5768aafc383b"
+  GEMINI_AUTO_REFRESH: "false"
+  GEMINI_BROWSER_AUTO_LOAD: "false"
+  GEMINI_TASK_AUTO_APPROVE: "false"
+  GEMINI_TASK_WEB_APPROVALS: "false"
+  PIP_DISABLE_PIP_VERSION_CHECK: "1"
+
+jobs:
+  verify-and-build:
+    if: github.repository == 'Luckycat133/gemini-web-mcp'
+    name: Verify exact main commit and build release assets
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout pinned main source
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ env.RELEASE_TARGET }}
+          persist-credentials: false
+      - name: Confirm pinned source and fresh tag before building
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$RELEASE_TARGET"
+          test "$(git ls-remote --exit-code origin refs/heads/main | cut -f1)" = "$RELEASE_TARGET"
+          existing_tag="$(git ls-remote origin "refs/tags/$RELEASE_TAG")"
+          test -z "$existing_tag"
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install release gates and pinned skill validator
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[all,dev]"
+          python -m pip install "skills-ref @ git+https://github.com/agentskills/agentskills.git@38a2ff82958afee88dadf4831509e6f7e9d8ef4e#subdirectory=skills-ref"
+      - name: Verify tag, repository metadata, and dependency intent
+        run: |
+          python scripts/check_version_consistency.py --tag "$RELEASE_TAG"
+          python scripts/check_dependency_contract.py
+      - name: Run static and offline release gates
+        run: |
+          python -m ruff check src tests scripts
+          python -m mypy src scripts
+          python -m pytest -q
+      - name: Validate public Agent Skills
+        run: |
+          skills-ref validate .agents/skills/gemini-web-mcp-development
+          skills-ref validate .agents/skills/gemini-web-mcp
+          skills-ref validate .agents/skills/gemini-assist
+      - name: Snapshot source profiles and MCP protocol
+        run: |
+          python scripts/smoke_profiles.py
+          python scripts/smoke_mcp_protocol.py
+      - name: Build versioned release assets
+        run: python scripts/package_release.py --outdir dist --tag "$RELEASE_TAG"
+      - name: Verify generated asset names and wheel metadata
+        run: python scripts/check_version_consistency.py --tag "$RELEASE_TAG" --artifacts-dir dist
+      - name: Set up pinned uv
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+      - name: Verify the unified release CLI in an isolated uv environment
+        working-directory: ${{ runner.temp }}
+        run: uvx --from "$GITHUB_WORKSPACE"/dist/*.whl gemini-web-cli --version
+      - name: Install release wheel in a clean environment
+        run: |
+          python -m venv "$RUNNER_TEMP/gemini-release-smoke"
+          "$RUNNER_TEMP/gemini-release-smoke/bin/python" -m pip install --upgrade pip
+          "$RUNNER_TEMP/gemini-release-smoke/bin/python" -m pip install dist/*.whl
+          "$RUNNER_TEMP/gemini-release-smoke/bin/python" -m pip check
+      - name: Smoke the installed release product
+        run: |
+          cd "$RUNNER_TEMP"
+          "$RUNNER_TEMP/gemini-release-smoke/bin/python" "$GITHUB_WORKSPACE/scripts/smoke_installed_wheel.py"
+          "$RUNNER_TEMP/gemini-release-smoke/bin/python" "$GITHUB_WORKSPACE/scripts/smoke_profiles.py"
+          "$RUNNER_TEMP/gemini-release-smoke/bin/python" "$GITHUB_WORKSPACE/scripts/smoke_mcp_protocol.py"
+      - name: Stage verified release assets
+        uses: actions/upload-artifact@v7
+        with:
+          name: verified-release-assets
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    name: Publish verified GitHub Release
+    needs: verify-and-build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout pinned main source
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ env.RELEASE_TARGET }}
+          persist-credentials: false
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - name: Download verified release assets
+        uses: actions/download-artifact@v8
+        with:
+          name: verified-release-assets
+          path: dist
+      - name: Re-verify downloaded assets before publishing
+        run: python scripts/check_version_consistency.py --tag "$RELEASE_TAG" --artifacts-dir dist
+      - name: Create the exact tag and publish the verified Release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REPOSITORY" = "Luckycat133/gemini-web-mcp"
+          test "$GITHUB_REF" = "refs/heads/dots/release-v0.24.2-once"
+          test "$RELEASE_TAG" = "v0.24.2"
+          [[ "$RELEASE_TARGET" =~ ^[0-9a-f]{40}$ ]]
+          test "$(git rev-parse HEAD)" = "$RELEASE_TARGET"
+          test "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq .object.sha)" = "$RELEASE_TARGET"
+          created="$(gh api --method POST "repos/$GITHUB_REPOSITORY/git/refs" -f "ref=refs/tags/$RELEASE_TAG" -f "sha=$RELEASE_TARGET" --jq .object.sha)"
+          test "$created" = "$RELEASE_TARGET"
+          gh release create "$RELEASE_TAG" dist/* --verify-tag --generate-notes
+          test "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$RELEASE_TAG" --jq .object.sha)" = "$RELEASE_TARGET"
+          test "$(gh release view "$RELEASE_TAG" --json assets,isDraft --jq '.isDraft == false and (.assets | length) == 4')" = true
