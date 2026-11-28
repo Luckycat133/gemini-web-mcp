@@ -439,7 +439,7 @@ def _matches_no_cookie(legacy_code: str, error_text: str) -> bool:
 
 
 def _matches_invalid_cookie(legacy_code: str, error_text: str) -> bool:
-    return legacy_code == "INVALID_COOKIE" or (
+    return legacy_code in {"INVALID_COOKIE", "AUTH_EXPIRED"} or (
         ("cookie" in error_text or "psid" in error_text)
         and any(marker in error_text for marker in ("invalid", "expired", "rejected"))
     )
@@ -509,7 +509,7 @@ _TEXT_CLASSIFICATION_RULES: tuple[_TextRule, ...] = (
         DomainErrorCode.AUTH_EXPIRED,
         "Gemini Web authentication is invalid or expired.",
         False,
-        "Refresh the Gemini Web cookie and retry.",
+        "Restore access to the same Gemini Web account. Check any existing operation handle before resubmitting.",
         OperationState.FAILED,
     )),
     (_matches_session_not_found, (

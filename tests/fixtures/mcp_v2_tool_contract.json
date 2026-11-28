@@ -217,19 +217,19 @@
       },
       {
         "annotations_sha256": "99300d9e2937ba92c763822593cb3ba8ec634d1813f3ab37fad3d6d0432268f9",
-        "input_schema_sha256": "aa0ad52f26b5655775d6eebdf2e2f7027d0862bf7b208bcdac66ea7c4bc62bf6",
+        "input_schema_sha256": "609bd3f62cf987eca9282471d0b25a65b195b5036d01739e9facf6a15d72429e",
         "name": "generate-image",
         "output_schema_sha256": "fe2661d319292b9e43a18e8462cc57b8617ec398107861f24f757e0a2a145d28"
       },
       {
         "annotations_sha256": "99300d9e2937ba92c763822593cb3ba8ec634d1813f3ab37fad3d6d0432268f9",
-        "input_schema_sha256": "c5c672bc15d8ba9b47e800eb32cbc7504ce62a50b1c530d8dc84141f50285f30",
+        "input_schema_sha256": "880180d3dc9ac7203e85a4958ed85fe1736be223cac9582bc12949ec62a8435d",
         "name": "generate-music",
         "output_schema_sha256": "cbedf28da01d17424ed9e4f6695b8180cf68420b3dc747ba0360699b64ab3310"
       },
       {
         "annotations_sha256": "99300d9e2937ba92c763822593cb3ba8ec634d1813f3ab37fad3d6d0432268f9",
-        "input_schema_sha256": "53a676d10b5d9466300fac5a7c7959c3a84c8c644bf5fafe21c07248841919e9",
+        "input_schema_sha256": "4abef0ffc2a798b882f4d644fb4daedd57da9bce4e464d669eb9624242273765",
         "name": "generate-video",
         "output_schema_sha256": "71c05dbb66358c1ffcaa14e4f4a6c5ea321c59ce1e7c07b94cf4922ab8e64ab6"
       },

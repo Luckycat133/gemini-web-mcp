@@ -33,3 +33,10 @@ See [Notebook, Chat and Task workflows](notebook-task-workflows.md) and the late
 
 
 Task browser checks cover initial full-frame coverage, raw pixel format, vertical scroll, input release on failure, stale-frame refusal, claimed-action deduplication, pre-dispatch-only connection retries, account/VM/turn isolation, idle/shutdown closure, and no persistent VM credentials. Schedule checks include all six recurrence shapes, nanosecond-preserving UTC normalization, pre/post/CAS account fences, bounded failure/no-op output, complete-list deletion proof and owned-thread lifecycle. Live checks must use explicit synthetic resources and independently verify teardown.
+
+
+## Unified MCP and migration boundary
+
+The eight public tools validate the advertised Draft 2020-12 input schema before handler dispatch and the successful structured output before transmission. Legacy compatibility profiles retain their original behavior. The public tests exercise modern and legacy wire negotiation, structured output against the advertised schema, and local session/rate-limit recovery with synthetic upstream failures. For an expired credential, restore access to the same account and check any existing operation before submitting again. An HTTP 429 never immediately replays a request; a valid upstream `Retry-After` supplies machine-readable reset guidance under result metadata.
+
+The Agent Skill CI job checks out skills-repo v0.11.1 at `0d8449810fe0fd857598840258aecc73e7c604f6`. It exercises Cursor-to-Codex preview/apply/no-op with a temporary home, redacts the synthetic credential to an environment variable name and opens the migrated command over installed MCP stdio. No native editor or live account is used. Outside that CI job set `GEMINI_SKILLS_MIGRATION_SOURCE` to an existing checkout of that exact version to run the same test.

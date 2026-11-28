@@ -33,6 +33,7 @@ def test_runtime_imports_have_direct_or_extra_dependency_intent():
         "curl_cffi",
         "gemini_webapi",
         "httpx2",
+        "jsonschema",
         "loguru",
         "mcp",
         "mcp_types",

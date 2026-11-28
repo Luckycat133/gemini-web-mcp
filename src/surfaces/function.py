@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
+
+from pydantic import Field
 
 from .. import __version__
 from ..adapters import (
@@ -36,6 +38,7 @@ from .assist import register_assist_tools, register_lean_assist_tools
 from .catalogs import FUNCTION_FULL_TOOLS
 
 logger = logging.getLogger(__name__)
+_MediaWait = Annotated[int, Field(ge=0, le=MAX_RESULT_WAIT_SECONDS)] | None
 _INSTRUCTIONS = """
 Tools: `ask-gemini` (chat, multi-turn sessions, Notebooks, and `inputs` up to 16 images/files/URLs),
 `generate-image` (create or edit via image_paths/source_operation_id), `generate-video` (10s/15s, 16:9/9:16),
@@ -136,7 +139,7 @@ async def generate_image(
     source_artifact_id: str | None = None,
     output_dir: str | None = None,
     filename: str | None = None,
-    wait_seconds: int | None = None,
+    wait_seconds: _MediaWait = None,
     retain_chat: bool = False,
     ctx: Context | None = None,
 ) -> list[TextContent]:
@@ -168,7 +171,7 @@ async def generate_video(
     image_path: str | None = None,
     output_dir: str | None = None,
     filename: str | None = None,
-    wait_seconds: int | None = None,
+    wait_seconds: _MediaWait = None,
     retain_chat: bool = False,
     ctx: Context | None = None,
 ) -> list[TextContent]:
@@ -194,7 +197,7 @@ async def generate_music(
     genre: MusicGenre | None = None,
     output_dir: str | None = None,
     filename: str | None = None,
-    wait_seconds: int | None = None,
+    wait_seconds: _MediaWait = None,
     retain_chat: bool = False,
     ctx: Context | None = None,
 ) -> list[TextContent]:
