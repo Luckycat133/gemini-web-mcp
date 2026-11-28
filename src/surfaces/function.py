@@ -44,6 +44,9 @@ Tools: `ask-gemini` (chat, multi-turn sessions, Notebooks, and `inputs` up to 16
 `generate-image` (create or edit via image_paths/source_operation_id), `generate-video` (10s/15s, 16:9/9:16),
 `generate-music` (duration/vocals/genre), `run-research`, `run-task`, `get-operation`, `check-quota`.
 Models: `hydrogen` (default), `neon`, `carbon`, `auto`; thinking_level: `low`/`medium` (default)/`high`.
+On RATE_LIMITED, follow the reported cooldown and use `check-quota` to check account balance.
+For unconfirmed limits, wait before one retry or try off-peak. Resume pending or unverified work with the original
+`get-operation` handle or the original chat session's recovery path.
 Account admin (history, notebooks, skills, cleanup): `gemini-web-cli`.
 """.strip()
 
@@ -222,6 +225,8 @@ async def check_quota(ctx: Context | None = None) -> list[TextContent]:
     result = await fetch_initialized_quota_summary(get_gemini_client, initialize_client)
     await report_tool_progress(ctx, 1.0, 1.0, "Completed")
     text = format_quota_markdown(result.data) if result.ok and result.data is not None else domain_failure_text(result)
+    if result.meta.verification_status == "quota_cached":
+        text = "Using cached quota data because a fresh balance was unavailable.\n" + text
     return domain_text(result, text, use_result_data=True)
 
 

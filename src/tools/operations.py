@@ -78,6 +78,8 @@ def _present(result: DomainResult[OperationReadData], *, include_text: bool = Tr
     elif data.media_type:
         if data.artifact_state is not None:
             text += f"\nArtifact state: {data.artifact_state.value}."
+        elif state == "partial" and data.error_code == "RATE_LIMITED":
+            text += "\nRead-back is temporarily limited. Wait and use `get-operation` with this operation ID."
         elif data.worker_active:
             text += "\nA background worker is observing the original generation."
         else:

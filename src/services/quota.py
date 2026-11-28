@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Callable, Mapping
 from datetime import datetime, timezone
 import logging
@@ -10,6 +11,7 @@ from typing import Any
 from gemini_webapi.constants import GRPC
 from gemini_webapi.types import RPCData
 
+from ..client_manager import ClientRateLimited
 from ..domain import DomainErrorCode, DomainResult, result_from_exception
 
 logger = logging.getLogger(__name__)
@@ -182,6 +184,7 @@ async def fetch_quota_summary(client: Any) -> DomainResult[dict[str, Any]]:
             refresh = getattr(client, "_fetch_usage_info", None)
             if callable(refresh):
                 await refresh()
+        verification = "quota_observed" if parsed is not None else "quota_cached"
         if parsed is None:
             parsed = _usage_info_from_cached(client)
         if parsed is None:
@@ -189,7 +192,7 @@ async def fetch_quota_summary(client: Any) -> DomainResult[dict[str, Any]]:
                 DomainErrorCode.CAPABILITY_UNAVAILABLE,
                 "Gemini Web did not return usage quota information for this session.",
             )
-        return DomainResult.success(parsed, verification_status="quota_observed")
+        return DomainResult.success(parsed, verification_status=verification)
     except Exception as error:
         return result_from_exception(error, logger=logger, operation="check_quota")
 
@@ -232,7 +235,14 @@ async def fetch_initialized_quota_summary(
     client_initializer: Callable[[], Any],
 ) -> DomainResult[dict[str, Any]]:
     try:
-        await client_initializer()
+        try:
+            await client_initializer()
+        except ClientRateLimited as error:
+            delay = error.retry_after_seconds
+            if error.quota_window != "browser_probe_cooldown" or type(delay) is not int or not 1 <= delay <= 30:
+                raise
+            await asyncio.sleep(delay)
+            await client_initializer()
         return await fetch_quota_summary(client_provider())
     except Exception as error:
         return result_from_exception(error, logger=logger, operation="check_quota")

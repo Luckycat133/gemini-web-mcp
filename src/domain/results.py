@@ -314,7 +314,7 @@ def result_from_exception(
             legacy_code = str(getattr(error, "code", "")).upper()
             message, suggested_action = format_rate_limit_guidance(
                 reset_info,
-                capacity_only=(legacy_code == "UPSTREAM_LIMIT_EXCEEDED" and not reset_info),
+                generation_limited=legacy_code == "UPSTREAM_LIMIT_EXCEEDED",
             )
         except Exception:
             pass
@@ -486,7 +486,7 @@ def _contains_any(error_text: str, *markers: str) -> bool:
 _TEXT_CLASSIFICATION_RULES: tuple[_TextRule, ...] = (
     ((lambda code, text: code == "UPSTREAM_LIMIT_EXCEEDED"), (
         DomainErrorCode.RATE_LIMITED,
-        "The requested model quota was exhausted.",
+        "Gemini Web limited this request.",
         False,
         "Do not replay this request; quota fallback is considered for new queries only.",
         OperationState.FAILED,

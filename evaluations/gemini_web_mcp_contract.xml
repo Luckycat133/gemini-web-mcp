@@ -184,6 +184,10 @@
     <answer>No. The client requires fresh same-account basic Flash text-quota exhaustion evidence, expiring after 60 seconds or a successful basic Flash request. Only a new ordinary query may automatically fall back; never replay the original request or replace an explicit Pro or Argon choice.</answer>
   </qa_pair>
   <qa_pair>
+    <question>How should an agent recover after RATE_LIMITED when check-quota still reports credits?</question>
+    <answer>Report the failed or unverified request and the observed account balance separately. Honor explicit retry timing; with unknown timing wait about 10 minutes or try off-peak. Recover pending or unverified work with its original handle or chat session. A confirmed failure can be retried once after waiting.</answer>
+  </qa_pair>
+  <qa_pair>
     <question>What should the runtime do with a requested thinking level when quota fallback selects Flash-Lite?</question>
     <answer>Lock Lite to the SDK fixed default level rather than a caller-selected level and return the actual effective model, fallback reason, thinking_selectable=false and effective_thinking_level=null. Enforce this at the shared client boundary instead of relying on the agent to remove its argument.</answer>
   </qa_pair>

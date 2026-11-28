@@ -2,7 +2,7 @@
   <img src="docs/assets/gemini-web-mcp-banner.svg" alt="Gemini Web MCP" width="100%">
 </p>
 
-<h1 align="center">Gemini Web MCP Server (v0.24.2)</h1>
+<h1 align="center">Gemini Web MCP Server (v0.24.3 开发版)</h1>
 
 <p align="center">
   <a href="https://github.com/Luckycat133/gemini-web-mcp/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/Luckycat133/gemini-web-mcp/actions/workflows/ci.yml/badge.svg"></a>
@@ -20,6 +20,8 @@
 基于 Gemini Web 网页版逆向工程的 MCP 服务器，支持 Claude Desktop、VS Code 等任何 MCP/Skills 兼容的 AI 应用。
 
 ---
+
+遇到请求限流时，可用 `check-quota` 查看账号余额。有明确的冷却时间时按提示等待；原因或重试时间不明时，可等约 10 分钟，或在低峰期重试一次。还在运行或结果待核实的任务，继续用原来的 `operation_id` 调用 `get-operation`。额度查询会在已知的本地浏览器冷却结束后重新初始化一次。
 
 ## MCP 协议兼容性
 

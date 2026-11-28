@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from datetime import datetime, timezone
+import logging
 import json
 from pathlib import Path
 from types import SimpleNamespace
@@ -30,6 +31,7 @@ from src.infrastructure.media_companions import MediaCompanion, MediaCompanionCa
 from src.infrastructure.model_policy_store import ModelPolicyStore
 from src.services.chat import ChatRequest, ChatService, ChatServiceDependencies
 from src.services.operations import _next_wait_poll_seconds, _operation_read_result
+from src.services.quota import fetch_initialized_quota_summary, fetch_quota_summary
 from src.services.resilience import (
     extract_quota_reset_from_quotas,
     format_rate_limit_guidance,
@@ -187,10 +189,12 @@ def test_quota_reset_extraction_persistence_and_scheduled_retry_guidance(monkeyp
     assert exc_info.value.reset_at is not None
     assert exc_info.value.retry_after_seconds is not None
 
-    import logging
     domain_fail = result_from_exception(exc_info.value, logger=logging.getLogger("test"), operation="ask")
     assert domain_fail.error_code == DomainErrorCode.RATE_LIMITED.value
     assert domain_fail.meta.details["reset_at"] == exc_info.value.reset_at
+    assert domain_fail.meta.details["retry_after_source"] == "browser_probe_cooldown"
+    assert domain_fail.error is not None and "local cooldown" in domain_fail.error.message
+    assert "quota" not in domain_fail.error.message.lower()
     assert "host environment" in (domain_fail.error.suggested_action or "").lower()
     assert "/schedule" not in (domain_fail.error.suggested_action or "")
 
@@ -211,6 +215,65 @@ def test_quota_reset_extraction_persistence_and_scheduled_retry_guidance(monkeyp
     assert "host environment" in (op_fail.error.suggested_action or "").lower()
     assert "/schedule" not in (op_fail.error.suggested_action or "")
     assert op_fail.meta.details["reset_at"] == stored["reset_at"]
+    assert op_fail.meta.details["retry_after_source"] == "stored_quota_snapshot"
+    assert "quota snapshot" in op_fail.error.message
+
+
+@pytest.mark.parametrize("remaining", [33360, None, False])
+def test_quota_window_with_credits_or_unknown_balance_does_not_explain_429(monkeypatch, tmp_path, remaining):
+    db = tmp_path / "operations.sqlite3"
+    monkeypatch.setenv("GEMINI_OPERATION_DB_PATH", str(db))
+    monkeypatch.setattr("src.infrastructure.account_identity.current_account_key", lambda: "acct_test")
+    future_ts = time.time() + 1800
+    future_iso = datetime.fromtimestamp(future_ts, tz=timezone.utc).isoformat()
+    ModelPolicyStore(db).record_quota_snapshot(
+        "acct_test", quota_window="current_5h", reset_at=future_iso,
+        reset_timestamp=future_ts, remaining_credits=0,
+    )
+    client = SimpleNamespace(quotas={
+        "usage_info": {"current_5h": {"remaining_credits": remaining, "reset_at": future_iso}},
+        "None-11": {"reset_time": future_ts, "remaining": 0},
+    })
+    monkeypatch.setattr("src.client_wrapper.get_gemini_client", lambda: client)
+    error = RuntimeError("HTTP 429")
+    result = result_from_exception(error, logger=logging.getLogger("test"), operation="ask")
+    assert result.error is not None and result.error.code == DomainErrorCode.RATE_LIMITED
+    assert "reset_at" not in result.meta.details and "retry_after_seconds" not in result.meta.details
+    assert "unconfirmed" in result.error.message
+    assert "off-peak" in (result.error.suggested_action or "")
+    assert "confirmed failed request only once" in (result.error.suggested_action or "")
+
+
+@pytest.mark.parametrize("delays,expected_init_calls,expect_success", [
+    ([30], 2, True),
+    ([30, 30], 2, False),
+    ([31], 1, False),
+])
+def test_quota_initialization_retries_only_one_bounded_local_cooldown(monkeypatch, delays, expected_init_calls, expect_success):
+    initialize = AsyncMock(side_effect=[
+        *(ClientRateLimited(retry_after_seconds=delay, quota_window="browser_probe_cooldown") for delay in delays),
+        None,
+    ])
+    sleep = AsyncMock()
+    monkeypatch.setattr("src.services.quota.asyncio.sleep", sleep)
+    client = SimpleNamespace(usage_info={"current_5h": {"remaining_credits": 9}})
+    result = asyncio.run(fetch_initialized_quota_summary(lambda: client, initialize))
+    assert result.ok is expect_success
+    assert initialize.await_count == expected_init_calls
+    if expected_init_calls == 2:
+        sleep.assert_awaited_once_with(30)
+    else:
+        sleep.assert_not_awaited()
+
+
+def test_failed_fresh_quota_lookup_labels_cached_balance():
+    client = SimpleNamespace(
+        _batch_execute=AsyncMock(return_value=SimpleNamespace(text="empty")),
+        _parse_rpc_results=lambda *_: [],
+        usage_info={"current_5h": {"remaining_credits": 9}},
+    )
+    result = asyncio.run(fetch_quota_summary(client))
+    assert result.ok and result.meta.verification_status == "quota_cached"
 
 
 def test_adaptive_wait_poll_interval():

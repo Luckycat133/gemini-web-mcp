@@ -2,7 +2,7 @@
   <img src="docs/assets/gemini-web-mcp-banner.svg" alt="Gemini Web MCP" width="100%">
 </p>
 
-<h1 align="center">Gemini Web MCP (v0.24.2)</h1>
+<h1 align="center">Gemini Web MCP (v0.24.3 development)</h1>
 
 <p align="center">
   An agent-first MCP Python SDK v2 gateway and skills for Gemini Web workflows.
@@ -33,6 +33,8 @@ Configure the unified `gemini-web-mcp` entrypoint alongside companion `gemini-we
 
 `ask-gemini` handles ordinary questions, current-web questions, up to 16 mixed multimodal `inputs` (images, local files, URLs, text), multi-turn sessions (`start_session`/`session_id`), and Notebook Q&A (`notebook_ids`), defaulting to discovered `hydrogen` (`4 Hydrogen`) with `medium` thinking (`low`/`medium`/`high`; selectable LLMs: `hydrogen`, `neon`, `carbon`, `auto`). Long-running tools (`generate-image`, `generate-video`, `generate-music`, `run-research`, `run-task`) wait with MCP `notifications/progress` heartbeats by default (`wait_seconds=0` returns a handle immediately) and resume cleanly via `get-operation`.
 
+Use `check-quota` to verify account credit balances after a request is rate-limited. Honor an explicit cooldown. If the retry time is unknown, wait about 10 minutes or try again off-peak. For pending or unverified work, resume the original handle with `get-operation`. The quota check retries initialization once after a known local browser cooldown.
+
 See [Notebook, Chat and Task workflows](docs/notebook-task-workflows.md) for examples, automatic cleanup and restart recovery. The default account surface includes bounded Task progress. The `account-full` profile provides Task schedules and explicit browser inputs. Verify external app changes by reading back their actual effects.
 
 Supported native Task file attachments are saved and verified before cleanup. See [native Skills and Notebook management](docs/native-account-resources.md) and the [Web feature coverage matrix](docs/web-feature-coverage.md) for actual live evidence and remaining gaps. Saved permission read-back does not establish that a Task will skip confirmation.
@@ -47,7 +49,7 @@ The supported runtime is `mcp>=2,<3` plus `mcp-types>=2,<3`. CI exercises both c
 
 ## Install The Runtime Skill
 
-The repository runtime Skill is `0.24.2`. Install the public listing from ClawHub (and verify its displayed version when publication state matters):
+The development branch runtime Skill is `0.24.3`. Install the public listing from ClawHub (and verify its displayed version when publication state matters):
 
 ```bash
 clawhub install gemini-web-mcp

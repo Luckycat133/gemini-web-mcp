@@ -9,6 +9,13 @@ Detailed per-build validation logs live in [docs/changelog.md](docs/changelog.md
 
 ## [Unreleased]
 
+## [0.24.3] - 2026-11-28
+
+### Fixed
+
+- Separate request throttling and browser initialization cooldown from observed compute quota depletion. Honor explicit retry timing when available. If the cause is unconfirmed, suggest one delayed retry or an off-peak attempt.
+- Retry the read-only quota check's initialization once after a known local cooldown. Report cached balances as cached. Recover pending media on its original operation handle.
+
 ## [0.24.2] - 2026-11-28
 
 - Enforce advertised JSON Schema for inputs and structured outputs, including media wait limits, across the eight public MCP tools without changing legacy profiles.

@@ -4,7 +4,7 @@ description: "Use this skill when an agent should extend itself with Gemini Web:
 license: MIT-0
 compatibility: "Requires Python 3.11+ and a connected `gemini-web-mcp` server. The unified server exposes 8 verb-object tools (`ask-gemini`, `generate-image`, `generate-video`, `generate-music`, `run-research`, `run-task`, `get-operation`, `check-quota`); `gemini-web-cli` handles account administration. Full compatibility catalogs (`function-full` / `account-full`) remain supported internally. Media completion requires verified artifacts. Live calls require Gemini Web account Cookies."
 metadata:
-  version: "0.24.2"
+  version: "0.24.3"
   openclaw:
     emoji: "♊️"
     homepage: https://github.com/Luckycat133/gemini-web-mcp
@@ -61,7 +61,7 @@ Use this Skill to complete the user's task with Gemini, not to tour the Gemini t
 
 - **LLMs (`ask-gemini`, `run-research`, `run-task`)**: `hydrogen` (default — fast general & multimodal), `neon` (deeper analysis/reasoning), `carbon` (coding & complex work), `auto` (Gemini Web auto-routing). Default `thinking_level` is `medium` (`low` / `medium` / `high`).
 - **Multimodal generation (`generate-image`, `generate-video`, `generate-music`)**: backend engines are selected and managed automatically by Gemini Web — no hidden engine parameters needed.
-- **Prompting Guides**: Load [prompting_guides.md](references/prompting_guides.md) before drafting complex media prompts. Keep `generate-music` prompts focused on natural musical descriptions (mood, instrumentation, genre, tempo feel) and avoid DAW/MIDI/bar-by-bar specs that can cause text-only replies.
+- **Prompting Guides**: Load [prompting_guides.md](references/prompting_guides.md) before drafting complex media prompts. For `generate-video` (Gemini Omni 1.2 Flash): anchor recurring people in a keyframe built from their character sheet, refer to them by role instead of restating face/age, write `Single continuous shot, no scene cuts` unless you script timecoded beats, and rephrase (never blind-retry) after `UPSTREAM_REJECTED`. Keep `generate-music` prompts focused on natural musical descriptions (mood, instrumentation, genre, tempo feel) and avoid DAW/MIDI/bar-by-bar specs that can cause text-only replies.
 - **No Sensitive-Word Pre-Interception**: Do **not** pre-screen or block prompts locally using any sensitive-word list. Send the prompt as requested; if upstream returns `UPSTREAM_REJECTED`, rephrase and retry.
 
 ## Workflow, Artifacts & Resilience
@@ -73,6 +73,6 @@ When generating media, pass that file or URI to the next relevant tool rather th
 `generate-image`, `generate-video`, `generate-music`, `run-research`, and `run-task` wait with MCP progress heartbeats by default; pass `wait_seconds=0` to return an `operation_id` immediately for parallel work. Recover timed-out operations via `get-operation(operation_id=...)` — never resubmit a running handle. Cancellation is not available. Task confirmation cards auto-approve by default across MCP and Web UI Tasks (`GEMINI_TASK_AUTO_APPROVE=false` opts out). See [operations.md](references/operations.md) and [workflows.md](references/workflows.md).
 
 - Transient transport blips and expired browser Cookies auto-recover before failing.
-- On `RATE_LIMITED` / `UPSTREAM_LIMIT_EXCEEDED`, inspect `meta.details.reset_at` / `retry_after_seconds` (or call `check-quota` / `gemini-web-cli quotas`). **Do not tight-loop retry** — wait until after reset or defer a single retry using your host environment's scheduling/timer capability if available.
+- On `RATE_LIMITED` or `UPSTREAM_LIMIT_EXCEEDED`, use `check-quota` to verify the 5-hour and weekly balances. Report which limit was actually observed. Honor `meta.details.retry_after_seconds` and its source. If the retry time is unknown, wait about 10 minutes or try during off-peak hours. Retry a confirmed failure at most once after waiting. For pending or unverified work, use `get-operation` with the original handle or recover the original chat session. `check-quota` retries initialization once after a known local browser-probe cooldown.
 
 The Skill supplies routing instructions; an MCP server must also be connected. See [tool_surface.md](references/tool_surface.md) and [recovery.md](references/recovery.md) for troubleshooting and compatibility profiles (`gemini-assist`, `function-full`, `account-full`).

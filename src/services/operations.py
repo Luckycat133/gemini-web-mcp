@@ -538,7 +538,7 @@ def _has_report(response: Any) -> bool:
 
 def _operation_failure_message(data: OperationReadData) -> str:
     if data.error_code == "UPSTREAM_LIMIT_EXCEEDED" or data.verification_status == "upstream_limit_message_observed":
-        return "Gemini Web reported that the generation quota or capacity limit was reached; retry after quota reset."
+        return "Gemini Web limited this generation request."
     if data.error_code == "ARTIFACT_NOT_RETURNED" or data.verification_status in {
         "model_media_refusal_observed",
         "completed_music_notation_without_artifact_observed",
@@ -569,7 +569,7 @@ def _operation_read_result(data: OperationReadData, *, warnings: tuple[DomainWar
                 details.update({k: v for k, v in reset_info.items() if v is not None})
                 message, suggested_action = format_rate_limit_guidance(
                     reset_info,
-                    capacity_only=(data.error_code == "UPSTREAM_LIMIT_EXCEEDED" and not reset_info),
+                    generation_limited=data.error_code == "UPSTREAM_LIMIT_EXCEEDED",
                 )
             except Exception:
                 pass

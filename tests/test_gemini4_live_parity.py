@@ -238,7 +238,7 @@ def test_operation_read_result_formats_specific_media_failure_messages():
         verification_status="upstream_media_error_card_observed",
         error_code="UPSTREAM_REJECTED",
     )
-    assert "quota or capacity limit" in _operation_read_result(quota).error.message
+    assert "limited this generation request" in _operation_read_result(quota).error.message
     assert "without a media file" in _operation_read_result(refusal).error.message
     assert "error card" in _operation_read_result(err_card).error.message
 

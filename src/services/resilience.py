@@ -111,47 +111,25 @@ def _parse_iso_timestamp(value: object) -> tuple[str | None, float | None]:
 
 
 def extract_quota_reset_from_quotas(quotas: Any) -> dict[str, Any] | None:
-    """Extract the most relevant active quota window and reset timestamp from client.quotas."""
-    if not isinstance(quotas, Mapping):
+    """Return a future account-window reset only with a known depleted balance."""
+    usage = quotas.get("usage_info") if isinstance(quotas, Mapping) else None
+    if not isinstance(usage, Mapping):
         return None
-    usage = quotas.get("usage_info")
-    if isinstance(usage, Mapping):
-        weekly = usage.get("weekly")
-        window_5h = usage.get("current_5h")
-        chosen: tuple[str, Mapping[str, Any]] | None = None
-        if isinstance(weekly, Mapping):
-            rem = weekly.get("remaining_credits")
-            if isinstance(rem, int) and rem <= 0 and weekly.get("reset_at"):
-                chosen = ("weekly", weekly)
-        if chosen is None:
-            for window_name, payload in (("current_5h", window_5h), ("weekly", weekly)):
-                if isinstance(payload, Mapping) and payload.get("reset_at"):
-                    chosen = (window_name, payload)
-                    break
-        if chosen is not None:
-            window_name, payload = chosen
-            iso_text, ts = _parse_iso_timestamp(payload.get("reset_at"))
-            if iso_text and ts is not None:
-                rem = payload.get("remaining_credits")
-                return {
-                    "quota_window": window_name,
-                    "reset_at": iso_text,
-                    "reset_timestamp": ts,
-                    "remaining_credits": rem if type(rem) is int else None,
-                }
-    # Fallback to model quota buckets ("None-11" / "None-4").
-    for key, entry in quotas.items():
-        if key == "usage_info" or not isinstance(entry, Mapping):
+    now = time.time()
+    for window in ("weekly", "current_5h"):
+        entry = usage.get(window)
+        if not isinstance(entry, Mapping):
             continue
-        reset_time = entry.get("reset_time")
-        if isinstance(reset_time, (int, float)) and not isinstance(reset_time, bool) and reset_time > 0:
-            ts = float(reset_time)
-            rem = entry.get("remaining")
+        remaining = entry.get("remaining_credits")
+        if type(remaining) is not int or remaining > 0:
+            continue
+        reset_at, timestamp = _parse_iso_timestamp(entry.get("reset_at"))
+        if reset_at and timestamp is not None and timestamp > now:
             return {
-                "quota_window": str(key),
-                "reset_at": _format_local_iso(ts),
-                "reset_timestamp": ts,
-                "remaining_credits": rem if type(rem) is int else None,
+                "quota_window": window,
+                "reset_at": reset_at,
+                "reset_timestamp": timestamp,
+                "remaining_credits": remaining,
             }
     return None
 
@@ -211,88 +189,98 @@ def resolve_rate_limit_reset(
 ) -> dict[str, Any]:
     """Resolve the best available quota/cooldown reset timestamp and wait duration."""
     now = time.time()
-    info: dict[str, Any] = {}
     if error is not None:
-        for attr in ("reset_at", "reset_timestamp", "retry_after_seconds", "quota_window"):
-            val = getattr(error, attr, None)
-            if val is not None:
-                info[attr] = val
-        if "retry_after_seconds" not in info and (header_seconds := _retry_after_header_seconds(error, now)):
-            info["retry_after_seconds"] = header_seconds
-            info.setdefault("reset_timestamp", now + header_seconds)
-            info.setdefault("reset_at", _format_local_iso(info["reset_timestamp"]))
-            info.setdefault("quota_window", "http_retry_after")
-    if "reset_timestamp" not in info:
-        target_client = client
-        if target_client is None:
-            try:
-                from ..client_wrapper import get_gemini_client
-                target_client = get_gemini_client()
-            except Exception:
-                target_client = None
-        if target_client is not None:
-            live = extract_quota_reset_from_quotas(getattr(target_client, "quotas", None))
-            if live and float(live["reset_timestamp"]) > now:
-                info.update(live)
-    if "reset_timestamp" not in info:
+        window = getattr(error, "quota_window", None)
+        delay = getattr(error, "retry_after_seconds", None)
+        timestamp = getattr(error, "reset_timestamp", None)
+        if not isinstance(timestamp, (int, float)) or isinstance(timestamp, bool):
+            _, timestamp = _parse_iso_timestamp(getattr(error, "reset_at", None))
+        header_delay = _retry_after_header_seconds(error, now)
+        source = "browser_probe_cooldown" if window == "browser_probe_cooldown" else "upstream_reset"
+        if header_delay is not None and (type(delay) is not int or header_delay >= delay):
+            source, window, delay, timestamp = "http_retry_after", "http_retry_after", header_delay, None
+        if timestamp is None and type(delay) is int and delay > 0:
+            timestamp = now + delay
+        if timestamp is not None and math.isfinite(timestamp) and timestamp > now:
+            return {
+                "retry_after_source": source,
+                **({"quota_window": window} if window else {}),
+                "reset_at": _format_local_iso(timestamp),
+                "reset_timestamp": timestamp,
+                "retry_after_seconds": max(1, math.ceil(timestamp - now)),
+            }
+
+    if client is None:
+        try:
+            from ..client_wrapper import get_gemini_client
+            client = get_gemini_client()
+        except Exception:
+            pass
+    quotas = getattr(client, "quotas", None)
+    usage = quotas.get("usage_info") if isinstance(quotas, Mapping) else None
+    snapshot = extract_quota_reset_from_quotas(quotas)
+    source = "client_quota_snapshot"
+    if snapshot is None:
+        # A client observation for the same window supersedes a stored balance.
         try:
             from ..infrastructure.account_identity import current_account_key
             from ..infrastructure.model_policy_store import ModelPolicyStore
 
             resolved_key = account_key or current_account_key()
-            if resolved_key:
-                cached = ModelPolicyStore().get_quota_snapshot(resolved_key)
-                if cached and float(cached["reset_timestamp"]) > now:
-                    info.update(cached)
+            cached = ModelPolicyStore().get_quota_snapshot(resolved_key) if resolved_key else None
+            if cached:
+                window = cached["quota_window"]
+                current = usage.get(window) if isinstance(usage, Mapping) else None
+                remaining = cached.get("remaining_credits")
+                if (window in {"weekly", "current_5h"} and type(remaining) is int and remaining <= 0
+                        and cached["reset_timestamp"] > now and not isinstance(current, Mapping)):
+                    snapshot = cached
+                    source = "stored_quota_snapshot"
         except Exception:
             pass
-    ts = info.get("reset_timestamp")
-    if isinstance(ts, (int, float)) and not isinstance(ts, bool) and ts > now:
-        remaining = max(1, int(math.ceil(float(ts) - now)))
-        info["retry_after_seconds"] = info.get("retry_after_seconds") or remaining
-        info.setdefault("reset_at", _format_local_iso(float(ts)))
-    elif isinstance(info.get("retry_after_seconds"), int) and info["retry_after_seconds"] > 0:
-        ts = now + info["retry_after_seconds"]
-        info["reset_timestamp"] = ts
-        info.setdefault("reset_at", _format_local_iso(ts))
-    return {k: v for k, v in info.items() if v is not None}
+    if snapshot is None:
+        return {}
+    return {
+        **snapshot,
+        "retry_after_source": source,
+        "retry_after_seconds": max(1, math.ceil(float(snapshot["reset_timestamp"]) - now)),
+    }
 
 
 def format_rate_limit_guidance(
     reset_info: Mapping[str, Any] | None,
     *,
-    capacity_only: bool = False,
+    generation_limited: bool = False,
 ) -> tuple[str, str]:
-    """Return user- and agent-actionable (message, suggested_action) with timer guidance."""
+    """Describe the observed limit and recommend a bounded follow-up."""
     info = reset_info or {}
+    source = info.get("retry_after_source")
     reset_at = info.get("reset_at")
     retry_after = info.get("retry_after_seconds")
-    window = info.get("quota_window")
-    if isinstance(reset_at, str) and reset_at and isinstance(retry_after, int) and retry_after > 0:
-        buffer_seconds = 10 if window == "browser_probe_cooldown" else 60
-        delay = retry_after + buffer_seconds
-        window_note = f" ({window})" if window else ""
-        message = (
-            f"The upstream service rate limit or quota{window_note} was reached. "
-            f"Quota resets at {reset_at} (~{retry_after}s remaining)."
+    message = (
+        "Gemini Web limited this generation request."
+        if generation_limited else "Gemini Web temporarily limited this request."
+    )
+    if source == "browser_probe_cooldown":
+        message = "Gemini Web session initialization is in a short local cooldown."
+    if isinstance(reset_at, str) and type(retry_after) is int and retry_after > 0:
+        if source in {"client_quota_snapshot", "stored_quota_snapshot"}:
+            window = "weekly" if info.get("quota_window") == "weekly" else "5-hour"
+            message += f" A quota snapshot showed a depleted {window} balance and a scheduled reset at {reset_at}."
+            next_step = f"Check the current balance with `check-quota` or wait until {reset_at}."
+        else:
+            message += f" Retry after {reset_at} (in about {retry_after}s)."
+            next_step = f"Wait until {reset_at}."
+    else:
+        message += " The cause and retry time are unconfirmed."
+        minutes = _RATE_LIMIT_DEFAULT_CAPACITY_WAIT_SECONDS // 60
+        next_step = (
+            f"Wait about {minutes} minutes or try again during off-peak hours. "
+            "Use `check-quota` (CLI: `gemini-web-cli quotas`) to verify the account balance separately."
         )
-        suggested_action = (
-            f"Do not retry in a tight loop. Wait until after {reset_at} (~{delay}s including safety "
-            "margin), or schedule a single deferred retry using your host environment's scheduling or "
-            "timer capability if available."
-        )
-        return message, suggested_action
-    if capacity_only:
-        message = "Gemini Web reported that the generation quota or capacity limit was temporarily reached due to high traffic."
-        suggested_action = (
-            "Do not retry in a tight loop. Wait ~10 minutes before retrying, or schedule a single "
-            "deferred retry using your host environment's scheduling or timer capability if available."
-        )
-        return message, suggested_action
-    message = "The upstream service temporarily limited requests; exact reset time was not reported."
     suggested_action = (
-        "Check `gemini-web-cli quotas` for account window status and wait (~10 minutes) or schedule "
-        "a single deferred retry using your host environment's scheduling or timer capability instead "
-        "of tight-loop retrying."
+        f"{next_step} Avoid tight-loop retries. For a pending or unverified operation, "
+        "resume the original handle with `get-operation`. Otherwise, retry a confirmed failed request only once "
+        "after waiting, using a host environment timer if available."
     )
     return message, suggested_action

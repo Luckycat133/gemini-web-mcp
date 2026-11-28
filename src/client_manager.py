@@ -5,6 +5,7 @@
 import asyncio
 import inspect
 import json
+import math
 import os
 import socket
 import tempfile
@@ -315,7 +316,7 @@ class ClientManager:
         self._rate_limit_reset_timestamp = time.time() + 30
 
     def _rate_limit_error(self) -> ClientRateLimited:
-        remaining = max(1, int(round(self._browser_retry_at - time.monotonic())))
+        remaining = max(1, math.ceil(self._browser_retry_at - time.monotonic()))
         reset_ts = self._rate_limit_reset_timestamp or (time.time() + remaining)
         from datetime import datetime, timezone
         reset_at = datetime.fromtimestamp(reset_ts, tz=timezone.utc).astimezone().isoformat(timespec="seconds")
@@ -529,7 +530,7 @@ class ClientManager:
                 self._remember_rate_limit()
                 with suppress(Exception):
                     await client.close()
-                raise ClientRateLimited() from None
+                raise self._rate_limit_error() from None
             raise
         except asyncio.CancelledError:
             with self._lock:
