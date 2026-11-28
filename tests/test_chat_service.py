@@ -1023,3 +1023,38 @@ def test_late_cid_is_persisted_in_original_account_cleanup_store(monkeypatch, tm
     assert manager._store.get(owner, "c_late_ledger")["state"] == "pending"
     assert manager._store.get(other, "c_late_ledger") is None
     finalize.assert_not_awaited()
+
+
+@pytest.mark.parametrize("switch_account", [False, True])
+def test_expired_cookie_refresh_replays_only_before_commit_and_for_same_account(monkeypatch, switch_account):
+    service, client, _, _ = _make_service()
+    original = client.generate_content_stream
+    calls = 0
+
+    class AuthExpired(RuntimeError):
+        code = "AUTH_EXPIRED"
+
+    async def interrupted(**kwargs):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise AuthExpired("synthetic")
+        async for frame in original(**kwargs):
+            yield frame
+
+    async def refresh(_error):
+        if switch_account:
+            monkeypatch.setenv("GEMINI_PSID", "synthetic-other-account")
+        return True
+
+    client.generate_content_stream = interrupted
+    refresh_mock = AsyncMock(side_effect=refresh)
+    monkeypatch.setattr("src.services.resilience.try_auto_refresh_auth", refresh_mock)
+    result = asyncio.run(service.generate_stream(ChatRequest(message="synthetic")))
+    refresh_mock.assert_awaited_once()
+    if switch_account:
+        assert result.error_code == "AUTH_REQUIRED"
+        assert calls == 1
+    else:
+        assert result.ok
+        assert calls == 2

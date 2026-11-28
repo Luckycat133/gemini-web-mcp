@@ -6,6 +6,9 @@ Each minor iteration introduces a workflow; patch iterations group related corre
 
 ## [Unreleased]
 
+- Enforce advertised JSON Schema types and media wait limits across the eight public MCP tools without changing legacy profiles.
+- Exercise offline recovery for expired sessions and upstream rate limits, and pin the agent-skills-setup v0.11.1 migration contract.
+
 ## [0.24.1] - 2026-11-27
 
 - Repair offline test scheduling and verify the installed unified CLI/MCP contracts in CI and releases.

@@ -11,6 +11,7 @@ from collections.abc import Callable
 from copy import deepcopy
 from typing import Any, TypeVar
 
+from jsonschema import Draft202012Validator  # type: ignore[import-untyped]
 from mcp.server import MCPServer as SDKMCPServer
 from mcp.server.mcpserver import Context
 from mcp.server.mcpserver.exceptions import ToolError
@@ -120,8 +121,14 @@ class MCPServer(SDKMCPServer):
             tool = next((item for item in await super().list_tools() if item.name == name), None)
             # The high-level SDK can discard unknown keys before running the
             # handler. Reject them before any job starts or account data changes.
-            if tool is not None and arguments.keys() - tool.input_schema.get("properties", {}).keys():
-                raise ToolError("Unknown tool arguments. Use the advertised input schema.")
+            if tool is not None:
+                schema = _compact_input_schema(tool.input_schema)
+                if arguments.keys() - schema.get("properties", {}).keys():
+                    raise ToolError("Unknown tool arguments. Use the advertised input schema.")
+                # Pydantic can coerce inputs (e.g. "0" to 0); the wire contract is
+                # JSON Schema. Never disclose raw arguments or SDK errors.
+                if not Draft202012Validator(schema).is_valid(arguments):
+                    raise ToolError("Invalid tool arguments. Use the advertised input schema.")
         return await super().call_tool(name, arguments, context)
 
     def tool(

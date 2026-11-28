@@ -240,6 +240,8 @@ class ChatService:
                         if is_transient_error(error) or await try_auto_refresh_auth(error):
                             client = self._dependencies.client_provider()
                             await asyncio.sleep(0.5)
+                            if self._dependencies.account_key_provider() != owner:
+                                return self._account_failure()
                             continue
                     raise
                 if (attempt == 0 and is_generation_failure_reply(getattr(response, "text", None))
@@ -356,6 +358,8 @@ class ChatService:
                         if is_transient_error(error) or await try_auto_refresh_auth(error):
                             client = self._dependencies.client_provider()
                             await asyncio.sleep(0.5)
+                            if self._dependencies.account_key_provider() != owner:
+                                return self._account_failure()
                             continue
                     raise
             with observe_cleanup_frames(observer.observe):
@@ -477,7 +481,10 @@ class ChatService:
         state = lookup.session
         async with state._policy_lock:
             if state.lifecycle_state is not SessionLifecycleState.ACTIVE:
-                return DomainResult.failure(DomainErrorCode.SESSION_NOT_FOUND, "The session no longer exists.")
+                return DomainResult.failure(
+                    DomainErrorCode.SESSION_NOT_FOUND, "The session no longer exists.",
+                    suggested_action="Start a new session explicitly with ask-gemini and start_session=true.",
+                )
             return await self._send_session_locked(request, state)
 
     async def _send_session_locked(
@@ -569,7 +576,10 @@ class ChatService:
         state = lookup.session
         async with state._policy_lock:
             if state.lifecycle_state is not SessionLifecycleState.ACTIVE:
-                return DomainResult.failure(DomainErrorCode.SESSION_NOT_FOUND, "The session no longer exists.")
+                return DomainResult.failure(
+                    DomainErrorCode.SESSION_NOT_FOUND, "The session no longer exists.",
+                    suggested_action="Start a new session explicitly with ask-gemini and start_session=true.",
+                )
             return await self._send_session_stream_locked(request, state)
 
     async def _send_session_stream_locked(

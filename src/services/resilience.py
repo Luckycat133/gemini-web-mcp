@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Mapping
 from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 import logging
 import math
 import time
@@ -175,7 +176,7 @@ def persist_client_quota_snapshot(client: Any, *, account_key: str | None = None
     return snapshot
 
 
-def _retry_after_header_seconds(error: BaseException | None) -> int | None:
+def _retry_after_header_seconds(error: BaseException | None, now: float) -> int | None:
     if error is None:
         return None
     headers = getattr(getattr(error, "response", None), "headers", None)
@@ -186,11 +187,19 @@ def _retry_after_header_seconds(error: BaseException | None) -> int | None:
         if raw is None:
             continue
         try:
-            seconds = int(float(str(raw).strip()))
+            raw_value = str(raw).strip()
+            if raw_value.isascii() and raw_value.isdecimal():
+                seconds = int(raw_value)
+            else:
+                retry_at = parsedate_to_datetime(raw_value)
+                if retry_at.tzinfo is None:
+                    retry_at = retry_at.replace(tzinfo=timezone.utc)
+                seconds = math.ceil(retry_at.timestamp() - now)
             if seconds > 0:
+                _format_local_iso(now + seconds)
                 return seconds
-        except ValueError:
-            pass
+        except (ValueError, TypeError, OverflowError, OSError):
+            continue
     return None
 
 
@@ -208,7 +217,7 @@ def resolve_rate_limit_reset(
             val = getattr(error, attr, None)
             if val is not None:
                 info[attr] = val
-        if "retry_after_seconds" not in info and (header_seconds := _retry_after_header_seconds(error)):
+        if "retry_after_seconds" not in info and (header_seconds := _retry_after_header_seconds(error, now)):
             info["retry_after_seconds"] = header_seconds
             info.setdefault("reset_timestamp", now + header_seconds)
             info.setdefault("reset_at", _format_local_iso(info["reset_timestamp"]))
