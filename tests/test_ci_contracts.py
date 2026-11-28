@@ -43,6 +43,7 @@ def test_targeted_contract_checklist_covers_stable_architecture_boundaries() -> 
     assert {
         "tests/test_domain_results.py",
         "tests/test_mcp_sdk_v2.py",
+        "tests/test_public_mcp_schema_recovery.py",
         "tests/test_conversation_lifecycle.py",
         "tests/test_chat_service.py",
         "tests/test_chat_timeouts.py",
