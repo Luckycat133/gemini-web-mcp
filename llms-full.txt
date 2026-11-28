@@ -1,68 +1,51 @@
-# Gemini Web MCP Full Documentation
+# Gemini Web MCP: agent reference
 
-> Agent-first Model Context Protocol (MCP) Python SDK v2 gateway and skills for Gemini Web workflows, background tasks, and NotebookLM integration.
+> Verified baseline: [v0.24.2](https://github.com/Luckycat133/gemini-web-mcp/releases/tag/v0.24.2). This is a Gemini Web integration, not the official paid Gemini API. Upstream feature availability and quota depend on the account.
 
-- **Repository**: https://github.com/Luckycat133/gemini-web-mcp
-- **Author**: Luckycat133
-- **License**: AGPL-3.0
-- **Runtime**: Python >= 3.10, official `mcp` Python SDK v2 (`mcp>=2,<3`)
-- **Protocol**: MCP Specification (JSON-RPC 2.0 stdio / SSE)
+## Install and connect
 
----
+Use Python 3.11 or later. Download the v0.24.2 wheel from GitHub Releases and install it in an isolated venv:
 
-## 1. Architecture Overview
-
-Gemini Web MCP delegates MCP protocol behavior to the official `mcp` Python SDK v2 through a dedicated `MCPServer` adapter. It provides two distinct surfaces:
-1. `gemini-mcp-function`: Core execution tools (Chat, Task, Media, Deep Research, Operation Recovery).
-2. `gemini-mcp-account`: State and metadata management (Notebooks, chat history, pinning, and deletion).
-
----
-
-## 2. Quickstart & Configuration
-
-### Installation
 ```bash
-git clone https://github.com/Luckycat133/gemini-web-mcp.git
-cd gemini-web-mcp
 python3 -m venv .venv
-source .venv/bin/activate
-pip install -e .
+.venv/bin/python -m pip install ./gemini_mcp_server-0.24.2-py3-none-any.whl
+.venv/bin/gemini-web-cli --version
 ```
 
-### Client Configuration (`claude_desktop_config.json`)
+Configure the client's stdio entry with the absolute installed command path, for example:
+
 ```json
 {
   "mcpServers": {
     "gemini-web": {
-      "command": "/path/to/gemini-web-mcp/.venv/bin/gemini-mcp-function",
+      "command": "/absolute/path/to/.venv/bin/gemini-web-mcp",
       "args": []
     }
   }
 }
 ```
 
----
+The released project supplies two executables: `gemini-web-mcp` (the unified stdio MCP server) and `gemini-web-cli` (explicit account commands, including notebooks, history, preferences, and cleanup). Discover command usage with `gemini-web-cli --help`. Client-managed credentials belong in the host environment or an authorized local credential source, not inline in a shareable configuration. Use `GEMINI_BROWSER_AUTO_LOAD=false` and `GEMINI_AUTO_REFRESH=false` for offline checks; set `GEMINI_TASK_AUTO_APPROVE=false` and `GEMINI_TASK_WEB_APPROVALS=false` explicitly when testing without approvals.
 
-## 3. Tool Surface
+## Unified public tools
 
-### Function Surface
-- `gemini_ask`: Question answering with web search, multimodal attachments, and thinking level control (`low`, `medium`, `high`).
-- `gemini_run_task`: Launch long-running asynchronous tasks with handle-based result recovery.
-- `gemini_task_status`: Query background task progress.
-- `gemini_media`: Handle image, audio, and video inputs.
+| Tool | Purpose |
+| --- | --- |
+| `ask-gemini` | Chat, multi-turn sessions, NotebookLM questions, and up to 16 mixed inputs. Use `start_session=true` to start a session and its `session_id` to continue. |
+| `generate-image` | Generate an image or edit from local references or a previous operation. |
+| `generate-video` | Generate Web video with supported duration and aspect ratio. |
+| `generate-music` | Generate music with supported duration, vocals and genre options. |
+| `run-research` | Start Deep Research or derive supported outputs from the exact completed research operation. |
+| `run-task` | Start or answer an explicitly requested long-running Task. |
+| `get-operation` | Read status or recover output using its original operation handle; does not repeat generation. |
+| `check-quota` | Read the account's 5-hour and weekly quota windows when available. |
 
-### Account Surface
-- `gemini_list_chats`: Enumerate historical chats with metadata.
-- `gemini_manage_chat`: Rename, pin, unpin, or move chats to notebooks.
-- `gemini_delete_chat`: Verified deletion of conversation sessions.
-- `gemini_list_notebooks`: Discover accessible NotebookLM collections.
+Use `tools/list` as the authority for current input and output JSON Schemas, defaults and annotations. Invalid wire arguments fail before dispatch. Successful structured output is checked against the advertised schema; a response-validation error alone does not tell you whether upstream work has occurred.
 
----
+## Recovery and migration
 
-## 4. Frequently Asked Questions (FAQ)
+- `AUTH_EXPIRED`: restore access to the same Gemini Web account. Preserve any existing handle and check its state before resubmitting.
+- `RATE_LIMITED`: use reported retry/reset metadata when present; do not retry in a tight loop. Quota may be unavailable or have no exact reset.
+- The offline migration contract pins [agent-skills-setup v0.11.1](https://github.com/Luckycat133/skills-repo/tree/v0.11.1). It checks temporary Cursor-to-Codex preview, apply, and no-op; credential values are redacted to environment variable names, and the migrated config launches the installed MCP command. This is not live account or native editor validation.
 
-### Q: Does Gemini Web MCP use official developer API keys?
-It operates over authenticated Gemini Web browser sessions, unlocking Gemini 3.8 / Pro reasoning, NotebookLM integration, and web grounding that are distinct from standard developer API endpoints.
-
-### Q: What is the Python SDK compatibility?
-It strictly requires `mcp>=2,<3` and `mcp-types>=2,<3`, returning validated `structuredContent` and JSON Schema validation for every tool.
+See [verification contracts](docs/agent-verification.md), [README](README.md), and [license](LICENSE) (AGPL-3.0-only).
