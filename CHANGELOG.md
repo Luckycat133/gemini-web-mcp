@@ -9,6 +9,8 @@ Detailed per-build validation logs live in [docs/changelog.md](docs/changelog.md
 
 ## [Unreleased]
 
+## [0.24.2] - 2026-11-28
+
 - Enforce advertised JSON Schema types and media wait limits across the eight public MCP tools without changing legacy profiles.
 - Exercise offline recovery for expired sessions and upstream rate limits, and pin the agent-skills-setup v0.11.1 migration contract.
 
