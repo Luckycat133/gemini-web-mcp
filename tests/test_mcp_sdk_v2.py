@@ -79,6 +79,28 @@ def test_strict_arguments_refuse_unknown_keys_before_dispatch():
     asyncio.run(verify())
 
 
+def test_strict_surface_refuses_invalid_wire_output_without_replaying(monkeypatch):
+    from mcp_types import CallToolResult
+
+    server = MCPServer("Strict", strict_arguments=True)
+
+    @server.tool()
+    async def report(prompt: str) -> list[TextContent]:
+        return [TextContent(type="text", text=prompt)]
+
+    calls = []
+
+    async def mock_sdk(_self, name, arguments, _context):
+        calls.append((name, arguments))
+        return CallToolResult(content=[], structuredContent={"result": [{"type": "text", "fixture": "secret"}]})
+
+    monkeypatch.setattr(SDKMCPServer, "call_tool", mock_sdk)
+    with pytest.raises(ToolError, match="output could not be verified") as error:
+        asyncio.run(server.call_tool("report", {"prompt": "fixture"}))
+    assert "secret" not in str(error.value)
+    assert calls == [("report", {"prompt": "fixture"})]
+
+
 def _reload_server_full():
     """重新加载 src.server 并在 full 工具表面下运行（GEMINI_TOOLS=all）。"""
     os.environ["GEMINI_TOOLS"] = "all"

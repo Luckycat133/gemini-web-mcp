@@ -117,19 +117,26 @@ class MCPServer(SDKMCPServer):
     async def call_tool(
         self, name: str, arguments: dict[str, Any], context: Any = None,
     ) -> CallToolResult | InputRequiredResult:
-        if self._strict_arguments:
-            tool = next((item for item in await super().list_tools() if item.name == name), None)
-            # The high-level SDK can discard unknown keys before running the
-            # handler. Reject them before any job starts or account data changes.
-            if tool is not None:
-                schema = _compact_input_schema(tool.input_schema)
-                if arguments.keys() - schema.get("properties", {}).keys():
-                    raise ToolError("Unknown tool arguments. Use the advertised input schema.")
-                # Pydantic can coerce inputs (e.g. "0" to 0); the wire contract is
-                # JSON Schema. Never disclose raw arguments or SDK errors.
-                if not Draft202012Validator(schema).is_valid(arguments):
-                    raise ToolError("Invalid tool arguments. Use the advertised input schema.")
-        return await super().call_tool(name, arguments, context)
+        if not self._strict_arguments:
+            return await super().call_tool(name, arguments, context)
+        tool = next((item for item in await self.list_tools() if item.name == name), None)
+        if tool is not None:
+            schema = tool.input_schema
+            # The high-level SDK can discard unknown keys or coerce strings
+            # into numbers before running the handler. Validate the wire input.
+            if arguments.keys() - schema.get("properties", {}).keys():
+                raise ToolError("Unknown tool arguments. Use the advertised input schema.")
+            if not Draft202012Validator(schema).is_valid(arguments):
+                raise ToolError("Invalid tool arguments. Use the advertised input schema.")
+        result = await super().call_tool(name, arguments, context)
+        if (tool is not None and tool.output_schema is not None and isinstance(result, CallToolResult)
+                and not result.is_error and not Draft202012Validator(tool.output_schema).is_valid(
+                    result.structured_content,
+                )):
+            # The handler may have already executed. Never leak the payload,
+            # claim failure of the upstream operation, or replay it.
+            raise ToolError("Tool output could not be verified. Check existing operation status before retrying.")
+        return result
 
     def tool(
         self,
